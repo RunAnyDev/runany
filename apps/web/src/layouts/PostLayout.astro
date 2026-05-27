@@ -6,62 +6,111 @@ import SummaryBox from '@/components/SummaryBox.astro';
 interface Props {
   title: string;
   description: string;
-  pubDate: Date;
-  updatedDate?: Date;
+  pubDate: Date | string;
+  updatedDate?: Date | string;
   category: string;
   tags: string[];
+  author?: string;
   image?: { url: string; alt: string };
   readingTime?: number;
   headings?: { depth: number; slug: string; text: string }[];
 }
 
-const { title, description, pubDate, updatedDate, category, tags, image, readingTime, headings } = Astro.props;
+const { 
+  title, description, pubDate, updatedDate, category, tags, 
+  author = 'Du', image, readingTime, headings 
+} = Astro.props;
 
-// Ensure pubDate is a Date object for toLocaleDateString
-const formattedDate = typeof pubDate === 'string' 
-  ? new Date(pubDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-  : pubDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+// Format date for display
+const formatDate = (d: any) => {
+  if (!d) return '';
+  if (typeof d === 'string') return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (d instanceof Date) return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return '';
+};
+
+const formattedDate = formatDate(pubDate);
+const formattedUpdatedDate = updatedDate ? formatDate(updatedDate) : null;
+const imageUrl = image?.url;
 ---
 
 <BaseLayout
   title={title}
   description={description}
-  image={image?.url}
+  image={imageUrl}
   article={true}
   pubDate={pubDate}
   updatedDate={updatedDate}
   tags={tags}
   category={category}
+  author={author}
+  readingTime={readingTime}
 >
-  <article class="max-w-4xl mx-auto px-4 py-8">
-    {image && (
+  <article 
+    class="max-w-4xl mx-auto px-4 py-8"
+    itemscope
+    itemtype="https://schema.org/TechArticle"
+  >
+    {imageUrl && (
       <img
-        src={image.url}
-        alt={image.alt}
+        src={imageUrl}
+        alt={image?.alt || title}
         width="1200"
         height="630"
         class="w-full h-64 md:h-96 object-cover rounded-xl mb-8"
+        loading="eager"
+        decoding="async"
+        itemprop="image"
       />
     )}
     
     <header class="mb-8">
-      <p class="text-sm text-gray-500 mb-2">
+      <!-- Breadcrumb -->
+      <nav aria-label="Breadcrumb" class="text-sm mb-4">
+        <ol class="flex items-center gap-2 text-gray-500">
+          <li><a href="/" class="hover:text-primary">Home</a></li>
+          <li>›</li>
+          <li><a href="/blog" class="hover:text-primary">Blog</a></li>
+          <li>›</li>
+          <li><a href={`/category/${category.toLowerCase()}`} class="hover:text-primary">{category}</a></li>
+        </ol>
+      </nav>
+
+      <!-- Category + Date + Reading time -->
+      <p class="text-sm text-gray-500 mb-2" itemprop="articleSection">
         <a href={`/category/${category.toLowerCase()}`} class="link">{category}</a>
         {' · '}
-        {formattedDate}
-        {readingTime && <span> · {readingTime} min read</span>}
+        <time datetime={pubDate instanceof Date ? pubDate.toISOString() : new Date(pubDate as string).toISOString()} itemprop="datePublished">
+          {formattedDate}
+        </time>
+        {readingTime && <span> · <span itemprop="timeRequired">{readingTime} min read</span></span>}
       </p>
-      <h1 class="text-4xl font-bold mb-4">{title}</h1>
-      <p class="text-xl text-gray-600 dark:text-gray-400">{description}</p>
+
+      <!-- Title -->
+      <h1 class="text-4xl font-bold mb-4" itemprop="headline">{title}</h1>
+      
+      <!-- Description/Summary -->
+      <p class="text-xl text-gray-600 dark:text-gray-400" itemprop="description">{description}</p>
+      
+      <!-- Tags -->
       <div class="flex gap-2 mt-4">
         {tags.map(tag => (
-          <a href={`/tags/${tag.toLowerCase()}`} class="text-sm px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full">
+          <a href={`/tags/${tag.toLowerCase()}`} class="text-sm px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
             #{tag}
           </a>
         ))}
       </div>
+
+      <!-- Author byline -->
+      <div class="flex items-center gap-2 mt-4 text-sm text-gray-500">
+        <span>By</span>
+        <span itemprop="author" itemscope itemtype="https://schema.org/Person">
+          <span itemprop="name">{author}</span>
+        </span>
+      </div>
     </header>
 
+    <!-- Main content with optional TOC -->
     {headings && headings.length > 0 && (
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div class="lg:col-span-3 prose dark:prose-invert max-w-none">
@@ -79,6 +128,14 @@ const formattedDate = typeof pubDate === 'string'
       </div>
     )}
 
-    <SummaryBox title={title} tags={tags} />
+    <!-- Updated date if exists -->
+    {formattedUpdatedDate && (
+      <p class="text-sm text-gray-500 mt-8">
+        Last updated: <time datetime={updatedDate instanceof Date ? updatedDate.toISOString() : new Date(updatedDate as string).toISOString()} itemprop="dateModified">{formattedUpdatedDate}</time>
+      </p>
+    )}
+
+    <!-- Summary box for AI extraction -->
+    <SummaryBox title={title} tags={tags} description={description} />
   </article>
 </BaseLayout>
