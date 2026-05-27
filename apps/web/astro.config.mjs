@@ -4,7 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import UnoCSS from '@unocss/astro';
 
 export default defineConfig({
-  site: 'https://example.com',
+  site: 'https://runany.dev',
   output: 'static',
   integrations: [
     mdx(),

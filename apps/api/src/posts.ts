@@ -3,7 +3,7 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import type { PostFrontmatter, PostSummary } from '@runany/shared';
 
-const BLOG_DIR = '/Users/friday/personal/runany/content/blog';
+const BLOG_DIR = path.join(process.cwd(), 'apps/web/src/content/blog');
 
 function getPostFiles(): string[] {
   if (!fs.existsSync(BLOG_DIR)) {
