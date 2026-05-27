@@ -1,0 +1,57 @@
+---
+import PostLayout from '@/layouts/PostLayout.astro';
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+  return posts.map(post => ({
+    params: { slug: post.slug },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content, headings } = await post.render();
+
+// Calculate reading time
+const wordCount = post.body.split(/\s+/).length;
+const readingTime = Math.ceil(wordCount / 200);
+
+// Get related posts (same category or tags)
+const allPosts = await getCollection('blog', ({ data }) => !data.draft);
+const relatedPosts = allPosts
+  .filter(p => p.slug !== post.slug)
+  .filter(p => 
+    p.data.category === post.data.category || 
+    p.data.tags.some(t => post.data.tags.includes(t))
+  )
+  .slice(0, 3);
+---
+
+<PostLayout
+  title={post.data.title}
+  description={post.data.description}
+  pubDate={post.data.pubDate}
+  updatedDate={post.data.updatedDate}
+  category={post.data.category}
+  tags={post.data.tags}
+  image={post.data.image}
+  readingTime={readingTime}
+  headings={headings}
+>
+  <Content />
+  
+  {relatedPosts.length > 0 && (
+    <div class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
+      <h3 class="text-xl font-semibold mb-6">Related Posts</h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {relatedPosts.map(p => (
+          <a href={`/blog/${p.slug}`} class="card hover:shadow-lg transition-shadow">
+            <h4 class="font-medium mb-2">{p.data.title}</h4>
+            <p class="text-sm text-gray-500">{p.data.pubDate.toLocaleDateString()}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  )}
+</PostLayout>
