@@ -18,7 +18,7 @@ export async function GET(context: APIContext) {
     items: sortedPosts.map((post) => ({
       title: post.data.title,
       description: post.data.description,
-      link: `/blog/${post.slug}/`,
+      link: `/blog/${post.id.replace(/\.mdx?$/, '')}/`,
       pubDate: new Date(post.data.pubDate),
       author: 'du@runany.dev (Du)',
       categories: [post.data.category, ...post.data.tags],

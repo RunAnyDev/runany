@@ -10,10 +10,6 @@ export default defineConfig({
       violet: '#8B5CF6',
       lime: '#A3E635',
     },
-    fontFamily: {
-      sans: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      mono: 'SFMono-Regular, Consolas, "Liberation Mono", monospace',
-    },
   },
   shortcuts: {
     'btn': 'px-4 py-2 rounded-xl font-semibold transition-colors',
