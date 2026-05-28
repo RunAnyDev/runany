@@ -1,6 +1,7 @@
 import { getCollection } from 'astro:content';
+import type { APIContext } from 'astro';
 
-export async function GET(context) {
+export async function GET(_context: APIContext) {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
   const sortedPosts = posts.sort((a, b) => {
     const aDate = typeof a.data.pubDate === 'string' ? new Date(a.data.pubDate) : a.data.pubDate;
@@ -11,7 +12,6 @@ export async function GET(context) {
   const siteUrl = 'https://runany.dev';
   
   const rssItems = sortedPosts.map(post => {
-    const { Content } = post.render();
     // Get first ~500 chars of content as summary for RSS
     const plainText = post.body.replace(/[#*`\[\]]/g, '').replace(/\n+/g, ' ').trim();
     const summary = plainText.slice(0, 500) + (plainText.length > 500 ? '...' : '');
