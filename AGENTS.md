@@ -2,9 +2,9 @@
 
 ## Overview
 
-runany.dev là blog chia sẻ kiến thức tech, AI, setup tools cho developers. Tối ưu cho AI crawlers (GPT, Claude, Perplexity).
+runany.dev is an English tech blog sharing knowledge about AI, developer tools, and setup guides. Optimized for AI crawlers (GPT, Claude, Perplexity).
 
-**Quy tắc quan trọng:** Agent có thể commit trực tiếp bài viết mới vào repo mà KHÔNG cần webhook.
+**Important rule:** Agents can commit new posts directly to the repo WITHOUT needing a webhook.
 
 ---
 
@@ -18,16 +18,16 @@ runany.dev là blog chia sẻ kiến thức tech, AI, setup tools cho developers
 
 ### 2. Naming Convention
 
-- **Slug**: lowercase, hyphenated, mô tả nội dung
-- Ví dụ: `setup-ollama-local.mdx`, `cursor-vs-copilot.mdx`
-- KHÔNG dùng số thứ tự trong slug (`post-1`, `post-2`)
+- **Slug**: lowercase, hyphenated, descriptive
+- Examples: `setup-ollama-local.mdx`, `cursor-vs-copilot.mdx`
+- Do NOT use numbers in the slug (`post-1`, `post-2`)
 
-### 3. Frontmatter (BẮT BUỘC)
+### 3. Frontmatter (REQUIRED)
 
 ```yaml
 ---
-title: "Tiêu đề bài viết (≤60 chars)"
-description: "Mô tả ngắn 150-200 chars cho SEO và AI extract"
+title: "Post title (≤60 chars)"
+description: "Short description 150-200 chars for SEO and AI extraction"
 pubDate: "2025-05-27"
 tags: ["tag1", "tag2", "tag3"]
 category: "ai-setup"
@@ -53,11 +53,11 @@ draft: false
 ```
 ## TL;DR
 
-> **TL;DR:** Một sentence tóm tắt nội dung.
+> **TL;DR:** A one-sentence summary of the content.
 
-## Tại sao cần [topic]?
+## Why [topic]?
 
-- Context ngắn gọn
+- Brief context
 - Problem being solved
 
 ## Prerequisites
@@ -67,7 +67,7 @@ draft: false
 
 ## Step 1: [Task name]
 
-Code blocks với language identifier:
+Code blocks with language identifier:
 
 ```bash
 # Example command
@@ -78,22 +78,22 @@ echo "hello"
 
 ## FAQ
 
-**Q: Câu hỏi thường gặp?**
-**A:** Trả lời ngắn gọn.
+**Q: Common question?**
+**A:** Brief answer.
 
 ## Conclusion
 
-Tóm tắt + next steps
+Summary + next steps
 ```
 
 ### 5. Content Rules
 
-- **Code blocks**: LUÔN có language identifier (`bash`, `python`, `javascript`, `json`, `yaml`)
-- **Headings**: H2 cho main sections, H3 cho sub-steps
-- **Links**: Dùng relative paths cho internal links (`/blog/other-post/`)
-- **Images**: Local trong `public/` hoặc external URLs
-- **TL;DR**: Thêm block quote `>` cho summary (AI summary box sẽ extract)
-- **FAQ**: Thêm Q&A format ở cuối nếu có nhiều câu hỏi
+- **Code blocks**: ALWAYS include a language identifier (`bash`, `python`, `javascript`, `json`, `yaml`)
+- **Headings**: H2 for main sections, H3 for sub-steps
+- **Links**: Use relative paths for internal links (`/blog/other-post/`)
+- **Images**: Local in `public/` or external URLs
+- **TL;DR**: Add block quote `>` for summary (AI summary box will extract)
+- **FAQ**: Add Q&A format at the end if there are common questions
 
 ---
 
@@ -102,7 +102,7 @@ Tóm tắt + next steps
 ```bash
 cd ~/personal/runany
 
-# 1. Tạo file
+# 1. Create file
 cat > apps/web/src/content/blog/[slug].mdx << 'EOF'
 ---
 title: "..."
@@ -119,7 +119,7 @@ draft: false
 ## Content here
 EOF
 
-# 2. Verify syntax (optional - chạy build check)
+# 2. Verify syntax (optional - run build check)
 cd apps/web && npm run build 2>&1 | tail -5
 
 # 3. Commit
@@ -127,7 +127,7 @@ cd ~/personal/runany
 git add apps/web/src/content/blog/[slug].mdx
 git commit -m "feat: add [slug] - [title]"
 
-# 4. Push (trigger Vercel auto-deploy)
+# 4. Push (triggers Vercel auto-deploy)
 git push
 ```
 
@@ -135,17 +135,17 @@ git push
 
 ## Validation Checklist
 
-Trước khi commit, đảm bảo:
+Before committing, ensure:
 
-- [ ] `title` ≤ 60 chars, chứa keywords chính
-- [ ] `description` ≤ 200 chars, hấp dẫn để click
-- [ ] `tags` lowercase, hyphenated (không spaces)
-- [ ] `category` là một trong các options
-- [ ] Có TL;DR block `>`
-- [ ] Code blocks có language identifier
-- [ ] Headings hierarchy rõ ràng (H2 > H3)
-- [ ] File đặt đúng: `apps/web/src/content/blog/[slug].mdx`
-- [ ] `draft: false` (để publish)
+- [ ] `title` ≤ 60 chars, contains main keywords
+- [ ] `description` ≤ 200 chars, compelling to click
+- [ ] `tags` lowercase, hyphenated (no spaces)
+- [ ] `category` is one of the valid options
+- [ ] Has a TL;DR block `>`
+- [ ] Code blocks have language identifiers
+- [ ] Headings hierarchy is clear (H2 > H3)
+- [ ] File placed correctly: `apps/web/src/content/blog/[slug].mdx`
+- [ ] `draft: false` (to publish)
 
 ---
 
@@ -178,12 +178,12 @@ npm run build 2>&1 | grep -E "error|Error|ERROR"
 
 ## SEO Checklist
 
-- [ ] Title chứa main keyword
-- [ ] Description hấp dẫn, ≤ 160 chars
-- [ ] Tags phù hợp (3-5 tags)
-- [ ] Có internal links (liên quan đến bài khác)
-- [ ] Có code blocks với syntax highlighting
-- [ ] Có TL;DR summary cho AI extract
+- [ ] Title contains main keyword
+- [ ] Description is compelling, ≤ 160 chars
+- [ ] Tags are appropriate (3-5 tags)
+- [ ] Has internal links (related to other posts)
+- [ ] Has code blocks with syntax highlighting
+- [ ] Has TL;DR summary for AI extraction
 
 ---
 
@@ -194,7 +194,7 @@ runany/
 ├── apps/
 │   ├── web/                      ← Astro SSG
 │   │   └── src/
-│   │       ├── content/blog/     ← BÀI VIẾT Ở ĐÂY
+│   │       ├── content/blog/     ← BLOG POSTS GO HERE
 │   │       ├── layouts/          ← Layouts
 │   │       ├── components/       ← Components
 │   │       └── pages/            ← Routes
@@ -210,11 +210,11 @@ runany/
 ## Quick Command Reference
 
 ```bash
-# Tạo bài viết mới (slug: setup-n8n)
+# Create a new post (slug: setup-n8n)
 cat > apps/web/src/content/blog/setup-n8n.mdx << 'ENDOFFRONT'
 ---
-title: "Cách setup N8N trên VPS"
-description: "Hướng dẫn setup N8N automation tool trên VPS Ubuntu."
+title: "How to Set Up N8N on a VPS"
+description: "Step-by-step guide to setting up the N8N automation tool on an Ubuntu VPS."
 pubDate: "2025-05-27"
 tags: ["n8n", "automation", "self-hosted"]
 category: "self-hosted"
@@ -224,11 +224,11 @@ draft: false
 
 > **TL;DR:** ...
 
-## Nội dung
+## Content
 ENDOFFRONT
 
-# Commit và push
+# Commit and push
 git add apps/web/src/content/blog/setup-n8n.mdx
-git commit -m "feat: add setup-n8n - Cách setup N8N trên VPS"
+git commit -m "feat: add setup-n8n - How to Set Up N8N on a VPS"
 git push
 ```

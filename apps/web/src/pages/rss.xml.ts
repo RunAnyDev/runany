@@ -44,7 +44,7 @@ export async function GET(context) {
   <channel>
     <title>runany.dev</title>
     <link>${siteUrl}</link>
-    <description>Chia sẻ kiến thức tech, AI, setup tools cho developers. Tối ưu cho AI crawlers.</description>
+    <description>Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.</description>
     <language>vi</language>
     <managingEditor>du@runany.dev (Du)</managingEditor>
     <webMaster>du@runany.dev (Du)</webMaster>

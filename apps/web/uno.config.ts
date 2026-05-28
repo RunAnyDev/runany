@@ -4,7 +4,11 @@ import { presetWind } from 'unocss';
 export default defineConfig({
   theme: {
     colors: {
-      primary: '#3B82F6',
+      primary: '#22D3EE',
+      ink: '#020617',
+      panel: '#0F172A',
+      violet: '#8B5CF6',
+      lime: '#A3E635',
     },
     fontFamily: {
       sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -12,10 +16,10 @@ export default defineConfig({
     },
   },
   shortcuts: {
-    'btn': 'px-4 py-2 rounded-lg font-medium transition-colors',
-    'btn-primary': 'px-4 py-2 rounded-lg font-medium transition-colors bg-primary text-white hover:bg-blue-600',
-    'card': 'border border-gray-200 dark:border-gray-700 rounded-xl p-4',
-    'link': 'text-blue-500 hover:underline',
+    'btn': 'px-4 py-2 rounded-xl font-semibold transition-colors',
+    'btn-primary': 'px-4 py-2 rounded-xl font-semibold transition-colors bg-cyan-400 text-slate-950 hover:bg-cyan-300',
+    'card': 'border border-white/10 bg-slate-950/70 rounded-2xl p-5 shadow-xl shadow-slate-950/20',
+    'link': 'text-cyan-300 hover:text-cyan-200 hover:underline underline-offset-4',
   },
   presets: [
     presetWind(),
