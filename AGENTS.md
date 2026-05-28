@@ -18,16 +18,22 @@ runany.dev is an English tech blog sharing knowledge about AI, developer tools, 
 
 ### 2. Filename Convention (SORTING)
 
-Filename format: `YYYY-MM-DD-[slug].mdx`
+Filename format: `YYYY-MM-DD-HHMMSS-[slug].mdx`
 
-The filename starts with a date timestamp (YYYY-MM-DD) for automatic chronological sorting. The slug portion after the timestamp becomes the actual blog URL slug.
+The filename starts with a full timestamp (YYYY-MM-DD-HHMMSS) for automatic chronological sorting. HHMMSS = 6-digit time (hour-minute-second). The slug portion after the timestamp becomes the actual blog URL slug.
 
 ```
-2026-05-28-frigade-product-onboarding.mdx  →  URL: /blog/frigade-product-onboarding/
-2026-05-27-agentmesh-multi-agent-setup.mdx  →  URL: /blog/agentmesh-multi-agent-setup/
+2026-05-28-190915-frigade-product-onboarding.mdx  →  URL: /blog/frigade-product-onboarding/
+2026-05-28-191500-sentrial-observability.mdx       →  URL: /blog/sentrial-observability/
 ```
 
-The sorting logic strips the `YYYY-MM-DD-` prefix before generating the URL slug.**Do NOT use spaces in filenames** — hyphens only.
+**Rules:**
+- ✅ Timestamp must include HHMMSS (6 digits, e.g., `160656`, `190915`)
+- ✅ Slug: lowercase, hyphens only, no spaces
+- ❌ DO NOT use `YYYY-MM-DD-[slug].mdx` without HHMMSS — posts without time component sort incorrectly
+- ❌ DO NOT use spaces in filenames
+
+**Sorting logic:** `b.id.localeCompare(a.id)` → descending by filename (newest first). The regex `^\d{4}-\d{2}-\d{2}-\d{6}-` strips the full timestamp prefix.
 
 ### 3. Frontmatter (REQUIRED)
 
@@ -93,7 +99,31 @@ echo "hello"
 Summary + next steps
 ```
 
-### 5. Content Rules
+### 5. Thumbnail & CDN (REQUIRED)
+
+**ALWAYS upload thumbnail to R2 BEFORE committing a post.**
+
+Thumbnail path: `apps/web/public/blog/thumbnails/[slug].webp`
+R2 CDN URL: `https://cdn.runany.dev/blog/thumbnails/[slug].webp`
+
+**Workflow:**
+1. Generate thumbnail via MiniMax: `scripts/generate-github-tool-thumbnail.mjs` or custom prompt
+2. Upload to R2 using script's R2 API (S3-compatible PUT with AWS Signature v4)
+3. Verify HTTP 200 before committing
+4. Reference in frontmatter: `image: { url: "https://cdn.runany.dev/blog/thumbnails/[slug].webp", alt: "..." }`
+
+**R2 upload script** (from `scripts/generate-github-tool-thumbnail.mjs`):
+```javascript
+// Uses env: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_ACCOUNT_ID
+// Endpoint: https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{R2_BUCKET}/{key}
+// Uses AWS Signature v4 for authentication
+```
+
+**Validation:**
+- ✅ All 21 existing thumbnails verified on R2 (HTTP 200)
+- ❌ DO NOT commit if CDN returns 404 — thumbnail must be uploaded first
+
+### 6. Content Rules
 
 - **Code blocks**: ALWAYS include a language identifier (`bash`, `python`, `javascript`, `json`, `yaml`)
 - **Headings**: H2 for main sections, H3 for sub-steps
@@ -144,6 +174,8 @@ git push
 
 Before committing, ensure:
 
+- [ ] Filename: `YYYY-MM-DD-HHMMSS-[slug].mdx` (HHMMSS required, 6 digits)
+- [ ] Thumbnail uploaded to R2 CDN → verify HTTP 200 before commit
 - [ ] `title` ≤ 60 chars, contains main keywords
 - [ ] `description` ≤ 200 chars, compelling to click
 - [ ] `tags` lowercase, hyphenated (no spaces)
@@ -151,7 +183,7 @@ Before committing, ensure:
 - [ ] Has a TL;DR block `>`
 - [ ] Code blocks have language identifiers
 - [ ] Headings hierarchy is clear (H2 > H3)
-- [ ] File placed correctly: `apps/web/src/content/blog/[slug].mdx`
+- [ ] File placed correctly: `apps/web/src/content/blog/YYYY-MM-DD-HHMMSS-[slug].mdx`
 - [ ] `draft: false` (to publish)
 
 ---
