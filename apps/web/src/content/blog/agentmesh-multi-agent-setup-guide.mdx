@@ -1,0 +1,199 @@
+---
+title: "AgentMesh – Define AI Agent Teams in YAML"
+description: "Define multi-agent AI workflows in YAML and run them locally with one command. AgentMesh brings Docker Compose patterns to AI agent orchestration."
+pubDate: "2026-05-28"
+tags: ["ai-agents", "multi-agent", "mcp", "self-hosted", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agentmesh-multi-agent-setup-guide.webp"
+  alt: "AgentMesh GitHub tool guide thumbnail"
+draft: false
+---
+
+![AgentMesh GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/agentmesh-multi-agent-setup-guide.webp)
+
+## TL;DR
+
+> **TL;DR:** AgentMesh lets you define a team of AI agents with shared memory and message passing — all in a `mesh.yaml` file — and spin them up with a single command.
+
+## Source and Accuracy Notes
+
+Official repository: [github.com/arczibdg/agentmesh](https://github.com/arczibdg/agentmesh). MIT licensed, TypeScript/Node.js based. This guide uses `npx agentmesh` without a local install.
+
+## What Is AgentMesh?
+
+If you have used Docker Compose, AgentMesh will feel immediately familiar. Instead of defining services that spin up as containers, you define AI agents that spin up as processes — each with its own model, tools, memory namespace, and message subscriptions. The orchestration happens locally on your machine, no cloud service required.
+
+The core idea: a team of agents that can coordinate among themselves. One agent might review a pull request, emit an approval signal, and trigger a deployer agent to push to staging. A separate monitor agent watches the deployment and writes status back to a shared memory namespace. All of this is expressed declaratively in YAML rather than wired up imperatively in code.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Initialize a Mesh
+
+Run the init command to scaffold a `mesh.yaml` in your current directory:
+
+```bash
+npx agentmesh init
+```
+
+This creates a starter configuration with one agent and documentation comments inline.
+
+### Step 2: Define Your Agent Team
+
+Open `mesh.yaml` and configure your agents. A realistic three-agent setup covering code review, deployment, and monitoring looks like this:
+
+```yaml
+version: "1"
+
+defaults:
+  model: claude-sonnet-4-6
+  timeout: 120s
+  retries: 3
+
+memory:
+  namespaces:
+    - shared
+    - deployments
+
+mcp:
+  github:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_TOKEN: $env.GITHUB_TOKEN
+
+agents:
+  reviewer:
+    role: "Review pull requests for bugs, security issues, and style violations"
+    model: claude-sonnet-4-6
+    tools:
+      mcp: [github]
+    memory:
+      read: [shared]
+      write: [shared]
+
+  deployer:
+    role: "Deploy approved changes to staging and production"
+    model: gpt-4o
+    tools:
+      mcp: [github]
+      http:
+        - name: deploy
+          url: https://api.render.com/v1/deploys
+          auth: Bearer $env.RENDER_TOKEN
+    memory:
+      read: [shared, deployments]
+      write: [deployments]
+    listen:
+      - from: reviewer
+        on: approved
+
+  monitor:
+    role: "Watch deployments and report failures"
+    model: ollama/llama3
+    tools:
+      http:
+        - name: healthcheck
+          url: https://api.example.com/health
+    memory:
+      read: [deployments]
+      write: [shared]
+    listen:
+      - from: deployer
+        on: deployed
+```
+
+Key concepts in the config:
+
+- **`defaults`** sets fallback values for all agents. Every agent can override these.
+- **`memory.namespaces`** declares the shared state stores. The `reviewer` and `monitor` share `shared`; `deployer` and `monitor` share `deployments`.
+- **`listen`** creates agent-to-agent communication channels. The `deployer` subscribes to the `reviewer`'s `approved` event.
+- **`mcp`** registers Model Context Protocol servers that agents can invoke as tools.
+
+### Step 3: Validate and Run
+
+Before starting, validate the configuration against the JSON schema:
+
+```bash
+npx agentmesh validate
+```
+
+If everything checks out, boot the whole team:
+
+```bash
+npx agentmesh up
+```
+
+The reviewer will start polling GitHub. When it approves a PR, it writes to `shared` and emits the `approved` signal. The deployer picks that up, deploys, and signals `deployed`. The monitor responds to `deployed` by checking health endpoints and writing results to `shared`.
+
+### Step 4: Inspect Running Agents
+
+Use the built-in doctor command to check that all models are reachable, environment variables are set, and the config is valid:
+
+```bash
+npx agentmesh doctor
+```
+
+## Deeper Analysis
+
+### Why YAML-First?
+
+The choice of YAML as the configuration format is deliberate. YAML is readable by non-developers, version-controllable, and composable — you can include fragments from other files. Compared to embedding JSON schemas in code or writing imperative setup scripts, a YAML mesh file can be reviewed in a pull request, shared across a team, and audited for tool access patterns at a glance.
+
+### Shared Memory with Namespace Isolation
+
+The memory layer uses SQLite under the hood, but the API presents it as named namespaces with read/write permission lists per agent. An agent that only has `read: [shared]` cannot write to `deployments`. This is a clean security boundary — you can give the reviewer read access to secrets without giving it write access to the deployment log.
+
+### MCP-Native Tooling
+
+The MCP server manager handles spawning and lifecycle for MCP server processes, connecting them to agents via stdio transport. The HTTP escape hatch is practical for calling internal APIs that do not have MCP server implementations yet, like a private Render or Railway deploy API.
+
+### Model Routing
+
+The model router dispatches prompts to OpenAI, Anthropic, Ollama, or Google depending on the model string. The circuit breaker logic prevents cascading failures if one provider is slow or unavailable. In practice, you can mix models: a faster agent on GPT-4o for simple tasks, a slower reasoning agent on Claude Sonnet for analysis.
+
+### Local-First
+
+Everything runs on your machine. For fully offline operation, switch agents to `ollama/llama3` or another Ollama-hosted model. No data leaves your environment unless you explicitly configure HTTP tools with external endpoints.
+
+## Practical Evaluation Checklist
+
+- [ ] `mesh.yaml` created and validates with `agentmesh validate`
+- [ ] At least two agents communicating via `listen`/`on`
+- [ ] Memory namespace shared between two agents, with different read/write permissions
+- [ ] One MCP tool invoked successfully (e.g., GitHub MCP for PR listing)
+- [ ] One HTTP tool invoked successfully (custom REST endpoint)
+- [ ] `agentmesh doctor` reports all green
+- [ ] Graceful shutdown with `Ctrl+C` (no orphaned processes)
+
+## Security Notes
+
+- **`$env.VAR`** references are resolved at runtime from the shell environment. Secrets never appear in `mesh.yaml`.
+- MCP server tokens (e.g., `GITHUB_TOKEN`) should be set in your shell profile, not committed to the repo.
+- Agent memory namespaces are file-backed SQLite databases in `.agentmesh/memory/`. They are not encrypted at rest — treat them like you would a local database file.
+- The HTTP tool supports Bearer token authentication. For long-lived tokens, consider scoping permissions to the minimum required for the task.
+
+## FAQ
+
+**Q:** Can AgentMesh run agents on remote servers, or is it strictly local?
+**A:** Currently local-only. Each agent runs as a Node.js process on your machine. Remote execution is a documented roadmap item.
+
+**Q:** How does it compare to LangChain or CrewAI?
+**A:** LangChain is a library for building individual chains; CrewAI is role-based with a code-first API. AgentMesh is configuration-first — you express the team topology in YAML without writing orchestration code.
+
+**Q:** Does it support Windows?
+**A:** The project is Node.js-based and should work on Windows via WSL2 or directly if Node compatibility is maintained. Check the repo for Windows-specific issues.
+
+**Q:** Can I add a new agent without restarting the mesh?
+**A:** Not yet — edits to `mesh.yaml` currently require a full restart (`npx agentmesh up`). Hot-reload is on the roadmap.
+
+**Q:** What happens if one agent crashes?
+**A:** The Agent Supervisor handles retries up to the `retries` limit. After exhausting retries, the mesh logs the failure but continues running other agents.
+
+## Conclusion
+
+AgentMesh brings the compositional clarity of Docker Compose to multi-agent AI orchestration. If you find yourself scripting separate AI tool invocations that need to coordinate — a reviewer that triggers a deployer, a monitor that alerts on failures — AgentMesh replaces those scripts with a declarative mesh file that is easier to audit, share, and version.
+
+Start with `npx agentmesh init` and add your agents one by one. The `agentmesh validate` and `agentmesh doctor` commands give fast feedback as you build out the mesh.
