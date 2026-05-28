@@ -10,6 +10,7 @@ export async function GET(context: APIContext) {
     return bDate.valueOf() - aDate.valueOf();
   });
 
+  const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
   return rss({
     title: 'runany.dev',
     description: 'Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.',
@@ -18,7 +19,7 @@ export async function GET(context: APIContext) {
     items: sortedPosts.map((post) => ({
       title: post.data.title,
       description: post.data.description,
-      link: `/blog/${post.id.replace(/\.mdx?$/, '')}/`,
+      link: `/blog/${getSlug(post.id)}/`,
       pubDate: new Date(post.data.pubDate),
       author: 'du@runany.dev (Du)',
       categories: [post.data.category, ...post.data.tags],
