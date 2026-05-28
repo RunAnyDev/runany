@@ -1,0 +1,163 @@
+---
+title: "Extend AI – Turn Messy Documents into Clean Structured Data"
+description: "Extend is a YC W23 AI toolkit that parses messy documents—PDFs, images, Excel files—and extracts reliable structured data for AI pipelines."
+pubDate: "2026-05-29"
+tags: ["ai-tool", "document-parsing", "yc-w23", "api", "data-pipeline"]
+category: "ai-setup"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/extend-ai-document-parsing-toolkit-yc-w23.webp"
+  alt: "Extend AI document parsing toolkit thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Extend is a YC W23 document parsing API that uses vision models to extract clean structured data from messy real-world documents—multi-page PDFs, handwriting, split tables, and mixed file types—saving AI teams months of pipeline maintenance.
+
+## Source and Accuracy Notes
+
+- **Official site:** [https://www.extend.ai/](https://www.extend.ai/)
+- **Live demo:** [https://dashboard.extend.ai/demo](https://dashboard.extend.ai/demo) (no signup required)
+- **HN Launch:** [Launch HN: Extend (YC W23)](https://news.ycombinator.com/item?id=45529628) — 61 points
+- This article is based on the founder's HN launch post and public documentation.
+
+## What Is Extend?
+
+Extend is an AI document parsing toolkit built for engineering teams that need to extract reliable structured data from the kinds of documents that break normal OCR pipelines. Think 100-page PDFs with tables split across pages, scribbled handwriting, checkbox fields in a dozen different formats, mixed file types, and scanned images with poor lighting.
+
+The founders—Kushal and Eli—built Extend after spending months at a previous job fighting unreliable document pipelines, then seeing the same problems repeated across dozens of YC companies. They launched Extend at YC W23 and quickly found traction with teams building medical agents, real-time bank account onboarding, and mortgage automation products.
+
+The core product is a set of REST APIs that let engineers parse, classify, split, and extract data from documents without building and maintaining their own computer vision pipelines.
+
+## How It Works
+
+### Step 1: Upload a Document
+
+Send any combination of PDFs, images (PNG, JPG, TIFF), or Excel files to the parsing endpoint:
+
+```bash
+curl -X POST https://api.extend.ai/v1/parse \
+  -H "Authorization: Bearer $EXTEND_API_KEY" \
+  -F "file=@contract.pdf" \
+  -F "options={\"mode\":\"standard\",\"extract_tables\":true}"
+```
+
+### Step 2: Receive Structured JSON
+
+Extend returns normalized JSON with extracted fields. Tables come back as structured arrays, handwritten sections get flagged, and multi-page documents are merged intelligently:
+
+```json
+{
+  "document_id": "doc_abc123",
+  "pages": 12,
+  "tables": [
+    {
+      "page": 3,
+      "headers": ["Item", "Qty", "Price"],
+      "rows": [
+        ["Consulting hours", "40", "$8,000"],
+        ["License fee", "1", "$2,500"]
+      ]
+    }
+  ],
+  "fields": {
+    "total_amount": { "value": "$10,500", "confidence": 0.97 },
+    "signatures": [
+      { "page": 11, "type": "handwritten", "readable": true }
+    ]
+  },
+  "warnings": [
+    { "page": 7, "note": "poor scan quality, confidence reduced" }
+  ]
+}
+```
+
+### Step 3: Integrate into Your Pipeline
+
+Extend is designed to drop into existing workflows with minimal changes. The API handles the document-to-data conversion; your system handles the downstream logic:
+
+```python
+import httpx
+
+async def process_invoice(filepath: str, api_key: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.extend.ai/v1/parse",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": open(filepath, "rb")},
+            data={"mode": "standard", "extract_tables": True}
+        )
+        return response.json()
+```
+
+## Real-World Use Cases
+
+Extend targets the hard edge cases that generic OCR fails on:
+
+- **Medical agents** — pulling structured data from mixed-format patient forms, lab reports, and insurance documents
+- **Bank account onboarding** — parsing ID documents, proof-of-address files, and utility bills with wildly inconsistent formats
+- **Mortgage automation** — handling 100+ page loan packages with split tables, signatures, and attachments
+- **Legal document review** — extracting clause data from contracts with complex layouts, footnotes, and scanned signatures
+
+The common thread: documents that come from the real world, not clean templates.
+
+## Pricing
+
+Extend offers a usage-based pricing model with a free tier for evaluation. The demo at [dashboard.extend.ai/demo](https://dashboard.extend.ai/demo) lets you test with sample documents without creating an account. Production pricing scales with document page count and parsing complexity.
+
+For AI teams running high-volume document pipelines, the cost of using Extend is typically far below the engineering cost of maintaining custom parsing logic for the long tail of document edge cases.
+
+## Practical Evaluation Checklist
+
+If you're evaluating Extend for your team, here's what to check:
+
+- **Document variety:** Test with your worst documents—multi-page PDFs with mixed content types, poor scans, non-standard layouts
+- **Latency:** Run a batch of representative documents through the demo API and measure end-to-end latency for your target use case
+- **Confidence scores:** Evaluate whether the per-field confidence scores align with your error tolerance
+- **Table extraction quality:** If your documents have complex tables, test split-table scenarios (tables that span page breaks)
+- **API ergonomics:** The REST API is straightforward, but check whether the SDKs (Python, Node) cover your stack
+- **Cost modeling:** Estimate your monthly document volume and compare Extend's pricing against the engineering cost of maintaining your own pipeline
+
+## Security Notes
+
+When processing sensitive documents through Extend:
+
+- Verify the API endpoints are served over TLS with valid certificates
+- Check Extend's data retention and processing isolation policies for your compliance requirements (HIPAA, SOC 2, etc.)
+- For highly sensitive documents, consider whether document redaction before submission is appropriate
+- Rotate API keys regularly and use environment variable storage rather than hardcoding
+
+## FAQ
+
+**Q:** Does Extend support batch processing for high-volume document workflows?
+
+**A:** Yes, the API supports asynchronous batch processing. You can submit multiple documents and poll for results, or use webhooks for notification when processing completes. High-volume enterprise plans offer higher throughput limits.
+
+**Q:** How does Extend handle documents in languages other than English?
+
+**A:** Extend's vision models support multi-language document parsing. Documents with mixed-language content, non-Latin scripts, and special characters are handled by the same parsing pipeline. Specific language support should be verified against current API documentation for edge cases.
+
+**Q:** Can Extend handle handwritten content?
+
+**A:** Yes. Handwritten text is recognized and flagged in the response with a `type: "handwritten"` marker. Confidence scores for handwritten sections are typically lower than printed text, and the API response includes per-field confidence scores so you can route low-confidence items for human review.
+
+**Q:** What happens with corrupted or password-protected PDFs?
+
+**A:** Corrupted files return an error with a descriptive code. Password-protected PDFs need to be unlocked before submission—the API does not handle DRM removal. The error response includes a `failure_reason` field that indicates whether the issue is file corruption, password protection, or format incompatibility.
+
+**Q:** Is there an on-premise or private cloud deployment option?
+
+**A:** Extend is currently offered as a managed cloud API. Enterprise customers requiring on-premise deployment should contact the sales team directly to discuss compliance and infrastructure requirements.
+
+## Conclusion
+
+Extend solves a specific but painful problem: the long tail of messy real-world documents that break standard OCR pipelines. If your AI system processes documents from users, partners, or third-party sources—anything that doesn't come from a clean, known template—Extend can eliminate months of custom parsing engineering.
+
+The YC W23 backing and traction across medical, financial, and legal domains suggests the team has already handled the hardest document edge cases. Worth a closer look if document parsing is slowing down your AI pipeline.
+
+**Useful links:**
+- [extend.ai](https://www.extend.ai/) — main site
+- [Dashboard demo](https://dashboard.extend.ai/demo) — try without account
+- [HN Launch Discussion](https://news.ycombinator.com/item?id=45529628)
