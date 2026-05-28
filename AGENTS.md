@@ -16,11 +16,18 @@ runany.dev is an English tech blog sharing knowledge about AI, developer tools, 
 ~/personal/runany/apps/web/src/content/blog/[slug].mdx
 ```
 
-### 2. Naming Convention
+### 2. Filename Convention (SORTING)
 
-- **Slug**: lowercase, hyphenated, descriptive
-- Examples: `setup-ollama-local.mdx`, `cursor-vs-copilot.mdx`
-- Do NOT use numbers in the slug (`post-1`, `post-2`)
+Filename format: `YYYY-MM-DD-[slug].mdx`
+
+The filename starts with a date timestamp (YYYY-MM-DD) for automatic chronological sorting. The slug portion after the timestamp becomes the actual blog URL slug.
+
+```
+2026-05-28-frigade-product-onboarding.mdx  →  URL: /blog/frigade-product-onboarding/
+2026-05-27-agentmesh-multi-agent-setup.mdx  →  URL: /blog/agentmesh-multi-agent-setup/
+```
+
+The sorting logic strips the `YYYY-MM-DD-` prefix before generating the URL slug.**Do NOT use spaces in filenames** — hyphens only.
 
 ### 3. Frontmatter (REQUIRED)
 
