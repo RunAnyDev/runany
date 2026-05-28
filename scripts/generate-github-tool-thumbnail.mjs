@@ -3,6 +3,7 @@ import { createHmac, createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const root = process.cwd();
 const dataDir = path.join(root, '.data');
@@ -29,7 +30,7 @@ async function loadDotEnv() {
 }
 
 function slugify(input) {
-  return input.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return String(input).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 function seoTitle(repo) {
@@ -51,6 +52,7 @@ function validateRequiredEnv() {
     R2_BUCKET: process.env.R2_BUCKET,
     R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
     R2_ENDPOINT_OR_R2_ACCOUNT_ID: endpoint,
+    MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
   };
   const missing = Object.entries(required).filter(([, value]) => !value).map(([key]) => key);
   if (missing.length) throw new Error(`Missing required env: ${missing.join(', ')}`);
@@ -82,46 +84,76 @@ function awsDate(date) {
   return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
 }
 
-function escapeSvg(input) {
-  return String(input)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function optimizeSvg(svg) {
-  return svg
-    .replace(/>\s+</g, '><')
-    .replace(/\s{2,}/g, ' ')
-    .replace(/<!--([\s\S]*?)-->/g, '')
-    .trim();
-}
-
-function thumbnailSvg(repo, title) {
+function thumbnailPrompt(repo, title) {
   const description = repo.description || 'Open-source AI and developer tool';
   const language = repo.language || 'Developer Tool';
   const stars = repo.stargazers_count.toLocaleString('en-US');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="55%" stop-color="#111827"/>
-      <stop offset="100%" stop-color="#2563eb"/>
-    </linearGradient>
-  </defs>
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <circle cx="1020" cy="80" r="210" fill="#60a5fa" opacity="0.18"/>
-  <circle cx="140" cy="560" r="240" fill="#22c55e" opacity="0.14"/>
-  <text x="72" y="92" fill="#93c5fd" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">runany.dev · GitHub Tool Guide</text>
-  <text x="72" y="210" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="58" font-weight="800">${escapeSvg(title)}</text>
-  <text x="72" y="298" fill="#dbeafe" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="500">${escapeSvg(description.slice(0, 110))}</text>
-  <text x="72" y="430" fill="#bfdbfe" font-family="Inter, Arial, sans-serif" font-size="28">${escapeSvg(repo.full_name)}</text>
-  <text x="72" y="488" fill="#e0f2fe" font-family="Inter, Arial, sans-serif" font-size="24">${escapeSvg(language)} · ${stars} stars · ${escapeSvg(repo.license?.spdx_id || 'No license detected')}</text>
-  <rect x="72" y="526" width="280" height="50" rx="25" fill="#ffffff" opacity="0.14"/>
-  <text x="102" y="559" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">Setup guide</text>
-</svg>`;
-  return optimizeSvg(svg);
+  return [
+    'Create a 16:9 tech blog hero thumbnail for runany.dev.',
+    `Topic: ${title}.`,
+    `Repository: ${repo.full_name}.`,
+    `Context: ${description.slice(0, 180)}.`,
+    `Visual cues: ${language}, ${stars} GitHub stars, ${repo.license?.spdx_id || 'open-source'} license.`,
+    'Style: futuristic developer workstation, multi-agent AI orchestration, abstract config panels without readable characters, connected nodes, subtle GitHub/tooling references.',
+    'Color palette: dark navy, cyan, electric blue, emerald accents.',
+    'Composition: clean editorial banner, strong focal object, high contrast, generous negative space for title overlay.',
+    'Strict rule: no text, no letters, no numbers, no words, no captions, no logos, no UI labels, no code glyphs anywhere in the image.',
+    'No watermark, no logo imitation, no typography, no fake font rendering.',
+  ].join(' ');
+}
+
+async function generateThumbnail(repo, title, slug) {
+  const minimaxKey = process.env.MINIMAX_API_KEY;
+  if (!minimaxKey) throw new Error('Missing MINIMAX_API_KEY env for MiniMax thumbnail generation.');
+
+  const prompt = thumbnailPrompt(repo, title);
+  if (prompt.length > 1500) throw new Error(`MiniMax prompt too long: ${prompt.length} characters`);
+
+  const payload = {
+    model: process.env.MINIMAX_IMAGE_MODEL || 'image-01',
+    prompt,
+    response_format: 'base64',
+    n: 1,
+    aspect_ratio: '16:9',
+    prompt_optimizer: true,
+  };
+
+  const host = (process.env.MINIMAX_API_HOST || 'https://api.minimax.io').replace(/\/$/, '');
+  const response = await fetch(`${host}/v1/image_generation`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${minimaxKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const result = await response.json().catch(async () => ({ raw: await response.text() }));
+  if (!response.ok) throw new Error(`MiniMax HTTP ${response.status}: ${JSON.stringify(result)}`);
+
+  const baseResp = result.base_resp || {};
+  if (baseResp.status_code != null && baseResp.status_code !== 0) {
+    throw new Error(`MiniMax image gen failed: ${JSON.stringify(baseResp)}`);
+  }
+
+  const data = result.data || {};
+  const base64Values = data.image_base64 || data.images || data.image || [];
+  const imageValue = Array.isArray(base64Values) ? base64Values[0] : base64Values;
+  let source;
+  if (typeof imageValue === 'string' && imageValue) {
+    source = Buffer.from(imageValue.replace(/^data:[^,]+,/, ''), 'base64');
+  } else if (Array.isArray(data.image_urls) && data.image_urls[0]) {
+    const imageResponse = await fetch(data.image_urls[0]);
+    if (!imageResponse.ok) throw new Error(`MiniMax image download failed ${imageResponse.status}: ${await imageResponse.text()}`);
+    source = Buffer.from(await imageResponse.arrayBuffer());
+  } else {
+    throw new Error(`No MiniMax image payload found: ${JSON.stringify(result)}`);
+  }
+
+  const webpBuffer = await sharp(source).resize(1200, 630, { fit: 'cover' }).webp({ quality: 88 }).toBuffer();
+  if (webpBuffer.byteLength > 180_000) throw new Error(`Optimized thumbnail too large: ${webpBuffer.byteLength} bytes`);
+
+  return { buffer: webpBuffer, contentType: 'image/webp' };
 }
 
 async function putR2Object(key, body, contentType) {
@@ -146,6 +178,7 @@ async function putR2Object(key, body, contentType) {
   const signingKey = hmac(serviceKey, 'aws4_request');
   const signature = hmac(signingKey, stringToSign, 'hex');
   const authorization = `AWS4-HMAC-SHA256 Credential=${config.R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -156,18 +189,20 @@ async function putR2Object(key, body, contentType) {
     },
     body,
   });
+
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(`R2 upload failed ${response.status}: ${detail} Check R2 credentials and bucket name.`);
+    throw new Error(`R2 upload failed ${response.status}: ${detail}`);
   }
+
   return `${config.R2_PUBLIC_URL.replace(/\/$/, '')}/${key}`;
 }
 
 async function uploadThumbnail(repo, title, slug) {
-  const key = `blog/thumbnails/${slug}.svg`;
-  const body = thumbnailSvg(repo, title);
-  if (body.byteLength > 80_000) throw new Error(`Optimized thumbnail too large: ${body.byteLength} bytes`);
-  return putR2Object(key, body, 'image/svg+xml');
+  const { buffer, contentType } = await generateThumbnail(repo, title, slug);
+  const key = `blog/thumbnails/${slug}.webp`;
+  const publicUrl = await putR2Object(key, buffer, contentType);
+  return publicUrl;
 }
 
 async function readTrackedRepos() {
