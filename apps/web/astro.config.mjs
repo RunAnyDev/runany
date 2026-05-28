@@ -8,7 +8,10 @@ export default defineConfig({
   output: 'static',
   integrations: [
     mdx(),
-    sitemap(),
+    sitemap({
+      lastmod: new Date(),
+      changefreq: 'daily',
+    }),
     UnoCSS({ injectReset: true }),
   ],
   markdown: {
