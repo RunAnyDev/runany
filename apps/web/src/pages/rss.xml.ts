@@ -21,6 +21,7 @@ export async function GET(context: APIContext) {
       description: post.data.description,
       link: `/blog/${getSlug(post.id)}/`,
       pubDate: new Date(post.data.pubDate),
+      content: post.body ? `<![CDATA[${post.body}]]>` : undefined,
       author: 'du@runany.dev (Du)',
       categories: [post.data.category, ...post.data.tags],
     })),
