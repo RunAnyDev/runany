@@ -4,11 +4,7 @@ import rss from '@astrojs/rss';
 
 export async function GET(context: APIContext) {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = posts.sort((a, b) => {
-    const aDate = typeof a.data.pubDate === 'string' ? new Date(a.data.pubDate) : a.data.pubDate;
-    const bDate = typeof b.data.pubDate === 'string' ? new Date(b.data.pubDate) : b.data.pubDate;
-    return bDate.valueOf() - aDate.valueOf();
-  });
+  const sortedPosts = posts.sort((a, b) => b.id.localeCompare(a.id));
 
   const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
   return rss({
