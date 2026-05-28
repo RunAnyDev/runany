@@ -1,7 +1,8 @@
 import { getCollection } from 'astro:content';
 import type { APIContext } from 'astro';
+import rss from '@astrojs/rss';
 
-export async function GET(_context: APIContext) {
+export async function GET(context: APIContext) {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
   const sortedPosts = posts.sort((a, b) => {
     const aDate = typeof a.data.pubDate === 'string' ? new Date(a.data.pubDate) : a.data.pubDate;
@@ -9,60 +10,18 @@ export async function GET(_context: APIContext) {
     return bDate.valueOf() - aDate.valueOf();
   });
 
-  const siteUrl = 'https://runany.dev';
-  
-  const rssItems = sortedPosts.map(post => {
-    // Get first ~500 chars of content as summary for RSS
-    const plainText = post.body.replace(/[#*`\[\]]/g, '').replace(/\n+/g, ' ').trim();
-    const summary = plainText.slice(0, 500) + (plainText.length > 500 ? '...' : '');
-    
-    return `
-    <item>
-      <title><![CDATA[${post.data.title}]]></title>
-      <link>${siteUrl}/blog/${post.slug}/</link>
-      <guid isPermaLink="true">${siteUrl}/blog/${post.slug}/</guid>
-      <description><![CDATA[${post.data.description || summary}]]></description>
-      <content:encoded><![CDATA[
-        <h1>${post.data.title}</h1>
-        <p><strong>${post.data.description || ''}</strong></p>
-        <p>Tags: ${post.data.tags.map(t => `#${t}`).join(', ')} | Category: ${post.data.category}</p>
-        <hr/>
-        ${post.body}
-      ]]></content:encoded>
-      <pubDate>${new Date(post.data.pubDate).toUTCString()}</pubDate>
-      <author>${post.data.author || 'Du'}</author>
-      <category>${post.data.category}</category>
-      ${post.data.tags.map(tag => `<category>${tag}</category>`).join('\n        ')}
-    </item>`;
-  }).join('\n');
-
-  const rss = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" 
-  xmlns:content="http://purl.org/rss/1.0/modules/content/"
-  xmlns:atom="http://www.w3.org/2005/Atom"
-  xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <channel>
-    <title>runany.dev</title>
-    <link>${siteUrl}</link>
-    <description>Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.</description>
-    <language>vi</language>
-    <managingEditor>du@runany.dev (Du)</managingEditor>
-    <webMaster>du@runany.dev (Du)</webMaster>
-    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-    <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />
-    <image>
-      <url>${siteUrl}/favicon.svg</url>
-      <title>runany.dev</title>
-      <link>${siteUrl}</link>
-    </image>
-    ${rssItems}
-  </channel>
-</rss>`;
-
-  return new Response(rss, {
-    headers: {
-      'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
-    },
+  return rss({
+    title: 'runany.dev',
+    description: 'Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.',
+    site: context.site ?? 'https://runany.dev',
+    customData: '<language>en-us</language><managingEditor>du@runany.dev (Du)</managingEditor><webMaster>du@runany.dev (Du)</webMaster>',
+    items: sortedPosts.map((post) => ({
+      title: post.data.title,
+      description: post.data.description,
+      link: `/blog/${post.slug}/`,
+      pubDate: new Date(post.data.pubDate),
+      author: 'du@runany.dev (Du)',
+      categories: [post.data.category, ...post.data.tags],
+    })),
   });
 }
