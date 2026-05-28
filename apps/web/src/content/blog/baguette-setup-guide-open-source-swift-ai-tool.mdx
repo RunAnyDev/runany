@@ -1,6 +1,6 @@
 ---
-title: "baguette Setup Guide: Open Source Swift AI Tool"
-description: "baguette setup guide based on the official GitHub README: learn what this open-source AI tool does, documented install steps, and usage notes."
+title: "Baguette iOS Simulator Automation Guide"
+description: "Set up Baguette for iOS Simulator automation, web dashboards, device farms, gesture input, streaming, and camera testing with Xcode caveats."
 pubDate: "2026-05-28"
 tags: ["github-trending","dev-tools","swift","agent","cli"]
 category: "dev-tools"
@@ -12,117 +12,166 @@ image:
 draft: false
 ---
 
+![baguette GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/baguette-setup-guide-open-source-swift-ai-tool.webp)
 
 ## TL;DR
 
-> **TL;DR:** [baguette](https://github.com/tddworks/baguette) is an emerging open-source developer tool with 1,023 stars; this guide follows the official README instead of guessing install steps.
+> **TL;DR:** Baguette is a Swift CLI and browser UI for headless iOS Simulator farms, with live streaming, coordinate gestures, accessibility dumps, logs, screenshots, virtual camera support, and device-farm control surfaces.
 
 ## Source and Accuracy Notes
 
-This guide is based on the repository README and docs links detected at [the official docs source](https://github.com/tddworks/baguette/blob/main/README.md). Extracted sections include: Install, Quickstart, Build from source.
+This article uses public material from [tddworks/baguette](https://github.com/tddworks/baguette), project quickstart, CLI reference, build notes, and documented web UI behavior. Commands below are limited to commands documented by Baguette project material.
 
-Important rule for this post: when the README does not provide a command, this guide says so instead of inventing one. GitHub projects change quickly, so always compare this article with the current README before running commands.
+Baguette targets recent Apple simulator tooling and links against private SimulatorKit and CoreSimulator frameworks shipped with Xcode. That makes environment fit more important than typical CLI tools. Expect macOS, Xcode, simulator runtime, and architecture details to affect success.
 
 ## What Is baguette?
 
-baguette is an open-source project hosted at [tddworks/baguette](https://github.com/tddworks/baguette). Repository summary: Headless iOS Simulator manager/farm + host-side input injection for iOS 26 — taps, swipes, multi-finger gestures, and 60 fps streaming
+Baguette is a headless iOS Simulator manager and farm. It provides host-side input injection for iOS simulators, including taps, swipes, multi-finger gestures, keyboard events, hardware buttons, live 60 fps streaming, screenshots, logs, accessibility inspection, virtual camera support, and browser-based dashboard views.
 
-Repository signals at write time:
+The project solves a practical automation gap. Apple simulators are powerful, but visual control at scale can be awkward: multiple booted devices, focus pages, gesture input, screenshots, logs, accessibility tree capture, and farm overview usually require mix of Xcode UI, `simctl`, custom scripts, and screen-recording glue. Baguette packages those surfaces into one CLI plus web server.
 
-- Official GitHub repo: [tddworks/baguette](https://github.com/tddworks/baguette)
-- README / docs source: [https://github.com/tddworks/baguette/blob/main/README.md](https://github.com/tddworks/baguette/blob/main/README.md)
-- Stars: 1,023
-- Forks: 55
-- Open issues: 9
-- Main language: Swift
-- License: Apache-2.0
-- Created: 2026-05-01
-- Last updated: 2026-05-27
+Its browser UI has two major entry points. `/simulators` lists simulators on machine with boot and shutdown controls, per-device stream pages, DeviceKit-sourced bezel, camera, accessibility, logs, home, screenshot, app switcher controls, and focus-mode device view. `/farm` shows every booted simulator side by side, letting user click to focus. For agentic mobile testing, that farm view matters because computer-vision or UI agents need visual state, not only command success.
 
-## Docs-Derived Setup Notes
+## Repo-Specific Setup Workflow
 
-The following notes come from headings and text extracted from the official README and linked docs pages. They are not generic install guesses.
+### Step 1: Install on supported Mac
 
-- **Install:** Apple Silicon only. Requires Xcode 26 — baguette links against private SimulatorKit / CoreSimulator frameworks shipped with Xcode.
-- **Quickstart:** bash
-- **Build from source:** Hybrid build: SPM fetches dependencies (ArgumentParser, Mockable, Hummingbird, HummingbirdWebSocket); swiftc compiles everything with an Objective-C bridging header targeting arm64e-apple-macos26.0, linking CoreSimulator, SimulatorKit, IOSu
-
-## Step 1: Clone the Official Repository
-
-Cloning is safe to document because it comes from the official GitHub repository URL. After cloning, read the README before installing dependencies.
-
-```bash
-git clone https://github.com/tddworks/baguette.git
-cd baguette
-```
-
-## Step 2: Follow README Commands
-
-Use these commands only because they were found in README or linked docs setup, usage, configuration, or example sections. If a command is missing, check the official README link above.
-
-### README Command 1: Install
+Homebrew install path:
 
 ```bash
 brew install tddworks/tap/baguette
 ```
 
-### README Command 2: Build from source
+Before blaming Baguette for failures, confirm Xcode and required iOS simulator runtimes are installed. Baguette depends on Apple simulator frameworks, not generic cross-platform device emulation.
+
+### Step 2: Start web UI
+
+Quickstart starts local server:
+
+```bash
+# Start the web UI
+baguette serve
+
+# Single-device dashboard — list, boot/shutdown, per-device stream pages
+open http://localhost:8421/simulators
+
+# Device farm — every booted simulator side-by-side, click to focus
+open http://localhost:8421/farm
+```
+
+Default port is `8421`. Server command also supports documented options in CLI reference:
+
+```text
+serve [--port 8421] [--host 127.0.0.1] [--device-set <path>]
+```
+
+### Step 3: Use headless terminal workflow
+
+Headless path lists devices, boots chosen UDID, and sends coordinate tap:
+
+```bash
+baguette list
+baguette boot --udid <UDID>
+baguette tap --udid <UDID> --x 219 --y 478 --width 438 --height 954
+```
+
+Coordinates are device points in documented CLI reference for gestures, with `width` and `height` matching simulator screen size in points. Do not hard-code values across devices unless your device set is fixed.
+
+### Step 4: Build from source when needed
+
+Source build and tests:
 
 ```bash
 make           # release build via ./build.sh
 swift test     # run the test suite
 ```
 
-## Step 3: Verify Configuration Requirements
+Build is hybrid. Swift Package Manager fetches dependencies such as `ArgumentParser`, `Mockable`, `Hummingbird`, and `HummingbirdWebSocket`; `swiftc` compiles with Objective-C bridging header targeting `arm64e-apple-macos26.0` and links Apple private frameworks including `CoreSimulator`, `SimulatorKit`, `IOSurface`, `VideoToolbox`, `CoreGraphics`, and `ImageIO` from Xcode private frameworks.
 
-Look for environment variables, API keys, model settings, service URLs, or Docker configuration mentioned in the README sections. Do not assume defaults for AI tools because they often depend on local models, cloud APIs, or workspace-specific settings.
+### Step 5: Learn CLI shape before scripting
 
-If the README includes an environment example, copy that exact example file and fill in local values. If no environment example is documented, avoid creating one from guesswork.
+Core command pattern:
 
-## Step 4: Run a Small README-Based Test
+```text
+baguette <command> [options]
+```
 
-Use the smallest command documented by the repo. Good first tests include a help command, example command, local demo, or test command only if the README explicitly shows it.
+Important lifecycle commands:
 
-If the README does not document a smoke test, open issues and examples before trying the tool on real code or private data.
+```text
+list [--json]
+boot     --udid <UDID>
+shutdown --udid <UDID>
+orientation --udid <UDID> <portrait|landscape-left|landscape-right|portrait-upside-down>
+```
 
-## Step 5: Evaluate Before Adopting
+Frames and screenshots:
 
-Use this checklist before adding baguette to a real project:
+```text
+stream     --udid <UDID> [--fps 60] [--format mjpeg|avcc]
+screenshot --udid <UDID> [--output <path>] [--quality 0.85] [--scale 1]
+```
 
-- Does the README explain installation, configuration, and common errors?
-- Do documented commands run on your machine without extra hidden steps?
-- Are issues and pull requests active?
-- Is the license compatible with your use case?
-- Are releases or tags available?
-- Can you pin a version or commit SHA?
-- Does it need access to secrets, files, browsers, shells, or production systems?
+Accessibility and logs:
+
+```text
+describe-ui --udid <UDID> [--x <px> --y <px>] [--output <path>]
+logs --udid <UDID> [--level info|debug|default] [--style default|compact|json|ndjson|syslog] [--predicate <NSPredicate>] [--bundle-id <id>]
+```
+
+One-shot gestures include `tap`, `double-tap`, `swipe`, `pinch`, and `pan`. Keyboard commands include `key` and `type`. Hardware commands use `press` with button names such as home, lock, power, volume, action, app-switcher, swipe-to-home, and notification-center gestures.
+
+## Deeper Analysis
+
+Baguette is important for AI tooling because mobile agents need repeatable visual and input control. Desktop web agents can use Playwright. Native iOS agents often hit rougher terrain: simulator lifecycle, visual stream, coordinate gestures, accessibility tree, logs, and screenshots must line up. Baguette creates one service layer around those concerns.
+
+The web UI is not just convenience. A farm view becomes debugging surface for automation at scale. When tests or agents run on multiple devices, seeing all booted simulators side by side helps identify stuck launches, wrong orientation, permission dialogs, camera state, and UI drift.
+
+Accessibility dumps may be even more valuable than pixels. `describe-ui` returns on-screen accessibility tree as JSON, with frames in device points so they can pipe straight back into taps. That connects perception to action: inspect UI, choose node, tap coordinates. For agent workflows, this is safer than pure image-coordinate guessing.
+
+The private-framework dependency is tradeoff. It gives deeper simulator control and streaming capability, but may break when Xcode internals change. Teams should pin Xcode versions in CI and treat Baguette upgrades as simulator-infrastructure changes, not harmless CLI bumps.
+
+## Practical Evaluation Checklist
+
+- Confirm macOS version, Xcode version, and installed simulator runtimes.
+- Run `baguette serve` and open both `/simulators` and `/farm`.
+- Boot one simulator through web UI and one through CLI.
+- Validate `baguette list --json` output before automation.
+- Test tap coordinates on each target device size.
+- Compare `describe-ui` frames with gesture coordinates.
+- Exercise screenshots, logs, and stream commands under concurrent devices.
+- Pin Xcode and Baguette versions for CI farms.
 
 ## Security Notes
 
-Treat every new developer tool as untrusted until reviewed. This matters more for AI agents, CLIs, browser automation tools, and code generators because they may read files, execute shell commands, or send data to external APIs.
+Baguette controls local iOS simulators and exposes web UI. Keep `serve` bound to `127.0.0.1` unless you intentionally expose farm controls. Remote access could allow clicking, typing, capturing screenshots, viewing logs, or manipulating test devices.
 
-Safer first-run habits:
+Simulator logs and screenshots may contain tokens, app secrets, test user data, or unreleased UI. Treat captured artifacts as sensitive CI data. If agents consume screenshots or accessibility dumps, redact secrets before sending them outside local trusted environment.
 
-- Run it in a temporary folder or container.
-- Read install scripts before executing them.
-- Avoid piping remote scripts directly into bash.
-- Use a test API key with limited permissions.
-- Check network calls if the tool handles private code or data.
+Private framework linkage creates operational risk. Xcode updates can change behavior. Test Baguette after Xcode upgrades before running critical mobile automation.
 
 ## FAQ
 
-**Q: Where is the official GitHub repository?**
-**A:** The official repo is [tddworks/baguette](https://github.com/tddworks/baguette).
+**Q: Is Baguette for real iPhones?**
+**A:** Project scope is iOS Simulator management and host-side simulator input injection, not physical device control.
 
-**Q: Are install commands guessed?**
-**A:** No. Commands in this post are extracted from README or linked docs sections. If no README command is found, the post tells you to use the official docs instead of inventing commands.
+**Q: What port does web UI use?**
+**A:** Quickstart opens `http://localhost:8421/simulators` and `http://localhost:8421/farm` after `baguette serve`.
 
-**Q: How do I avoid duplicate coverage later?**
-**A:** This blog tracks covered repositories in .data/written-repos.txt, using one lowercased owner/repo entry per line.
+**Q: Can Baguette run headlessly?**
+**A:** Yes. CLI supports `list`, `boot`, `shutdown`, gesture commands, streaming, screenshots, accessibility dumps, logs, keyboard input, and hardware button actions.
 
-**Q: When is the thumbnail generated?**
-**A:** The generator creates a MiniMax AI image, optimizes it to WebP, and uploads it to Cloudflare R2 before writing the MDX post, so the committed article already points to the final public image URL.
+**Q: Are gesture coordinates pixels or points?**
+**A:** CLI reference describes gesture coordinates and `width` / `height` as device points for simulator screen size. Keep device dimensions accurate.
+
+**Q: Why does source build depend on Xcode internals?**
+**A:** Baguette links against SimulatorKit and CoreSimulator frameworks shipped with Xcode to provide deep simulator management and streaming behavior.
+
+
+Related reading: [GitHub Trending tools](/tags/github-trending/), [Developer tools](/category/dev-tools/), [workshop setup guide open source typescript ai tool](/blog/workshop-setup-guide-open-source-typescript-ai-tool/), and [rmux setup guide open source rust ai tool](/blog/rmux-setup-guide-open-source-rust-ai-tool/).
 
 ## Conclusion
 
-baguette is worth evaluating only after reading the official README and running the documented setup path. Start with [tddworks/baguette](https://github.com/tddworks/baguette), compare the extracted commands above with current docs, and test in a safe environment before using it on production code or private data.
+Baguette is a serious simulator-control layer for teams building mobile automation, visual device farms, or iOS agents. Its repo-specific strength is broad surface area: web dashboard, farm view, live streams, input injection, accessibility JSON, logs, screenshots, and virtual device controls in one Swift tool.
+
+Adopt it with environment discipline. Validate Xcode version, keep simulator device sets predictable, avoid exposing web UI, and test coordinate workflows across device sizes. If your current mobile automation depends on fragile simulator scripts, Baguette is worth evaluating as unified control plane.

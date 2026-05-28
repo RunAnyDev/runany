@@ -1,6 +1,6 @@
 ---
-title: "CodexPlusPlus Setup Guide: Open Source Rust AI Tool"
-description: "CodexPlusPlus setup guide based on the official GitHub README: learn what this open-source AI tool does, documented install steps, and usage notes."
+title: "CodexPlusPlus Setup and Risk Guide"
+description: "Evaluate CodexPlusPlus for Codex launcher enhancements, API relay mode, provider sync, local state handling, update flow, and rollback planning."
 pubDate: "2026-05-28"
 tags: ["github-trending","dev-tools","rust"]
 category: "dev-tools"
@@ -12,104 +12,168 @@ image:
 draft: false
 ---
 
+![CodexPlusPlus GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/codexplusplus-setup-guide-open-source-rust-ai-tool.webp)
 
 ## TL;DR
 
-> **TL;DR:** [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) is an emerging open-source developer tool with 7,257 stars; this guide follows the official README instead of guessing install steps.
+> **TL;DR:** CodexPlusPlus is a Rust/Tauri enhancement layer for Codex that launches through its own entrypoint, injects menus/scripts externally, supports relay-provider configuration, session management, provider sync, worktree helpers, update checks, and separate Windows/macOS packages.
 
 ## Source and Accuracy Notes
 
-The README is available at [the official docs source](https://github.com/BigPizzaV3/CodexPlusPlus/blob/main/README.md), but it does not expose clear install or usage headings that can be extracted safely. This post avoids inventing commands and points you back to the repo docs.
+This guide uses official project material from [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus), including the English and Chinese README content about relay injection, enhancement mode, recommendations, update packages, data locations, FAQ, and development commands. Commands and config snippets below are limited to official project docs.
 
-Important rule for this post: when the README does not provide a command, this guide says so instead of inventing one. GitHub projects change quickly, so always compare this article with the current README before running commands.
+CodexPlusPlus changes how users launch and manage Codex. That makes setup less about `cargo install` and more about choosing the right release package, understanding injected behavior, and knowing where configuration and logs live.
 
 ## What Is CodexPlusPlus?
 
-CodexPlusPlus is an open-source project hosted at [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus). Repository summary: An enhanced tool for CodexApp, striving to make Codex better to use and more comfortable 一个CodexApp的增强工具，努力让Codex变得更好用更舒服
+CodexPlusPlus, branded as Codex++, is an enhancement tool for CodexApp. It is not a replacement model and not a standalone coding agent. It wraps the Codex desktop experience with a Rust backend, silent launcher, and Tauri + React management app. Its features target friction points around plugin access, session deletion, Markdown export, project movement, Timeline, custom user scripts, provider sync, relay injection, update flow, and worktree creation.
 
-Repository signals at write time:
+A key architectural detail is external CDP injection. The project states that it does not modify `app.asar` and does not write DLLs into the Codex install directory. Instead, users start through the `Codex++` entrypoint, and injected scripts/menus appear in the running Codex UI. That matters for troubleshooting: if you launch original Codex directly, Codex++ features may not appear.
 
-- Official GitHub repo: [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus)
-- README / docs source: [https://github.com/BigPizzaV3/CodexPlusPlus/blob/main/README.md](https://github.com/BigPizzaV3/CodexPlusPlus/blob/main/README.md)
-- Stars: 7,257
-- Forks: 481
-- Open issues: 166
-- Main language: Rust
-- License: Not specified
-- Created: 2026-05-06
-- Last updated: 2026-05-28
+The repo serves two kinds of users. Normal users install packaged releases: Windows NSIS installer or macOS DMG for Intel x64 or Apple Silicon arm64. Developers work across frontend and Rust checks. Operators need to know state locations under `~/.codex/` and `~/.codex-session-delete/` before debugging login, provider sync, or backend status.
 
-## Docs-Derived Setup Notes
+## Repo-Specific Setup Workflow
 
-The following notes come from headings and text extracted from the official README and linked docs pages. They are not generic install guesses.
+### Step 1: Install the correct release package
 
-- No install or usage section was detected in the README metadata extraction.
+Codex++ publishes installers through GitHub Releases. Windows uses an NSIS installer. macOS provides separate Intel x64 and Apple Silicon arm64 DMGs. Choose architecture carefully; Intel Macs use x64, Apple Silicon uses arm64.
 
-## Step 1: Clone the Official Repository
+There is no official one-line install command in the docs. That is important: do not invent `cargo install` or `npm install -g` instructions. Normal setup starts from the release package.
 
-Cloning is safe to document because it comes from the official GitHub repository URL. After cloning, read the README before installing dependencies.
+### Step 2: Launch through Codex++ entrypoint
 
-```bash
-git clone https://github.com/BigPizzaV3/CodexPlusPlus.git
-cd CodexPlusPlus
+After install, start Codex through `Codex++`, not through the original Codex app. The FAQ says missing menu issues usually come from launching original Codex. If menu injection fails, open manager Diagnostics and Logs pages.
+
+This detail shapes every support case. If the backend is running but the UI has no `Codex++` menu, first confirm entrypoint and injection status before editing config files.
+
+### Step 3: Decide between official login and relay injection
+
+Relay injection is for users already logged in with an official ChatGPT account in Codex/ChatGPT who want requests routed through a custom compatible API. The manager flow is:
+
+1. Confirm ChatGPT login status is detected.
+2. Add relay profiles with Base URL and Key.
+3. Select active profile and apply relay injection.
+4. Launch `Codex++`.
+
+Codex++ writes provider configuration similar to this into `~/.codex/config.toml`:
+
+```toml
+model_provider = "CodexPlusPlus"
+
+[model_providers.CodexPlusPlus]
+name = "CodexPlusPlus"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://example.com/v1"
+experimental_bearer_token = "sk-..."
 ```
 
-## Step 2: Follow README Commands
+To return to official login mode, use the clear API mode button in the Relay Injection page. It removes `OPENAI_API_KEY` related configuration and switches Codex back to official ChatGPT authentication.
 
-Use these commands only because they were found in README or linked docs setup, usage, configuration, or example sections. If a command is missing, check the official README link above.
+### Step 4: Understand enhancement mode
 
-The README extraction did not find short fenced command blocks for installation or usage. Do not guess commands. Open the README and follow the latest documented setup path.
+Enhancement injection is controlled in the manager and enabled by default. When disabled, Codex++ will not inject menu or scripts. In relay injection mode, plugin entry unlock and forced plugin install are unnecessary, and the UI indicates that. Other enhancements can still operate: session delete, export, move, Timeline, recommendations, and user scripts.
 
-## Step 3: Verify Configuration Requirements
+That split matters. Relay injection is about model/provider routing. Enhancement mode is about UI/tooling augmentation. Troubleshoot them separately.
 
-Look for environment variables, API keys, model settings, service URLs, or Docker configuration mentioned in the README sections. Do not assume defaults for AI tools because they often depend on local models, cloud APIs, or workspace-specific settings.
+### Step 5: Know data and log locations
 
-If the README includes an environment example, copy that exact example file and fill in local values. If no environment example is documented, avoid creating one from guesswork.
+The project documents these locations:
 
-## Step 4: Run a Small README-Based Test
+- Codex config: `~/.codex/config.toml`
+- Codex auth state: `~/.codex/auth.json`
+- Codex local database: `~/.codex/state_5.sqlite`
+- Codex++ state and logs: `~/.codex-session-delete/`
+- Provider Sync backups: `~/.codex/backups_state/provider-sync`
 
-Use the smallest command documented by the repo. Good first tests include a help command, example command, local demo, or test command only if the README explicitly shows it.
+Before changing relay providers or deleting sessions, back up relevant files. Provider Sync exists because switching providers can hide historical sessions; backups help preserve metadata.
 
-If the README does not document a smoke test, open issues and examples before trying the tool on real code or private data.
+### Step 6: Test backend connectivity when plugin reports disconnected
 
-## Step 5: Evaluate Before Adopting
+Official troubleshooting starts with this PowerShell request:
 
-Use this checklist before adding CodexPlusPlus to a real project:
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:57321/backend/status -Body "{}" -ContentType "application/json"
+```
 
-- Does the README explain installation, configuration, and common errors?
-- Do documented commands run on your machine without extra hidden steps?
-- Are issues and pull requests active?
-- Is the license compatible with your use case?
-- Are releases or tags available?
-- Can you pin a version or commit SHA?
-- Does it need access to secrets, files, browsers, shells, or production systems?
+If endpoint works but plugin still times out, project docs point to Codex page CDP bridge or script cache issues. Restart Codex++ and inspect logs for `renderer.script_loaded`, `bridge.request`, and `bridge.response`.
+
+### Step 7: Use Upstream worktree helper intentionally
+
+Codex++ can create worktrees from fresh remote branches. The documented equivalent command is:
+
+```bash
+git worktree add -b <new-branch> <worktree-path> upstream/<base-branch>
+```
+
+Codex++ fetches remote branch state first, which reduces conflicts caused by starting from stale local HEAD. If it cannot safely recognize the current Codex native worktree form, use Codex++ menu entry and provide repository path, branch name, worktree path, remote, and base branch manually.
+
+### Step 8: Run development checks across both stacks
+
+Developer verification spans frontend and Rust:
+
+```bash
+npm install
+npm run check
+npm run vite:build
+cargo fmt --check
+cargo test
+cargo build --release
+```
+
+This command set tells you what Codex++ is: React/Tauri frontend plus Rust backend/launcher, not a pure JS extension.
+
+## Deeper Analysis
+
+Codex++ focuses on practical Codex desktop gaps: plugin access under API-key/relay workflows, real session deletion, export/move affordances, remote editor integration, provider switching, and worktree hygiene. None of those sound glamorous, but they are daily workflow problems for heavy Codex users.
+
+Relay injection is the most sensitive feature. It writes a custom provider into `~/.codex/config.toml` with `wire_api = "responses"`, `requires_openai_auth = true`, a base URL, and bearer token. That can be powerful when you need compatible API routing while preserving login state, but it also means config correctness and token handling matter. Clear API mode is the safe rollback path.
+
+External CDP injection is also a meaningful design decision. Avoiding app bundle modification lowers some maintenance and integrity risks, but injection can still break when Codex UI internals change. That explains why logs mention renderer/script bridge events.
+
+Recommendation loading is another area to know. Codex++ loads recommendation content from remote JSON URLs:
+
+```text
+https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json
+https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json
+```
+
+Requests append cache busters, and slow recommendation loading should not mark backend connection failed. Privacy-sensitive users should know that remote content fetching exists.
+
+## Practical Evaluation Checklist
+
+- Install only from GitHub Releases; pick Windows, macOS x64, or macOS arm64 correctly.
+- Launch via `Codex++` entrypoint before troubleshooting missing menus.
+- Back up `~/.codex/config.toml` and `~/.codex/auth.json` before relay experiments.
+- Use clear API mode to return to official ChatGPT login behavior.
+- Keep enhancement injection and relay injection mental models separate.
+- Test backend status on `127.0.0.1:57321` before blaming plugin UI.
+- Review remote recommendation fetching if your environment restricts outbound requests.
+- Run frontend and Rust checks before distributing custom builds.
 
 ## Security Notes
 
-Treat every new developer tool as untrusted until reviewed. This matters more for AI agents, CLIs, browser automation tools, and code generators because they may read files, execute shell commands, or send data to external APIs.
+Codex++ can alter provider routing, store relay keys in Codex config, inject scripts into the Codex UI, fetch remote recommendation JSON, and manage local session metadata. Treat relay profiles as secrets. Do not paste production provider keys into a shared machine. Review `~/.codex/config.toml` after enabling and clearing API mode to confirm expected state.
 
-Safer first-run habits:
-
-- Run it in a temporary folder or container.
-- Read install scripts before executing them.
-- Avoid piping remote scripts directly into bash.
-- Use a test API key with limited permissions.
-- Check network calls if the tool handles private code or data.
+Unsigned and unnotarized macOS builds may trigger Gatekeeper. The project advises allowing the app in System Settings -> Privacy & Security. That is normal for many open-source macOS builds, but it still means users must trust the downloaded release artifact.
 
 ## FAQ
 
-**Q: Where is the official GitHub repository?**
-**A:** The official repo is [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus).
+**Q: Why does the Codex++ menu not appear?**
+**A:** Most likely Codex was launched through the original entrypoint. Start through `Codex++`, then inspect Diagnostics and Logs in the manager if it still fails.
 
-**Q: Are install commands guessed?**
-**A:** No. Commands in this post are extracted from README or linked docs sections. If no README command is found, the post tells you to use the official docs instead of inventing commands.
+**Q: Does Codex++ replace Codex?**
+**A:** No. It enhances CodexApp through a launcher, backend, management UI, and injected features.
 
-**Q: How do I avoid duplicate coverage later?**
-**A:** This blog tracks covered repositories in .data/written-repos.txt, using one lowercased owner/repo entry per line.
+**Q: How do I return from relay API mode?**
+**A:** Use clear API mode in the Relay Injection page. It removes API-key related configuration and returns to official ChatGPT login mode.
 
-**Q: When is the thumbnail generated?**
-**A:** The generator creates a MiniMax AI image, optimizes it to WebP, and uploads it to Cloudflare R2 before writing the MDX post, so the committed article already points to the final public image URL.
+**Q: Does it support Intel Macs?**
+**A:** Yes. Releases include `macos-x64.dmg`; Apple Silicon users should choose `macos-arm64.dmg`.
+
+
+Related reading: [GitHub Trending tools](/tags/github-trending/), [Developer tools](/category/dev-tools/), [dulus setup guide open source python ai tool](/blog/dulus-setup-guide-open-source-python-ai-tool/), and [opensquilla setup guide open source python ai tool](/blog/opensquilla-setup-guide-open-source-python-ai-tool/).
 
 ## Conclusion
 
-CodexPlusPlus is worth evaluating only after reading the official README and running the documented setup path. Start with [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus), compare the extracted commands above with current docs, and test in a safe environment before using it on production code or private data.
+CodexPlusPlus is useful when Codex is already central to your workflow and you want sharper desktop controls: relay profiles, session tools, provider sync, exports, worktrees, and injected UI features. Install from releases, launch through the right entrypoint, keep backups of Codex config/auth state, and treat relay keys and injected scripts as high-trust components.

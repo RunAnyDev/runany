@@ -1,6 +1,6 @@
 ---
-title: "bumblebee Setup Guide: Open Source Go AI Tool"
-description: "bumblebee setup guide based on the official GitHub README: learn what this open-source AI tool does, documented install steps, and usage notes."
+title: "Bumblebee Go Package Inventory Guide"
+description: "Review Bumblebee for Go package inventory workflows, including setup, dependency validation, CI adoption, supply-chain use, and report checks."
 pubDate: "2026-05-28"
 tags: ["github-trending","dev-tools","go","golang","package-inventory"]
 category: "dev-tools"
@@ -12,107 +12,152 @@ image:
 draft: false
 ---
 
+![bumblebee GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/bumblebee-setup-guide-open-source-go-ai-tool.webp)
 
 ## TL;DR
 
-> **TL;DR:** [bumblebee](https://github.com/perplexityai/bumblebee) is an emerging open-source developer tool with 3,617 stars; this guide follows the official README instead of guessing install steps.
+> **TL;DR:** bumblebee is a read-only Go inventory scanner for developer endpoints; it turns local package metadata, lockfiles, extension manifests, browser extension data, and selected MCP configs into NDJSON so responders can check known exposure quickly without executing package managers.
 
 ## Source and Accuracy Notes
 
-This guide is based on the repository README and docs links detected at [the official docs source](https://github.com/perplexityai/bumblebee/blob/main/README.md). Extracted sections include: Install, Install the latest tagged release into $GOBIN., Quick start, Limit a run to selected emitted ecosystems..
+This guide uses the official repository [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee) and its linked inventory-source documentation as the source for scope, install commands, profiles, output format, exposure catalog behavior, and safety model. The project is explicit about being read-only and about avoiding package-manager execution such as `npm ls`, `pip show`, or `go list`.
 
-Important rule for this post: when the README does not provide a command, this guide says so instead of inventing one. GitHub projects change quickly, so always compare this article with the current README before running commands.
+Commands below are preserved from the official documentation. I do not add invented flags, scheduler examples, or deployment wrappers. Bumblebee is useful for supply-chain response, but it is not an SBOM generator for shipped software and not an EDR replacement. It answers a narrower question: which developer machines currently show matching on-disk metadata for packages, extensions, versions, or MCP server entries?
 
 ## What Is bumblebee?
 
-bumblebee is an open-source project hosted at [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee). Repository summary: Read-only developer endpoint scanner for on-disk package, extension, and developer-tool metadata, built to check exposure to known software supply-chain compromises.
+bumblebee is a single static binary written in Go 1.25+ with zero non-standard-library dependencies. Its job is inventory collection on macOS and Linux developer endpoints. Instead of asking package managers what is installed, it reads known metadata files directly: npm lockfiles, pnpm and Yarn data, Bun locks, Python dist-info and egg-info metadata, Go module files, Gemfile.lock and gemspecs, Composer files, MCP JSON host configs, editor extension manifests, and browser extension data.
 
-Repository signals at write time:
+The output is newline-delimited JSON. Each component record can include ecosystem, name, version, source file, source type, root kind, profile, and related metadata. Diagnostics go to stderr as NDJSON, which makes the tool friendlier for fleet collection pipelines that separate inventory from scanner warnings.
 
-- Official GitHub repo: [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee)
-- README / docs source: [https://github.com/perplexityai/bumblebee/blob/main/README.md](https://github.com/perplexityai/bumblebee/blob/main/README.md)
-- Stars: 3,617
-- Forks: 302
-- Open issues: 25
-- Main language: Go
-- License: Apache-2.0
-- Created: 2026-05-20
-- Last updated: 2026-05-28
+The project’s threat model is practical. During an advisory, responders often know a bad package name, version range, browser extension, or MCP server indicator. They need to know which developer machines have evidence of it right now. SBOMs describe built artifacts. EDR describes execution and network behavior. bumblebee inspects messy local developer state.
 
-## Docs-Derived Setup Notes
+## Repo-Specific Setup Workflow
 
-The following notes come from headings and text extracted from the official README and linked docs pages. They are not generic install guesses.
+### Step 1: Install or build the binary
 
-- **Install:** Requires Go 1.25+. Zero non-stdlib dependencies. sh
-- **Install the latest tagged release into $GOBIN.:** go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
-- **Quick start:** sh
-- **Limit a run to selected emitted ecosystems.:** bumblebee scan --profile baseline \ --ecosystem npm,pypi \ --ecosystem go
+bumblebee requires Go 1.25+. Install latest tagged release or pin a known version:
 
-## Step 1: Clone the Official Repository
+```sh
+# Install the latest tagged release into $GOBIN.
+go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
 
-Cloning is safe to document because it comes from the official GitHub repository URL. After cloning, read the README before installing dependencies.
-
-```bash
-git clone https://github.com/perplexityai/bumblebee.git
-cd bumblebee
+# Or pin a specific tag.
+go install github.com/perplexityai/bumblebee/cmd/bumblebee@v0.1.1
 ```
 
-## Step 2: Follow README Commands
+To build from checkout, use the documented build and test commands:
 
-Use these commands only because they were found in README or linked docs setup, usage, configuration, or example sections. If a command is missing, check the official README link above.
+```sh
+go build -o bumblebee ./cmd/bumblebee
+go test ./...
+```
 
-The README extraction did not find short fenced command blocks for installation or usage. Do not guess commands. Open the README and follow the latest documented setup path.
+For traceable production builds, stamp an explicit version:
 
-## Step 3: Verify Configuration Requirements
+```sh
+go build -ldflags "-X main.Version=v0.1.1" -o bumblebee ./cmd/bumblebee
+```
 
-Look for environment variables, API keys, model settings, service URLs, or Docker configuration mentioned in the README sections. Do not assume defaults for AI tools because they often depend on local models, cloud APIs, or workspace-specific settings.
+### Step 2: Run the embedded self-test
 
-If the README includes an environment example, copy that exact example file and fill in local values. If no environment example is documented, avoid creating one from guesswork.
+The self-test uses embedded fixtures with fake package names and makes no network calls. Use it before deploying to laptops or CI runners:
 
-## Step 4: Run a Small README-Based Test
+```sh
+bumblebee selftest
+# selftest OK (2 findings in 1ms)
+```
 
-Use the smallest command documented by the repo. Good first tests include a help command, example command, local demo, or test command only if the README explicitly shows it.
+### Step 3: Pick the right scan profile
 
-If the README does not document a smoke test, open issues and examples before trying the tool on real code or private data.
+`baseline` scans common global and user package roots, toolchains, editor extensions, browser extensions, and MCP configs. `project` scans configured development directories. `deep` scans explicit roots and can walk broad paths such as `$HOME`; baseline and project refuse bare-home roots.
 
-## Step 5: Evaluate Before Adopting
+### Step 4: Generate inventory or targeted findings
 
-Use this checklist before adding bumblebee to a real project:
+The quick-start commands show three common patterns:
 
-- Does the README explain installation, configuration, and common errors?
-- Do documented commands run on your machine without extra hidden steps?
-- Are issues and pull requests active?
-- Is the license compatible with your use case?
-- Are releases or tags available?
-- Can you pin a version or commit SHA?
-- Does it need access to secrets, files, browsers, shells, or production systems?
+```sh
+# Baseline global inventory.
+bumblebee scan --profile baseline > inventory.ndjson
+
+# Daily project sweep with explicit roots.
+bumblebee scan --profile project --root ~/code --root ~/work > projects.ndjson
+
+# Limit a run to selected emitted ecosystems.
+bumblebee scan --profile deep --root ~/code \
+  --ecosystem npm,pypi \
+  > npm-pypi.ndjson
+
+# On-demand exposure scan against a published advisory.
+bumblebee scan --profile deep --root ~/code \
+  --exposure-catalog exposures.json \
+  --findings-only \
+  > findings.ndjson
+```
+
+### Step 5: Inspect planned roots before scanning
+
+The project documents a roots command that prints root kind and path pairs. Use it to confirm what population a run will cover:
+
+```sh
+bumblebee roots --profile baseline
+# prints "<root_kind>\t<path>" lines
+```
+
+### Step 6: Design exposure catalogs carefully
+
+Exposure catalogs are JSON inputs that define known indicators. Use them for exact response questions, not vague risk scoring. Keep advisory source, package ecosystem, name, version constraints, and date in separate incident notes so findings remain auditable.
+
+## Deeper Analysis
+
+bumblebee’s most useful engineering decision is refusing to execute package managers. During incident response, running `npm`, `pip`, `go`, or another tool across many endpoints can be slow, inconsistent, and sometimes unsafe. Local package-manager commands may trigger scripts, hit networks, use project-specific environment, or produce results that depend on caches. A read-only scanner that parses files creates a cleaner collection story.
+
+The second strong decision is profile separation. Baseline, project, and deep scans answer different operational questions. Baseline is good for recurring endpoint hygiene. Project scans target developer workspaces where lockfiles and vendored metadata live. Deep scans are heavier and should be reserved for campaigns or incident response, especially with ecosystem filters and findings-only output.
+
+The MCP coverage is timely. Developer endpoints increasingly contain AI tool configuration files. Some MCP host configs can include environment blocks with credentials. bumblebee parses server inventory but does not emit those environment values. That behavior is important: responders can detect relevant MCP server presence without turning inventory output into a secret dump.
+
+NDJSON is also a good fit. Fleet systems, SIEM pipelines, object storage, and command-line tools can process line-oriented JSON without loading a whole report into memory. It also lets diagnostics stay separate on stderr while component records stream to stdout.
+
+Limitations follow from the read-only model. If metadata is stale, missing, custom, or outside supported paths, bumblebee may not see it. It does not prove execution. It does not prove exploitability. It does not replace a full dependency graph built during CI. It gives responders fast evidence of on-disk exposure indicators across developer machines.
+
+## Practical Evaluation Checklist
+
+- Confirm Go 1.25+ and run `bumblebee selftest` on each target platform.
+- Compare `baseline`, `project`, and `deep` results on a test machine before fleet rollout.
+- Validate roots with `bumblebee roots --profile baseline` before collecting data.
+- Keep stdout inventory and stderr diagnostics separate in runners.
+- Use pinned versions for production collection so records map to a known scanner build.
+- Test exposure catalogs against fixture repos before incident use.
+- Document false negatives caused by unsupported ecosystems, custom paths, or missing metadata.
 
 ## Security Notes
 
-Treat every new developer tool as untrusted until reviewed. This matters more for AI agents, CLIs, browser automation tools, and code generators because they may read files, execute shell commands, or send data to external APIs.
+bumblebee is intentionally read-only, but inventory data can still be sensitive. Package names, internal project paths, browser extensions, editor extensions, and MCP server names can reveal company technology choices and incident scope. Store NDJSON outputs with access controls and retention limits.
 
-Safer first-run habits:
+Pay special attention to MCP configs. The tool avoids emitting env values from supported JSON configs, but raw source files may still contain secrets. Do not attach full configs to tickets unless necessary. If using bumblebee during a live advisory, avoid broad deep scans until filters and output handling are tested.
 
-- Run it in a temporary folder or container.
-- Read install scripts before executing them.
-- Avoid piping remote scripts directly into bash.
-- Use a test API key with limited permissions.
-- Check network calls if the tool handles private code or data.
+Because the binary is likely to run across developer endpoints, pin scanner versions and verify build provenance. The `bumblebee version` output includes build details that help tie collected records back to a specific build.
 
 ## FAQ
 
-**Q: Where is the official GitHub repository?**
-**A:** The official repo is [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee).
+**Q: Does bumblebee execute package managers?**
+**A:** No. It reads supported metadata files and avoids package-manager execution, which keeps scans predictable and read-only.
 
-**Q: Are install commands guessed?**
-**A:** No. Commands in this post are extracted from README or linked docs sections. If no README command is found, the post tells you to use the official docs instead of inventing commands.
+**Q: Is bumblebee an SBOM tool?**
+**A:** Not in the traditional shipped-artifact sense. It inventories developer endpoint state for response questions.
 
-**Q: How do I avoid duplicate coverage later?**
-**A:** This blog tracks covered repositories in .data/written-repos.txt, using one lowercased owner/repo entry per line.
+**Q: Which scan profile should I start with?**
+**A:** Start with `baseline` for global endpoint inventory, then use `project` for known workspace roots. Reserve `deep` for targeted response.
 
-**Q: When is the thumbnail generated?**
-**A:** The generator creates a MiniMax AI image, optimizes it to WebP, and uploads it to Cloudflare R2 before writing the MDX post, so the committed article already points to the final public image URL.
+**Q: Can it scan MCP configs?**
+**A:** Yes, selected JSON MCP host configs are parsed for server inventory. Non-JSON configs are outside the documented v0.1 parsing scope.
+
+**Q: What format does it output?**
+**A:** Component records are NDJSON on stdout, while diagnostics are NDJSON on stderr.
+
+
+Related reading: [GitHub Trending tools](/tags/github-trending/), [Developer tools](/category/dev-tools/), [openmonoagent ai setup guide open source c ai tool](/blog/openmonoagent-ai-setup-guide-open-source-c-ai-tool/), and [rkn block checker setup guide open source python ai tool](/blog/rkn-block-checker-setup-guide-open-source-python-ai-tool/).
 
 ## Conclusion
 
-bumblebee is worth evaluating only after reading the official README and running the documented setup path. Start with [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee), compare the extracted commands above with current docs, and test in a safe environment before using it on production code or private data.
+bumblebee is a focused supply-chain response tool for developer machines. Its value comes from narrow scope: static Go binary, read-only metadata parsing, explicit profiles, NDJSON output, and exposure-catalog matching. Use it when you already know what indicator you are looking for and need fast endpoint evidence. Pair it with SBOMs, EDR, and CI dependency controls for a full supply-chain picture.

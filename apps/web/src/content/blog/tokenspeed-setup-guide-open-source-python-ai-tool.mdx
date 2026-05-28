@@ -1,6 +1,6 @@
 ---
-title: "tokenspeed Setup Guide: Open Source Python AI Tool"
-description: "tokenspeed setup guide based on the official GitHub README: learn what this open-source AI tool does, documented install steps, and usage notes."
+title: "TokenSpeed Preview and Benchmark Guide"
+description: "Evaluate TokenSpeed as a preview LLM inference engine for B200 benchmark reproduction, model recipes, server docs, and production-readiness checks."
 pubDate: "2026-05-28"
 tags: ["github-trending","dev-tools","python","blackwell","deepseek"]
 category: "dev-tools"
@@ -8,108 +8,206 @@ author: "Du"
 featured: false
 image:
   url: "https://cdn.runany.dev/blog/thumbnails/tokenspeed-setup-guide-open-source-python-ai-tool.webp"
-  alt: "tokenspeed GitHub tool guide thumbnail"
+  alt: "TokenSpeed GitHub tool guide thumbnail"
 draft: false
 ---
 
+![tokenspeed GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/tokenspeed-setup-guide-open-source-python-ai-tool.webp)
 
 ## TL;DR
 
-> **TL;DR:** [tokenspeed](https://github.com/lightseekorg/tokenspeed) is an emerging open-source developer tool with 1,236 stars; this guide follows the official README instead of guessing install steps.
+> **TL;DR:** TokenSpeed is an early, GPU-heavy LLM inference engine for agentic workloads, with documented Docker runner setup, editable Python packages, OpenAI-compatible serving, and explicit warning against production use for current preview.
 
 ## Source and Accuracy Notes
 
-The README is available at [the official docs source](https://github.com/lightseekorg/tokenspeed/blob/main/README.md), but it does not expose clear install or usage headings that can be extracted safely. This post avoids inventing commands and points you back to the repo docs.
+This article uses public material from [lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed), [TokenSpeed docs index](https://lightseek.org/tokenspeed/), [Getting Started](https://lightseek.org/tokenspeed/guides/getting-started), [Launching a Server](https://lightseek.org/tokenspeed/guides/launching), [Server Parameters](https://lightseek.org/tokenspeed/configuration/server), [Compatible Parameters](https://lightseek.org/tokenspeed/configuration/compatible-parameters), [Model Recipes](https://lightseek.org/tokenspeed/recipes/models), and [Parallelism](https://lightseek.org/tokenspeed/serving/parallelism). Commands below are preserved from official project docs.
 
-Important rule for this post: when the README does not provide a command, this guide says so instead of inventing one. GitHub projects change quickly, so always compare this article with the current README before running commands.
+TokenSpeed labels current release as preview for reproducing Kimi K2.5 on B200 and MLA on B200 results. The project notes major work still in progress: Qwen 3.6, DeepSeek V4, MiniMax M2.7, PD, EPLB, KV store, Mamba cache, VLM, metrics, Hopper optimization, MI350 optimization, and other runtime work. It explicitly says not to use preview release for production deployments.
 
 ## What Is tokenspeed?
 
-tokenspeed is an open-source project hosted at [lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed). Repository summary: TokenSpeed is a speed-of-light LLM inference engine.
+TokenSpeed is a Python-facing LLM inference engine built by LightSeek for high-throughput agentic workloads. It positions itself between TensorRT-LLM-style performance and vLLM-style usability. That framing matters: agentic workloads are not only single long completions. They often involve many short and medium requests, tool-call formats, reasoning traces, cache pressure, and latency-sensitive control loops.
 
-Repository signals at write time:
+The project is organized around four core areas. Modeling uses local-SPMD design with static compiler support for generating collective communication from placement annotations at module boundaries. Scheduler architecture splits C++ control plane from Python execution plane, while request lifecycle and KV cache ownership live in finite-state logic. Kernels are pluggable through layered registry system, including Multi-head Latent Attention work for Blackwell. Entrypoint exposes SMG-integrated `AsyncLLM` and an OpenAI-compatible HTTP server through `tokenspeed serve`.
 
-- Official GitHub repo: [lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed)
-- README / docs source: [https://github.com/lightseekorg/tokenspeed/blob/main/README.md](https://github.com/lightseekorg/tokenspeed/blob/main/README.md)
-- Stars: 1,236
-- Forks: 123
-- Open issues: 38
-- Main language: Python
-- License: MIT
-- Created: 2026-05-06
-- Last updated: 2026-05-28
+In practical terms, this is not a laptop inference toy. It expects NVIDIA GPU infrastructure, Docker with GPU support, big shared memory, and model checkpoint access. Current showcase points include Kimi K2.5 on B200 and reported TokenSpeed performance results for Qwen3.5-397B-A17B agentic workloads. If you do not operate high-end accelerators, TokenSpeed is mainly worth studying for architecture direction.
 
-## Docs-Derived Setup Notes
+## Repo-Specific Setup Workflow
 
-The following notes come from headings and text extracted from the official README and linked docs pages. They are not generic install guesses.
+### Step 1: Confirm hardware and container prerequisites
 
-- No install or usage section was detected in the README metadata extraction.
+Documented prerequisites are direct: NVIDIA GPU host, Docker with GPU support, enough shared memory for model serving, and access to model checkpoints. Missing any one of those changes evaluation from install test to architecture reading.
 
-## Step 1: Clone the Official Repository
+### Step 2: Start runner container
 
-Cloning is safe to document because it comes from the official GitHub repository URL. After cloning, read the README before installing dependencies.
+Project docs start with prebuilt runner image:
+
+```bash
+docker pull lightseekorg/tokenspeed-runner:latest
+
+docker run -itd \
+  --shm-size 32g \
+  --gpus all \
+  -v /raid/cache:/home/runner/.cache \
+  --ipc=host \
+  --network=host \
+  --pid=host \
+  --privileged \
+  --name tokenspeed \
+  lightseekorg/tokenspeed-runner:latest \
+  /bin/bash
+```
+
+This command is intentionally broad in host access: GPU, IPC, network, PID namespace, and privileged mode. Use isolated benchmark hosts, not shared developer machines.
+
+### Step 3: Clone source inside container
+
+Inside container:
 
 ```bash
 git clone https://github.com/lightseekorg/tokenspeed.git
 cd tokenspeed
 ```
 
-## Step 2: Follow README Commands
+### Step 4: Install editable packages
 
-Use these commands only because they were found in README or linked docs setup, usage, configuration, or example sections. If a command is missing, check the official README link above.
+Install Python runtime:
 
-The README extraction did not find short fenced command blocks for installation or usage. Do not guess commands. Open the README and follow the latest documented setup path.
+```bash
+export PIP_BREAK_SYSTEM_PACKAGES=1
+pip install -e "./python" --no-build-isolation
+```
 
-## Step 3: Verify Configuration Requirements
+Install kernel package:
 
-Look for environment variables, API keys, model settings, service URLs, or Docker configuration mentioned in the README sections. Do not assume defaults for AI tools because they often depend on local models, cloud APIs, or workspace-specific settings.
+```bash
+pip install -e tokenspeed-kernel/python/ --no-build-isolation
+```
 
-If the README includes an environment example, copy that exact example file and fill in local values. If no environment example is documented, avoid creating one from guesswork.
+Install scheduler package:
 
-## Step 4: Run a Small README-Based Test
+```bash
+pip install -e tokenspeed-scheduler/
+```
 
-Use the smallest command documented by the repo. Good first tests include a help command, example command, local demo, or test command only if the README explicitly shows it.
+Editable installs signal active development workflow. Expect source-level iteration, not polished package-manager experience.
 
-If the README does not document a smoke test, open issues and examples before trying the tool on real code or private data.
+### Step 5: Verify CLI surface
 
-## Step 5: Evaluate Before Adopting
+Run documented checks:
 
-Use this checklist before adding tokenspeed to a real project:
+```bash
+tokenspeed env
+tokenspeed serve --help
+```
 
-- Does the README explain installation, configuration, and common errors?
-- Do documented commands run on your machine without extra hidden steps?
-- Are issues and pull requests active?
-- Is the license compatible with your use case?
-- Are releases or tags available?
-- Can you pin a version or commit SHA?
-- Does it need access to secrets, files, browsers, shells, or production systems?
+Save `tokenspeed env` output with benchmark notes. In GPU inference work, environment details often explain more than code changes: driver, CUDA stack, image version, GPU model, and package state.
+
+### Step 6: Launch minimal OpenAI-compatible server
+
+Minimal launch:
+
+```bash
+tokenspeed serve openai/gpt-oss-20b \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tensor-parallel-size 1
+```
+
+The model path goes directly after `tokenspeed serve`. API surface then listens at configured host and port.
+
+### Step 7: Use production skeleton as reproducibility template
+
+Docs provide explicit Kimi K2.5-style launch skeleton:
+
+```bash
+tokenspeed serve nvidia/Kimi-K2.5-NVFP4 \
+  --served-model-name kimi-k2.5 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --trust-remote-code \
+  --max-model-len 262144 \
+  --kv-cache-dtype fp8 \
+  --quantization nvfp4 \
+  --tensor-parallel-size 4 \
+  --enable-expert-parallel \
+  --chunked-prefill-size 8192 \
+  --max-num-seqs 256 \
+  --attention-backend trtllm_mla \
+  --moe-backend flashinfer_trtllm \
+  --reasoning-parser kimi_k25 \
+  --tool-call-parser kimik2
+```
+
+Treat this as benchmark skeleton, not universal config. Hardware topology, model family, parser choice, and quantization format all matter.
+
+### Step 8: Test OpenAI client compatibility
+
+Documented Python client path:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:8000/v1")
+response = client.chat.completions.create(
+    model="kimi-k2.5",
+    messages=[{"role": "user", "content": "Write a concise deployment checklist."}],
+    max_tokens=256,
+)
+print(response.choices[0].message.content)
+```
+
+That compatibility matters because agent frameworks usually already speak OpenAI chat completions.
+
+## Deeper Analysis
+
+TokenSpeed is interesting because it targets scheduler and kernel bottlenecks exposed by agent workloads. Agent loops often produce smaller turns, tool-call parsing, reasoning-token structures, and concurrent sessions. Serving engine must manage KV cache reuse safely while keeping GPUs fed. TokenSpeed emphasizes finite-state request lifecycle and compile-time safety around KV resource reuse, which points directly at production-class scheduling concerns.
+
+The modeling layer is also worth attention. Local-SPMD plus placement annotations suggests users should express model parallel intent without hand-writing every collective operation. If successful, this could improve maintainability for large MoE and reasoning models where parallelism strategy becomes part of serving correctness.
+
+However, preview status dominates evaluation. Features many teams need for production observability and operations are still listed as ongoing. The install flow uses privileged Docker and editable installs. That is acceptable for benchmark reproduction and deep technical evaluation, but not turnkey production.
+
+## Practical Evaluation Checklist
+
+- Confirm exact GPU type; Blackwell B200 examples should not be generalized to older cards.
+- Record Docker image digest, driver version, CUDA stack, and `tokenspeed env` output.
+- Start with minimal launch before Kimi-style large config.
+- Verify model license and checkpoint access before downloading huge weights.
+- Use same prompt set for vLLM, TensorRT-LLM, and TokenSpeed comparison.
+- Track throughput, time-to-first-token, inter-token latency, error rate, and GPU memory use.
+- Test OpenAI-compatible client behavior with your real agent framework.
+- Avoid production rollout while preview warning remains.
 
 ## Security Notes
 
-Treat every new developer tool as untrusted until reviewed. This matters more for AI agents, CLIs, browser automation tools, and code generators because they may read files, execute shell commands, or send data to external APIs.
+The runner command uses `--privileged`, `--network=host`, `--pid=host`, and `--ipc=host`. That gives container broad host visibility. Run it only on isolated GPU hosts or disposable benchmark machines.
 
-Safer first-run habits:
+`--trust-remote-code` appears in documented production skeleton. That flag allows model repository code execution. Use only with model sources you trust, pinned revisions, and restricted network/storage permissions.
 
-- Run it in a temporary folder or container.
-- Read install scripts before executing them.
-- Avoid piping remote scripts directly into bash.
-- Use a test API key with limited permissions.
-- Check network calls if the tool handles private code or data.
+Serving on `0.0.0.0:8000` exposes API on all interfaces. Add firewalling, reverse proxy authentication, or private network placement before allowing access beyond localhost. Model endpoints can leak prompts, completions, and business logic.
 
 ## FAQ
 
-**Q: Where is the official GitHub repository?**
-**A:** The official repo is [lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed).
+**Q: Is TokenSpeed production-ready?**
+**A:** No for current preview. Project material says not to use preview release for production deployments.
 
-**Q: Are install commands guessed?**
-**A:** No. Commands in this post are extracted from README or linked docs sections. If no README command is found, the post tells you to use the official docs instead of inventing commands.
+**Q: Can I run it on CPU or normal laptop GPU?**
+**A:** Documented setup requires NVIDIA GPU host and Docker GPU support. It is aimed at serious accelerator environments.
 
-**Q: How do I avoid duplicate coverage later?**
-**A:** This blog tracks covered repositories in .data/written-repos.txt, using one lowercased owner/repo entry per line.
+**Q: Why does setup use multiple editable installs?**
+**A:** Runtime, kernel package, and scheduler package are separate active-development components. Editable installs fit source evaluation and local patching.
 
-**Q: When is the thumbnail generated?**
-**A:** The generator creates a MiniMax AI image, optimizes it to WebP, and uploads it to Cloudflare R2 before writing the MDX post, so the committed article already points to the final public image URL.
+**Q: Is API compatible with OpenAI clients?**
+**A:** Server launch exposes OpenAI-compatible HTTP API, and docs include Python `OpenAI` client example using `base_url="http://localhost:8000/v1"`.
+
+**Q: What should I benchmark first?**
+**A:** Start with documented minimal launch and small request set. Only then move to large Kimi K2.5 skeleton with tensor parallelism, expert parallelism, NVFP4, and parser flags.
+
+
+Related reading: [GitHub Trending tools](/tags/github-trending/), [Developer tools](/category/dev-tools/), [how to train setup guide open source jupyter notebook ai tool](/blog/how-to-train-setup-guide-open-source-jupyter-notebook-ai-tool/), and [opensquilla setup guide open source python ai tool](/blog/opensquilla-setup-guide-open-source-python-ai-tool/).
 
 ## Conclusion
 
-tokenspeed is worth evaluating only after reading the official README and running the documented setup path. Start with [lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed), compare the extracted commands above with current docs, and test in a safe environment before using it on production code or private data.
+TokenSpeed is best read as high-performance inference research turning into usable infrastructure. Its repo-specific value is not one magic command; it is combination of modeling compiler direction, explicit scheduler design, pluggable kernels, Blackwell-focused MLA work, and OpenAI-compatible serving.
+
+For runany.dev readers, practical path is narrow: evaluate on isolated NVIDIA GPU servers, preserve documented commands, capture environment facts, and compare against existing serving stack. If you need production stability today, wait. If you study future agentic inference engines or operate benchmark hardware, TokenSpeed deserves close inspection.

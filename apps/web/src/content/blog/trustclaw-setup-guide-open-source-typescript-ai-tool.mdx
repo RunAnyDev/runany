@@ -1,6 +1,6 @@
 ---
-title: "trustclaw Setup Guide: Open Source TypeScript AI Tool"
-description: "trustclaw setup guide based on the official GitHub README: learn what this open-source AI tool does, documented install steps, and usage notes."
+title: "TrustClaw Deployment and Security Guide"
+description: "Deploy TrustClaw with Vercel, Composio, Neon, Upstash, and AI Gateway while planning env vars, cron limits, public signup, and cost controls."
 pubDate: "2026-05-28"
 tags: ["github-trending","dev-tools","typescript"]
 category: "dev-tools"
@@ -8,59 +8,79 @@ author: "Du"
 featured: false
 image:
   url: "https://cdn.runany.dev/blog/thumbnails/trustclaw-setup-guide-open-source-typescript-ai-tool.webp"
-  alt: "trustclaw GitHub tool guide thumbnail"
+  alt: "TrustClaw GitHub tool guide thumbnail"
 draft: false
 ---
 
+![trustclaw GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/trustclaw-setup-guide-open-source-typescript-ai-tool.webp)
 
 ## TL;DR
 
-> **TL;DR:** [trustclaw](https://github.com/ComposioHQ/trustclaw) is an emerging open-source developer tool with 715 stars; this guide follows the official README instead of guessing install steps.
+> **TL;DR:** trustclaw is a self-hosted personal AI agent for recurring work: Next.js dashboard, Telegram access, Composio OAuth tools, Postgres/pgvector memory, Vercel AI Gateway models, and sandboxed execution instead of local shell access.
 
 ## Source and Accuracy Notes
 
-This guide is based on the repository README and docs links detected at [the official docs source](https://github.com/ComposioHQ/trustclaw/blob/main/README.md). Extracted sections include: ⚡ Deploy your own in seconds, ⚠️ Before deploying to production, 🧰 Manual setup (local dev).
+This article uses official project material from [ComposioHQ/trustclaw](https://github.com/ComposioHQ/trustclaw), especially the root README and repo architecture notes. Commands below are limited to commands documented by the project. When a workflow detail is not explicit, this guide calls out the gap rather than filling it with guessed package-manager steps.
 
-Important rule for this post: when the README does not provide a command, this guide says so instead of inventing one. GitHub projects change quickly, so always compare this article with the current README before running commands.
+The repo describes trustclaw as a security-first rebuild inspired by OpenClaw. Current setup is strongly shaped by Vercel, Neon/Postgres with `pgvector`, Upstash KV, Composio, Better Auth, tRPC, Prisma, and Vercel AI Gateway. That combination matters: trustclaw is not a generic local CLI agent. It is a hosted web app whose agent runtime, memory, auth, cron, integrations, and chat surfaces are tied together.
 
 ## What Is trustclaw?
 
-trustclaw is an open-source project hosted at [ComposioHQ/trustclaw](https://github.com/ComposioHQ/trustclaw). Repository summary: A self-hostable personal AI agent with vector memory, Composio tools, and Telegram.
+trustclaw is a 24/7 personal AI assistant that can chat through a Next.js web dashboard or Telegram, remember useful context, connect to third-party services through OAuth, and run recurring tasks on a schedule. Its central promise is not only “AI agent with tools.” Its promise is safer agency: actions go through Composio-managed OAuth integrations and execute in isolated cloud environments instead of handing a local agent long-lived credentials and shell access on your laptop.
 
-Repository signals at write time:
+Architecture is repo-specific. Frontend and backend live in one Next.js app. Backend logic runs through tRPC procedures under the app, auth uses Better Auth with username/password login, data sits in Postgres with vector search, and long-running context uses a three-layer strategy: pruning, memory flush, and summarization compaction. Model and embedding calls route through Vercel AI Gateway, which reduces direct OpenAI or Anthropic key handling for normal Vercel deployments.
 
-- Official GitHub repo: [ComposioHQ/trustclaw](https://github.com/ComposioHQ/trustclaw)
-- README / docs source: [https://github.com/ComposioHQ/trustclaw/blob/main/README.md](https://github.com/ComposioHQ/trustclaw/blob/main/README.md)
-- Stars: 715
-- Forks: 171
-- Open issues: 14
-- Main language: TypeScript
-- License: MIT
-- Created: 2026-05-05
-- Last updated: 2026-05-26
+The interesting part for runany.dev readers is operational fit. trustclaw is not best when you need a throwaway terminal copilot. It is better when you want a small personal agent service: “every morning summarize my calendar and email,” “watch GitHub issues,” “draft follow-ups,” “run a scheduled task,” or “interact with connected SaaS accounts without pasting API tokens into `.env` files per tool.”
 
-## Docs-Derived Setup Notes
+## Repo-Specific Setup Workflow
 
-The following notes come from headings and text extracted from the official README and linked docs pages. They are not generic install guesses.
+### Step 1: Choose Vercel template or CLI deployment
 
-- **⚡ Deploy your own in seconds:** Click here to use the Vercel Template: [![Deploy with Vercel]](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FComposioHQ%2Ftrustclaw&project-name=trustclaw&repository-name=trustclaw&env=BETTERAUTHSECRET,COMPOSIOAPIKE
-- **⚠️ Before deploying to production:** README section exists, but text is mostly commands, images, or links.
-- **🧰 Manual setup (local dev):** If you'd rather skip the deploy CLI and run TrustClaw locally: For local AI Gateway access, run vercel link && vercel env pull to get a short-lived OIDC token, or set AIGATEWAYAPIKEY manually. For Telegram, point your bot's webhook at /api/
-
-## Step 1: Clone the Official Repository
-
-Cloning is safe to document because it comes from the official GitHub repository URL. After cloning, read the README before installing dependencies.
+Fastest path is the Vercel template button from the project page. It preselects the TrustClaw repo, asks for required env vars, and offers Neon and Upstash integrations. If you prefer terminal flow, use the documented CLI path:
 
 ```bash
-git clone https://github.com/ComposioHQ/trustclaw.git
-cd trustclaw
+npx @composio/trustclaw deploy
 ```
 
-## Step 2: Follow README Commands
+That command is the repo’s intended “one command” deploy path. Treat it as the primary installer, not `git clone` plus improvised scripts.
 
-Use these commands only because they were found in README or linked docs setup, usage, configuration, or example sections. If a command is missing, check the official README link above.
+### Step 2: Prepare required accounts and keys
 
-### README Command 1: 🧰 Manual setup (local dev)
+The documented prerequisites are Vercel login, GitHub CLI login, and a Composio API key. These exact commands appear as one-time prerequisite checks:
+
+```bash
+npx vercel login
+```
+
+```bash
+gh auth login
+```
+
+The README also points users to the Composio CLI install command when getting a free API key:
+
+```bash
+curl -fsSL https://composio.dev/install | bash
+```
+
+For secrets, the Vercel template text instructs users to generate `BETTER_AUTH_SECRET` and `CRON_SECRET` like this:
+
+```bash
+openssl rand -base64 32
+```
+
+### Step 3: Understand required runtime services
+
+trustclaw needs `DATABASE_URL`, `BETTER_AUTH_SECRET`, `COMPOSIO_API_KEY`, and `CRON_SECRET`. `DATABASE_URL` must point to Postgres with `pgvector` because long-term memory depends on vector storage. `COMPOSIO_API_KEY` is server-side; Composio brokers integrations and OAuth-connected tool calls. `CRON_SECRET` protects `/api/cron/*` routes.
+
+Local AI Gateway access has two official options: link/pull Vercel env for a short-lived OIDC token, or set `AI_GATEWAY_API_KEY` manually. The exact phrase in docs is command-shaped:
+
+```bash
+vercel link && vercel env pull
+```
+
+### Step 4: Run local development only with documented commands
+
+For local work, the project provides a short path:
 
 ```bash
 pnpm install
@@ -69,56 +89,64 @@ pnpm prisma db push        # apply schema (Postgres + pgvector required)
 pnpm dev                   # http://localhost:3000
 ```
 
-## Step 3: Verify Configuration Requirements
+Repo notes also list maintenance commands:
 
-Look for environment variables, API keys, model settings, service URLs, or Docker configuration mentioned in the README sections. Do not assume defaults for AI tools because they often depend on local models, cloud APIs, or workspace-specific settings.
+```bash
+pnpm build
+pnpm lint
+pnpm auth:generate
+```
 
-If the README includes an environment example, copy that exact example file and fill in local values. If no environment example is documented, avoid creating one from guesswork.
+These commands reveal real stack boundaries: package install, Prisma schema push, Next dev server, production build, lint, and Better Auth client type generation.
 
-## Step 4: Run a Small README-Based Test
+### Step 5: Plan Vercel tier around cron expectations
 
-Use the smallest command documented by the repo. Good first tests include a help command, example command, local demo, or test command only if the README explicitly shows it.
+Hobby deployments have meaningful cron limits. The project notes daily-only cron behavior and a window around scheduled time; the CLI adjusts `vercel.json` to a daily schedule when it detects Hobby. If your use case needs per-minute recurring work or longer function duration, Vercel Pro is the practical deployment target.
 
-If the README does not document a smoke test, open issues and examples before trying the tool on real code or private data.
+## Deeper Analysis
 
-## Step 5: Evaluate Before Adopting
+trustclaw’s design reduces several common agent hazards. First, OAuth replaces direct password/API-key sharing for third-party tools. Second, sandboxed remote execution narrows blast radius compared with a local agent that can read arbitrary home-directory files. Third, audit trails and revocation become visible features instead of “delete secret from random config file and hope.”
 
-Use this checklist before adding trustclaw to a real project:
+The tradeoff is dependency concentration. You get secure defaults by accepting Vercel, Composio, Postgres/pgvector, Upstash, and AI Gateway as core pieces. That is reasonable for a personal hosted assistant, but it is not minimal. If you want offline local inference, this repo is a mismatch. If you want recurring web/SaaS work with hosted auth and low setup friction, it is well aligned.
 
-- Does the README explain installation, configuration, and common errors?
-- Do documented commands run on your machine without extra hidden steps?
-- Are issues and pull requests active?
-- Is the license compatible with your use case?
-- Are releases or tags available?
-- Can you pin a version or commit SHA?
-- Does it need access to secrets, files, browsers, shells, or production systems?
+Repo architecture is also unusually production-minded for an agent demo. Better Auth handles username/password login; tRPC keeps backend contracts typed; Prisma owns schema state; memory is not pasted into prompts forever but periodically pruned and compacted; tool calls happen server-side behind one `COMPOSIO_API_KEY`. Those are sensible boundaries for an app that may see email, calendars, GitHub repos, tickets, and private notes.
+
+The biggest evaluation question is “who owns the actions?” trustclaw still performs AI-directed work against real accounts. OAuth scopes, Composio app connections, cron frequency, and prompt-injection resistance need review before connecting sensitive apps.
+
+## Practical Evaluation Checklist
+
+- Confirm your target tasks are recurring or integration-heavy, not one-off local code edits.
+- Confirm Postgres includes `pgvector`; memory features depend on vector storage.
+- Decide whether Vercel Hobby cron limits are acceptable before relying on automation.
+- Use separate test OAuth accounts before connecting primary Gmail, GitHub, Slack, or Drive.
+- Review Composio tool scopes and revoke unused integrations early.
+- Keep `BETTER_AUTH_SECRET`, `CRON_SECRET`, `DATABASE_URL`, and `COMPOSIO_API_KEY` server-side only.
+- Test Telegram separately from web chat; they are different interaction surfaces.
+- Run local `pnpm lint` and `pnpm build` before changing auth, cron, memory, or agent runtime.
 
 ## Security Notes
 
-Treat every new developer tool as untrusted until reviewed. This matters more for AI agents, CLIs, browser automation tools, and code generators because they may read files, execute shell commands, or send data to external APIs.
+trustclaw’s security model is its main differentiator, but “safer” does not mean “risk-free.” OAuth can still grant broad permissions. A sandbox can still perform damaging remote actions through allowed tools. Cron can repeat a bad instruction. Memory can persist sensitive facts. Treat first deployment like a staging agent, not an invisible employee.
 
-Safer first-run habits:
-
-- Run it in a temporary folder or container.
-- Read install scripts before executing them.
-- Avoid piping remote scripts directly into bash.
-- Use a test API key with limited permissions.
-- Check network calls if the tool handles private code or data.
+Protect `/api/cron/*` with `CRON_SECRET`, avoid exposing local `.env`, rotate Composio keys if they leak, and prefer least-privilege OAuth scopes. If you self-host for a team, add rate limiting at chat and cron endpoints as the project suggests. For work accounts, audit action logs and start with read-only integrations when possible.
 
 ## FAQ
 
-**Q: Where is the official GitHub repository?**
-**A:** The official repo is [ComposioHQ/trustclaw](https://github.com/ComposioHQ/trustclaw).
+**Q: Is trustclaw a local coding agent?**
+**A:** No. It is a self-hosted web/Telegram personal assistant. Its repo emphasizes OAuth integrations, cloud sandbox execution, memory, cron, and hosted deployment.
 
-**Q: Are install commands guessed?**
-**A:** No. Commands in this post are extracted from README or linked docs sections. If no README command is found, the post tells you to use the official docs instead of inventing commands.
+**Q: Do I need OpenAI or Anthropic API keys?**
+**A:** Normal Vercel deployment routes LLM and embedding calls through Vercel AI Gateway, so direct provider keys are not the central setup path.
 
-**Q: How do I avoid duplicate coverage later?**
-**A:** This blog tracks covered repositories in .data/written-repos.txt, using one lowercased owner/repo entry per line.
+**Q: Can Vercel Hobby run frequent scheduled tasks?**
+**A:** No. Hobby cron behavior is limited. For per-minute precision and longer function duration, plan for Vercel Pro.
 
-**Q: When is the thumbnail generated?**
-**A:** The generator creates a MiniMax AI image, optimizes it to WebP, and uploads it to Cloudflare R2 before writing the MDX post, so the committed article already points to the final public image URL.
+**Q: What should I test first?**
+**A:** Deploy with a test user, connect one low-risk Composio integration, create a simple scheduled task, then inspect logs and revocation flow.
+
+
+Related reading: [GitHub Trending tools](/tags/github-trending/), [Developer tools](/category/dev-tools/), [dulus setup guide open source python ai tool](/blog/dulus-setup-guide-open-source-python-ai-tool/), and [codexplusplus setup guide open source rust ai tool](/blog/codexplusplus-setup-guide-open-source-rust-ai-tool/).
 
 ## Conclusion
 
-trustclaw is worth evaluating only after reading the official README and running the documented setup path. Start with [ComposioHQ/trustclaw](https://github.com/ComposioHQ/trustclaw), compare the extracted commands above with current docs, and test in a safe environment before using it on production code or private data.
+trustclaw is worth watching because it treats agent security as architecture, not marketing copy. Its best use case is a personal hosted assistant that can remember, schedule, and act across OAuth-connected services without storing passwords or running arbitrary shell commands on your machine. Use the documented Vercel/CLI path, respect cron limits, and evaluate integrations one scope at a time.
