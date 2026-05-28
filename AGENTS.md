@@ -250,18 +250,10 @@ runany/
 
 **runany.pages.dev → runany.dev**
 
-Configure in `vercel.json` at project root:
+For Cloudflare Pages deploy (not Vercel), create `_redirects` at `apps/web/public/_redirects`:
 
-```json
-{
-  "redirects": [
-    {
-      "source": "/(.*)",
-      "destination": "https://runany.dev/$1",
-      "permanent": true
-    }
-  ]
-}
+```
+/* https://runany.dev/:splat 301
 ```
 
 All paths redirect permanently (301) to main domain.
