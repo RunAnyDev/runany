@@ -246,6 +246,28 @@ runany/
 
 ---
 
+## Redirects
+
+**runany.pages.dev → runany.dev**
+
+Configure in `vercel.json` at project root:
+
+```json
+{
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "https://runany.dev/$1",
+      "permanent": true
+    }
+  ]
+}
+```
+
+All paths redirect permanently (301) to main domain.
+
+---
+
 ## Quick Command Reference
 
 ```bash
