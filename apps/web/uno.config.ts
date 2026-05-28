@@ -1,4 +1,4 @@
-import { defineConfig, presetTypography, presetWebFonts } from 'unocss';
+import { defineConfig, presetTypography } from 'unocss';
 import { presetWind } from 'unocss';
 
 export default defineConfig({
@@ -11,8 +11,8 @@ export default defineConfig({
       lime: '#A3E635',
     },
     fontFamily: {
-      sans: ['Inter', 'system-ui', 'sans-serif'],
-      mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+      sans: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      mono: 'SFMono-Regular, Consolas, "Liberation Mono", monospace',
     },
   },
   shortcuts: {
@@ -24,12 +24,5 @@ export default defineConfig({
   presets: [
     presetWind(),
     presetTypography(),
-    presetWebFonts({
-      provider: 'google',
-      fonts: {
-        sans: 'Inter:400,500,600,700',
-        mono: 'JetBrains Mono:400,500',
-      },
-    }),
   ],
 });
