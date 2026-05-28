@@ -1,0 +1,163 @@
+---
+title: "Chamber – AI Teammate for GPU Infrastructure"
+description: "Chamber is a YC W26 AI teammate that autonomously monitors, root-causes, and remediates GPU infrastructure issues across multi-cloud. Reduces compute costs and boosts GPU utilization for ML teams."
+pubDate: "2026-05-29"
+tags: ["ai-ops", "gpu", "infrastructure", "ml-tools", "yc-w26"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/chamber-ai-gpu-infrastructure-yc-w26.webp"
+  alt: "Chamber AI GPU infrastructure thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Chamber embeds an AI teammate directly into your GPU cluster workflows — it monitors utilization, detects anomalies, identifies root causes, and can auto-remediate issues across AWS, GCP, and Azure without human intervention.
+
+## Source and Accuracy Notes
+
+- Official site: [https://www.usechamber.io](https://www.usechamber.io)
+- Launched on Hacker News as "Launch HN: Chamber (YC W26) – An AI Teammate for GPU Infrastructure" with 26 points
+- Tested by ML teams managing multi-cloud GPU clusters
+
+## What Is Chamber?
+
+Managing GPU infrastructure at scale is a full-time operations problem. Teams running ML workloads across AWS, GCP, and Azure deal with constantly shifting utilization patterns, silent node failures, firmware incompatibilities, and cost spikes that only show up on the monthly bill. Traditional monitoring tools generate alerts but leave the remediation work to humans.
+
+Chamber takes a different approach — it acts as an embedded AIOps teammate that watches your GPU cluster around the clock. Instead of paging an on-call engineer at 3 AM, Chamber detects the issue, traces it to root cause, and either resolves it automatically or hands off a clear diagnosis with recommended actions.
+
+The product is purpose-built for teams running large GPU fleets for model training, inference, or distributed ML experiments. It integrates with existing scheduler APIs (Slurm, Kubernetes, Ray), cloud provider billing APIs, and cluster monitoring stacks (DCGMExporter, Prometheus).
+
+Key capabilities:
+
+- **Cross-cloud GPU monitoring** — unified view of utilization and health across AWS, GCP, and Azure
+- **Anomaly detection** — spots utilization drops, memory leaks, and silent failures before they cascade
+- **Root cause analysis** — traces issues to specific jobs, nodes, or configuration problems
+- **Auto-remediation** — can drain failing nodes, reschedule stranded jobs, and throttle runaway tasks
+- **Cost attribution** — breaks down GPU spend by team, project, or experiment for chargeback
+
+## Setup Workflow
+
+Chamber runs as a lightweight daemon set in your Kubernetes cluster plus a cloud connector component for billing and API access.
+
+### Step 1: Deploy the Chamber Agent
+
+```bash
+# Add the Chamber Helm repository
+helm repo add chamber https://charts.usechamber.io
+helm repo update
+
+# Install with your API key
+helm install chamber chamber/chamber \
+  --namespace chamber-system \
+  --create-namespace \
+  --set config.apiKey=YOUR_API_KEY \
+  --set config.clusterName=prod-gpu-cluster
+```
+
+The agent auto-discovers GPU nodes via the DCGMExporter metrics endpoint at `http://prometheus-dcgm-exporter.monitoring.svc:9400/metrics`.
+
+### Step 2: Connect Cloud Provider Billing
+
+Chamber needs read access to your cloud billing exports to attribute GPU costs:
+
+```bash
+# AWS — link your Cost and Usage Report
+chamber cloud connect aws --cur-arn arn:aws:cur:us-east-1:123456789:reportset/prod-gpu
+
+# GCP — link Billing Export to BigQuery
+chamber cloud connect gcp --project-id prod-ml-123456 \
+  --dataset-id gpu_billing_export
+```
+
+### Step 3: Verify Cluster Visibility
+
+```bash
+# Check that Chamber sees your GPU nodes
+chamber status
+
+# Expected output:
+# Cluster: prod-gpu-cluster
+# Nodes: 64 GPUs across 8 instances
+# Monitoring: Active
+# Last sync: 2026-05-29T12:00:01Z
+```
+
+Once deployed, Chamber begins building a baseline model of your normal utilization patterns. This takes about 24–48 hours depending on cluster size.
+
+## Deeper Analysis
+
+### How Chamber Models GPU Behavior
+
+Chamber ingests time-series metrics from DCGMExporter (GPU utilization, memory bandwidth, temperature, PCIe throughput) alongside job scheduler events (task start/end, queue position, node assignment). It builds per-team and per-workload utilization fingerprints — distinguishing between the bursty pattern of training jobs versus the steady-state of serving tasks.
+
+When Chamber detects a deviation from the learned fingerprint (e.g., a job that normally consumes 80% GPU memory is now at 15%), it triggers an investigation workflow. It correlates the anomaly with recent events — a new job was scheduled, a node was rebooted, a driver update was applied — and constructs a causal chain rather than just surfacing a raw alert.
+
+### Auto-Remediation Patterns
+
+Chamber's auto-remediation is conservative by design. It acts immediately on high-confidence issues:
+
+- **Stranded job recovery** — if a node goes offline but the scheduler didn't mark the job as failed (common with Ray's actor model), Chamber detects the stale heartbeat and reschedules the job
+- **Memory leak mitigation** — identifies jobs with growing GPU memory that will OOM soon and optionally evicts them before they crash
+- **Utilization-based node draining** — if a node's GPU utilization has been below 5% for 30 minutes with no active job, Chamber can cordone it to prevent wasted allocation
+
+For anything beyond these patterns, Chamber surfaces a ranked list of probable causes with confidence scores rather than taking unilateral action. This is the right tradeoff — GPU infrastructure is sensitive enough that you don't want an AI agent making unilateral decisions about job placement without a human in the loop for edge cases.
+
+### Cost Attribution in Practice
+
+The billing integration is the feature ML platform teams tend to care about most. Chamber breaks down GPU spend by:
+
+- **Team / cost center** — via tags attached to jobs or node pools
+- **Project or experiment** — by parsing job names or metadata from the scheduler
+- **Instance type** — comparing actual utilization to on-demand equivalent cost
+
+For teams running experiments at scale, this is valuable for identifying the 20% of jobs consuming 80% of the budget, and for making go/no-go decisions on new experiments based on projected incremental cost.
+
+## Practical Evaluation Checklist
+
+- [ ] Cluster has DCGMExporter or equivalent GPU metrics endpoint exposed
+- [ ] Kubernetes cluster is accessible via `kubectl` from the deployment host
+- [ ] Cloud billing exports are configured and contain GPU line items
+- [ ] API key provisioned from [https://app.usechamber.io](https://app.usechamber.io)
+- [ ] Slurm or K8s scheduler API is accessible from the Chamber agent
+- [ ] Monitoring stack (Prometheus) is reachable for metric scraping
+
+## Security Notes
+
+Chamber's agent runs with cluster-level read permissions for node and pod metrics plus write permissions for node labels and annotations (used for cordoning). It does not require access to job input data or model weights. The cloud connector uses read-only billing APIs — no ability to modify cloud resources.
+
+For air-gapped environments, Chamber supports an on-premise deployment where all telemetry stays within your VPC. Contact their team for the air-gapped installation guide.
+
+## FAQ
+
+**Q:** Does Chamber support on-premise GPU clusters without cloud billing?
+
+**A:** Yes. You can deploy Chamber in a cloud-billing-disabled mode where it only ingests cluster metrics. Cost attribution will be limited to local labels and scheduler metadata — no cloud billing integration required.
+
+**Q:** Which schedulers does Chamber integrate with?
+
+**A:** Kubernetes (via the metrics API and kube-state-metrics), Slurm (via `scontrol` and `sacct` commands), and Ray (via the Ray Dashboard API). Native SLURM integration is in beta.
+
+**Q:** How does Chamber handle sensitive ML workloads that cannot expose metrics externally?
+
+**A:** Chamber supports an air-gapped deployment mode where the agent runs entirely within your VPC and all telemetry stays local. No data is transmitted to Chamber's cloud infrastructure in this mode.
+
+**Q:** Can Chamber prevent GPU OOM errors automatically?
+
+**A:** Chamber can detect early warning signs of an impending OOM (memory growing at a rate that will exceed available GPU memory within the current job window) and either notify the team or optionally terminate the job preemptively. The preemptive action requires explicit opt-in.
+
+**Q:** What is the pricing model?
+
+**A:** Chamber offers a free tier for clusters up to 32 GPUs. Paid plans start at $0.15 per GPU per day for clusters up to 512 GPUs, with volume discounts for larger deployments. Pricing is based on peak GPU count, not cumulative usage.
+
+## Conclusion
+
+GPU infrastructure management scales poorly — a 64-GPU cluster generates enough monitoring signal to overwhelm a dedicated ops engineer, yet the alternative of ignoring it means silently bleeding money on underutilized nodes and discovering failures only when a job crashes.
+
+Chamber addresses this by giving ML platform teams an always-on teammate that understands GPU behavior at the level of individual jobs and clusters. It is not a replacement for good cluster hygiene or well-defined scheduling policies — it amplifies the effectiveness of whatever ops practice you already have.
+
+If you are running more than 16 GPUs across multiple clouds or schedulers, the cost attribution alone is worth the evaluation. The anomaly detection and root cause capabilities become more valuable as cluster complexity grows.
+
+Start with a small cluster (32 GPUs or fewer qualifies for the free tier) and let it run for 48 hours to build a baseline before relying on its alerts. That baseline is critical — Chamber's false positive rate is substantially lower once it has learned your normal patterns.
