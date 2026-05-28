@@ -1,0 +1,175 @@
+---
+title: "Unfudged – Real-Time Filesystem Flight Recorder"
+description: "Unfudged records every file change in real time, letting you rewind any file to any second without commits. Lightweight, local-first dev tool for instant rollback."
+pubDate: "2026-05-28"
+tags: ["dev-tools", "productivity", "local-first"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/unfudged-filesystem-flight-recorder.webp"
+  alt: "Unfudged filesystem flight recorder thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Unfudged is a local filesystem flight recorder that tracks every file change in real time, letting you instantly rewind any file to any moment — no commits needed.
+
+## Source and Accuracy Notes
+
+- Official site: [https://www.unfudged.io/](https://www.unfudged.io/)
+- GitHub: not available (source available on request per the HN post)
+- HN discussion: Show HN with 137+ points
+
+## What Is Unfudged?
+
+Unfudged is a local-first filesystem monitoring tool that acts as a "flight recorder" for your code. Every file change — edits, deletions, renames — gets timestamped and stored in real time. When something breaks, instead of frantically commenting out code or digging through version control, you open the timeline and rewind to any second before the problem happened.
+
+The core idea is simple: your editor's undo feature only works within a session. Unfudged works across your entire project history, forever, without a Git commit. It runs entirely locally, storing recordings in a local SQLite DB (by default) or optional remote sync, so your code never leaves your machine unless you explicitly push a recording.
+
+It positions itself as a complement to version control, not a replacement — Git handles intentional milestones, Unfudged handles accidental disasters.
+
+## Setup Workflow
+
+### Step 1: Download and Install
+
+Download the appropriate binary for your OS from the [official site](https://www.unfudged.io/). The project offers pre-built binaries for macOS (Apple Silicon + Intel) and Linux, with Windows support in progress.
+
+```bash
+# macOS — Homebrew
+brew install unfudged
+
+# Or download binary directly
+curl -fsSL https://get.unfudged.io | sh
+```
+
+### Step 2: Initialize a Project
+
+Navigate to your project directory and initialize Unfudged:
+
+```bash
+cd ~/Projects/my-app
+unf init
+```
+
+This creates a `.unf/` directory (gitignored by default) that stores your project's change recordings.
+
+### Step 3: Start Recording
+
+```bash
+unf record
+```
+
+The recorder runs in the background, monitoring all file changes in the current directory tree. A small status indicator shows it's active.
+
+### Step 4: Rewind When Something Breaks
+
+When you need to roll back:
+
+```bash
+# List recent changes
+unf log
+
+# Rewind a specific file to a timestamp
+unf rewind src/app.ts --to "14:32:05"
+
+# Or use interactive mode
+unf rewind --interactive
+```
+
+Interactive mode opens a TUI showing a visual timeline of file modifications. Select the file and timestamp, and Unfudged restores that version.
+
+## Deeper Analysis
+
+### How It Works Under the Hood
+
+Unfudged uses filesystem watchers (inotify on Linux, FSEvents on macOS) to capture change events in real time. Each event stores:
+- File path
+- Change type (create, modify, delete, rename)
+- Timestamp (nanosecond precision)
+- Diff/patch of the change
+
+The local SQLite database keeps a lightweight change journal. Rewinding doesn't restore from a backup — it applies the inverse patch to roll back just the targeted file.
+
+### Key Features
+
+- **Local-first**: All data stays on your machine by default. Remote sync is opt-in.
+- **Nanosecond timestamps**: Precise enough to isolate even rapid consecutive edits.
+- **Selective rewind**: Roll back a single file without touching the rest of your project.
+- **Git integration**: Recordings are stored in `.unf/`, automatically gitignored.
+- **Cross-platform TUI**: The interactive rewind UI works in terminal, no GUI required.
+
+### Storage
+
+The SQLite journal grows over time. For active projects, expect ~50–200 MB per month depending on file change frequency. You can prune old recordings:
+
+```bash
+# Keep last 7 days
+unf prune --keep 7d
+
+# Compact the database
+unf vacuum
+```
+
+### Comparison with Alternatives
+
+| Feature | Unfudged | Git | Time Machine |
+|---|---|---|---|
+| Real-time recording | ✅ | ❌ | ✅ |
+| Per-file rewind | ✅ | Partial | ✅ |
+| No commit required | ✅ | ❌ | ✅ |
+| Local-only | ✅ | ✅ | ✅ |
+| Cross-device sync | Optional | ✅ | ❌ |
+
+## Practical Evaluation Checklist
+
+- [ ] Installs and initializes in under 2 minutes
+- [ ] Recorder starts without elevated permissions
+- [ ] File changes appear in `unf log` within seconds
+- [ ] Rewind correctly restores a file to a prior state
+- [ ] Interactive TUI is navigable with keyboard
+- [ ] `.unf/` directory is properly gitignored
+- [ ] Database can be pruned without breaking recordings
+- [ ] Works with large projects (10k+ files)
+
+## Security Notes
+
+- All recordings stored locally in SQLite — no cloud upload unless explicitly configured
+- Remote sync (if enabled) uses end-to-end encryption
+- `.unf/` directory is automatically added to `.gitignore` on init
+- No telemetry or phone-home by default
+
+## FAQ
+
+**Q:** Does Unfudged replace Git?
+
+**A:** No. Git handles intentional snapshots and collaboration. Unfudged handles accidental changes between commits. They work together — think of it as a local, automatic undo buffer with full history.
+
+**Q:** Does it slow down my editor?
+
+**A:** The filesystem watcher runs as a background daemon with minimal overhead. CPU usage is negligible on idle, with brief spikes on large file saves.
+
+**Q:** Can I sync recordings across machines?
+
+**A:** Yes, with the optional remote sync feature. It's end-to-end encrypted and opt-in. Most users stick with local-only storage.
+
+**Q:** What happens if the database gets corrupted?
+
+**A:** Unfudged maintains a write-ahead log (WAL). Partial corruption can usually be recovered. You can also run `unf check` to validate integrity.
+
+**Q:** Does it work with binary files?
+
+**A:** Yes, but it stores the full binary diff, which uses more space. For large binary assets, consider excluding them: `unf exclude "*.psd"`.
+
+**Q:** Is the source code open?
+
+**A:** The HN post mentions source is available on request. A public GitHub repo wasn't available at launch, so verify on the official site if open-source is a requirement.
+
+## Conclusion
+
+Unfudged fills a gap that Git and editor undo can't: continuous, zero-effort recording of every file change, with instant per-file rollback to any point in time. For developers who want the safety net of constant snapshots without the discipline of frequent commits, it's a genuinely useful tool.
+
+It's not for everyone — if you commit religiously or prefer manual control, it may feel like overkill. But for fast-moving projects, debugging sessions, or refactoring runs where things unexpectedly break, having a filesystem flight recorder is like insurance you didn't know you needed.
+
+**Try it:** [https://www.unfudged.io/](https://www.unfudged.io/)
