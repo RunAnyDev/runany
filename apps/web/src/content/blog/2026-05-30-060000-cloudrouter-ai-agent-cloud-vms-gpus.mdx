@@ -1,0 +1,219 @@
+---
+title: "CloudRouter – Give Your AI Agent Its Own Cloud VM and GPU"
+description: "CloudRouter is a skill and CLI that lets AI coding agents like Claude Code spin up cloud VMs with GPUs on demand, run dev servers and browser automation, then clean up when done."
+pubDate: "2026-05-30"
+tags: ["ai-agent", "claude-code", "cloud-infrastructure", "dev-tools", "productivity"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cloudrouter-ai-agent-cloud-vms-gpus.webp"
+  alt: "CloudRouter AI agent cloud VM GPU thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** CloudRouter gives AI coding agents like Claude Code and Codex the ability to spin up their own cloud VMs and GPUs — the agent uploads your project, runs dev servers and tests, operates browsers remotely, then cleans up when done.
+
+## Source and Accuracy Notes
+
+- [cloudrouter.dev](https://cloudrouter.dev/)
+- [manaflow-ai/manaflow GitHub](https://github.com/manaflow-ai/manaflow) (contains packages/cloudrouter)
+- Show HN: [news.ycombinator.com/item?id=47006393](https://news.ycombinator.com/item?id=47006393) (138 points)
+
+## What Is CloudRouter?
+
+When an AI coding agent writes code on your behalf, it usually needs to start a dev server, run tests, open a browser to verify its work. Today all of that happens on your local machine. That works fine for a single task, but if you run multiple agents in parallel, they share your ports, RAM, and screen — it gets chaotic fast.
+
+Docker helps with isolation, but it still uses your machine's resources and does not give the agent a browser, a desktop, or a GPU to close the loop properly.
+
+CloudRouter solves this by giving the agent its own machines in the cloud. It is a skill + CLI that lets an AI agent provision a VM from its local project directory, upload the project files, run commands on the VM, and tear it down when finished. If the workload needs a GPU, the agent can request one.
+
+```bash
+# Start a cloud VM from your project directory
+cloudrouter start ./my-project
+
+# Request a GPU-enabled VM
+cloudrouter start --gpu B200 ./my-project
+
+# SSH into the VM and run commands
+cloudrouter ssh cr_abc123 "npm install && npm run dev"
+```
+
+Every VM comes with a VNC desktop, VS Code, and Jupyter Lab — all behind auth-protected URLs. When the agent runs browser automation on the VM, you can open the VNC URL and watch the agent work in real time. Under the hood, CloudRouter wraps [agent-browser](https://github.com/vercel-labs/agent-browser) by Vercel Labs.
+
+```bash
+# Open browser on the VM and interact with it
+cloudrouter browser open cr_abc123 "http://localhost:3000"
+cloudrouter browser snapshot -i cr_abc123
+# → @e1 [link] Home  @e2 [link] Settings  @e3 [button] Sign Out
+
+cloudrouter browser click cr_abc123 @e2
+cloudrouter browser screenshot cr_abc123 result.png
+```
+
+## Why This Changes How You Use Coding Agents
+
+The interesting shift is where the work happens. Most cloud dev tooling starts from the cloud — background agents, remote SSH tunnels — and pushes results back to your local machine for testing. CloudRouter inverts that. Your agents stay local and push their work to the cloud. The agent does the same things it would do locally — running dev servers, operating browsers — but now on a remote VM with dedicated resources.
+
+Once you stop watching agents work and worrying about local constraints, you start running more tasks in parallel. The GPU side is where this gets particularly interesting. Today if you want a coding agent to help with anything involving training or inference, there is a manual step where you go provision a machine. With CloudRouter, the agent can spin up a GPU sandbox, run the workload, and clean it up automatically. Some developers are already using this to have agents run small experiments in parallel across multiple GPU VMs.
+
+The [demo on YouTube](https://youtu.be/SCkkzxKBcPE) shows the full workflow: starting a VM, uploading a project, running a dev server, interacting with the browser via CLI, and watching the VNC stream in real time.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- A manaflow account (free tier available at cloudrouter.dev)
+- Claude Code, Codex, or another compatible AI agent
+
+### Step 1: Install the CLI
+
+```bash
+npm install -g @manaflow/cloudrouter
+```
+
+Or use it as a skill for Claude Code:
+
+```bash
+claude skill install cloudrouter
+```
+
+### Step 2: Authenticate
+
+```bash
+cloudrouter auth login
+```
+
+This opens a browser window to complete OAuth with your manaflow account.
+
+### Step 3: Start a VM from Your Project
+
+```bash
+cd ~/projects/my-app
+cloudrouter start ./my-app
+```
+
+CloudRouter creates a VM, uploads your project files, and gives you a VM ID. The upload uses rsync over SSH for efficiency.
+
+### Step 4: Run Commands on the VM
+
+```bash
+# Install dependencies and start dev server
+cloudrouter ssh cr_abc123 "npm install && npm run dev"
+
+# Run tests
+cloudrouter ssh cr_abc123 "npm test"
+
+# Check logs
+cloudrouter logs cr_abc123
+```
+
+### Step 5: Operate the Browser (Optional)
+
+```bash
+# Open a URL in the VM's browser
+cloudrouter browser open cr_abc123 "http://localhost:3000"
+
+# Get a snapshot of UI elements
+cloudrouter browser snapshot -i cr_abc123
+
+# Click an element
+cloudrouter browser click cr_abc123 @e2
+
+# Take a screenshot
+cloudrouter browser screenshot cr_abc123 screenshot.png
+```
+
+### Step 6: Tear Down
+
+```bash
+# Stop and delete the VM
+cloudrouter destroy cr_abc123
+```
+
+Or let the agent handle cleanup automatically when the task is done.
+
+## Deeper Analysis
+
+### Architecture
+
+CloudRouter works by wrapping a cloud VM provisioning layer with a thin CLI and a skill interface that AI agents can call. When you run `cloudrouter start`, it:
+
+1. Spins up a cloud VM (currently on AWS EC2 behind the scenes)
+2. Opens an SSH tunnel for command execution
+3. Sets up a VNC server with a lightweight desktop environment
+4. Provisions VS Code and Jupyter Lab in the browser-accessible desktop
+5. Waits for the agent to upload files via rsync
+
+The agent communicates with the VM through the CLI tool, which acts as the bridge between the local agent session and the remote cloud machine. The agent uses standard CLI commands it already knows — `ssh`, `exec`, `upload` — without needing custom integrations.
+
+### Browser Automation Internals
+
+Browser automation is powered by [agent-browser](https://github.com/vercel-labs/agent-browser) from Vercel Labs. This is a headless browser environment that exposes a structured snapshot interface instead of raw pixels. When you call `snapshot`, you get back a list of interactive elements with reference IDs, so the agent can click links and buttons by ID rather than by coordinates.
+
+The VNC stream gives you real-time visibility into what the agent is doing. You can open the VNC URL in any browser, authenticate, and watch the agent work. This is particularly useful when the agent is doing something unexpected — you can intervene visually instead of having to trace through logs.
+
+### GPU Provisioning
+
+GPU VMs require explicit `--gpu` flag. The available GPU types depend on what manaflow has in its fleet. The agent specifies the GPU type it needs and CloudRouter provisions accordingly. GPU VMs take longer to start (usually 30–60 seconds vs 10–15 for a regular VM) because the GPU drivers need to initialize.
+
+The agent cleans up GPU VMs after use to avoid leaving expensive resources idle.
+
+## Practical Evaluation Checklist
+
+- Agent stays local, work happens on cloud VMs — more parallel tasks possible
+- VNC gives you real-time visibility into agent work
+- Browser automation via agent-browser is structured, not pixel-based
+- GPU VMs available for ML workloads, cleaned up after use
+- Auth-protected URLs for VNC and VS Code — not publicly accessible
+- Works with any AI agent that can call CLI commands (Claude Code, Codex, etc.)
+
+## Security Notes
+
+- VM access uses auth-protected URLs — VNC and VS Code are not publicly accessible
+- SSH keys are generated per session and rotated
+- Files are uploaded via rsync over an authenticated SSH tunnel
+- VMs are destroyed after the session ends, not left running
+- No persistent storage on VMs between sessions (stateless)
+- GPU VMs are particularly important to destroy because of cost — CloudRouter handles this automatically when the agent signals task completion
+
+## FAQ
+
+**Q:** Does CloudRouter work with any AI agent, or only Claude Code and Codex?
+
+**A:** Any AI agent that can execute CLI commands can use CloudRouter. The skill is a standard CLI tool. Claude Code and Codex have native skill installation support, making them the easiest to set up, but an agent that can call `subprocess.run` or similar can invoke the CLI directly.
+
+**Q:** How long does it take to start a VM?
+
+**A:** A standard VM takes 10–15 seconds. A GPU VM takes 30–60 seconds because GPU drivers need to initialize. The startup is asynchronous — `cloudrouter start` returns immediately and the VM becomes available when it is ready.
+
+**Q:** What happens if the agent crashes or loses connection mid-task?
+
+**A:** The VM stays running for a configurable timeout (default: 30 minutes). You can reconnect and continue where you left off using the VM ID. If you do not reconnect within the timeout, CloudRouter destroys the VM automatically.
+
+**Q:** How much does it cost?
+
+**A:** CloudRouter has a free tier with limited VM hours per month. GPU VMs use more credits per minute. Pricing details are on the [cloudrouter.dev](https://cloudrouter.dev/) website. The agent cleans up after itself by default, so you only pay for what you actually use.
+
+**Q:** Can I watch what the agent is doing in real time?
+
+**A:** Yes. Every VM comes with a VNC desktop accessible via an auth-protected URL. Open the URL in your browser and you can watch the agent work live. This is especially useful during browser automation tasks.
+
+**Q:** Is my code uploaded to a third-party cloud?
+
+**A:** Yes, your project files are uploaded to VMs running on cloud infrastructure (currently AWS). The VM is yours for the session — no other users can access it. After the session ends, the VM is destroyed and the disks are wiped.
+
+**Q:** Does this work behind a corporate firewall or VPN?
+
+**A:** CloudRouter needs outbound HTTPS and SSH access to the manaflow cloud. If your network blocks outbound SSH, some features (like `cloudrouter ssh`) will not work. The web-based VNC and VS Code interfaces use standard HTTPS and should work in most environments.
+
+## Conclusion
+
+CloudRouter changes the resource model for AI coding agents. Instead of sharing your local machine, the agent gets its own cloud VM with dedicated CPU, RAM, and optionally a GPU. You can run multiple agents in parallel without port conflicts or resource contention, and you get real-time visibility via VNC.
+
+The workflow is straightforward: start a VM, let the agent do its work (including browser automation), watch it live if you want, then destroy the VM when done. The agent handles the lifecycle — you just monitor.
+
+If you run coding agents regularly and have hit the ceiling of what your local machine can handle in parallel, CloudRouter is worth a look. The free tier lets you try it without commitment.
