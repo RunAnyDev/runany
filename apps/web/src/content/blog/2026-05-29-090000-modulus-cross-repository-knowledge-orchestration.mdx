@@ -1,0 +1,172 @@
+---
+title: "Modulus – Cross-Repo Knowledge for AI Coding Agents"
+description: "Modulus is a desktop app that connects multiple AI coding agents (Claude Code, Cursor, Devin) to shared project memory, solving cross-repository context loss."
+pubDate: "2026-05-29"
+tags: ["dev-tools", "ai-agent", "cursor", "coding-agent"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/modulus-cross-repository-knowledge-orchestration.webp"
+  alt: "Modulus cross-repository knowledge orchestration thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Modulus is a desktop app that lets you run multiple AI coding agents with shared project memory across repositories, so agents stop repeating mistakes your team already fixed.
+
+## Source and Accuracy Notes
+
+- Official site: [https://modulus.so](https://modulus.so)
+- Show HN launch: March 2026 (15 points)
+- No public GitHub repo available
+
+## What Is Modulus?
+
+When you're working across five repositories simultaneously, your AI coding agent has no idea what happened in the other four. It doesn't know you reverted a database migration six weeks ago. It doesn't know your team's postmortem marked a pattern permanently off-limits. It only knows what's in front of it right now.
+
+Modulus solves this by acting as a shared memory layer between AI coding agents. Instead of each agent running in isolation, Modulus gives them a common project context they can all read from and write to.
+
+Think of it as a shared brain that persists across all your coding agent sessions — regardless of which tool (Cursor, Claude Code, Devin) is doing the work.
+
+## Setup Workflow
+
+Modulus is a desktop application for macOS and Windows.
+
+### Step 1: Download and Install
+
+Visit [https://modulus.so](https://modulus.so) and download the installer for your platform. The install process is straightforward — download the `.dmg` (macOS) or `.exe` (Windows) and follow the prompts.
+
+No account required for basic use.
+
+### Step 2: Connect Your First Repository
+
+On first launch, Modulus opens a clean workspace. Click **Add Repository** and select a folder from your filesystem.
+
+Modulus will index the repository — this includes:
+
+- File structure and key file types
+- Recent git history (commit messages, branch names)
+- TODO comments and documentation files
+- Any `.md` files in the root or `docs/` directory
+
+This index becomes the shared memory baseline for all agents connected to this repository.
+
+### Step 3: Launch an AI Coding Agent
+
+Modulus doesn't bundle its own AI model. Instead, it wraps your existing coding agents.
+
+From the Modulus toolbar, choose **Launch Agent** and select from supported integrations:
+
+- **Claude Code** (via Cursor or standalone)
+- **Cursor** (with agent mode enabled)
+- **Copilot Chat** (JetBrains or VS Code)
+
+The agent opens in a split view within Modulus. Everything the agent reads and writes gets automatically tagged with the current repository context.
+
+### Step 4: Set Memory Policies
+
+Modulus lets you configure what gets saved to shared memory. From **Settings → Memory**:
+
+- **Auto-capture reads**: Saves every file the agent reads (can be noisy)
+- **Auto-capture writes**: Saves changes the agent makes
+- **Key decisions only**: Only saves when you manually mark a decision important
+- **Context window budget**: Limits how much memory gets injected per agent turn (avoids token bloat)
+
+For most teams, **Auto-capture writes** plus **Key decisions only** is the right starting point.
+
+## Deeper Analysis
+
+### The Problem With Isolated Agent Context
+
+Modern AI coding agents are stateless by design. Each conversation starts fresh. Some tools (Claude Code, Cursor) persist conversation history to disk, but none of them share that history with a second agent running in a separate window.
+
+The result: Agent A makes a mistake. You fix it. You switch to Agent B in a different repo. Agent B makes the same mistake because it has no way to know what Agent A did.
+
+This is especially painful in:
+
+- **Microservices codebases**: Changes in `auth-service` can break `payment-service`, but agents only see one at a time
+- **Shared library updates**: Updating a utility function doesn't update all the callers unless an agent explicitly reads the utility first
+- **Post-incident remediation**: The team converges on a solution, documents it, but the next sprint's agent has no access to that institutional knowledge
+
+### How Modulus Stores and Retrieves Context
+
+Modulus maintains a vector store locally on your machine. Each memory entry is:
+
+1. **Chunked** from source files, git commits, or manual notes
+2. **Embedded** using an on-device embedding model (no data sent to external APIs)
+3. **Indexed** by repository and time period
+4. **Retrieved** via semantic search when an agent queries the shared memory
+
+The retrieval happens at the start of each agent turn. Modulus injects the top-K relevant memory entries into the system prompt as context, before the agent's normal reasoning begins.
+
+### Cross-Repository Linking
+
+The killer feature is cross-repo linking. If you work across `frontend`, `backend`, and `shared-libs` repositories, Modulus can:
+
+- Detect when an agent in `frontend` is calling something from `shared-libs`
+- Automatically pull `shared-libs` context into the `frontend` agent session
+- Tag memory entries with the repository they came from, so agents know which repo owns which decision
+
+This is the key difference from simply having a shared notes document. Modulus understands code structure and dependency relationships.
+
+### Performance Considerations
+
+Indexing a large repository (>50k files) takes 10-20 minutes on first run. After that, incremental indexing only processes changed files.
+
+Memory usage is proportional to repository size and memory policy settings. A medium project with default settings typically uses 200-500 MB of RAM.
+
+The vector store runs locally. No cloud sync, no external embedding API calls.
+
+## Practical Evaluation Checklist
+
+- [ ] Download and install from modulus.so
+- [ ] Add 2+ repositories to your workspace
+- [ ] Launch a coding agent in one repo, make a change, mark it as a "key decision"
+- [ ] Switch to the second repo, launch a new agent session, verify shared memory is accessible
+- [ ] Adjust memory policy settings and observe token usage in agent responses
+- [ ] Test cross-repo linking: edit a shared utility, verify downstream agents see the change
+- [ ] Evaluate indexing quality: does the agent retrieve relevant context when prompted?
+- [ ] Check resource usage: RAM and CPU during active indexing vs. idle
+
+## Security Notes
+
+- **Local-only processing**: Embeddings are computed on-device. No data leaves your machine for memory storage.
+- **Repository access**: Modulus requests filesystem access to the folders you add. This is necessary for indexing but means you should only add repos you trust.
+- **Agent data sharing**: Everything agents write to shared memory is stored locally. No telemetry or memory snapshots are sent anywhere.
+- **No authentication**: The local app has no user accounts or access controls. If multiple people use the same machine, they share the same memory store.
+
+## FAQ
+
+**Q:** Does Modulus work with all AI coding agents?
+
+**A:** Modulus officially supports Claude Code, Cursor (agent mode), and Copilot Chat in JetBrains/VS Code. Other agents may work through the generic "manual context injection" feature, but compatibility is not guaranteed.
+
+**Q:** How is this different from just using a shared Notion document or README for project context?
+
+**A:** A shared document requires a human to decide what's important and paste it in. Modulus automatically captures what the agent reads and writes, and retrieves relevant context at the right moment — without human intervention. It also understands code structure, not just text.
+
+**Q:** Can I use Modulus without an internet connection?
+
+**A:** Yes. All indexing, embedding, and retrieval runs locally. The only times internet is needed are (1) downloading the installer and (2) calling the AI model's API when an agent is actually running.
+
+**Q:** What happens to my memory if I delete the Modulus app?
+
+**A:** The vector store is stored in `~/Library/Application Support/Modulus/` (macOS) or `%APPDATA%\Modulus\` (Windows). Uninstalling the app does not delete this folder — you'll need to manually remove it if you want a clean slate.
+
+**Q:** Does Modulus support team collaboration with shared memory?
+
+**A:** Not yet. Currently all memory is local to one machine. Team-shared memory is on the roadmap but has no announced release date.
+
+## Conclusion
+
+Modulus addresses a real problem that every developer hits once they're working with AI coding agents in earnest: agents are stateless, but codebases aren't. Cross-repository context loss is a silent productivity killer — you don't notice it until you watch an agent make a mistake that was already fixed six weeks ago.
+
+The local-first architecture is a strong point. Nothing leaves your machine. The embedding model runs on-device, which means there's no ongoing API cost and no privacy risk.
+
+The cross-repo linking feature is genuinely useful if you work across multiple related repositories. Most other solutions just give you a shared clipboard or notes panel — Modulus actually understands the dependency graph between your repos.
+
+That said, the tool is young. The UI is functional but sparse, the agent integration list is short, and team collaboration features don't exist yet. If you're a solo developer with 2-3 repos, Modulus is already useful. If you're a team waiting for shared memory across machines, you'll need to wait.
+
+**Try it at [https://modulus.so](https://modulus.so)** — free for personal use, no account required.
