@@ -124,4 +124,4 @@ Please do not report security vulnerabilities through public issues. See [SECURI
 
 ## License
 
-No license file is currently included. Until one is added, all rights are reserved by the repository owner.
+RunAny is licensed under the [MIT License](./LICENSE).
