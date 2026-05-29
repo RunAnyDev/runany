@@ -1,0 +1,217 @@
+---
+title: "Step CI – Open-Source API Testing Framework"
+description: "Step CI is an open-source API testing framework that supports REST, GraphQL, gRPC, and SOAP. Define tests in YAML, generate from OpenAPI specs, and run in any CI pipeline."
+pubDate: "2026-05-29"
+tags: ["api-testing", "dev-tools", "open-source", "graphql", "grpc"]
+category: "dev-tools"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/stepci-api-testing-framework.webp"
+  alt: "Step CI API Testing Framework thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Step CI is an open-source, language-independent API testing framework that handles REST, GraphQL, gRPC, and SOAP — define tests in YAML and run them anywhere.
+
+## Source and Accuracy Notes
+
+- GitHub: [stepci/stepci](https://github.com/stepci/stepci) (1,857 stars, MPL-2.0)
+- Docs: [stepci.com](https://stepci.com)
+- Supports REST, GraphQL, gRPC, SOAP
+- Tests defined in YAML — no code required
+
+## What Is Step CI?
+
+Step CI is an open-source API testing and quality assurance framework built for developers who want to test APIs without being locked into a specific programming language or tooling ecosystem.
+
+Most API testing tools are tied to a specific language runtime — Postman collections require the Postman app, JMeter needs Java, and framework-specific test libs only work within their own ecosystem. Step CI breaks this pattern by using a YAML-based test definition format that works with any language, any framework, and any CI system.
+
+The project launched on HN and has accumulated 1,857 GitHub stars with strong community support. It has been featured in multiple Show HN posts with steady improvements over several releases.
+
+Key capabilities:
+- Define API tests in declarative YAML — no coding required to get started
+- Generate tests automatically from OpenAPI/Swagger specs
+- Support for REST, GraphQL, gRPC, SOAP, and tRPC APIs
+- Built-in load testing for both HTTP and gRPC endpoints
+- OAuth 2.0 (Client Credentials) and Client Certificate authentication
+- Reusable credentials across test suites
+- GitHub Actions native integration
+
+## Setup Workflow
+
+Step CI runs as a standalone CLI binary — no Node.js or runtime dependencies required for the core runner. Here's how to get started.
+
+### Step 1: Install the CLI
+
+```bash
+# macOS via Homebrew
+brew install stepci/tap/stepci
+
+# Linux (curl)
+curl -L https://stepci.io/install | bash
+
+# npm (if you prefer Node.js)
+npm install -g @stepci/stepci
+
+# Verify
+stepci --version
+```
+
+### Step 2: Create Your First Test File
+
+Create a file called `api-test.yml`:
+
+```yaml
+version: "1.1"
+
+env:
+  baseUrl: "https://jsonplaceholder.typicode.com"
+
+HttpSteps:
+  getPosts:
+    run: GET /posts/1
+    check:
+      status: 200
+      content-types:
+        json: true
+
+  createPost:
+    run: POST /posts
+    body:
+      title: "Test Post"
+      body: "API testing made simple"
+      userId: 1
+    check:
+      status: 201
+```
+
+### Step 3: Run the Tests
+
+```bash
+stepci run api-test.yml
+```
+
+If everything works, you'll see colored output showing each step passing or failing with detailed request/response data on failure.
+
+### Step 4: Generate Tests from OpenAPI Spec
+
+One of Step CI's most useful features is auto-generating test templates from an existing OpenAPI spec:
+
+```bash
+stepci generate https://your-api.com/openapi.json > generated-tests.yml
+```
+
+This gives you a working test suite skeleton you can customize.
+
+## Deeper Analysis
+
+### How Tests Are Structured
+
+Step CI uses a YAML structure organized by protocol (HttpSteps, GRPCSteps, GraphQLSteps). Each step defines:
+
+- **run**: The request method and path
+- **body**: Request payload (when applicable)
+- **check**: Assertions on status codes, response fields, headers, content types
+- **before**: Setup steps that run before the main request
+- **after**: Teardown steps
+
+```yaml
+HttpSteps:
+  getUser:
+    run: GET /users/{userId}
+    before:
+      - run: POST /auth/login
+        body:
+          username: "testuser"
+          password: "testpass"
+        assign:
+          token: "x-auth-token"
+    after:
+      - run: DELETE /sessions/{sessionId}"
+    with:
+      userId: 1
+    headers:
+      Authorization: "Bearer {$.env.token}"
+    check:
+      status: 200
+      body:
+        id: 1
+        role: "admin"
+```
+
+### Load Testing
+
+Step CI also handles load testing, which many API testing tools hand off to separate tools:
+
+```yaml
+LoadSteps:
+  stressPostsEndpoint:
+    driver: phantom
+    steps:
+      - get: /posts
+    vus: 100
+    duration: 30s
+```
+
+This generates configurable load against your endpoints directly from the same test definition.
+
+### CI/CD Integration
+
+The native GitHub Actions integration makes it straightforward to run API tests in CI:
+
+```yaml
+- name: Run API Tests
+  uses: stepci/stepci-action@v1
+  with:
+    file: tests/api.yml
+    token: ${{ secrets.STEPCI_TOKEN }}
+```
+
+## Practical Evaluation Checklist
+
+- Language-independent test definitions (YAML only)
+- REST, GraphQL, gRPC, SOAP, tRPC coverage
+- Auto-generate tests from OpenAPI/Swagger specs
+- Load testing (HTTP and gRPC) built-in
+- OAuth and certificate-based auth supported
+- GitHub Actions native integration
+- Self-hosted runner (no cloud account required)
+- 1,857 GitHub stars, active maintenance
+
+## Security Notes
+
+- Credentials can be stored as environment variables or secrets manager references
+- The `before` step pattern lets you fetch short-lived tokens at test runtime rather than storing them statically
+- For client certificate auth, pass the cert/key path at runtime rather than hardcoding
+- When running in CI, use your CI provider's secret management to inject sensitive values
+
+## FAQ
+
+**Q:** Do I need to know how to code to use Step CI?
+
+**A:** No. The core test definition format is pure YAML — you can write complete test suites without writing a single line of code. That said, if you need custom logic, Step CI supports JavaScript within test steps.
+
+**Q:** How is this different from Postman or Insomnia?
+
+**A:** Postman and Insomnia are GUI-based API clients. Step CI is a test-runner-first tool where tests are code-as-definition (YAML), designed for automated CI pipelines rather than manual exploration. You can import Postman collections into Step CI.
+
+**Q:** Can I test GraphQL APIs with it?
+
+**A:** Yes, GraphQLSteps provides first-class support with query, variables, and headers configuration.
+
+**Q:** Does it support contract testing?
+
+**A:** Not natively in the core tool, but the OpenAPI generation feature means you can validate your live API against its published spec as a form of contract testing.
+
+**Q:** Is there a hosted/cloud version?
+
+**A:** The core runner is open-source and self-hosted. The team also offers a hosted platform at stepci.com with monitoring and collaboration features.
+
+## Conclusion
+
+Step CI fills a real gap in the API development workflow — a language-neutral, YAML-driven testing framework that supports the major API paradigms and integrates cleanly into modern CI pipelines. Whether you're testing a REST microservice, a gRPC backend, or a GraphQL endpoint, the same tool handles it. The auto-generation from OpenAPI specs alone saves hours of boilerplate writing.
+
+If you're managing APIs across multiple languages or need a more portable alternative to framework-specific test libs, Step CI is worth a close look.
