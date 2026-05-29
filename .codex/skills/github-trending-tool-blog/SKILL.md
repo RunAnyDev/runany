@@ -1,3 +1,8 @@
+---
+name: github-trending-tool-blog
+description: Create and publish runany.dev blog posts about newly popular GitHub developer or AI tools, including repo research, thumbnail workflow, SEO review, validation, commit, and push rules.
+---
+
 # GitHub Trending Tool Blog
 
 Use this skill to create runany.dev blog posts about newly popular GitHub developer or AI tools. The Codex agent writes the article with its current model. Do not make `scripts/create-github-trending-tool-post.mjs` call an AI API to write content.
