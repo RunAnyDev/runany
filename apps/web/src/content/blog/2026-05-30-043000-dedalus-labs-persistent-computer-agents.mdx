@@ -1,0 +1,178 @@
+---
+title: "Dedalus Labs – Full Linux Machines for AI Agents in 250ms"
+description: "Dedalus Labs spins up persistent full Linux VMs for AI agents in under 250ms. No Dockerfiles, no YAML configs — just SSH, GPU, and a Python SDK. Backed by Y Combinator."
+pubDate: "2026-05-30"
+tags: ["ai-agents", "mcp", "dev-tools", "cloud", "yc"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dedalus-labs-persistent-computer-agents.webp"
+  alt: "Dedalus Labs AI agent persistent computer thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Dedalus Labs gives AI agents their own persistent full Linux VMs that boot in under 250ms, with SSH access, root privileges, GPU support, and a simple Python/TypeScript/Go SDK to connect any LLM to any MCP tool.
+
+## Source and Accuracy Notes
+
+- Official site: [dedaluslabs.ai](https://www.dedaluslabs.ai)
+- Documentation: [docs.dedaluslabs.ai](https://docs.dedaluslabs.ai)
+- GitHub (MIT licensed): [github.com/dedalus-labs](https://github.com/dedalus-labs) — SDKs for Python, TypeScript, Go, and OpenAPI
+- YC launched: [Launch HN: Dedalus Labs (YC S25)](https://news.ycombinator.com/item?id=45054040)
+
+## What Is Dedalus Labs?
+
+When developers want AI agents to perform real tasks — running code, executing shell commands, interacting with APIs — they usually reach for cloud sandboxes: short-lived Docker containers or serverless functions. These work for simple tasks but hit walls fast. Sandbox environments lack root access, can't run Docker themselves, have no GPU support, and die when the session ends, losing all state.
+
+Dedalus Labs flips this model. Instead of a sandbox, you get a **persistent Linux machine** — a full VM that boots in under 250 milliseconds and stays alive (sleeping when idle, waking on demand) between sessions. Your agent can install whatever it needs (`apt`, `pip`, `npm`, `cargo`), SSH in at any time, and the filesystem persists across sessions. When you're done, it goes back to sleep and you only pay for active compute.
+
+The core idea is purpose-built for AI agents: equip any LLM with powerful tool-calling capabilities by connecting it to MCP servers deployed on Dedalus machines — without writing Dockerfiles or wrestling cloud configs.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+curl -fsSL https://www.dedaluslabs.ai/install/dedalus | bash
+```
+
+The CLI works on macOS, Linux, and (with minor tweaks) Windows.
+
+### Step 2: Authenticate
+
+Sign up at [dedaluslabs.ai](https://www.dedaluslabs.ai) and grab your API key. Set it as an environment variable:
+
+```bash
+export DEDALUS_API_KEY=<YOUR_API_KEY>
+```
+
+### Step 3: Create Your First Machine
+
+```bash
+dedalus machines create --vcpu 1 --memory-mib 1024 --storage-gib 10
+```
+
+Machines boot in under 250ms. The CLI returns the machine ID (`dm-<id>`) almost instantly.
+
+### Step 4: Connect an LLM to MCP Tools
+
+The Python SDK connects your LLM to any MCP tool running on your Dedalus machine:
+
+```python
+from dedalus import Dedalus, DedalusRunner
+
+client = Dedalus()
+runner = DedalusRunner(client)
+
+result = runner.run(
+    input="List the files in /tmp and tell me which ones are larger than 1MB",
+    tools=[" filesystem", " shell"],
+    mcp_servers=["author/server-1", "author/server-2"],
+    model=["openai/gpt-4.1", "anthropic/claude-sonnet-4-20250514"],
+    stream=True,
+)
+stream_sync(result)  # Streams result, supports tool calling too
+```
+
+The `DedalusRunner` handles tool execution, response streaming, and multi-step workflows. No YAML configuration, no Docker deployment, no networking handwiring — tools register by name and just work.
+
+### Step 5: SSH In (Optional)
+
+For debugging or manual inspection:
+
+```bash
+dedalus ssh dm-<id>
+```
+
+### Step 6: GPU Support
+
+For ML training or CUDA workloads:
+
+```bash
+dedalus machines create --vcpu 4 --memory-mib 32768 --gpu-count 1 --storage-gib 500
+```
+
+## Deeper Analysis
+
+### Why This Matters for AI Agent Development
+
+The gap between "demo AI agent" and "production AI agent" is mostly infrastructure. A demo works because someone pre-installed dependencies, pre-seeded state, and pre-configured auth. Production agents need to do all of that themselves, inside a runtime environment that survives across tool calls.
+
+Traditional approaches in this space include:
+
+- **Cloud sandboxes** (Modal, Railway, etc.) — ephemeral, stateless, limited filesystem
+- **Docker containers** — no persistent state across sessions, no root access in most configs
+- **SSH bastion VMs** — slow to boot (30–60 seconds), manually managed
+- **Local dev machines** — not accessible for remote agents, no GPU access
+
+Dedalus targets the specific agentic workflow where you want persistent, stateful machines that boot fast enough to not feel virtualized. The 250ms boot time is the keynumber — it means an agent can spin up a machine per task, use it, and let it sleep between steps without awkward latency.
+
+### The MCP Connection
+
+The Model Context Protocol (MCP) is becoming the standard for giving LLMs tool access. Most MCP servers today require you to run a local server, manage authentication tokens per workspace, and wrangle endpoint URLs. Dedalus deploys MCP servers as **streamable HTTP services** uploaded to Dedalus Machines — once deployed, the platform handles routing and auth.
+
+The Dedalus SDK then connects any LLM (OpenAI, Anthropic, Google, etc.) to those MCP servers without per-change redeploys. Their SDKs are MIT-licensed and live on GitHub:
+
+- [dedalus-sdk-python](https://github.com/dedalus-labs/dedalus-sdk-python) — MIT
+- [dedalus-sdk-typescript](https://github.com/dedalus-labs/dedalus-sdk-typescript) — MIT
+- [dedalus-sdk-go](https://github.com/dedalus-labs/dedalus-sdk-go) — MIT
+- [dedalus-openapi](https://github.com/dedalus-labs/dedalus-openapi) — MIT
+
+### VM-Level Isolation
+
+Unlike Docker containers which share the host kernel, Dedalus uses VM-level isolation with a kernel boundary. This makes it safe to run untrusted agent-generated code — the VM is hardware-isolated, with root access contained within the guest. Sandboxes can't do this: they typically run untrusted code in the same process space as the host.
+
+### Idle Compute Billing
+
+Machines bill only when running. When idle (no active SSH session, no running tool calls), a machine automatically enters sleep mode at ~$0.07–$0.11/hour depending on specs. This is substantially cheaper than keeping a full VM perpetually awake for intermittent agent workloads.
+
+## Practical Evaluation Checklist
+
+- **Boot speed**: Machine is ready in under 250ms — verified on the product site showing live machine list
+- **SDK support**: Python, TypeScript, Go, OpenAPI — MIT licensed on GitHub
+- **Isolation model**: VM-level (hardware kernel boundary), not container-level
+- **GPU support**: Yes — `dedalus machines create --gpu-count 1`
+- **Storage**: 500 GB disk default for GPU machines
+- **Runtimes**: Python, Node.js, Rust, Go, Java, Ruby, plus system packages (`apt`, `pip`, `npm`, `cargo`, `brew`)
+- **Pricing model**: Per-second billing while awake, free while asleep
+- **Auth**: Their MCP auth solution is "coming next month" per the HN launch — currently you handle your own token management
+- **MCP marketplace**: Planned — allows monetizing tools with built-in billing and rev-share
+- **Y Combinator backing**: S25 batch — credibility signal for a YC-backed infrastructure product
+
+## Security Notes
+
+- **VM isolation** is a stronger security boundary than Docker for running untrusted agent code — hardware-enforced memory isolation
+- **Root access within the VM** is yours — but the VM itself is isolated from the host and other VMs
+- **No pre-built MCP auth yet** — the team acknowledged the "S in MCP stands for security" problem and is building an auth solution (expected next month after launch)
+- **SOC 2 / GDPR**: Not yet visible on the site, but given the YC backing and institutional backing from HSG, compliance certification is likely in progress
+
+## FAQ
+
+**Q:** How is this different from Modal or other serverless code platforms?
+**A:** Modal runs ephemeral serverless functions — stateless, no SSH, dies after each call. Dedalus gives you persistent VMs that wake on demand and keep state across sessions. Modal is great for stateless functions; Dedalus is built for agents that need a real machine environment that persists and can be SSHed into.
+
+**Q:** Can I run Docker inside a Dedalus VM?
+**A:** Yes. Unlike sandbox environments that block Docker, Dedalus VMs have full root access and Docker support. You can pull images, run containers, and do anything a normal Linux machine can do.
+
+**Q:** What happens to my machine if I don't use it for a while?
+**A:** It goes to sleep automatically when idle. Sleep billing is ~$0.07–$0.11/hour depending on machine specs. You can also terminate it manually with `dedalus machines delete --machine-id dm-<id>`.
+
+**Q:** Does Dedalus work with local MCP servers?
+**A:** Yes — you can connect to local MCP servers via the SDK or upload streamable HTTP MCP servers to Dedalus Machines for cloud-hosted use. Both patterns are supported.
+
+**Q:** When is the MCP auth solution coming?
+**A:** The team said on HN that their auth solution for MCP servers is "high on the priority list" and launching within a month of their S25 launch (July 2025). Verify current status at [docs.dedaluslabs.ai](https://docs.dedaluslabs.ai).
+
+## Conclusion
+
+Dedalus Labs is solving the right problem: giving AI agents a real machine environment — persistent, stateful, fast-booting — instead of forcing them to work through sandbox constraints. The under-250ms boot time, VM-level isolation, and MCP SDK make this a credible infrastructure layer for agentic applications.
+
+The product is fresh from YC S25, MIT-licensed SDKs are on GitHub, and the platform is live. If you're building AI agents that need more than stateless function calls, Dedalus is worth a look — especially if you've hit the limits of sandbox-style cloud execution.
+
+**Links:**
+- [dedaluslabs.ai](https://www.dedaluslabs.ai) — sign up, get an API key
+- [docs.dedaluslabs.ai](https://docs.dedaluslabs.ai) — quick start and examples
+- [github.com/dedalus-labs](https://github.com/dedalus-labs) — MIT-licensed SDKs
