@@ -1,0 +1,173 @@
+---
+title: "Cicada – FOSS CI/CD That Replaces YAML With a Real Language"
+description: "Cicada replaces GitHub Actions and GitLab CI YAML configs with a custom functional DSL, letting you write pipelines using variables, functions, and shell commands."
+pubDate: "2026-05-29"
+tags: ["cicd", "self-hosted", "open-source", "devops", "github-actions"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cicada-foss-cicd-platform.webp"
+  alt: "Cicada FOSS CI/CD platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cicada is a self-hostable CI/CD platform that replaces YAML workflow files with a custom functional DSL — letting you write pipelines with variables, conditionals, and shell commands instead of brittle YAML indentation.
+
+## Source and Accuracy Notes
+
+- **Official site:** [cicada.sh](https://cicada.sh)
+- **GitHub repo:** [Cicada-Software/cicada](https://github.com/Cicada-Software/cicada) (568 stars, AGPL-3.0)
+- **Documentation:** [docs/installing.md](https://github.com/Cicada-Software/cicada/blob/main/docs/installing.md)
+- **Demo:** [GitHub Codespaces](https://github.com/codespaces/new/Cicada-Software/cicada?quickstart=1)
+
+## What Is Cicada?
+
+GitHub Actions and GitLab CI both share the same fundamental constraint: your pipelines are defined in YAML. YAML is fine for simple lint → test → build sequences. But the moment you need conditional logic, reusable functions, or anything beyond a straight line of steps, you end up embedding shell scripts anyway — and YAML was never designed to hold shell scripts.
+
+Cicada takes a different approach. Instead of YAML, you write pipelines in a **custom functional DSL** built specifically for CI/CD workflows. The Cicada DSL is a fully functional programming language: you get variables, function definitions, shell command execution, and platform-agnostic event handling. A single workflow file works across both GitHub and GitLab without modification.
+
+The core pitch from founder Logan Hunt (who built this after years using GitHub Actions, GitLab CI, and Azure DevOps at a previous job): YAML-based pipelines fail at anything complex, and every platform uses a different YAML dialect — locking you in.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Try It Without Installing
+
+The fastest way to evaluate Cicada is via GitHub Codespaces:
+
+```bash
+# Click the badge in the README or open:
+# https://github.com/codespaces/new/Cicada-Software/cicada?quickstart=1
+
+# This spins up a cloud dev environment with Cicada pre-configured.
+# You'll have a working demo server without installing anything locally.
+```
+
+### Step 2: Self-Host on a VPS
+
+For a permanent self-hosted setup, clone and run on your own server:
+
+```bash
+# Clone the repository
+git clone https://github.com/Cicada-Software/cicada
+cd cicada
+
+# Create a virtual environment and install dependencies
+python3 -m virtualenv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run database migrations
+python3 -m cicada.api.infra.migrate
+
+# Start the server
+export CICADA_DOMAIN=yourdomain.here
+export CICADA_USER=your-github-username
+python3 -m cicada.api
+```
+
+The `CICADA_DOMAIN` must be a publicly accessible domain (not `localhost`) since GitHub needs to redirect back to it for OAuth. Use [ngrok](https://ngrok.com/) for local development if you don't have a domain handy.
+
+### Step 3: Connect GitHub or GitLab
+
+Once the server is running, navigate to the URL it outputs. Cicada walks you through a **GitHub App setup wizard** — click the green button, authorize on GitHub, and restart the server. The wizard creates your `.env` file and SSH key automatically.
+
+For GitLab, you'll set up a webhook manually following [the docs](https://github.com/Cicada-Software/cicada/blob/main/docs/making-a-gitlab-webhook.md).
+
+### Step 4: Write Your First Workflow
+
+Cicada workflows live in a `.cicada/` directory at your repository root. Here's what the DSL looks like — the [getting started docs](https://github.com/Cicada-Software/cicada/blob/main/docs/getting-started.md) point to the [ci-lang getting started guide](https://github.com/Cicada-Software/cicada/blob/main/docs/ci-lang/getting-started.md) for the full syntax:
+
+```cicada
+# Define a reusable function
+fn run_tests(path: str) {
+  sh("cd " + path)
+  sh("npm install")
+  sh("npm test")
+}
+
+# Trigger on push and pull request events
+on.push()
+on.pull_request()
+
+# Run the pipeline
+run_tests("./my-project")
+```
+
+The key difference from YAML: `run_tests` is a real function you can call with different arguments, not a reusable step reference you have to copy-paste.
+
+## Deeper Analysis
+
+### Why a Custom DSL?
+
+YAML pipelines are essentially configuration files with embedded script blocks. The problem is that YAML has no abstraction mechanisms — if you need the same three-step sequence in ten different workflows, you copy-paste or you reach for a template system that adds complexity on top of an already fragile format.
+
+Cicada's DSL solves this the way any programming language would: define a function once, call it everywhere. The DSL is also **platform-agnostic by design**. A `git.push()` event from GitHub looks identical to a `git.push()` event from GitLab. Your workflow code doesn't change when you switch CI providers — which is the entire point.
+
+The tradeoff is that you need to learn a new language. For small teams with simple pipelines, this might not be worth it. For teams with complex, conditional CI logic that's currently held together by Makefiles and shell scripts embedded in YAML, Cicada's approach is genuinely cleaner.
+
+### Current State and Maturity
+
+Cicada is early-stage software. The founder explicitly notes in the HN launch thread that the MVP is functional but far from complete. Features like `if` statement support are listed as "coming soon." The hosted version is running on a small Linode server with no rate limiting initially — the whitelist was removed for the launch period, which means it could get overwhelmed quickly.
+
+That said, the core workflow execution engine works, Docker-based runner support is in place ([self-hosted runner docs](https://github.com/Cicada-Software/cicada/blob/main/docs/self-hosted-runner.md) exist), and the GitHub App wizard handles the trickiest part of integration (OAuth) automatically.
+
+### Python-Based Backend
+
+The backend is written in Python (with the web framework not specified in the README, but the migration command suggests a reasonable setup). Python is a pragmatic choice for a project at this stage — easy to write, easy to extend, and familiar to most developers who might want to contribute or customize it.
+
+## Practical Evaluation Checklist
+
+- [ ] Spin up the GitHub Codespaces demo in under 5 minutes
+- [ ] Connect one GitHub repository via the wizard
+- [ ] Write a simple workflow that runs on `push` and `pull_request`
+- [ ] Verify the workflow executes and produces logs in the web UI
+- [ ] Test the self-hosted runner on a VPS
+- [ ] Evaluate whether the DSL learning curve is worth the abstraction benefits for your use case
+
+## Security Notes
+
+- The GitHub App OAuth flow requires a publicly accessible domain — don't expose your self-hosted instance without HTTPS and proper firewall rules.
+- Your `.env` file and private key (generated during GitHub App setup) must be kept secret; they grant access to your GitHub repositories.
+- For organization use, review GitHub App permissions carefully before granting access to all repositories.
+- The self-hosted runner executes arbitrary shell commands in Docker containers — treat workflow files from untrusted contributors with the same caution you'd apply to any CI system.
+
+## FAQ
+
+**Q:** Can I use Cicada without a public domain?
+
+**A:** For the GitHub App integration, yes — use a reverse proxy like [ngrok](https://ngrok.com/) to expose your local server during setup. The GitHub OAuth redirect must reach your instance, but once configured, the webhook receiver is the only incoming connection needed.
+
+---
+
+**Q:** How does Cicada compare to just using GitHub Actions?
+
+**A:** If your pipelines are straightforward (lint → test → build → deploy), GitHub Actions YAML is perfectly adequate and has a massive ecosystem of actions. Cicada's advantage appears when your pipelines have complex conditional logic, repeated patterns that need abstraction, or when you want to avoid vendor lock-in between GitHub and GitLab.
+
+---
+
+**Q:** Does Cicada work with self-hosted runners?
+
+**A:** Yes. The [self-hosted runner documentation](https://github.com/Cicada-Software/cicada/blob/main/docs/self-hosted-runner.md) covers deploying runners on your own infrastructure, separate from the Cicada server.
+
+---
+
+**Q:** Is the DSL documented?
+
+**A:** The [ci-lang directory](https://github.com/Cicada-Software/cicada/tree/main/docs/ci-lang) in the docs covers the language syntax. The project also provides [Neovim syntax highlighting](https://github.com/Cicada-Software/tree-sitter-cicada) built with Tree-sitter.
+
+---
+
+**Q:** What's the license?
+
+**A:** AGPL-3.0. You can self-host and modify it, but if you distribute a modified version as a service, you must open-source your changes.
+
+## Conclusion
+
+Cicada is a bet that the CI/CD world has been doing YAML wrong — that pipelines are programs, not configurations, and should be written as such. The custom DSL approach is genuinely novel for this space, and for teams with complex pipeline logic currently held together by Makefiles and shell script hacks, it could be a significant improvement.
+
+The project is early and the founder is up front about it. But the core idea is sound, the self-hosting story is clean, and the GitHub Codespaces demo means you can evaluate it without installing anything. If you've ever fought YAML indentation bugs or copy-pasted the same five-step sequence across twenty workflow files, Cicada is worth 20 minutes of your time.
+
+Try it at [cicada.sh](https://cicada.sh) or browse the source at [github.com/Cicada-Software/cicada](https://github.com/Cicada-Software/cicada).
