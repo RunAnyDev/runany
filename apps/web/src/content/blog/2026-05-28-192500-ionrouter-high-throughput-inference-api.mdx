@@ -1,0 +1,145 @@
+---
+title: "IonRouter – Fast Low-Cost AI Inference API"
+description: "IonRouter is a YC W26 inference API routing open-source and fine-tuned models via an OpenAI-compatible endpoint, built on a C++ runtime optimized for GH200 memory."
+pubDate: "2026-05-28"
+tags: ["ai-setup", "dev-tools", "inference-api", "open-source", "yc-w26"]
+category: "ai-setup"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ionrouter-high-throughput-inference-api.webp"
+  alt: "IonRouter AI inference API thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** IonRouter is a drop-in OpenAI-compatible inference API for open-source and fine-tuned models, built on a C++ runtime that squeezes more throughput out of GH200 memory bandwidth than traditional vLLM deployments — at a lower price point than Together or Fireworks.
+
+## Source and Accuracy Notes
+
+- Product: [https://ionrouter.io](https://ionrouter.io) (YC W26, Cumulus Labs)
+- Launch HN: [https://news.ycombinator.com/item?id=44081431](https://news.ycombinator.com/item?id=44081431) (72 points)
+- GitHub: No public repo yet — this is a hosted API product
+- API docs: Available at ionrouter.io
+
+## What Is IonRouter?
+
+Every AI engineering team hits the same wall eventually: GPU inference is either fast-and-expensive (Together AI, Fireworks AI — you pay for always-on GPU capacity) or cheap-and-DIY (Modal, RunPod — you hand-configure vLLM, deal with cold starts, and maintain the infrastructure yourself).
+
+IonRouter (from Cumulus Labs, YC W26) is the middle path. It offers an OpenAI-compatible inference API that routes to any open-source model or a custom fine-tuned one, running on IonRouter's own inference engine. The pitch: swap your base URL, keep your existing client code, get better throughput at a lower price.
+
+The secret sauce is **IonAttention** — a C++ inference runtime the team built from scratch, designed specifically around the GH200's unified memory architecture. Rather than treating GH200 as a compatibility target (run vLLM, spill to CPU memory as overflow), IonRouter built around what makes the hardware actually interesting: the high memory bandwidth between CPU and GPU.
+
+The founders include Veer and Suryaa — the latter spent years at TensorDock building GPU orchestration infrastructure, and the former led ML infrastructure and Linux kernel development for Space Force and NASA contracts.
+
+## Why Inference Cost Is a Real Problem
+
+If you've shipped a product that calls GPT-4 or Claude API at scale, you know the math gets uncomfortable fast. Token costs compound. Every RAG pipeline, every agent loop, every embedding lookup adds up.
+
+The self-hosted path (vLLM on Modal or RunPod) looks cheap on paper but has hidden costs: cold start latency, vLLM configuration complexity, GPU availability during traffic spikes, and the engineering time to keep it running reliably. For small teams shipping products — not infrastructure — that's a bad tradeoff.
+
+IonRouter sits in that gap. You pay per token, get managed infra, but the cost efficiency comes from the GH200-optimized runtime squeezing more tokens/second out of the same hardware.
+
+## Setup Workflow
+
+### Step 1: Get an API Key
+
+Sign up at [ionrouter.io](https://ionrouter.io). The free tier gives you enough to evaluate throughput and cold start behavior. Pricing you'll need to evaluate against your traffic profile.
+
+### Step 2: Swap the Base URL
+
+If you're using OpenAI's SDK or any OpenAI-compatible client:
+
+```bash
+# Before (OpenAI)
+OPENAI_BASE_URL="https://api.openai.com/v1"
+
+# After (IonRouter)
+OPENAI_BASE_URL="https://api.ionrouter.io/v1"
+```
+
+That's the entire migration for most codebases. IonRouter speaks the OpenAI chat completions format, so no client code changes needed.
+
+### Step 3: Choose Your Model
+
+IonRouter gives you access to a range of open-source models. You can also bring your own fine-tuned weights. The routing layer picks the right model based on your request — or you can pin a specific model if you prefer.
+
+Check the docs for the current model list:
+
+```bash
+curl https://api.ionrouter.io/v1/models \
+  -H "Authorization: Bearer $IONROUTER_API_KEY"
+```
+
+### Step 4: Test a Completion
+
+```bash
+curl https://api.ionrouter.io/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $IONROUTER_API_KEY" \
+  -d '{
+    "model": "meta-llama/Llama-3-70b-instruct",
+    "messages": [
+      {"role": "user", "content": "Explain why GH200 memory bandwidth matters for LLM inference."}
+    ],
+    "max_tokens": 200
+  }'
+```
+
+Response comes back in standard OpenAI format — parse it the same way you'd parse OpenAI's response.
+
+## Deep Dive: IonAttention and the GH200 Architecture
+
+Most inference stacks treat the NVIDIA GH200 (Grace Hopper Superchip) as a compatibility target: get vLLM to run on it, treat CPU memory as overflow when GPU VRAM fills up. It works, but it leaves performance on the table.
+
+The GH200's defining feature is its high-bandwidth CPU-to-GPU memory path — the NVLink-Chip-to-Chip (C2C) interconnect gives the CPU and GPU shared access to the same physical memory pool with much higher bandwidth than PCIe. IonAttention is built around this. Instead of treating CPU RAM as a fallback, IonRouter's runtime keeps the KV cache distributed across the unified memory in a way that maximizes the GH200's bandwidth advantage.
+
+The result is better tokens/second per dollar, particularly for longer contexts where KV cache bandwidth becomes the bottleneck rather than raw compute.
+
+## Practical Evaluation Checklist
+
+- [ ] Sign up and get API key (free tier available)
+- [ ] Run an existing workload through IonRouter vs your current provider
+- [ ] Compare latency at similar token throughput
+- [ ] Check cold start behavior vs Modal/RunPod self-hosted
+- [ ] Evaluate fine-tuning support if you need custom models
+- [ ] Check pricing against Together AI / Fireworks for your use case
+- [ ] Test with your actual production prompt patterns (long context, streaming)
+
+## Security Notes
+
+- API keys should be stored in environment variables, not hardcoded
+- IonRouter supports VPC peering for enterprise traffic (check docs)
+- As a hosted API, you are trusting IonRouter's infrastructure with your data — evaluate their data handling policy if your use case involves sensitive data
+
+## FAQ
+
+**Q:** How does IonRouter compare to Together AI or Fireworks AI?
+
+**A:** IonRouter targets the same use case (managed inference API for open-source models) but differentiates on price and throughput. The GH200-optimized runtime is their technical edge. Whether it wins for your workload depends on your token volume and latency requirements — test with your actual traffic patterns.
+
+**Q:** Can I use my own fine-tuned models?
+
+**A:** Yes. You can bring custom weights and IonRouter will serve them via their infrastructure. This is a key differentiator from providers that only offer fixed model pools.
+
+**Q:** What happens if IonRouter has an outage?
+
+**A:** Like any managed service, you're subject to their uptime. IonRouter doesn't yet have the multi-region redundancy of larger providers. Evaluate your application's tolerance for inference outages before going to production.
+
+**Q:** Is this open-source?
+
+**A:** The IonAttention runtime is not publicly available as open-source as of launch. IonRouter is a hosted API product from Cumulus Labs (YC W26).
+
+## Conclusion
+
+IonRouter is a credible answer to the "GPU inference is either too expensive or too much work" problem that every AI product team eventually hits. The OpenAI-compatible API makes migration trivial, and the GH200-optimized IonAttention runtime gives them a real technical differentiator on cost-per-token.
+
+If you're currently paying Together AI or Fireworks, or running vLLM on Modal/RunPod and spending engineering time on infra, IonRouter is worth an eval. The free tier lets you benchmark against your real workload before committing.
+
+The bigger story here is the GH200-as-a-first-class-citizen inference trend. As NVIDIA's mixed CPU-GPU architectures become more common in datacenters, expect more inference runtimes to follow IonRouter's lead and optimize for the interconnects rather than treating them as compatibility targets.
+
+**Next steps:**
+- Sign up at [ionrouter.io](https://ionrouter.io) and grab your free API key
+- Run your top-5 prompts through both IonRouter and your current provider
+- Compare tokens/second and cost per 1K tokens for your actual use case
