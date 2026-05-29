@@ -1,0 +1,165 @@
+---
+title: "Relvy – AI On-Call Runbooks That Fix Production Faster"
+description: "Relvy is an AI agent that automates on-call runbooks for DevOps and SRE teams—anchoring AI around deterministic runbook steps so engineers debug production issues in minutes, not hours."
+pubDate: "2026-05-29"
+tags: ["ai-tools", "devops", "automation", "yc-f24", "monitoring"]
+category: "review"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/relvy-ai-on-call-runbook-automation.webp"
+  alt: "Relvy AI on-call runbook automation thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Relvy embeds an AI agent directly into your on-call runbook workflow—connecting to your telemetry stack and code to automate incident investigation steps, so engineers verify AI findings in a notebook UI instead of starting from scratch every page.
+
+## Source and Accuracy Notes
+
+- Official site: [relvy.ai](https://www.relvy.ai)
+- Launch HN: [Launch HN: Relvy (YC F24) – On-call runbooks, automated](https://news.ycombinator.com/item?id=47702647) (48 points)
+- YC Profile: YC Fall 2024 batch
+
+## What Is Relvy?
+
+Every on-call shift starts the same way: a PagerDuty alert fires, you scramble to find the relevant runbook, paste logs into a chat window, and manually trace through dashboards hoping the error is obvious. Most teams have runbooks. Few runbooks actually get followed. Relvy changes that by making the AI *execute* the runbook.
+
+Relvy is an AI agent specifically built for production incident response. It connects to your observability stack (Datadog, Grafana, CloudWatch), your code repositories, and your existing runbook documents. When an alert fires, Relvy investigates autonomously—checking dashboards, detecting anomalies in time-series data, searching log patterns, and inspecting span trees—to surface a structured incident summary your team can verify and act on.
+
+The key insight from the founders: generic AI agents fail at production debugging not because the models are bad, but because raw telemetry data drowns them in noise. Relvy solves this with specialized telemetry analysis tools that filter signal from noise *before* feeding context to the agent.
+
+## Setup Workflow
+
+### Step 1: Install Relvy
+
+Relvy runs via Docker Compose on a local machine, or via Helm charts for Kubernetes, or you can sign up for the managed cloud version.
+
+```bash
+# Docker Compose (recommended for self-hosted)
+git clone https://github.com/relvy/relvy-deploy.git
+cd relvy-deploy
+docker-compose up -d
+```
+
+### Step 2: Connect Your Stack
+
+After startup, open the Relvy web UI and connect your integrations:
+
+- **Observability**: Datadog, Grafana, AWS CloudWatch, Prometheus
+- **Code**: GitHub or GitLab repositories
+- **Alert sources**: PagerDuty, OpsGenie, Slack webhooks
+- **Cloud provider**: AWS IAM roles for automated mitigation commands
+
+### Step 3: Create Your First Runbook
+
+Import existing runbooks or create new ones from the UI. Relvy's runbook format describes investigation *steps* (check X dashboard, look for Y pattern) that the AI agent can execute autonomously:
+
+```yaml
+# Example runbook step
+steps:
+  - name: "Check error rate spike"
+    action: "query_datadog"
+    metric: "error_rate"
+    threshold: ">5%"
+    time_range: "last_15m"
+  - name: "Isolate affected shards"
+    action: "check_apm_dashboard"
+    filter: "shard"
+  - name: "Check recent deployments"
+    action: "query_github_commits"
+    service: "{{service}}"
+    since: "last_deployment"
+```
+
+### Step 4: Let Relvy Investigate
+
+When an alert fires, either trigger Relvy manually or connect it to auto-respond from Slack. Relvy investigates and presents findings as a notebook with data visualizations—charts, log excerpts, anomaly highlights—that let you verify each step without replaying it yourself.
+
+## Deeper Analysis
+
+### Why On-Call AI Is a Hard Problem
+
+The founders point out that general-purpose AI agents score only 36% on root cause analysis benchmarks (OpenRCA dataset), even with frontier models. Three reasons:
+
+1. **Data volume** — A single production incident can generate millions of telemetry events. Dumping all of it into a context window overwhelms the model.
+2. **Enterprise context** — Understanding what a metric means requires knowing your specific architecture, service dependencies, and SLO thresholds.
+3. **Time pressure** — During an incident, you need answers in minutes. Agents that spend time exploring hypotheses waste critical time.
+
+### Relvy's Approach: Specialized Telemetry Tools
+
+Instead of a general-purpose agent, Relvy uses purpose-built tools for telemetry analysis:
+
+- **Anomaly detection** on time-series data that flags the relevant signal without requiring full data dumps
+- **Log pattern search** that groups similar errors and surfaces the root cause cluster
+- **Span tree analysis** for distributed tracing that identifies the failing service in a call graph
+- **Runbook anchoring** that constrains the agent to follow documented steps rather than explore freely
+
+The runbook is the control plane. The AI executes steps your team already decided are correct, instead of inventing its own investigation strategy.
+
+### Automatic Mitigation with Human Guardrails
+
+Relvy can run AWS CLI commands for automated mitigation (restarting instances, scaling services) but requires human approval before executing. This keeps the AI from making uncontrolled changes while still removing the manual steps from routine mitigations.
+
+### Pricing
+
+Relvy is free during beta. Pricing details were not publicly disclosed at launch.
+
+## Practical Evaluation Checklist
+
+- **Setup complexity**: Docker Compose install, connects to standard observability stack — moderate
+- **Customization**: Full runbook authoring with YAML steps, code integration
+- **Agent autonomy**: Executes runbook steps autonomously; mitigation requires approval
+- **Verification UX**: Notebook UI with data visualizations for engineer review
+- **Integrations**: Datadog, Grafana, CloudWatch, PagerDuty, Slack, GitHub
+- **Self-hosted**: Yes, Docker Compose or Helm — full data stays in your infra
+- **Latency**: Runs locally; investigation speed depends on your telemetry query performance
+
+## Security Notes
+
+- Data stays in your infrastructure when using self-hosted deployment
+- AWS IAM role permissions control what mitigation actions Relvy can take
+- Human approval gate prevents uncontrolled infrastructure changes
+- No training on your production data (beta policy)
+
+## FAQ
+
+**Q:** How does Relvy connect to my existing runbooks?
+
+**A:** You create runbooks directly in the Relvy UI using a structured YAML format that describes investigation steps with specific actions (query a metric, check a dashboard, search commits). Existing documents can be imported and converted to this format.
+
+---
+
+**Q:** Can Relvy fix problems automatically or just investigate?
+
+**A:** Relvy can investigate autonomously and recommend or execute mitigation steps (via AWS CLI) with human approval. Fully automated fixes without a human-in-the-loop are not supported—this is intentional for safety reasons.
+
+---
+
+**Q:** How is this different from just using Claude or GPT with my Datadog MCP server?
+
+**A:** Generic AI agents with raw telemetry access struggle with data volume and lack enterprise-specific context. Relvy's specialized telemetry tools pre-process signal from noise, and the runbook anchoring keeps investigations deterministic rather than exploratory. The result is faster, more reliable investigations that follow your team's documented best practices.
+
+---
+
+**Q:** Does Relvy support non-Datadog observability stacks?
+
+**A:** Yes—Relvy integrates with Grafana, AWS CloudWatch, and Prometheus. The list has been expanding. Check the documentation for the current supported integrations.
+
+---
+
+**Q:** Is there a managed cloud option?
+
+**A:** Yes, Relvy offers a cloud version in addition to self-hosted Docker Compose and Helm deployments.
+
+## Conclusion
+
+Relvy targets the gap between having on-call runbooks and actually following them under pressure. By making the AI agent execute documented investigation steps—rather than starting from raw telemetry every time—it brings consistency to incident response without sacrificing human oversight. The notebook-based verification UI is the right call: engineers need to build trust with AI-assisted debugging, and that means seeing what the AI found and why.
+
+If your team already struggles with alert fatigue, scattered runbooks, and "it was probably X" diagnoses, Relvy is worth evaluating. The self-hosted option keeps data in your environment, which matters for security-sensitive infrastructure teams.
+
+**Links:**
+
+- [relvy.ai](https://www.relvy.ai) — Official site
+- [HN Launch Thread](https://news.ycombinator.com/item?id=47702647) — 48 points, April 2026
