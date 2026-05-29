@@ -1,0 +1,235 @@
+---
+title: "Remotion – Make Videos Programmatically with React"
+description: "Create real MP4 videos using React components. Use code, data, and APIs to generate, automate, and scale video production. 48k GitHub stars."
+pubDate: "2026-05-29"
+tags: ["dev-tools", "react", "video", "typescript", "automation"]
+category: "dev-tools"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/remotion-setup-guide-open-source-typescript-ai-tool.webp"
+  alt: "Remotion make videos programmatically with React"
+---
+
+## TL;DR
+
+> **TL;DR:** Remotion lets you build videos as React components — use code, data binding, and real programming logic to generate MP4s programmatically at scale.
+
+## Source and Accuracy Notes
+
+- **Repo:** [remotion-dev/remotion](https://github.com/remotion-dev/remotion) (48k stars, TypeScript)
+- **Docs:** [remotion.dev/docs](https://remotion.dev/docs)
+- **License:** Two-tier — free for individuals/small teams, paid Company License for 4+ employees
+
+## What Is Remotion?
+
+Remotion is an open-source framework that lets you create videos using React. Instead of dragging timeline clips in Premiere, you write React components that render to MP4. This means:
+
+- **Version control your videos** — videos live in git
+- **Data-driven video generation** — pass JSON/CSV/API responses into components
+- **Reuse components** — build once, use across dozens of videos
+- **Scale rendering** — Lambda, serverless, or bulk render locally
+
+Real companies use it: Fireship made tutorial videos, GitHub Unwrapped generated personalized year-in-review videos for millions of users. Twitter/X's "Year on X" is also built with Remotion.
+
+## Quick Start
+
+### Install
+
+```bash
+npx create-video@latest my-video
+cd my-video
+npm run start
+```
+
+This scaffolds a Remotion project with a live preview server. Edit `src/Root.tsx` and watch your video update in real-time.
+
+### Your First Video
+
+```tsx
+import { Sequence, useVideoConfig, AbsoluteFill } from "remotion";
+
+const TitleCard: React.FC<{ title: string }> = ({ title }) => {
+  const { fps, durationInFrames } = useVideoConfig();
+  return (
+    <AbsoluteFill
+      style={{
+        backgroundColor: "#0a0a0a",
+        justifyContent: "center",
+        alignItems: "center",
+        fontSize: 80,
+        color: "white",
+      }}
+    >
+      <h1>{title}</h1>
+    </AbsoluteFill>
+  );
+};
+
+export const RemotionVideo: React.FC = () => {
+  return (
+    <>
+      <Sequence from={0} durationInFrames={150}>
+        <TitleCard title="Hello, Remotion" />
+      </Sequence>
+      <Sequence from={150} durationInFrames={150}>
+        <TitleCard title="Videos as Code" />
+      </Sequence>
+    </>
+  );
+};
+```
+
+`useVideoConfig()` gives you frame rate and duration. `AbsoluteFill` stacks layers. `Sequence` sequences them. Every standard CSS works.
+
+### Render to MP4
+
+```bash
+# Local render
+npx remotion render MyVideo out/video.mp4
+
+# With specific composition
+npx remotion render MyVideo out/video.mp4 --composition-id RemotionVideo
+```
+
+## Core Concepts
+
+### Composition
+
+A "composition" is a video definition — a React component with known dimensions, frame rate, and duration. Remotion introspects your component to give you a preview timeline.
+
+### Timing with `useCurrentFrame()`
+
+```tsx
+import { useCurrentFrame, interpolate } from "remotion";
+
+const SpinningLogo: React.FC = () => {
+  const frame = useCurrentFrame();
+  const rotation = interpolate(frame, [0, 30], [0, 360]);
+
+  return (
+    <div
+      style={{
+        transform: `rotate(${rotation}deg)`,
+        transition: "transform 0.1s",
+      }}
+    >
+      <img src="/logo.png" />
+    </div>
+  );
+};
+```
+
+`interpolate()` maps frame ranges to output values — standard Remotion animation pattern.
+
+### Data-Driven Videos
+
+```tsx
+const VideoFromData: React.FC<{ stats: Stats[] }> = ({ stats }) => {
+  return (
+    <>
+      {stats.map((stat, i) => (
+        <Sequence key={i} from={i * 90} durationInFrames={90}>
+          <StatCard stat={stat} />
+        </Sequence>
+      ))}
+    </>
+  );
+};
+
+// Render with data
+const data = await fetch("https://api.example.com/stats").then((r) => r.json());
+await renderComposition({
+  composition,
+  data,
+  output: "stats-video.mp4",
+});
+```
+
+This is where Remotion shines — one component, infinite variations from different data.
+
+## Rendering at Scale
+
+### Remotion Lambda
+
+Deploy video rendering to AWS Lambda:
+
+```bash
+npm install @remotion/lambda
+npx remotion lambda deploy
+```
+
+```tsx
+import { renderOnLambda } from "@remotion/lambda";
+
+const { renderId, bucketName } = await renderOnLambda({
+  region: "us-east-1",
+  functionName: "my-remotion-function",
+  composition: "RemotionVideo",
+  inputProps: { title: "Automated Video" },
+  framesPerLambda: 30,
+});
+```
+
+Lambda splits rendering across concurrent function invocations. A 10-minute video that takes 10 minutes locally renders in seconds on Lambda.
+
+### Batch Rendering
+
+For bulk video generation (thousands of personalized videos):
+
+```tsx
+const videos = await db.getAllTemplates();
+for (const template of videos) {
+  await renderOnLambda({
+    composition: "Template",
+    inputProps: template.data,
+    output: `videos/${template.id}.mp4`,
+  });
+}
+```
+
+Pair with an S3 bucket and a queue (SQS) for fully automated pipeline.
+
+## When Remotion Is the Right Tool
+
+**Wins:**
+- Data-driven video generation (analytics dashboards → video)
+- Personalized video at scale (unique video per user)
+- Version-controlled video assets in git
+- CI/CD video rendering pipelines
+- Recurring video formats (weekly reports, year-in-review)
+
+**Doesn't Fit:**
+- Video editing with complex non-linear timelines
+- Real-time collaboration on video projects
+- One-off creative work where visual drag-and-drop is faster
+
+## Security Notes
+
+- Remotion runs a headless Chromium via Puppeteer. Rendering is sandboxed but be aware of the attack surface if rendering untrusted user content.
+- The `@remotion/lambda` package requires AWS credentials with Lambda execution permissions.
+- If building a public video-generation service, implement rate limiting — Lambda costs accrue per render-second.
+
+## FAQ
+
+**Q: Can I use Remotion commercially?**
+**A:** Yes, under the Free License if you are an individual or a company of up to 3 people. Companies of 4+ need a Company License (starting at $100/month for Automators tier). See [remotion.dev/pricing](https://remotion.dev/pricing) for details.
+
+**Q: How does it compare to FFmpeg?**
+**A:** FFmpeg is a command-line stream processor. Remotion is a React component framework. FFmpeg excels at transcoding and simple concat operations. Remotion excels at composited, animated, data-driven video with developer ergonomics (Hot Module Replacement, TypeScript, component reuse).
+
+**Q: Does it require a GPU?**
+**A:** No. Rendering happens on CPU. Puppeteer/Chromium handles the compositing. Lambda uses standard AWS Lambda CPU (no GPU needed).
+
+**Q: What formats does it export?**
+**A:** MP4 (H.264), WebM (VP9), GIF, and image sequences (PNG, JPEG). Configuration via the `config` file.
+
+**Q: Can I use Three.js inside Remotion?**
+**A:** Yes. `@remotion/three` provides a `<Canvas>` component that works like react-three-fiber. You can render 3D scenes as video frames.
+
+## Conclusion
+
+Remotion is a genuinely unique tool — it brings software engineering practices (components, version control, CI/CD) to video production. 48k stars on GitHub and adoption by major platforms (GitHub Unwrapped, Fireship, Twitter/X) validate the approach.
+
+The sweet spot: developers building automated video pipelines, data-driven content, or personalized video at scale. If that describes your use case, `npx create-video@latest` and have a prototype running in 5 minutes.
