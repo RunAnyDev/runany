@@ -1,0 +1,143 @@
+---
+title: "Captain – Automated RAG Pipeline for Files"
+description: "Captain automates building and maintaining RAG pipelines for unstructured data. Index S3, GCS, and Google Drive in minutes with one API call."
+pubDate: "2026-05-29"
+tags: ["rag", "ai-setup", "vector-search", "yc-w26", "dev-tools"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/captain-automated-rag-pipeline-yc-w26.webp"
+  alt: "Captain – Automated RAG pipeline thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Captain is an AI tool that automates RAG pipeline setup for file-based data — index S3, GCS, or Google Drive in minutes with one API call, no manual ETL or tuning required.
+
+## Source and Accuracy Notes
+
+- Official site: [runcaptain.com](https://runcaptain.com)
+- Demo: [pg.runcaptain.com](https://pg.runcaptain.com) (search Paul Graham's essays)
+- YC Launch: [HN Thread](https://news.ycombinator.com/item?id=47366011) (221 points at time of writing)
+- Built by Lewis and Edgar (YC W26)
+
+## What Is Captain?
+
+Building a production-ready RAG pipeline for file data is deceptively hard. A working demo takes an afternoon. A pipeline that actually retrieves the right information consistently — with proper chunking, embeddings, reranking, and hybrid search — takes weeks of iteration.
+
+Captain automates the entire stack. One API call indexes cloud storage buckets (S3, GCS), Google Drive, individual files, or URLs. Under the hood, Captain handles text extraction, conversion to Markdown, chunking, embedding, storage, retrieval, reranking, and compliance metadata. You get semantic search over your unstructured files without assembling the pipeline yourself.
+
+The founders spent four years scaling RAG pipelines for enterprise clients before building Captain. Edgar's work at Purdue's NLP lab informed their chunking strategies. In demos, setting up a full RAG pipeline over Paul Graham's essays takes about three minutes.
+
+## Setup Workflow
+
+### Step 1: Sign Up and Get an API Key
+
+```bash
+# Sign up at https://runcaptain.com
+# Get your API key from the dashboard
+export CAPTAIN_API_KEY="your_key_here"
+```
+
+### Step 2: Index a Data Source
+
+```bash
+# Index an S3 bucket
+curl -X POST https://api.runcaptain.com/v1/sources \
+  -H "Authorization: Bearer $CAPTAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "s3",
+    "bucket": "my-documents",
+    "prefix": "reports/",
+    "recursive": true
+  }'
+```
+
+### Step 3: Query Your Data
+
+```bash
+# Semantic search across indexed content
+curl -X POST https://api.runcaptain.com/v1/query \
+  -H "Authorization: Bearer $CAPTAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "When should a startup be more cautious?",
+    "top_k": 10
+  }'
+```
+
+Response includes page number citations and source file metadata. The `/query` endpoint applies hybrid retrieval automatically — dense vector embeddings combined with full-text search using Reciprocal Rank Fusion (RRF), then reranked with Voyage's `rerank-2.5`.
+
+## Deeper Analysis
+
+### What Makes Captain Different
+
+Most RAG tools expose you to the underlying complexity. Captain abstracts it. The key tradeoffs they made:
+
+**Chunking strategy matters more than embedding model choice.** Captain initially used `gemini-embedding-001` but switched to Voyage's Contextualized Embeddings (`voyage-context-3`) because chunk-level embeddings that encode surrounding document context outperformed even newer Voyage 4 models. This is the kind of nuance that takes months of experimentation to discover.
+
+**Hybrid retrieval is not optional at scale.** Dense embeddings alone miss exact keyword matches. Full-text search alone misses semantic similarity. Captain combines both with RRF (Reciprocal Rank Fusion), then applies a second-stage reranker to surface the top 15 chunks from an initial pool of 50.
+
+**ETL quality determines everything downstream.** For complex PDFs, Captain uses Reducto. For images, Gemini 3 Pro. For basic OCR, Extend AI. The quality of extraction determines the ceiling for retrieval quality.
+
+### Limitations to Consider
+
+Captain is a managed service — your data goes to their infrastructure. For regulated industries with strict data residency requirements, this is a blocker. Self-hosted alternatives like RAGFlow or txtai give you more control but require significantly more setup effort.
+
+The tool is relatively new (YC W26, 2026). Enterprise features like SSO, audit logs, and custom retention policies are on the roadmap but may not be production-ready yet.
+
+### Performance Characteristics
+
+From the founders' data and public benchmarks:
+- Indexing throughput: depends on file size and format; complex PDFs are slower due to Reducto's extraction
+- Query latency: typically 200–800ms for hybrid search + reranking
+- Chunking: configurable chunk size, defaults optimized for code and prose
+- Storage: managed; you don't see the embedding store details
+
+## Practical Evaluation Checklist
+
+- [ ] Can I index my data source (S3/GCS/Drive) in under 5 minutes?
+- [ ] Does query response include source citations?
+- [ ] Is the hybrid retrieval (dense + sparse + rerank) working as expected?
+- [ ] Is data handling compliant with my company's requirements?
+- [ ] Is pricing predictable at my expected query volume?
+
+## Security Notes
+
+- API calls are authenticated via Bearer token
+- Metadata filters enable access control per document/folder
+- Data is processed on Captain's managed infrastructure — review their data processing agreement before using with sensitive data
+- No information provided yet on encryption at rest or SOC 2 compliance
+
+## FAQ
+
+**Q:** What file formats does Captain support?
+
+**A:** Captain processes PDFs, Markdown, plain text, Word docs, and more. Images within documents are handled via Gemini 3 Pro OCR. The pipeline converts everything to Markdown before chunking and embedding.
+
+**Q:** How is Captain different from building RAG with LangChain + a vector DB?
+
+**A:** LangChain gives you building blocks. Captain gives you a working pipeline. The difference is the weeks of tuning you'd spend on chunking strategies, embedding model selection, reranking, and hybrid search — all of which Captain handles out of the box.
+
+**Q:** Does Captain work with on-premise data sources?
+
+**A:** Currently cloud-only (S3, GCS, Google Drive). SFTP and SharePoint support are on the roadmap. For fully air-gapped environments, Captain is not yet suitable.
+
+**Q:** What does Captain cost?
+
+**A:** Captain offers a free month trial. Pricing details are on their website — plan tiers are usage-based (query volume + storage). Check [runcaptain.com/pricing](https://runcaptain.com) for current rates.
+
+**Q:** Can I use Captain with existing vector databases?
+
+**A:** Captain manages its own vector store. If you need to export embeddings to an external store (Pinecone, Weaviate, etc.), this is not currently supported. The pipeline is fully managed by Captain.
+
+## Conclusion
+
+Captain solves the undifferentiated heavy lifting of RAG pipeline construction. Instead of spending weeks tuning chunking, selecting embedding models, and wiring up hybrid retrieval, you get a working pipeline in minutes. The founders' expertise in NLP-informed chunking and their choice of contextualized embeddings (Voyage Context 3) suggest they understand the details that matter.
+
+The main caveat: Captain is a managed service. Your data leaves your infrastructure. For teams building on top of cloud storage who want semantic search without the RAG complexity, it is worth evaluating. For teams with strict data residency requirements, wait for self-hosted options or evaluate alternatives like RAGFlow.
+
+Try the live demo at [pg.runcaptain.com](https://pg.runcaptain.com) — ask Paul Graham's essays anything. The pipeline for that demo took Captain about 3 minutes to build.
