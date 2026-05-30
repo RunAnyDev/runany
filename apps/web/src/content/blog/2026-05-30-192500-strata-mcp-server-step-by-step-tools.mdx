@@ -1,0 +1,172 @@
+---
+title: "Strata – MCP Server That Reveals AI Tools Step by Step"
+description: "Strata is an open-source MCP server that reveals AI tools step-by-step as an agent works, instead of overwhelming it with thousands of tools at once."
+pubDate: "2026-05-30"
+tags: ["mcp", "ai-agents", "dev-tools", "open-source", "productivity"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/strata-mcp-server-step-by-step-tools.webp"
+  alt: "Strata MCP server step-by-step tools thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Strata is an open-source MCP server that reveals AI tools progressively as an agent works, preventing the overwhelm of dumping thousands of tools at once.
+
+## Source and Accuracy Notes
+
+- Official site: [https://www.klavis.ai/](https://www.klavis.ai/)
+- Strata GitHub: [https://github.com/klavis-AI/strata](https://github.com/klavis-AI/strata)
+- MCP specification: [https://modelcontextprotocol.io/](https://modelcontextprotocol.io/)
+- HN Launch: [https://news.ycombinator.com/item?id=45347914](https://news.ycombinator.com/item?id=45347914) (133 points)
+
+## What Is Strata?
+
+Most AI agents today connect to dozens or hundreds of tools via the Model Context Protocol (MCP). The problem: when an agent receives all available tools simultaneously, it slows down, picks the wrong tool, or simply ignores the majority of what's available.
+
+Strata flips this model. Instead of handing an agent the full tool catalog upfront, it reveals tools progressively — one step at a time, based on what the agent is actually trying to accomplish at that moment. Think of it as a smart concierge rather than handing someone a dictionary and asking them to write a novel.
+
+Built by Klavis AI, whose team previously worked on Google Gemini's tool use system, Strata is open-source and designed to work with any MCP-compatible agent.
+
+## Why Progressive Tool Revelation Matters
+
+When you give an LLM 200 tools at once, performance degrades in predictable ways:
+
+- **Tool selection errors** — the model picks a similar-sounding but wrong tool
+- **Latency spikes** — processing a large tool list adds latency to every inference call
+- **Context window waste** — massive tool descriptions consume your context budget
+- **Ignored capabilities** — agents tend to stick to familiar tools and ignore the rest
+
+Strata solves this by making tool availability context-dependent. An agent working on a database query sees only the database tools. When it moves to file operations, those tools appear. The same agent, different tool visibility based on actual need.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install Strata
+
+```bash
+npm install -g @klavis/strata
+# or
+pip install strata-mcp
+```
+
+### Step 2: Configure Your MCP Tools
+
+Create a `strata.config.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/path/to/files"]
+    },
+    "database": {
+      "command": "python",
+      "args": ["/path/to/db-mcp-server/main.py"]
+    }
+  },
+  "revelation": {
+    "mode": "progressive",
+    "maxVisible": 5
+  }
+}
+```
+
+### Step 3: Connect Your Agent
+
+Point your agent to Strata's MCP endpoint:
+
+```bash
+strata serve --port 3000
+```
+
+Then configure your agent to use `http://localhost:3000` as its MCP server. Strata handles tool routing, caching, and progressive revelation automatically.
+
+### Step 4: Verify the Setup
+
+```bash
+strata status
+# Expected output:
+# Strata MCP Server running on port 3000
+# Connected: filesystem, database
+# Revelation mode: progressive (max 5 visible)
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Strata sits between your agent and your MCP tool servers. It maintains a tool manifest and a revelation engine that decides which tools to surface based on:
+
+- Current conversation context
+- Explicit tool requests from the agent
+- Tool dependency chains (if tool A is requested, reveal tool B automatically)
+
+### Performance Impact
+
+In internal benchmarks shared on HN, Klavis reported:
+- 40% reduction in tool selection errors compared to full-disclosure MCP
+- 25% faster first-token latency due to smaller tool descriptions in context
+- 60% reduction in context window usage for multi-step tasks
+
+### Comparison to Standard MCP
+
+| Feature | Standard MCP | Strata |
+|---|---|---|
+| Tool disclosure | All at once | Progressive |
+| Context usage | Full tool list | Only visible tools |
+| Tool selection | Agent decides | Strata filters |
+| Setup complexity | Manual | Config + serve |
+
+### Limitations
+
+- Only works with MCP-compatible agents (but MCP is increasingly standard)
+- Progressive revelation requires well-described tools — poorly named tools still cause issues
+- Not a multi-agent orchestration tool — that's a separate problem
+
+## Practical Evaluation Checklist
+
+- Is your agent MCP-compatible?
+- Do you have more than 10 tools configured?
+- Is tool selection accuracy a bottleneck in your workflow?
+- Are you seeing context window pressure from large tool manifests?
+- Do you need context-dependent tool visibility (different tools for different tasks)?
+
+If you answered yes to 3 or more, Strata is worth evaluating.
+
+## Security Notes
+
+- Strata runs locally — no data leaves your infrastructure by default
+- Tool access is filtered at the server level, not the agent level
+- Audit logging is available via `strata audit-log --output logs.jsonl`
+- MCP server credentials are stored locally in the config file — use environment variable substitution for secrets
+
+## FAQ
+
+**Q:** Does Strata work with non-MCP agents?
+**A:** No — Strata is an MCP server implementation. It requires your agent to speak the MCP protocol. Most modern agent frameworks (LangChain, CrewAI, custom agents) support MCP.
+
+**Q:** How does Strata decide which tools to reveal?
+**A:** Based on conversation context, explicit tool requests, and a configurable revelation strategy. You can set `mode: "progressive"` for context-based revelation or `mode: "eager"` to reveal more tools upfront for simpler tasks.
+
+**Q:** Can I customize the revelation logic?
+**A:** Yes. Strata supports custom revelation plugins. You can write a JavaScript function that decides tool visibility based on your own business logic.
+
+**Q:** Does this work with existing MCP servers like Filesystem or Slack?
+**A:** Yes. Any standard MCP server works with Strata. You register it in `strata.config.json` and Strata handles the progressive revelation layer on top.
+
+**Q:** Is there a hosted version?
+**A:** Not yet. Klavis AI is focused on the self-hosted open-source version. A cloud offering may come later.
+
+## Conclusion
+
+Strata solves a real problem that appears as soon as you connect an agent to more than a handful of tools: the overwhelm of too many options. By revealing tools progressively based on actual context, it reduces errors, saves context window space, and makes agents more predictable.
+
+If you're running MCP with more than 10 tools and seeing tool selection issues, Strata is a low-friction fix. The setup is minimal, the config is straightforward, and the open-source license means you can audit the revelation logic.
+
+The team behind it has credible pedigree — they built tool use systems for Google Gemini. That experience shows in the API design: it's clean, the progressive mode works out of the box, and the fallback to eager mode is there when you need it.
+
+**Try it:** `npm install -g @klavis/strata` and point it at your existing MCP servers.
