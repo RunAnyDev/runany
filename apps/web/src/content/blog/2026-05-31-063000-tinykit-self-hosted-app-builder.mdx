@@ -1,0 +1,162 @@
+---
+title: "Tinykit – Self-Hosted Alternative to Lovable and Replit"
+description: "Tinykit is a self-hosted app builder powered by PocketBase, Svelte, and AI agents. Deploy unlimited apps on a $2/month VPS with your own API keys."
+pubDate: "2026-05-31"
+tags: ["self-hosted", "app-builder", "pocketbase", "svelte", "ai"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tinykit.webp"
+  alt: "Tinykit self-hosted app builder thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tinykit is a self-hosted, single-server alternative to Lovable and Replit — it runs on PocketBase with Svelte templates, deploys unlimited apps to their own domains, and uses an AI agent for one-shot app generation, all for the cost of a cheap VPS.
+
+## Source and Accuracy Notes
+
+- Official site: [tinykit.studio](https://tinykit.studio)
+- HN Launch: [Show HN: Tinykit – self-hosted Lovable, deploys to itself](https://news.ycombinator.com/item?id=46385040) (6 points)
+- GitHub: No public repo (pure self-hosted SaaS product)
+
+## What Is Tinykit?
+
+Tinykit is a self-contained, self-hosted alternative to Lovable, Replit, and v0 — built for developers who want the AI-accelerated app generation experience without surrendering control to a third-party platform. The entire stack runs on a single server you control, using PocketBase for the backend, Svelte for the frontend, and an embedded AI agent that generates and edits apps on your behalf.
+
+The pitch is straightforward: instead of paying $20–$100/month per project on hosted AI app builders, you spin up one cheap VPS, connect your API keys, and deploy unlimited apps to their own domains. A single $2/month server is enough to run the whole thing.
+
+Under the hood, Tinykit is architecturally elegant. A Node.js process sits alongside a PocketBase instance. PocketBase handles authentication, the database, file storage, and realtime subscriptions. The Node process routes incoming requests to the correct app based on the domain name each request originates from. Apps themselves are single `.svelte` files compiled to static HTML — lightweight, fast, and portable.
+
+## Setup Workflow
+
+### Step 1: Spin Up a VPS
+
+You need a server with Docker and a wildcard subdomain pointing to it. Any provider works — Hetzner, DigitalOcean, Linode. The author's example: a $2/month VPS is sufficient for personal use.
+
+```bash
+# SSH into your VPS
+ssh root@your-server
+
+# Install Docker if not present
+curl -fsSL https://get.docker.com | sh
+```
+
+### Step 2: Set Up Wildcard DNS
+
+Point a wildcard subdomain (`*.yourdomain.com`) at your server's IP. Each app gets its own subdomain, and Tinykit routes requests based on the hostname.
+
+```bash
+# Add an A record
+# *.yourdomain.com -> YOUR_SERVER_IP
+```
+
+### Step 3: Deploy Tinykit
+
+Clone and run the setup script:
+
+```bash
+git clone https://github.com/mmmateo/tinykit.git
+cd tinykit
+# Follow the setup instructions in the README
+```
+
+The setup script handles PocketBase initialization and the Node.js service configuration.
+
+### Step 4: Configure AI API Keys
+
+Tinykit uses your own API keys for the AI agent. Set them in the environment configuration:
+
+```bash
+# In your .env or configuration
+OPENAI_API_KEY=sk-...
+# or ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The agent works across all apps on your instance, so a single API key serves your entire app portfolio.
+
+### Step 5: Build Your First App
+
+Navigate to `https://appname.yourdomain.com/tinykit`. The AI agent interface lets you describe what you want — a todo list, a URL shortener, a CRM — and generates a working Svelte app in one shot. The generated app is a single `.svelte` file you can edit directly.
+
+## Deeper Analysis
+
+### Why Self-Hosting App Builders Makes Sense Now
+
+Lovable and Replit solved the "too much boilerplate" problem by injecting AI into the scaffolding. But they introduced a new dependency: your app lives on their infrastructure, subject to their pricing, their uptime, and their terms. For hobby projects and solo developers, this is usually fine — until it isn't.
+
+Tinykit takes a different approach. It bets that the combination of modern LLMs and mature open-source components (PocketBase is genuinely excellent) has reached a threshold where the "AI generates the app" workflow can happen entirely on infrastructure you own. The economics flip: instead of per-app SaaS fees, you pay once for the server.
+
+### The Architecture Decision: One Svelte File Per App
+
+Tinykit compiles generated apps to a single static HTML file. This is a deliberate constraint that serves multiple goals:
+
+1. **Simplicity** — one file is easy for the AI to generate and edit
+2. **Portability** — the output is framework-agnostic HTML
+3. **Performance** — no server-side rendering overhead for utility apps
+4. **Agent readability** — an AI editing a single file is far more reliable than one modifying a multi-file project structure
+
+The tradeoff is that complex interactive apps may outgrow the single-file model. Tinykit acknowledges this: it's aimed at "small personal utility and CRUD apps," not full-scale production applications.
+
+### PocketBase as the Backend Framework
+
+PocketBase has quietly become one of the most important open-source tools for solo developers. It provides auth, database, file storage, and realtime — everything most utility apps need — without requiring a separate deployment. Tinykit leans hard into this, using PocketBase not just for its own admin interface but as the backend runtime for every deployed app.
+
+The implication is that if PocketBase fits your data model, Tinykit gets you from idea to deployed app with almost zero overhead. If you need PostgreSQL, complex migrations, or worker queues, you'll hit the walls of the architecture quickly.
+
+### AI Agent Behavior
+
+The AI agent embedded in Tinykit has access to all the apps on your instance and can read/write across them. This enables cross-app automation — the agent can, for example, look up a user's record in one app and push a notification in another. The agent is also optional: you can build apps without AI assistance, using Tinykit purely as a deployment platform.
+
+## Practical Evaluation Checklist
+
+- **Ease of deployment:** Low — Docker compose up, wildcard DNS, done
+- **Cost:** VPS cost only (~$2–$10/month), own API keys
+- **AI quality:** Depends on your API key model and prompt quality
+- **App portability:** High — static HTML output, easy to migrate
+- **Limitation:** Single-file Svelte apps; complex apps need custom backend work
+- **Updates:** Self-hosted, you control when to update
+- **Data ownership:** Complete — all data stays on your server
+
+## Security Notes
+
+Tinykit inherits PocketBase's security model, which includes built-in auth, database-level permissions, and HTTPS enforcement. Key considerations:
+
+- **Network isolation:** Apps are separated by subdomain routing; ensure your PocketBase instance has proper collection permissions configured
+- **AI agent access:** The agent has elevated access to read and write data across apps on your instance — treat it like any other admin-level service
+- **API keys:** Your AI API keys live on the server; restrict access accordingly
+- **Updates:** PocketBase and Node.js components need regular updates for security patches
+
+## FAQ
+
+**Q:** What types of apps is Tinykit actually good for?
+
+**A:** CRUD apps, admin panels, internal tools, landing pages with a backend, hobby projects, and anything that fits in a single-page SPA. It struggles with real-time collaborative apps, high-traffic public products, and anything requiring a traditional multi-service backend.
+
+**Q:** How does this compare to WordPress or classic CMS platforms?
+
+**A:** WordPress is a CMS with extensibility through plugins. Tinykit is an AI-first app generator where the AI writes the application code. If WordPress is a pre-built house you customize, Tinykit is having an architect build you a house from scratch each time — with much more flexibility but more rough edges.
+
+**Q:** Can I use my own model provider for the AI agent?
+
+**A:** Yes. Tinykit uses OpenAI-compatible API endpoints. You can point it at OpenAI, Anthropic, local Ollama instances, or any compatible provider. This is one of its strongest advantages — you're not locked into a specific AI vendor.
+
+**Q:** What happens if PocketBase has issues or goes offline?
+
+**A:** PocketBase is the backend for all apps. If PocketBase goes down, all apps lose their database and auth. That said, PocketBase is mature and stable. For production-critical apps, you'd want to evaluate whether Tinykit's architecture meets your reliability requirements.
+
+**Q:** Can I export my apps to regular hosting?
+
+**A:** Yes. Each app is a compiled static HTML file. You can take that file and deploy it to any static host — Netlify, Vercel, Cloudflare Pages — and connect it to your own backend.
+
+## Conclusion
+
+Tinykit is a genuinely useful idea executed by someone who clearly lives in the space. The self-hosted Lovable/Replit comparison is apt, but it undersells the architectural insight: the combination of PocketBase, Svelte, and a good AI prompt library is powerful enough to replace a whole category of SaaS tools for solo developers.
+
+The target user is clear: a developer who has a dozen small ideas — a URL shortener, a shared grocery list, a time tracker for client billing — and is tired of either managing WordPress installations or paying $15/month per app on hosted platforms. Tinykit folds all of those into one cheap server with one AI agent and one consistent deployment model.
+
+It's not trying to be Vercel. It's trying to be the developer's personal platform, and it succeeds at that with minimal complexity.
+
+**Next steps:** If you have a VPS gathering dust, Tinykit is worth 30 minutes of your time to set up. The workflow from idea to deployed app is genuinely fast once you're inside the interface.
