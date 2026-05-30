@@ -1,0 +1,189 @@
+---
+title: "AgentMail – Email Inbox API for AI Agents"
+description: "AgentMail gives AI agents their own email inboxes via API. Create domains, configure webhooks, send and receive emails programmatically. From YC S25."
+pubDate: "2026-05-30"
+tags: ["ai-agent", "email-api", "yc-s25", "developer-tools", "automation"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agentmail-email-inbox-api-ai-agents-yc-s25.webp"
+  alt: "AgentMail email inbox API for AI agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AgentMail is an email inbox API built specifically for AI agents — create inboxes programmatically, send and receive emails via webhooks, and build agents that communicate through email like a natural interface.
+
+## Source and Accuracy Notes
+
+- Official site: [agentmail.to](https://agentmail.to)
+- HN Launch: [Launch HN: AgentMail (YC S25)](https://news.ycombinator.com/item?id=46812608) (169 points)
+- Demo: [youtube.com/watch?v=Y0MfUWS3LKQ](https://www.youtube.com/watch?v=Y0MfUWS3LKQ)
+
+## What Is AgentMail?
+
+AgentMail is an email inbox API from YC S25 designed for AI agents, not humans. The pitch: "Email for your AI" — not AI for your email.
+
+Traditional email APIs (Gmail, Outlook) are built for human users. They have per-seat pricing, OAuth requirements for every inbox, rate limits that do not account for agent-scale workloads, and no way to create inboxes programmatically. AgentMail built what they wished existed: an email provider for developers, with APIs for creating inboxes, configuring domains, parsing messages, and handling attachments at agent scale.
+
+Email as an agent interface has real advantages. It is asynchronous, multithreaded, supports rich text and files, has built-in identity and authentication, and already carries a lot of workflow-critical context. An agent can hit a stuck point, send an email to a human for clarification, and continue when it gets a reply.
+
+## How It Works
+
+AgentMail exposes a REST API for inbox management and email operations. Agents interact with it like any email provider — via SMTP for sending and webhooks for receiving.
+
+### Core API Operations
+
+```bash
+# Create a new inbox on your domain
+curl -X POST https://api.agentmail.to/v1/inboxes \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -d '{"domain": "inboxes.myapp.com", "name": "claude-task-42"}'
+
+# Send an email
+curl -X POST https://api.agentmail.to/v1/send \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -d '{
+    "from": "claude-task-42@inboxes.myapp.com",
+    "to": "user@example.com",
+    "subject": "Task complete — Price negotiation settled",
+    "body": "The agent negotiated a 12% discount with three vendors..."
+  }'
+
+# Receive via webhook
+# AgentMail POSTs incoming emails to your endpoint as JSON
+```
+
+### Webhook Payload
+
+When an email arrives at an AgentMail inbox, your endpoint receives a parsed payload:
+
+```json
+{
+  "inbox": "claude-task-42@inboxes.myapp.com",
+  "from": "vendor@supplier.co",
+  "subject": "Re: Quote for steel bearings",
+  "body_text": "Thanks for reaching out. Our best price is $2.40/unit...",
+  "attachments": [
+    { "filename": "quote-Q4731.pdf", "url": "https://storage.agentmail.to/..." }
+  ],
+  "thread_id": "thread_abc123"
+}
+```
+
+Attachments are automatically processed — text is extracted, PDFs are parsed, and files are stored with accessible URLs.
+
+## Real-World Agent Patterns
+
+The founders describe several deployment patterns already in use:
+
+**Document-to-data agents.** An agent receives an email with attachments (contracts, invoices, forms), extracts structured data using a VLM, and writes the data to a database or forwards it to the right system.
+
+**Procurement negotiation agents.** An agent sources quotes from multiple vendors via email, evaluates responses, negotiates further via email, and reports back with the best offer — all without human involvement until the final approval.
+
+**Training data collection agents.** Agents emulate real internet users end-to-end, including email-based flows, to collect training data for AI models.
+
+## Setting Up a Simple Agent Email Workflow
+
+### Step 1: Sign Up and Get an API Key
+
+```bash
+# Sign up at agentmail.to (free tier available)
+# Get your API key from the dashboard
+export AGENTMAIL_API_KEY="am_live_xxxxxx"
+```
+
+### Step 2: Verify a Domain
+
+```bash
+curl -X POST https://api.agentmail.to/v1/domains \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -d '{"domain": "agents.yourcompany.com"}'
+# Returns DNS records to add (MX, TXT, DKIM)
+```
+
+### Step 3: Create an Inbox
+
+```bash
+curl -X POST https://api.agentmail.to/v1/inboxes \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -d '{
+    "domain": "agents.yourcompany.com",
+    "name": "procurement-bot"
+  }'
+```
+
+### Step 4: Configure a Webhook
+
+In the dashboard, point your inbox to an HTTPS endpoint. AgentMail sends parsed email data as JSON — no MIME parsing required on your end.
+
+### Step 5: Build the Agent Loop
+
+```python
+import agentmail
+
+client = agentmail.Client(api_key=os.environ["AGENTMAIL_API_KEY"])
+
+# Poll for new emails
+while True:
+    messages = client.inbox("procurement-bot@agents.yourcompany.com").unread()
+    for msg in messages:
+        # Route to your agent logic
+        result = agent_router(msg)
+        if result.reply_needed:
+            client.send(
+                from_addr=msg.to,
+                to=msg.from_,
+                subject=f"Re: {msg.subject}",
+                body=result.response
+            )
+        client.inbox("procurement-bot@agents.yourcompany.com").mark_read(msg.id)
+    time.sleep(30)
+```
+
+## Semantic Search
+
+AgentMail includes semantic search across all inboxes:
+
+```bash
+curl "https://api.agentmail.to/v1/search?q=price+negotiation+discount&inbox=procurement-bot@agents.yourcompany.com" \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY"
+```
+
+This is useful for agents that need to reference past email context — instead of keyword matching, the search understands the meaning of the email thread.
+
+## Pricing
+
+The free tier includes 100 inboxes and 1,000 emails/month. Paid plans start at $29/month for 500 inboxes and 10,000 emails. Usage-based pricing scales without per-seat lock-in, which is important for agents that spawn many short-lived inboxes.
+
+## FAQ
+
+**Q:** How is this different from using Gmail API for agent workflows?
+
+**A:** Gmail's API has per-seat pricing, requires OAuth for each inbox, has strict rate limits, and has no way to create inboxes programmatically. AgentMail is designed for agent-scale workloads from the ground up — create hundreds of inboxes on the fly, pay for what you use, and receive parsed email data via webhook instead of raw MIME.
+
+**Q:** Can agents send email from existing domains?
+
+**A:** Yes. You can configure any domain you own — personal domains, company domains, or subdomains. AgentMail provides DKIM, SPF, and MX records for deliverability.
+
+**Q:** What happens to emails when my webhook endpoint is down?
+
+**A:** AgentMail retries with exponential backoff. Failed deliveries are queued and retried for up to 24 hours. You can also poll for missed messages via the API instead of relying solely on webhooks.
+
+**Q:** Is this suitable for high-volume agent workloads?
+
+**A:** Yes. The API is designed for agent-scale usage. The founders specifically mention usage-based pricing that works for agents — not per-seat pricing. If you are running hundreds of concurrent agent tasks that each need their own inbox, that model fits better than traditional email APIs.
+
+## Conclusion
+
+AgentMail addresses a real gap in the agent infrastructure stack. Email is a natural interface for long-running, asynchronous AI agents — it is universally supported, handles rich media, and most workflows already have email context. But Gmail and Outlook APIs were never designed for agent-scale workloads.
+
+The API-first approach (create inboxes on demand, webhooks for receiving, semantic search across threads) maps cleanly onto how AI agents actually work. If you are building agents that need to communicate with humans, coordinate across systems, or handle document-heavy workflows, email as an agent primitive makes sense.
+
+The free tier is sufficient to experiment. Start at [agentmail.to](https://agentmail.to).
+
+---
+
+*Discuss on [HN](https://news.ycombinator.com/item?id=46812608).*
