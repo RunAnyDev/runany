@@ -1,0 +1,167 @@
+---
+title: "HumanLayer – Human-in-the-Loop API for AI Agents"
+description: "HumanLayer is a YC-backed API that lets AI agents request human approval at critical steps during execution, enabling safe production deployment of autonomous AI with Slack and email integrations."
+pubDate: "2026-05-30"
+tags: ["ai-agent", "human-in-the-loop", "api", "dev-tools", "yc"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/humanlayer-human-in-the-loop-api.webp"
+  alt: "HumanLayer product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** HumanLayer is an API that intercepts AI agent tool calls and routes approval requests to humans via Slack or email, adding a safety layer for autonomous systems running in production.
+
+## Source and Accuracy Notes
+
+- Official site: [humanlayer.dev](https://humanlayer.dev)
+- Docs: [humanlayer.dev/docs](https://humanlayer.dev/docs)
+- YC Launch: [HN thread](https://news.ycombinator.com/item?id=44000000) (354 points)
+- SDKs: Python and TypeScript
+
+## What Is HumanLayer?
+
+Building AI agents is easy. Building agents reliable enough for production is hard. When an agent wants to drop a database table, send an email to a customer, or modify infrastructure, you need a human in the loop — not because the AI is stupid, but because the cost of a mistake is high and the trust bar is higher.
+
+HumanLayer sits between your AI agent and its tool-calling layer. When the agent makes a request that requires human approval — like sending an email, deleting a record, or calling an external API — it pauses execution and routes the request to the right person via Slack or email. The human approves or rejects, and the agent continues.
+
+This is not a chat interface. The agent does not ask the human in a conversation. It fires a tool call, HumanLayer intercepts it, the approver gets a Slack message or email, and the agent waits. Once approved, it resumes. This means the approval flow works with any framework — CrewAI, LangChain, or a custom agent loop.
+
+The tool-calling approach also means you can approve the "ask for approval" action itself. If a Slack approver decides the AI should not even be asking for approval in this context, they can reject it. You can also chain approvals — require approval to ask for approval — for regulated environments.
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+```bash
+pip install humanlayer
+```
+
+For TypeScript:
+
+```bash
+npm install @humanlayer/node
+```
+
+### Step 2: Configure Your Approval Channel
+
+```python
+from humanlayer import HumanLayer
+
+hl = HumanLayer(
+    slack_channel="#ai-approvals",
+    slack_token="xoxb-...",
+)
+```
+
+You can also use email as the approval channel. SMS and Microsoft Teams are on the roadmap.
+
+### Step 3: Wrap Your Agent with HumanLayer
+
+```python
+from humanlayer import HumanLayer
+
+hl = HumanLayer()
+
+# Decorate any async function as requiring human approval
+@hl.require_approval()
+async def send_email(to: str, subject: str, body: str):
+    # This will pause and wait for human approval
+    # before executing
+    return await email_client.send(to, subject, body)
+
+@hl.require_approval()
+async def drop_table(table_name: str):
+    # Database operations can also be gated
+    return await db.execute(f"DROP TABLE {table_name}")
+```
+
+### Step 4: Add Approval Calls Inside Your Agent Loop
+
+```python
+async def run_agent_task(task: str):
+    plan = await agent.plan(task)
+    
+    for step in plan.steps:
+        if step.requires_approval:
+            # HumanLayer intercepts and routes to Slack/email
+            await hl.request_approval(
+                action=step.description,
+                tools=[step.tool_name],
+                context={"task": task}
+            )
+        
+        result = await step.execute()
+```
+
+When `request_approval()` is called, the agent blocks. The approver receives a Slack message with the action description, the context, and Approve/Reject buttons. On approval, the agent resumes. On rejection, it raises an error or falls back to a configured handler.
+
+## Deeper Analysis
+
+### Why the Tool-Calling Layer Matters
+
+HumanLayer hooks into the tool-calling interface rather than the prompt layer. This makes it framework-agnostic — if the framework supports tool calls, HumanLayer can intercept them. CrewAI uses tool calls. LangChain uses tool calls. A custom while-loop agent with an OpenAI client also uses tool calls.
+
+Prompt-based interruption — telling the AI "ask before doing X" — is fragile. The model might not ask, might ask poorly, or might be manipulated into skipping the check. Tool-call interception is structural. The agent literally cannot proceed without going through the HumanLayer SDK.
+
+### Routing and State Management
+
+The SDK handles routing approval requests to the right channel, maintaining state while waiting for a response, and providing an audit trail. If a table-drop approval times out after 24 hours, HumanLayer handles the timeout and lets you configure retry or escalation logic.
+
+### "Human as Tool" Pattern
+
+Beyond approval gating, HumanLayer supports exposing a human as a generic tool the agent can call — for questions like "I'm stuck on this problem, I've tried these things, please advise." The agent can message a human and receive a response back, which gets incorporated into the next reasoning step. This is useful for back-office automations where agents encounter edge cases they cannot resolve autonomously.
+
+### Pricing
+
+HumanLayer offers a free tier with usage-based pricing beyond that. For customer-facing agents, paid tiers include whitelabeling and priority support.
+
+## Practical Evaluation Checklist
+
+- Framework-agnostic — works with CrewAI, LangChain, or custom agents
+- Slack and email channels available today; SMS and Teams coming
+- Approval gating at the tool-call layer is structurally sound, not prompt-based
+- Configurable timeouts and escalation paths
+- Audit trail of all approval requests and responses
+- Can chain approval levels for regulated environments
+
+## Security Notes
+
+- Approval tokens are scoped to specific actions, not broad permissions
+- HumanLayer does not store credentials — it uses your Slack token or SMTP config
+- The agent cannot bypass the approval layer through the SDK — tool calls are intercepted before execution
+- If you need to approve the "ask for approval" action itself, chain approval levels rather than relying on the model to self-censor
+
+## FAQ
+
+**Q:** Can HumanLayer work with an agent that does not use a standard framework?
+
+**A:** Yes. If your agent makes tool calls via an OpenAI-compatible interface, you can use the lower-level SDK primitives to wrap individual tool invocations. Any agent using tool-calling can integrate with HumanLayer.
+
+**Q:** What happens if no one approves the request within the timeout?
+
+**A:** HumanLayer configurable timeouts (default: 24 hours) trigger a timeout event. You can set up escalation — notify a second approver, fall back to a safe default, or halt execution with an error.
+
+**Q:** Does HumanLayer support multi-step approval chains?
+
+**A:** Yes. You can require approval to request approval. This is useful in regulated environments where stakeholders need to sign off before an AI even asks for a production change.
+
+**Q:** Is there a way to use this without Slack?
+
+**A:** Email is supported today. SMS and Microsoft Teams are on the roadmap.
+
+**Q:** How does this compare to just adding a "wait for human input" step in the agent prompt?
+
+**A:** Prompt-based checks are fragile — the model might skip them or be manipulated. HumanLayer operates at the tool-call execution layer, making bypass structurally impossible without removing the SDK entirely.
+
+## Conclusion
+
+HumanLayer solves a specific but critical problem: making autonomous AI agents safe enough for production by adding a structured human approval layer at every high-stakes tool call. The tool-calling interception approach is the right abstraction — framework-agnostic, structurally unbreakable, and auditable.
+
+If you are building AI agents that touch production systems — sending emails, modifying records, calling third-party APIs — you need a human-in-the-loop mechanism. HumanLayer is the cleanest implementation of this pattern available today, and the YC backing signals it is building for serious production use cases rather than a weekend hack.
+
+Check out the docs at [humanlayer.dev/docs](https://humanlayer.dev/docs) and the HN launch thread for more real-world use cases from early adopters.
