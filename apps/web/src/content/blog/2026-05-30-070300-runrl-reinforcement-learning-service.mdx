@@ -1,0 +1,179 @@
+---
+title: "RunRL – Reinforcement Learning as a Service for AI Models"
+description: "RunRL lets developers improve AI models and agents using reinforcement learning by simply defining a reward function — no GPU cluster management required."
+pubDate: "2026-05-30"
+tags: ["ai-setup", "dev-tools", "machine-learning", "yc-x25", "rl"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runrl-reinforcement-learning-service.webp"
+  alt: "RunRL reinforcement learning service thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** RunRL is an X25 YC-backed platform that lets developers fine-tune AI models and agents using reinforcement learning by defining a reward function — no infrastructure headaches.
+
+## Source and Accuracy Notes
+
+- **Official site:** [https://runrl.com](https://runrl.com)
+- **HN Launch:** [Launch HN: RunRL (YC X25)](https://news.ycombinator.com/item?id=45277704) — 71 points
+- **Demo video:** [YouTube demo](https://youtu.be/EtiBjs4jfCg)
+
+## What Is RunRL?
+
+RunRL is a cloud platform that runs reinforcement learning experiments on your AI models so you do not have to manage GPU clusters, training infrastructure, or distributed RL pipelines. The pitch from the founders: if you can define a metric, RunRL makes your model or agent better.
+
+The founders (Andrew and Derik) built this after noticing that everyone doing PhD research on RL for language models kept avoiding actually using RL because it was too hard to set up. RunRL abstracts away the infra.
+
+### Core workflow
+
+1. Choose an open-weight base model (averaging ~3B–14B parameters)
+2. Upload a dataset of prompts (e.g., "Generate an antiviral targeting Sars-CoV-2 protease", "Prove this theorem")
+3. Define a reward function using Python, an LLM-as-a-judge, or both
+4. For complex multi-turn agentic tasks, define an entire environment
+5. Watch the reward go up
+
+The platform handles all the GPU scheduling, distributed training, and experiment tracking. You get a dashboard showing your reward curve converging in real time.
+
+## Setup Workflow
+
+### Step 1: Sign up and get API access
+
+Visit [runrl.com](https://runrl.com) and create an account. The platform provides an API key and a web dashboard for monitoring experiments.
+
+### Step 2: Choose your base model
+
+RunRL supports open-weight models. The docs recommend starting with `Qwen3-4B-Instruct-2507` for most tasks — it is small enough to fit on a single node, which keeps costs predictable.
+
+Supported model families include Qwen, Llama variants, and Mistral. Models larger than 14B parameters may require multi-node setups.
+
+### Step 3: Define your dataset and prompts
+
+Upload a JSONL file with your prompt set. Each line is a prompt:
+
+```json
+{"prompt": "Generate an antiviral targeting Sars-CoV-2 protease"}
+{"prompt": "Prove this theorem in Lean4"}
+{"prompt": "What's the average summer high in Windhoek?"}
+```
+
+### Step 4: Define a reward function
+
+This is where the RL magic happens. A reward function can be:
+
+- **Python function:** Any computable metric — exact match, BLEU score, custom business logic
+- **LLM-as-a-judge:** Pass the output to a larger model for subjective scoring
+- **Hybrid:** Combine both for complex tasks
+
+Example reward function in Python:
+
+```python
+def reward_function(prompt, response, context=None):
+    # Simple exact-match reward
+    if "correct" in response.lower():
+        return 1.0
+    return 0.0
+
+# Or use an LLM judge
+def llm_judge_reward(prompt, response):
+    judge_response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": f"Score this response: {response}"}]
+    )
+    return float(judge_response.choices[0].message.content)
+```
+
+### Step 5: Launch your training run
+
+```bash
+curl -X POST https://api.runrl.com/v1/run \
+  -H "Authorization: Bearer $RUNRL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen3-4B-Instruct-2507",
+    "dataset": "my-prompts.jsonl",
+    "reward_function": "reward.py",
+    "max_nodes": 4
+  }'
+```
+
+Monitor the reward curve in the dashboard. Most well-defined tasks converge within a few hours to a day.
+
+## Deeper Analysis
+
+### Why this matters
+
+LLM intelligence is "spiky" — models are decent at common knowledge but randomly strong or weak in specific domains. RL is the proven method to sharpen exactly the capabilities you need without degrading others. The problem has always been that running RL at scale is hard enough that most teams just skip it.
+
+RunRL's claim is striking: a small open model + RunRL can outperform frontier models like Claude 4.1 Opus on domain-specific tasks. For example, they report Qwen-3B outperforming Opus on antiviral molecule design after RunRL fine-tuning. This is the classic "specialized beats generalist" argument, but with a practical platform backing it up.
+
+### Use cases that make sense
+
+- **Antiviral/drug design** — very clear success metric, easy to define reward
+- **Formal verification** — proof assistants with objective correct/incorrect feedback
+- **Browser agents** — define reward based on task completion
+- **Custom code generation** — pass/fail based on test suite results
+- **Domain-specific classification** — when general models are mediocre on your niche
+
+### Where it struggles
+
+- **Vague reward functions** — if you cannot define what "good" looks like computationally, RL will not help
+- **Multi-modal tasks** — current platform is text-focused
+- **Very large models** — 70B+ models need multi-node setups, cost scales quickly
+- **Real-time latency constraints** — RL training takes time, not instant
+
+### Pricing
+
+$80/node-hour. Most models up to 14B fit on one node. A typical training run for a well-defined task might cost a few hundred dollars — competitive with the cost of API calls to fine-tune via OpenAI/Anthropic, but with full control over the training process.
+
+## Practical Evaluation Checklist
+
+- Define a clear, computable reward metric before starting
+- Start with a small model (4B–7B) for rapid iteration
+- Have at least 100–500 diverse prompts in your dataset
+- Use an LLM judge for subjective tasks, Python functions for objective ones
+- Monitor the reward curve — if it plateaus early, the reward function may be poorly designed
+- For multi-turn agentic tasks, define the full environment rather than single-step prompts
+
+## Security Notes
+
+- **API keys** — Store in environment variables, never in code
+- **Data privacy** — Training data is uploaded to RunRL's cloud; do not send proprietary data without a DPA
+- **Reward function code** — Runs on RunRL infrastructure; avoid arbitrary file system access
+- **Model weights** — Open-weight models only; no closed model fine-tuning
+
+## FAQ
+
+**Q:** What models does RunRL support?
+
+**A:** Open-weight models up to roughly 14B parameters fit on a single node. Qwen3-4B-Instruct-2507 is recommended as a starting point. Larger models require multi-node setups.
+
+**Q:** How is this different from fine-tuning with OpenAI or Anthropic APIs?
+
+**A:** Fine-tuning uses supervised learning on your dataset. RunRL uses reinforcement learning — you define a reward signal and the model learns from it directly. RL is better for tasks where you can evaluate outcomes but cannot easily construct training examples. Also: you own the resulting weights.
+
+**Q:** How long does training take?
+
+**A:** For well-defined tasks with a clear reward function, convergence typically takes a few hours to a day. Complex multi-turn environments take longer. The dashboard shows real-time reward curves.
+
+**Q:** What happens if my reward function is poorly designed?
+
+**A:** The model may converge to a local maximum that exploits flaws in your reward. For example, a "length-based" reward might cause the model to output very long, padded responses. Always validate your reward function on a held-out set before launching a full run.
+
+**Q:** Can I use RunRL for browser agent training?
+
+**A:** Yes — this is one of the highlighted use cases. You define the browser environment, set task completion as the reward, and the agent learns to navigate and complete tasks. The HN discussion specifically mentions browser agents as a successful application.
+
+## Conclusion
+
+RunRL fills a real gap: making reinforcement learning accessible to developers who are not RL researchers but have domain expertise and a computable success metric. The $80/node-hour pricing is reasonable for the capability, and the ability to beat frontier models on specialized tasks with a small open model + RL is compelling.
+
+If you have a well-defined task where you know what "good" looks like computationally, RunRL is worth trying. If your reward function is inherently subjective, you will spend more time engineering the judge than training the model.
+
+**Next steps:**
+- Visit [runrl.com](https://runrl.com) and check the quick-start docs
+- Start with the free tier or a small experiment on a well-defined task
+- Browse the [HN discussion](https://news.ycombinator.com/item?id=45277704) for community experience reports
