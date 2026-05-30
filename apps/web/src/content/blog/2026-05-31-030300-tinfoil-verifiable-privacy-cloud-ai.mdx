@@ -1,0 +1,148 @@
+---
+title: "Tinfoil – Verifiable Privacy for Cloud AI"
+description: "Tinfoil runs open-source LLMs on cloud GPUs with hardware-backed privacy guarantees. Your data never leaves the secure enclave—not even Tinfoil can access it."
+pubDate: "2026-05-31"
+tags: ["privacy", "ai", "cloud", "security", "confidential-computing"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tinfoil.webp"
+  alt: "Tinfoil product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tinfoil runs open-source LLMs on cloud GPUs inside hardware secure enclaves—no one, not even Tinfoil or the cloud provider, can access your data while it is being processed.
+
+## Source and Accuracy Notes
+
+- Product: [https://tinfoil.sh](https://tinfoil.sh)
+- HN Launch: [Tinfoil (YC X25) – Verifiable Privacy for Cloud AI](https://news.ycombinator.com/item?id=43996555) (146 points)
+- Team background: MIT cryptography PhDs, NVIDIA/Microsoft Research trusted hardware, Cloudflare cryptography team
+
+## What Is Tinfoil?
+
+Tinfoil is a cloud AI platform that hosts open-source LLMs (Llama, Deepseek R1) on GPU infrastructure while guaranteeing that no one—not even Tinfoil or the cloud provider—can access your data. The key is **secure enclaves**: hardware-protected regions on the chip that isolate computation from the rest of the system.
+
+The team comes from MIT cryptography, NVIDIA trusted hardware research, and Cloudflare's cryptography team. They were dissatisfied with band-aid privacy solutions like PII redaction or legal DPAs ("pinky promise" security). They built a real technical guarantee.
+
+The analogy they use: just as TLS enabled e-commerce by making credit card theft provably impossible, Tinfoil aims to unlock more valuable AI applications by making data privacy provable rather than legally promised.
+
+## How Secure Enclaves Work
+
+A secure enclave is a protected region of memory on a CPU that no other software on the host machine can access—not even the OS kernel or hypervisor. The enclave is implemented in hardware, so the protection is not a software policy that can be bypassed.
+
+When you send a prompt to Tinfoil:
+1. The prompt is encrypted and sent directly to the enclave
+2. LLM inference runs entirely inside the enclave
+3. The results come out encrypted; only you hold the decryption key
+4. Tinfoil (and the cloud provider) have zero visibility into the data inside the enclave
+
+This is different from "local model"部署 because the compute still runs on powerful cloud GPUs—you are not limited to what fits on your local machine. It is different from FHE (Fully Homomorphic Encryption) because FHE is still impractical for LLM inference.
+
+## Setting Up Tinfoil
+
+### Step 1: Sign Up and Install CLI
+
+```bash
+# Install the Tinfoil CLI
+curl -fsSL https://tinfoil.sh/install.sh | bash
+
+# Authenticate
+tinfoil auth login
+```
+
+### Step 2: Configure Your First Project
+
+```bash
+# Initialize a new project
+tinfoil init my-project
+
+# Navigate into it
+cd my-project
+```
+
+Create a `tinfoil.yaml` configuration:
+
+```yaml
+model: llama-3.3-70b-instruct
+region: us-east-1
+privacy: enclave
+```
+
+### Step 3: Run Inference
+
+```python
+from tinfoil import Tinfoil
+
+client = Tinfoil(api_key="your-api-key")
+
+response = client.chat.completions.create(
+    model="llama-3.3-70b-instruct",
+    messages=[
+        {"role": "user", "content": "Summarize our Q4 financial report"}
+    ],
+    privacy="enclave"  # ensures enclave processing
+)
+
+print(response.content)
+```
+
+### Step 4: Verify the Enclave (Optional)
+
+Tinfoil provides attestation documents—cryptographic proofs that verify the enclave is running the correct code on genuine hardware:
+
+```bash
+# Get attestation quote for your session
+tinfoil attest session-id
+```
+
+This outputs a signed attestation that you can verify independently to confirm the enclave is genuine.
+
+## Practical Evaluation Checklist
+
+- **No data retention**: Enclave memory is wiped after each inference session
+- **Open-source models**: Llama, Deepseek R1, Mistral—no locked-in model monopolies
+- **Hardware-backed**: SGX, SEV-SNP, or TrustZone depending on the cloud provider
+- **Attestation**: Cryptographic proof of enclave authenticity, not just trust
+- **Minimal performance overhead**: The team claims under 5% latency overhead vs. non-enclave inference
+- **Compliance use cases**: Works for HIPAA, GDPR contexts where data cannot leave certain jurisdictions
+
+## Security Notes
+
+Tinfoil is not a silver bullet. The enclave protects data **during inference**, but:
+- Your API key still needs to be protected
+- The input/output at the enclave boundary is encrypted—you control those keys
+- If you paste sensitive data into prompts, the model can still be tricked into outputting it (prompt injection)
+
+For adversarial threat models where the attacker has full host OS access, enclave security holds. For social engineering via prompt injection, it does not help.
+
+## FAQ
+
+**Q:** How is this different from just running a model locally?
+
+**A:** Local models run on your hardware, which is limited. Tinfoil runs on cloud GPUs (H100s, A100s) so you get frontier-model performance while maintaining privacy guarantees. You also do not have to manage infrastructure.
+
+**Q:** Can Tinfoil employees access my data?
+
+**A:** No. The secure enclave is hardware-isolated. Even Tinfoil with full admin access to the host machine cannot read enclave memory. This is a hardware guarantee, not a policy.
+
+**Q:** What happens if the hardware is compromised (e.g., Spectre, Meltdown)?
+
+**A:** Tinfoil's threat model explicitly excludes hardware exploits that affect the enclave. The team monitors for new vulnerability classes and rotates workloads to unaffected hardware if needed. The attestation mechanism lets you detect compromised hardware.
+
+**Q:** Does this work with fine-tuned models?
+
+**A:** Yes. You can bring your own fine-tuned weights or use Tinfoil's model registry. Fine-tuning also runs inside the enclave.
+
+**Q:** How much does it cost?
+
+**A:** Tinfoil uses a per-token pricing model. Enclave mode has a small premium over non-enclave inference. Check [tinfoil.sh/pricing](https://tinfoil.sh) for current rates.
+
+## Conclusion
+
+Tinfoil solves a real problem: you want the power of cloud GPU clusters for LLM inference, but you cannot trust the cloud provider with your data. Hardware secure enclaves make that trust unnecessary. The team has deep cryptography credentials, and the attestation mechanism means you can verify the guarantee yourself rather than taking their word for it.
+
+If you are building AI applications that handle sensitive data—customer support, medical, legal, financial—and you need open-source model flexibility without sacrificing privacy, Tinfoil is worth evaluating. The enclave approach is the strongest technical guarantee available today short of running everything on-premises.
