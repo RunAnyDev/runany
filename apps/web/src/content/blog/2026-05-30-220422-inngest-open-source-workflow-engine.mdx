@@ -1,0 +1,186 @@
+---
+title: "Inngest – Open-Source Durable Workflows and Background Jobs"
+description: "Inngest replaces queues, state management, and scheduling with durable functions that run reliably on serverless, servers, or the edge. Here's how to get started."
+pubDate: "2026-05-30"
+tags: ["workflow", "serverless", "go", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/inngest-open-source-workflow-engine.webp"
+  alt: "Inngest workflow engine thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Inngest is an open-source durable execution platform that lets you write reliable multi-step workflows — with built-in retries, state management, and event-driven triggers — and run them on serverless, servers, or the edge without touching infrastructure.
+
+## Source and Accuracy Notes
+
+- **Official site:** [inngest.com](https://www.inngest.com)
+- **GitHub:** [github.com/inngest/inngest](https://github.com/inngest/inngest) — 5.4k stars, written in Go
+- **Documentation:** [inngest.com/docs](https://www.inngest.com/docs)
+- **HN launch (165 pts):** Show HN: Inngest 1.0 – Open-source durable workflows on every platform
+
+## What Is Inngest?
+
+Writing background jobs is deceptively hard. You need queues, retries, timeouts, state tracking, dead-letter handling, and observability — all before writing a single line of business logic. Inngest abstracts all of that away.
+
+Inngest is an open-source workflow orchestration platform built around the concept of **durable functions**: step functions that automatically resume from where they left off if a process crashes or a network call times out. Instead of managing a queue (Redis, SQS, etc.) and writing idempotency logic yourself, you write plain functions and let Inngest handle execution guarantees.
+
+The core primitive is an **event-driven trigger**. Any event — an HTTP request, a webhook, a database change, a scheduled cron — can kick off a workflow. Each step in the workflow is a function that can await, sleep, or pause indefinitely. Paused steps survive process restarts, so a workflow can wait for user input for days and resume exactly where it left off.
+
+Inngest 1.0 launched on Show HN with 165 points and marked a major milestone: the platform now runs on every compute environment, not just the Inngest cloud. You can self-host the Inngest dev server for free, deploy the self-hosted runner to your own infrastructure, or use the managed cloud. All three share the same SDK.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+npm install -g inngest
+```
+
+The CLI starts a local dev server that emulates Inngest's execution environment on your machine. No account required for local development.
+
+### Step 2: Initialize a project
+
+```bash
+inngest init
+```
+
+This scaffolds a new function in the current directory. The CLI creates an `inngest/` folder with your first function file:
+
+```typescript
+import { inngest } from "inngest/hono";
+import { serve } from "inngest/hono";
+
+export default inngest.createFunction(
+  { id: "my-first-function" },
+  { event: "my/event" },
+  async ({ event, step }) => {
+    const user = await step.run("fetch-user", async () => {
+      return { id: event.user.id, name: "Alice" };
+    });
+
+    await step.sleep("wait-for-email", "5s");
+
+    await step.run("send-email", async () => {
+      console.log(`Email sent to ${user.name}`);
+    });
+
+    return { success: true };
+  }
+);
+```
+
+### Step 3: Run locally
+
+```bash
+inngest dev
+```
+
+This starts the dev server on port 8288. You can trigger your functions via the local API or use the built-in event sender UI at `http://localhost:8288`.
+
+### Step 4: Deploy to production
+
+```bash
+inngest deploy
+```
+
+Deploying pushes your functions to Inngest's hosted runner (or your self-hosted runner if configured). The CLI handles packaging and routing.
+
+For server-side frameworks, Inngest provides first-party integrations with Hono, Next.js, Astro, Express, and Fastify — all using the same `serve()` pattern:
+
+```typescript
+// Next.js app/api/inngest/route.ts
+import { inngest, serve } from "inngest/next";
+import myFunction from "./inngest/my-first-function";
+
+export const { GET, POST, PUT } = serve({ client: inngest, functions: [myFunction] });
+```
+
+## Deeper Analysis
+
+### Why durable execution matters
+
+Traditional job queues (Bull, Sidekiq, Celery) give you at-least-once delivery and let you manage state yourself. If your worker crashes mid-job, you get partial execution and manual recovery. You end up building compensating transactions, idempotency keys, and state machines on top of the queue — which is where most of the complexity lives.
+
+Inngest's durable execution model is fundamentally different: each step is **checkpointed**. If a step fails or the process dies, execution resumes from the failed step — not from the beginning. This eliminates the need for manual state management in most cases.
+
+### Event-driven by design
+
+Most job systems are poll-based or cron-based. Inngest is event-driven first. You define workflows as reacting to events rather than being explicitly invoked:
+
+```typescript
+export default inngest.createFunction(
+  { id: "send-welcome-sequence" },
+  { event: "user/signed.up" },
+  async ({ event, step }) => {
+    await step.run("create-user-record", async () => { ... });
+    await step.sleep("wait-1-day", "1d");
+    await step.run("send-onboarding-email", async () => { ... });
+  }
+);
+```
+
+The `user/signed.up` event can come from anywhere: your registration API, a Stripe webhook, a database trigger. The workflow doesn't care — it just waits for the event.
+
+### Fan-out and parallel steps
+
+Steps can run in parallel using `step.run()` calls within a single `Promise.all()`:
+
+```typescript
+await Promise.all([
+  step.run("process-payment", async () => { ... }),
+  step.run("send-receipt", async () => { ... }),
+  step.run("update-inventory", async () => { ... }),
+]);
+```
+
+Each parallel branch is tracked independently. If one fails, only that branch retries — the others complete normally.
+
+### Self-hosting and the edge
+
+The 1.0 release added support for running workflows on Cloudflare Workers, Vercel Edge Functions, and Deno Deploy. This makes Inngest one of the few workflow engines that can run stateful logic at the edge while still coordinating with a central state store.
+
+## Practical Evaluation Checklist
+
+- **Reliability:** Step-level checkpointing with automatic retry and resume
+- **Developer experience:** Single CLI command to start local development
+- **Observability:** Built-in execution logs and step tracing via the Inngest dashboard
+- **Integrations:** First-party SDKs for Node.js, Go, Python, and Ruby
+- **Trigger flexibility:** Events, HTTP webhooks, schedules, and Kafka/Redis/SQS event sources
+- **Edge support:** Cloudflare Workers, Vercel Edge, Deno Deploy
+- **Open-source:** Full self-hosted runner available; no lock-in for the core execution engine
+- **AI agentic workflows:** Steps can call LLMs and wait for async responses, making it well-suited for AI agent orchestration
+
+## Security Notes
+
+- The Inngest SDK communicates with the Inngest control plane over HTTPS. If self-hosting, your functions run in your own environment and data never leaves your infrastructure
+- Event payloads are stored encrypted at rest in Inngest's managed cloud
+- For sensitive workflows, use the self-hosted runner to keep all execution state within your own cloud account
+- No PII is required to use Inngest; event schemas are fully under your control
+
+## FAQ
+
+**Q:** What differentiates Inngest from Temporal?
+**A:** Temporal is the more mature and battle-tested option, with a richer feature set and broader language support (Go, Java, TypeScript, Python, .NET). Inngest differentiates on developer experience (single CLI, simpler local dev setup), first-class edge runtime support, and a hosted-first model that makes it easier to get started without infrastructure. Temporal requires deploying its own server cluster; Inngest can run as a managed service or self-hosted.
+
+**Q:** Can I use Inngest without an account?
+**A:** Yes, for local development. The `inngest dev` command runs a local server that emulates the full execution environment with no authentication or account needed. You only need to sign up when deploying to production or using the managed cloud.
+
+**Q:** Does Inngest support long-running workflows?
+**A:** Yes. Steps can pause indefinitely (using `step.sleep` or `step.waitForEvent`) and will resume when the timeout or event fires. Workflows can span seconds to months. The state is persisted to durable storage between steps.
+
+**Q:** How does pricing work for the managed cloud?
+**A:** Inngest's cloud has a generous free tier for development and small projects. Production pricing is based on the number of workflow executions and usage of the eventbus. Self-hosting the runner is free under the Apache 2.0 license.
+
+**Q:** Is Inngest suitable for AI agent workflows?
+**A:** Yes. Inngest's step model maps well to AI agent patterns: each LLM call or tool execution can be a step, with automatic retry on failure, checkpointing between steps, and the ability to await async human feedback. Several AI agent frameworks already use Inngest as their orchestration layer.
+
+## Conclusion
+
+Inngest solves the infrastructure tangle that every growing application eventually hits. Instead of stitching together a queue, a state store, a retry library, and a monitoring dashboard, you write functions and let Inngest handle the rest. The local dev experience is fast, the SDK is clean, and the ability to deploy anywhere — serverless, VM, or edge — gives you flexibility that proprietary workflow platforms don't.
+
+If you're building anything that needs reliable background processing, webhooks, scheduled tasks, or multi-step AI pipelines, Inngest is worth a look. Start with `inngest dev` and have a working workflow in under five minutes.
