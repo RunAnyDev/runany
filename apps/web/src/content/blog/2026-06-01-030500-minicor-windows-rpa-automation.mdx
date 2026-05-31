@@ -1,0 +1,210 @@
+---
+title: "Minicor – Windows Desktop RPA at Scale via MCP"
+description: "Minicor connects AI agents like Claude Code and Codex to Windows virtual machines through an MCP server, enabling scalable desktop RPA with Python workflows, VM cloning, and 2FA handling."
+pubDate: "2026-06-01"
+tags: ["rpa", "automation", "windows", "mcp", "ai-agents"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/minicor-windows-rpa-automation.webp"
+  alt: "Minicor Windows desktop RPA automation thumbnail"
+draft: false
+---
+
+> **TL;DR:** Minicor is an MCP-based RPA platform that lets AI agents control Windows virtual machines programmatically — handling legacy desktop software, 2FA challenges, and parallel workflows at scale.
+
+## What Is Minicor?
+
+Minicor solves a specific pain point: AI companies that need to integrate with desktop systems that have no API. Legacy enterprise software — medical record systems, ERP clients, thick-client tools — often only exposes a GUI. Automating those systems has traditionally meant brittle screen-scraping scripts with high failure rates.
+
+Minicor wraps Windows VMs in an MCP server that Claude Code or Codex can use to navigate desktop software, create RPA workflows, and orchestrate runs at scale.
+
+The core is an MCP-compatible server that exposes a Python execution environment inside a Windows VM. Agents write RPA workflows as Python scripts — deterministic, version-controlled, and fast. Workflows can be triggered via API with any input/output schema, and each run stores video replays plus logs for debugging.
+
+## Key Features
+
+### MCP Native Integration
+Claude Code and Codex can drive Minicor workflows through the Model Context Protocol. The agent writes Python to control mouse/keyboard, reads screen state, and handles conditional logic — all within the VM's execution context.
+
+### Python-Based Workflows
+Unlike legacy RPA tools that use drag-and-drop flowcharts, Minicor workflows are Python scripts. This means:
+- Standard Python debugging tools (pdb, print, pytest)
+- Version control for workflows (git commit, PR review)
+- Reusable functions and packages
+- Deterministic execution (no hidden state)
+
+### VM Orchestration
+Minicor handles the infra overhead of running desktop automations:
+- **VM cloning** for parallelizing RPA runs across many machines
+- **Queue management** for scaling workflow execution
+- **State snapshots** for resumable runs after failures
+
+### 2FA and OTP Handling
+Desktop apps frequently require one-time passwords. Minicor includes built-in primitives for:
+- Email OTP extraction (via inbox integration)
+- SMS code reading
+- TOTP/HOTP token handling
+- Human-in-the-loop steps (pause workflow, wait for manual approval)
+
+### Observability
+Every workflow run produces:
+- Video replay of the GUI session
+- Structured logs with timestamps
+- Screenshot captures at decision points
+- Pass/fail status with error traces
+
+This makes cascading failures (common in RPA at scale) observable and debuggable rather than silent.
+
+## How It Works
+
+```
+AI Agent (Claude Code / Codex)
+        |
+        v
+   MCP Server (Minicor)
+        |
+        v
+  Windows VM + Python Runtime
+        |
+   RPA Workflow (Python script)
+        |
+   Desktop App (legacy GUI)
+```
+
+A workflow is a Python script that the agent writes or modifies. The MCP server executes it inside a Windows VM. The agent can make changes, re-run, and debug — all via MCP, with version history preserved in git.
+
+## Setup Workflow
+
+### Step 1: Deploy Minicor MCP Server
+
+```bash
+# Clone the Minicor runtime
+git clone https://github.com/laminar-run/minicor.git
+cd minicor
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Configure your VM environment
+cp .env.example .env
+# Set MINICOR_VM_HOST, MINICOR_API_KEY, MINICOR_STORAGE
+```
+
+### Step 2: Connect an AI Agent
+
+In Claude Code or Codex, add the Minicor MCP server:
+
+```json
+{
+  "mcpServers": {
+    "minicor": {
+      "command": "npx",
+      "args": ["-y", "@minicor/mcp-server", "--api-key", "your-key"]
+    }
+  }
+}
+```
+
+The agent can now call `minicor.run_workflow()`, `minicor.get_vm_state()`, and other tools exposed by the MCP server.
+
+### Step 3: Write Your First Workflow
+
+```python
+# workflow_clinic_sync.py
+import minicor
+
+def run(args):
+    # Launch the medical record app
+    minicor.launch_app("C:\\Program Files\\MedApp\\medrec.exe")
+
+    # Navigate to patient records
+    minicor.click("Patient Records")
+    minicor.type_text(args['patient_id'])
+    minicor.press("Enter")
+
+    # Pull the appointment list
+    html = minicor.capture_html()
+    appointments = parse_appointments(html)
+
+    # Call LLM to verify data quality
+    verified = minicor.llm_verify(
+        screenshot=minicor.capture_screen(),
+        prompt="Check if the patient name matches the appointment."
+    )
+
+    if not verified:
+        minicor.notify_slack(f"Verification failed for {args['patient_id']}")
+        minicor.request_human_review()
+
+    return appointments
+```
+
+### Step 4: Trigger via API
+
+```bash
+curl -X POST https://api.minicor.com/v1/workflows/run \
+  -H "Authorization: Bearer $MINICOR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "workflow_clinic_sync",
+    "args": {"patient_id": "P-2847"},
+    "vm_pool": "clinic-vms-pool-a"
+  }'
+```
+
+Response:
+```json
+{
+  "run_id": "run_8f3k9d2p",
+  "status": "queued",
+  "video_url": "https://storage.minicor.com/runs/run_8f3k9d2p/replay.mp4",
+  "estimated_duration_seconds": 45
+}
+```
+
+## Practical Evaluation Checklist
+
+- Does your target software expose a GUI but no API?
+- Are you integrating AI agents (Claude Code, Codex) that need to interact with desktop systems?
+- Do you need deterministic, version-controlled automation scripts?
+- Is parallel execution across many VMs a requirement?
+- Do you handle 2FA/OTP flows in your current automation?
+- Are cascading RPA failures causing silent data quality issues?
+
+If you answered yes to three or more, Minicor is worth evaluating.
+
+## Security Notes
+
+- VM execution is isolated — workflows run in contained Windows environments
+- API keys should be stored in secrets managers, not in workflow code
+- Video replays and logs may contain sensitive data — apply appropriate access controls
+- Network connectivity from VMs to internal systems should be restricted via VLAN/segmentation
+
+## FAQ
+
+**Q:** Does Minicor only work with Windows?
+
+**A:** Currently yes — Minicor is purpose-built for Windows desktop automation. The underlying MCP server runs on Windows VMs (Hyper-V or cloud Windows instances). macOS and Linux support is on the roadmap.
+
+**Q:** How does this compare to traditional RPA tools like UiPath or Automation Anywhere?
+
+**A:** Traditional RPA tools use graphical flowcharts and proprietary scripting languages. Minicor uses Python scripts executed via MCP, making it more developer-friendly and naturally integrated with AI coding agents. Traditional RPA is better for non-technical users; Minicor is better for teams already using Claude Code or Codex.
+
+**Q:** What happens if the GUI changes and the automation breaks?
+
+**A:** Minicor's observability layer captures every failure with screenshots and video replays. The agent can inspect the failure, modify the Python script, and re-run. Because workflows are in git, you can roll back to a known-good version.
+
+**Q:** Is this suitable for high-volume production workloads?
+
+**A:** Yes — the VM cloning and queuing system is designed for parallel execution across a pool of Windows VMs. Teams have used Minicor to run hundreds of concurrent RPA workflows.
+
+**Q:** Can human-in-the-loop steps pause execution for manual approval?
+
+**A:** Yes. Workflows can call `minicor.request_human_review()` which pauses execution and notifies a Slack channel or similar. Execution resumes when a human approves or modifies the VM state.
+
+## Conclusion
+
+Minicor fills a specific gap in the automation stack: legacy desktop software that exposes no API. By wrapping Windows VMs in an MCP server and using Python as the workflow language, it makes desktop RPA programmable and debuggable for teams already using AI coding agents. If you've been working around desktop automation with brittle scripts or expensive enterprise RPA licenses, Minicor is worth a look.
+
+**Site:** [minicor.com](https://www.minicor.com)
