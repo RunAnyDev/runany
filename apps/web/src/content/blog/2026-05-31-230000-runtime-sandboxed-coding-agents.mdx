@@ -1,0 +1,156 @@
+---
+title: "Runtime – Sandboxed Coding Agents for Teams"
+description: "Runtime lets engineering teams deploy sandboxed coding agents (Claude Code, Codex) where non-engineers can safely ship code without risking production or secrets."
+pubDate: "2026-05-31"
+tags: ["yc", "ai-agent", "dev-tools", "collaboration", "sandbox"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runtime-sandboxed-coding-agents.webp"
+  alt: "Runtime sandboxed coding agents platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Runtime spins up ephemeral, fully hydrated dev environments for AI coding agents so your whole team can safely ship with Claude Code or Codex — without engineering handholding every session.
+
+## What Is Runtime?
+
+Runtime is a YC P26 startup (103 points on Launch HN) building infrastructure that lets engineering teams run AI coding agents for everyone — including non-engineers — without risking production breaks or secrets leaks.
+
+The problem it solves is real. One founder shipped four full-stack products in three months solo using coding agents. When they tried to roll the same workflow out to the rest of the team, PRs went unmergeable, every repo needed one-off local setup, and there was no safe way for a PM to touch a real codebase.
+
+Runtime works in two layers. Engineering defines context once — system instructions, skills, scoped integrations — installable via CLI, mise, npm, or any package manager. Then Runtime snapshots the full running environment, including multi-service Docker Compose setups, Kafka, Redis, and seeded databases, so it comes up in milliseconds with every server already running. The agent lands in a fully hydrated environment, not an empty container.
+
+## Setup Workflow
+
+### Step 1: Install the Runtime CLI
+
+```bash
+npm install -g @runtimehq/cli
+```
+
+Or via mise:
+
+```bash
+mise install runtime
+```
+
+### Step 2: Authenticate
+
+```bash
+runtime auth login
+```
+
+This opens a browser window for OAuth with your team account.
+
+### Step 3: Initialize a Project
+
+```bash
+runtime init my-project
+cd my-project
+```
+
+The init command creates a `runtime.config.ts` where you define system instructions, skills, and which repositories the agent can access.
+
+### Step 4: Define Environment Context
+
+In `runtime.config.ts`:
+
+```typescript
+import { defineConfig } from '@runtimehq/sdk'
+
+export default defineConfig({
+  systemInstructions: 'You are a backend engineer. Always write tests.',
+  skills: ['typescript', 'postgresql', 'docker-compose'],
+  repositories: [
+    { url: 'https://github.com/acme/api', scope: 'read-write' }
+  ],
+  sandboxProvider: 'e2b' // or 'cursor', 'cagent'
+})
+```
+
+### Step 5: Launch an Agent Session
+
+```bash
+runtime agent start --agent claude-code --task "Add a /health endpoint"
+```
+
+Runtime spins up a sandboxed environment, injects the full context, and the agent executes the task. You can watch live logs in the dashboard or via the CLI.
+
+### Step 6: Review and Merge
+
+When the agent completes, Runtime attaches the diff and environment snapshot to a pull request. Engineering reviews the PR as usual — no special workflow needed.
+
+## Deeper Analysis
+
+### How Environment Snapshotting Works
+
+The core差异化 is that Runtime doesn't start services on-demand inside an empty sandbox. Instead, it pre-snapshots the entire running environment — Docker Compose services, databases with seed data, message queues — into a ready-to-run state. When an agent session starts, the snapshot restores in milliseconds, and the agent can immediately interact with real services rather than mocking them.
+
+This matters for integration-heavy tasks. An agent that needs to verify a Kafka consumer actually processes a message, or that a database migration runs correctly, can't do that in a blank container. Runtime's snapshot approach makes those scenarios tractable for agents.
+
+### Sandbox Isolation
+
+Runtime orchestrates across sandbox providers. The current list includes E2B and Cursor. Each sandbox is isolated — network access, filesystem scope, and credential access are all scoped by the config Engineering defines. A PM running an agent through Runtime cannot push directly to main, access production credentials, or reach services outside the defined scope.
+
+### vs. Buying More Agent Seats
+
+A naive response to "we want more people using agents" is buying more Copilot, Claude Code, or Codex seats. That doesn't solve the problem Runtime is targeting:
+
+- Individual agent seats still require the user to set up their own local environment
+- No isolation — a misconfigured prompt can write to wrong branches or expose secrets
+- No environment fidelity — agents work against empty containers, not hydrated dev setups
+- No oversight layer — PRs arrive from individuals' sessions, not from a managed workflow
+
+Runtime is the infrastructure layer that makes team-wide agent adoption manageable, not just affordable.
+
+### Pricing
+
+Runtime is in public beta. The team has not published public pricing yet. Check [runtm.com](https://www.runtm.com) for updates.
+
+## Practical Evaluation Checklist
+
+- [ ] Install CLI and authenticate (`runtime auth login`)
+- [ ] Initialize a project with `runtime init`
+- [ ] Configure a scoped repository in `runtime.config.ts`
+- [ ] Start an agent session with a specific task
+- [ ] Review the generated PR in your Git provider
+- [ ] Verify sandbox isolation — agent cannot access out-of-scope repos
+- [ ] Check environment fidelity — seeded DB, Docker Compose services available to agent
+
+## Security Notes
+
+Runtime's security model relies on engineering defining the scope upfront. The sandbox restricts filesystem and network access based on the config. However:
+
+- The effectiveness of sandboxing depends on the underlying provider (E2B, Cursor)
+- Credential injection is controlled by the config — do not include production secrets in the initial snapshot unless explicitly scoped
+- Review the generated diffs before merging — agents still produce incorrect code
+- The audit log in the dashboard tracks which agent session made which changes
+
+## FAQ
+
+**Q:** Can non-engineers use Runtime?
+**A:** Yes. The workflow is designed so a PM or designer can start an agent session once engineering has set up the project config. The non-engineer describes the task in plain language; the agent executes it within the sandbox.
+
+**Q:** How does it compare to giving everyone a Claude Code seat?
+**A:** Individual seats require each user to maintain their own local environment and don't provide sandbox isolation or environment fidelity. Runtime adds the infrastructure layer: hydrated environments, scoped access, and an audit trail.
+
+**Q:** Which sandbox providers are supported?
+**A:** E2B and Cursor are currently listed. The SDK supports provider abstraction, so additional providers can be added.
+
+**Q:** Does it work with existing CI/CD pipelines?
+**A:** Yes. Runtime outputs standard pull requests that integrate with your existing GitHub or GitLab workflow. No special CI configuration needed.
+
+**Q:** Is there a self-hosted option?
+**A:** Not yet publicly documented. Check the [runtime website](https://www.runtm.com) for future self-hosted plans.
+
+## Conclusion
+
+Runtime solves the team-scaling problem that individual AI coding agent seats leave on the table. By pre-snapshotting fully hydrated dev environments and wrapping them in scoped sandbox isolation, it lets engineering define the guardrails once and lets non-engineers safely run coding tasks without handholding.
+
+The 103-point Launch HN reception signals strong appetite for team-oriented agent infrastructure — not just more agent seats. If your team is evaluating how to let non-engineers safely interact with a codebase via AI agents, Runtime is worth a close look.
+
+**Official site:** [runtm.com](https://www.runtm.com)
