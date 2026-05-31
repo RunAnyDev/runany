@@ -1,0 +1,99 @@
+---
+title: "Drifting in Space – Server Process for Every User"
+description: "YC W22 startup that gives every web app user their own dedicated server-side process, enabling low-latency browser-based apps like video editors and IDEs without infrastructure headaches."
+pubDate: "2026-05-31"
+tags: ["dev-tools", "infrastructure", "browser", "yc", "real-time"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/drifting-in-space.webp"
+  alt: "Drifting in Space product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Drifting in Space is a YC-backed platform that gives every web app user their own dedicated server-side process — think Heroku where each user gets their own server instance, enabling browser-based apps like video editors and IDEs with real-time low-latency performance.
+
+## Source and Accuracy Notes
+
+- Official site: [driftingin.space](https://driftingin.space)
+- Open source (MIT): [github.com/drifting-in-space/spawner](https://github.com/drifting-in-space/spawner)
+- HN Launch: [Show HN: Drifting in Space (YC W22)](https://news.ycombinator.com/item?id=30502978) — 108 points
+
+## What Is Drifting in Space?
+
+Drifting in Space is server software for performance-intensive browser-based applications. The core idea is simple but powerful: every user of your web app gets their own dedicated server-side process that starts when they open the app and stops when they close the tab.
+
+This architecture is how high-end web apps achieve the low latency needed for ambitious products like full-fledged video editors, IDEs, and data-heavy visualization tools. The problem is that recreating this has traditionally required significant ongoing engineering investment — the kind only large teams can sustain.
+
+Drifting in Space makes this architecture available to everyone. You stay in the web stack and never have to touch Kubernetes.
+
+## The Architecture
+
+The team behind Drifting in Space — Paul (formerly at a hedge fund building data-intensive tools) and Taylor (from Datadog and Uber) — observed that industrial-scale data-heavy apps pose fundamental problems for both browsers and traditional stateless server architectures. Neither can provide the compute resources needed for low-latency interaction with large datasets.
+
+Their solution is two-pronged:
+
+**Spawner** (open source, MIT) is the core API that lets web apps spawn a session-lived process. It manages the process lifecycle, exposes it over HTTPS, tracks inbound connections, and shuts it down when the user closes their tab. Language-agnostic — your code runs in a container, not in Erlang or Elixir.
+
+**Jamsocket** is the managed platform built on Spawner. It provides the same API but frees you from cluster or network configuration. From an app developer's perspective, it feels like using Netlify or Render — you upload your container and the platform handles the rest.
+
+## Practical Use Case
+
+Imagine building a fraud investigation tool for a large transaction database. Users want to interactively filter, aggregate, and visualize gigabytes of transactions as a graph.
+
+Instead of sending all the data to the browser and doing the work there, you put your processing code in a container and upload it to Jamsocket. When a fraud analyst opens your application, you hit an API to spin up a dedicated backend for that analyst. The browser code opens a WebSocket connection directly to that backend, streaming data as the analyst applies filters or zooms the visualization.
+
+The dedicated process per user means no shared resource contention, no latency spikes from other users' workloads, and compute resources that actually match the task.
+
+## How It Compares
+
+Drifting in Space sits in a unique position in the infrastructure landscape:
+
+- **vs. Heroku/Render/Netlify:** Those platforms share infrastructure across users. Drifting in Space gives each user their own process.
+- **vs. Agones:** Architecturally similar, but Agones targets games where clients speak UDP to arbitrary IPs. Drifting in Space targets applications connecting from browsers to a hostname over HTTPS.
+- **vs. Cloudflare Durable Objects:** Durable Objects focus on program state synchronization rather than arbitrary high-compute and memory use cases.
+- **vs. rolling your own with Kubernetes:** Spawner gives you the per-user process model without the operational overhead.
+
+## Pricing
+
+Drifting in Space uses a usage-based billing model similar to Heroku — you pay for what you use, metered fractionally. Usage billing scales to zero, making it approachable for weekend experiments.
+
+The target is roughly10 cents an hour for an instance capable of running VS Code, with higher resource tiers costing more and volume discounts for heavy users. The platform is currently in beta, onboarding users from a waitlist.
+
+## Security Notes
+
+Each user gets an isolated process with no shared resources, which naturally limits the blast radius of any security incident. The process lifecycle is managed by Spawner — it starts on demand and terminates when idle or when the user closes the tab.
+
+Because connections are made over HTTPS with direct WebSocket paths to the dedicated backend, data does not transit through shared infrastructure. For sensitive workloads, this isolation model is a meaningful improvement over shared server architectures.
+
+That said, the usual security considerations for containerized workloads still apply: input validation, access controls, and network policies should be configured appropriately for your threat model.
+
+## FAQ
+
+**Q:** Does this replace traditional REST APIs?
+**A:** No. Drifting in Space complements REST APIs. You still use your normal API for things like authentication, metadata lookups, and persistent storage. The dedicated process is for compute-intensive or latency-sensitive operations that benefit from being close to the user's session.
+
+**Q:** What languages are supported?
+**A:** Language-agnostic. Your code runs in a container, so any language with a container runtime works. The Spawner API exposes HTTPS and WebSocket endpoints — standard protocols, no language-specific SDK required.
+
+**Q:** How does this handle cold starts?
+**A:** The managed Jamsocket platform handles container provisioning. For latency-sensitive applications, you can configure warm instances or keep-alive policies. The billing model is fractional, so you pay only for actual compute time.
+
+**Q:** Is there a free tier?
+**A:** The platform is in beta and currently onboarding from a waitlist. The open source Spawner is free to self-host. Once GA pricing is announced, usage-based scaling to zero means even small deployments have a low cost floor.
+
+**Q:** Can I self-host Spawner without using Jamsocket?
+**A:** Yes. Spawner is open source under the MIT license. You can run it on your own infrastructure. Jamsocket is the managed option that handles cluster management, networking, and scaling for you.
+
+## Conclusion
+
+Drifting in Space solves a real infrastructure gap: the per-user server process model that powers high-end browser apps like Figma and VS Code Online, made accessible to smaller teams. With Spawner as the open-source core and Jamsocket as the managed platform, it serves both self-hosted and SaaS deployment preferences.
+
+If you're building a browser-based app that needs real-time low-latency performance — video editing, data visualization, collaborative tools, or anything compute-intensive — this architecture is worth evaluating. The isolation model also simplifies security reasoning: each user's process is genuinely separate, with no shared state to accidentally leak.
+
+**Useful links:**
+- [driftingin.space](https://driftingin.space) — sign up for beta
+- [github.com/drifting-in-space/spawner](https://github.com/drifting-in-space/spawner) — open source core
