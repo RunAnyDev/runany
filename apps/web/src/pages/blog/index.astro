@@ -16,6 +16,17 @@ const tags = [...new Set(allPosts.flatMap(p => p.data.tags))];
 const selectedCategory = Astro.url.searchParams.get('category') || '';
 const selectedTag = Astro.url.searchParams.get('tag') || '';
 
+const maxVisibleTags = 6;
+const sortedTags = selectedTag
+  ? [
+      ...tags.filter(t => t.toLowerCase() === selectedTag.toLowerCase()),
+      ...tags.filter(t => t.toLowerCase() !== selectedTag.toLowerCase()),
+    ]
+  : tags;
+const visibleTags = sortedTags.slice(0, maxVisibleTags);
+const hiddenTags = sortedTags.slice(maxVisibleTags);
+const hasMoreTags = hiddenTags.length > 0;
+
 const activeClasses = 'bg-cyan-300 text-slate-950';
 const inactiveClasses = 'border border-white/10 bg-white/5 text-slate-300 hover:text-cyan-200';
 const activeTagClasses = 'bg-violet-300 text-slate-950';
@@ -83,11 +94,25 @@ const structuredData = [
       <div>
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Tags</h2>
         <div class="flex flex-wrap gap-2" id="blog-tag-filters">
-          {tags.map(tag => (
+          {visibleTags.map(tag => (
             <button data-filter="tag" data-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
               #{tag}
             </button>
           ))}
+          {hasMoreTags && (
+            <div id="blog-hidden-tags" class="hidden contents">
+              {hiddenTags.map(tag => (
+                <button data-filter="tag" data-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
+                  #{tag}
+                </button>
+              ))}
+            </div>
+          )}
+          {hasMoreTags && (
+            <button id="blog-tag-toggle" type="button" class="rounded-full px-3 py-1.5 text-sm border border-white/20 bg-white/5 text-slate-300 hover:text-violet-200 transition-colors">
+              +{hiddenTags.length} more
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -405,6 +430,19 @@ const structuredData = [
           fetchAndAppend();
         }, { rootMargin: '360px 0px' });
         observer.observe(sentinel);
+      }
+
+      // Tag toggle: show/hide extra tags
+      const tagToggle = document.getElementById('blog-tag-toggle');
+      const hiddenTags = document.getElementById('blog-hidden-tags');
+      if (tagToggle && hiddenTags) {
+        tagToggle.addEventListener('click', () => {
+          const isHidden = hiddenTags.classList.contains('hidden');
+          hiddenTags.classList.toggle('hidden', !isHidden);
+          hiddenTags.classList.toggle('contents', isHidden);
+          tagToggle.textContent = isHidden ? 'Show less' : '+' + hiddenTags.querySelectorAll('button').length + ' more';
+          tagToggle.style.display = '';
+        });
       }
 
       updateStatus();
