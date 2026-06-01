@@ -1,0 +1,162 @@
+---
+title: "Runtime - Team-Wide AI Coding Agents Without the Chaos"
+description: "Runtime gives your whole team safe access to Claude Code, Codex, and other coding agents with snapshot environments, scoped secrets, and infrastructure-level guardrails."
+pubDate: "2026-06-02"
+tags: ["ai-agents", "developer-tools", "coding-agents", "yc"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runtime-coding-agents-team-platform.webp"
+  alt: "Runtime team coding agents platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Runtime orchestrates sandboxed AI coding agents across your entire team — letting non-engineers safely ship with Claude Code, Codex, and Cursor through snapshot environments, scoped secrets, and infrastructure-level guardrails.
+
+## What Is Runtime?
+
+Runtime solves the team-wide coding agent coordination problem. When one engineer uses AI coding tools, they can handhold the agent and keep PRs mergeable. When you try to roll the same workflow out to ten people — product managers, designers, data analysts — it falls apart fast.
+
+The failure modes are predictable: most agent PRs become unmergeable slop, every repo requires one-off engineer setup, context lives in individual heads, and there is no safe way for a PM to touch a real codebase.
+
+Runtime is infrastructure that makes coding agents safe and scalable for teams. Engineering defines the context once with system instructions, skills, and scoped integrations. Then Runtime snapshots the full running environment including Docker Compose multi-service setups, Kafka, Redis, and seeded databases, bringing everything up in milliseconds so the agent starts with every server already running.
+
+The product works with whatever agent your team already uses: Claude Code, Codex, Cursor, Copilot, Gemini, and Devin. You trigger sandboxes from a web app, CLI, Slack, Linear, GitHub, or API.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the Runtime CLI
+
+The CLI installs via npm, mise, or any package manager:
+
+```bash
+npm install -g @runtm-ai/cli
+# or
+mise use -g @runtm-ai/cli
+```
+
+Authentication uses a simple login flow:
+
+```bash
+runtm login
+# Opens browser for OAuth with GitHub or Google
+```
+
+### Step 2: Define Team Context Once
+
+Engineering creates a `runtime.toml` in the repo root to define the sandbox environment, allowed integrations, and skill instructions:
+
+```toml
+[runtime]
+name = "backend-api"
+agent = "claude-code"
+
+[sandbox]
+provider = "e2b"  # e2b, daytona, ec2, or self-hosted-k8s
+snapshot = ["docker-compose.yml", "./db/seed.sql", "./kafka/config.yaml"]
+
+[secrets]
+inject = ["STRIPE_SECRET_KEY", "SNOWFLAKE_CREDS"]
+scoped = true  # secrets never reach the agent directly
+
+[guardrails]
+allowed_commands = ["npm", "git", "docker-compose", "pytest"]
+denied_commands = ["rm -rf /", "DROP DATABASE", "kubectl delete"]
+network_egress = ["api.stripe.com", "snowflake.example.com"]
+```
+
+### Step 3: Trigger a Sandboxed Agent Session
+
+Non-engineers can spin up a sandboxed agent session from Slack, Linear, or the web dashboard:
+
+```bash
+# Trigger from CLI
+runtm launch --task "Fix the login bug and add a unit test"
+
+# Or via Slack integration
+/runtm launch "Update the onboarding flow"
+```
+
+Each session gets a shareable preview URL so internal builds go from sandbox to the team without anyone needing production access.
+
+## Architecture
+
+```bash
+Team Member (Slack / Linear / Web / CLI)
+              |
+              v
+     Runtime Orchestrator
+              |
+    +---------+---------+
+    |         |         |
+ E2B     Daytona     EC2
+ Sandboxes   |      Sandboxes
+    \        |        /
+     \       |       /
+      +------v------+
+      |  Managed    |
+      |  Proxy      |
+      |  (secrets,  |
+      |  guardrails)|
+      +-------------+
+              |
+         Agent Session
+         (Claude Code,
+          Codex, etc.)
+              |
+    +---------v---------+
+    |  Snapshot Env    |
+    |  Docker Compose  |
+    |  Kafka/Redis/DBs |
+    +------------------+
+```
+
+The Managed Proxy keeps secrets isolated from the agent and enforces command allow/deny lists and network egress controls at the infrastructure layer before they ever reach the agent.
+
+## Security Notes
+
+Runtime was designed around the insight that agent security cannot be left to prompting alone.
+
+Secrets are injected through a managed proxy so they never touch the agent directly. Even if an agent prompt is manipulated, it cannot output your Stripe keys or Snowflake credentials — they flow through a proxy that filters them based on scope.
+
+Guardrails run at the infrastructure level, not the policy level:
+
+- Command allow/deny lists evaluated before execution
+- Network egress controls block unauthorized outbound connections
+- RBAC scoped per human and per agent
+- Every session gets an audit trail
+
+For teams using coding agents with real production integrations, this infrastructure-level enforcement is the difference between a useful tool and a liability.
+
+## FAQ
+
+**Q:** Does Runtime work with self-hosted agents or only cloud providers?
+
+**A:** Runtime orchestrates across multiple sandbox providers including E2B, Daytona, EC2, and self-hosted Kubernetes. You choose the provider that fits your security requirements. Self-hosted K8s gives you full control over the infrastructure while still benefiting from the orchestration layer.
+
+**Q:** How are secrets protected from prompt injection?
+
+**A:** Secrets never flow to the agent process directly. They travel through a managed proxy that scopes them per task and session. The agent only sees what the proxy allows it to see, based on the RBAC rules your team defines in runtime.toml.
+
+**Q:** Can non-engineers actually ship useful code with this?
+
+**A:** Yes. A fintech customer built an on-call inspector that wires PagerDuty, Sentry, and their repo so when an alert fires, the agent finds the cause and opens a PR with a unit test before anyone gets paged. Another runs a finance agent in a private Slack channel pulling from Stripe, NetSuite, and Snowflake to run reconciliations in minutes with source rows attached.
+
+**Q:** Is the open source core actually useful standalone?
+
+**A:** The core at github.com/RunTM-ai/RunTM covers the snapshot and orchestration layer. The hosted version at app.runtm.com adds the managed proxy, multi-provider orchestration, RBAC dashboard, and Slack/Linear/GitHub integrations out of the box.
+
+## Conclusion
+
+Runtime addresses the coordination problem that appears the moment you try to scale AI coding agents beyond a single power user. Infrastructure-level guardrails, scoped secrets injection, and environment snapshots let you give non-engineers safe access to the same tools your best engineers are using — without creating a chaos layer on top of your codebase.
+
+If your team has tried rolling out coding agents and hit the wall of unmergeable PRs, context drift, and one-off setup overhead, Runtime is worth a serious look. The hosted free tier is generous enough to evaluate on a real production repo.
+
+**Links:**
+
+- Product: https://www.runtm.com
+- GitHub (core): https://github.com/RunTM-ai/RunTM
+- Docs: https://docs.runtm.com
