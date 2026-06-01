@@ -13,8 +13,8 @@ const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').repl
 const categories = [...new Set(allPosts.map(p => p.data.category))];
 const tags = [...new Set(allPosts.flatMap(p => p.data.tags))];
 
-const selectedCategory = Astro.url.searchParams.get('category');
-const selectedTag = Astro.url.searchParams.get('tag');
+const selectedCategory = Astro.url.searchParams.get('category') || '';
+const selectedTag = Astro.url.searchParams.get('tag') || '';
 
 const activeClasses = 'bg-cyan-300 text-slate-950';
 const inactiveClasses = 'border border-white/10 bg-white/5 text-slate-300 hover:text-cyan-200';
@@ -26,6 +26,12 @@ const filteredPosts = sortedPosts.filter(post => {
   if (selectedTag && !post.data.tags.map(t => t.toLowerCase()).includes(selectedTag.toLowerCase())) return false;
   return true;
 });
+
+const postsPerPage = 6;
+const initialPosts = filteredPosts.slice(0, postsPerPage);
+const initialTotal = filteredPosts.length;
+const hasMore = initialTotal > postsPerPage;
+
 const siteUrl = 'https://runany.dev';
 const structuredData = [
   {
@@ -62,102 +68,346 @@ const structuredData = [
     <div class="mb-10 grid gap-5 rounded-3xl border border-white/10 bg-slate-900/45 p-5 md:grid-cols-2">
       <div>
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Categories</h2>
-        <div class="flex flex-wrap gap-2">
-          <a href="/blog" data-filter-link data-filter-type="all" class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', !selectedCategory && !selectedTag ? activeClasses : inactiveClasses]}>
+        <div class="flex flex-wrap gap-2" id="blog-category-filters">
+          <button data-filter="category" data-value="" class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', !selectedCategory && !selectedTag ? activeClasses : inactiveClasses]}>
             All
-          </a>
+          </button>
           {categories.map(cat => (
-            <a href={`/blog?category=${encodeURIComponent(cat.toLowerCase())}`} data-filter-link data-filter-type="category" data-filter-value={cat.toLowerCase()} class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', selectedCategory === cat.toLowerCase() ? activeClasses : inactiveClasses]}>
+            <button data-filter="category" data-value={cat.toLowerCase()} class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', selectedCategory === cat.toLowerCase() ? activeClasses : inactiveClasses]}>
               {cat}
-            </a>
+            </button>
           ))}
         </div>
       </div>
 
       <div>
         <h2 class="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Tags</h2>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2" id="blog-tag-filters">
           {tags.map(tag => (
-            <a href={`/blog?tag=${encodeURIComponent(tag.toLowerCase())}`} data-filter-link data-filter-type="tag" data-filter-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
+            <button data-filter="tag" data-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
               #{tag}
-            </a>
+            </button>
           ))}
         </div>
       </div>
     </div>
 
     <div class="mb-6 flex items-center justify-between gap-4">
-      <h2 class="text-2xl font-bold text-white"><span data-post-count>{filteredPosts.length}</span> posts</h2>
-      <a href="/blog" data-clear-filters class:list={['link text-sm', !(selectedCategory || selectedTag) && 'hidden']}>Clear filters</a>
+      <h2 class="text-2xl font-bold text-white"><span id="blog-post-count">{initialTotal}</span> posts</h2>
+      <button id="blog-clear-filters" data-has-filter={selectedCategory || selectedTag ? 'true' : 'false'} class:list={['link text-sm', !(selectedCategory || selectedTag) && 'hidden']}>Clear filters</button>
     </div>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-      {filteredPosts.map(post => (
-        <div data-post-card data-category={post.data.category.toLowerCase()} data-tags={post.data.tags.map(tag => tag.toLowerCase()).join(',')}>
-          <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} />
-        </div>
+    <div id="blog-post-grid" class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3" data-posts-per-page={postsPerPage}>
+      {initialPosts.map(post => (
+        <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} />
       ))}
     </div>
 
-    <p data-empty-state class:list={['rounded-2xl border border-white/10 bg-white/5 py-12 text-center text-slate-400', filteredPosts.length !== 0 && 'hidden']}>No posts found matching your criteria.</p>
+    <p id="blog-empty-state" class:list={['rounded-2xl border border-white/10 bg-white/5 py-12 text-center text-slate-400', initialTotal !== 0 && 'hidden']}>No posts found matching your criteria.</p>
+
+    {hasMore && (
+      <div class="mt-10 flex flex-col items-center gap-4 text-center">
+        <button
+          id="blog-load-more-posts"
+          type="button"
+          class="rounded-full border border-violet-300/30 bg-violet-300/10 px-6 py-3 text-sm font-semibold text-violet-100 transition hover:border-violet-300/70 hover:bg-violet-300/20"
+        >
+          Load more posts
+        </button>
+        <p id="blog-infinite-scroll-status" class="text-sm text-slate-400" aria-live="polite">
+          Scroll down to load more posts.
+        </p>
+        <div id="blog-infinite-scroll-sentinel" class="h-1 w-full" aria-hidden="true"></div>
+      </div>
+    )}
   </section>
 
-  <script define:vars={{ activeClasses, inactiveClasses, activeTagClasses, inactiveTagClasses }}>
-    const normalize = (value) => (value || '').toLowerCase();
-    const params = new URLSearchParams(window.location.search);
-    const selectedCategory = normalize(params.get('category'));
-    const selectedTag = normalize(params.get('tag'));
-    const cards = Array.from(document.querySelectorAll('[data-post-card]'));
-    const links = Array.from(document.querySelectorAll('[data-filter-link]'));
-    const count = document.querySelector('[data-post-count]');
-    const clear = document.querySelector('[data-clear-filters]');
-    const empty = document.querySelector('[data-empty-state]');
-
-    const setClasses = (element, enabled, active, inactive) => {
-      element.classList.remove(...active.split(' '), ...inactive.split(' '));
-      element.classList.add(...(enabled ? active : inactive).split(' '));
-      element.setAttribute('aria-current', enabled ? 'page' : 'false');
-    };
-
-    links.forEach((link) => {
-      const type = link.dataset.filterType;
-      const value = normalize(link.dataset.filterValue);
-      const enabled = type === 'all'
-        ? !selectedCategory && !selectedTag
-        : type === 'category'
-          ? selectedCategory === value
-          : selectedTag === value;
-      setClasses(link, enabled, type === 'tag' ? activeTagClasses : activeClasses, type === 'tag' ? inactiveTagClasses : inactiveClasses);
-    });
-
-    let visible = 0;
-    cards.forEach((card) => {
-      const categoryMatches = !selectedCategory || normalize(card.dataset.category) === selectedCategory;
-      const tags = normalize(card.dataset.tags).split(',').filter(Boolean);
-      const tagMatches = !selectedTag || tags.includes(selectedTag);
-      const matches = categoryMatches && tagMatches;
-      card.classList.toggle('hidden', !matches);
-      if (matches) visible += 1;
-    });
-
-    if (count) count.textContent = String(visible);
-    clear?.classList.toggle('hidden', !selectedCategory && !selectedTag);
-    empty?.classList.toggle('hidden', visible !== 0);
-  </script>
+  <template id="blog-post-card-template">
+    <article class="group relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/75 shadow-2xl shadow-slate-950/30 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/40 hover:shadow-cyan-950/30" data-post-card-article>
+      <a data-card-link href="" class="block" aria-label="">
+        <div class="relative aspect-[16/9] overflow-hidden bg-slate-900">
+          <img data-card-img src="" alt="" width="600" height="338" class="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
+          <div data-card-img-fallback class="relative h-full w-full bg-gradient-to-br from-violet-500/25 via-slate-800 to-cyan-400/25" style="display:none">
+            <div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.10)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.10)_1px,transparent_1px)] bg-[size:28px_28px] opacity-35"></div>
+            <div class="absolute left-5 top-5 rounded-full border border-white/15 bg-slate-950/55 px-3 py-1 text-xs font-semibold text-cyan-100 backdrop-blur">
+              <span data-card-category-label></span>
+            </div>
+          </div>
+          <div class="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-transparent to-transparent"></div>
+        </div>
+      </a>
+      <div class="p-5">
+        <div class="mb-3 flex items-center justify-between gap-3 text-xs font-medium text-slate-400">
+          <a data-card-category-link href="" class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-cyan-200 hover:border-cyan-300/50"></a>
+          <time data-card-date datetime=""></time>
+        </div>
+        <h3 class="mb-3 text-xl font-bold leading-tight text-white">
+          <a data-card-title href="" class="hover:text-cyan-200 transition-colors"></a>
+        </h3>
+        <p data-card-desc class="mb-4 line-clamp-2 text-sm leading-6 text-slate-400"></p>
+        <div data-card-tags class="flex flex-wrap gap-2"></div>
+      </div>
+    </article>
+  </template>
 
   <style>
-    [data-filter-link][aria-current="page"] {
+    [aria-current="page"] {
       border-color: transparent;
       color: #020617;
     }
-
-    [data-filter-link][data-filter-type="category"][aria-current="page"],
-    [data-filter-link][data-filter-type="all"][aria-current="page"] {
+    [data-filter="category"][aria-current="page"] {
       background-color: #67e8f9;
     }
-
-    [data-filter-link][data-filter-type="tag"][aria-current="page"] {
+    button[data-filter="category"][aria-current="page"] {
+      background-color: #67e8f9;
+      color: #020617;
+      border-color: transparent;
+    }
+    button[data-filter="tag"][aria-current="page"] {
       background-color: #c4b5fd;
+      color: #020617;
+      border-color: transparent;
     }
   </style>
+
+  <script define:vars={{ activeClasses, inactiveClasses, activeTagClasses, inactiveTagClasses, selectedCategory, selectedTag, initialTotal, postsPerPage, hasMore }}>
+    (function () {
+      const grid = document.querySelector('#blog-post-grid');
+      const loadMoreBtn = document.querySelector('#blog-load-more-posts');
+      const statusEl = document.querySelector('#blog-infinite-scroll-status');
+      const sentinel = document.querySelector('#blog-infinite-scroll-sentinel');
+      const template = document.querySelector('#blog-post-card-template');
+      const countEl = document.querySelector('#blog-post-count');
+      const emptyEl = document.querySelector('#blog-empty-state');
+      const clearBtn = document.querySelector('#blog-clear-filters');
+      const categoryFilters = document.querySelectorAll('#blog-category-filters [data-filter]');
+      const tagFilters = document.querySelectorAll('#blog-tag-filters [data-filter]');
+
+      let currentCategory = selectedCategory;
+      let currentTag = selectedTag;
+      let currentPage = 1;
+      let total = initialTotal;
+      let hasMorePosts = hasMore;
+      let loading = false;
+
+      const activeCatClasses = activeClasses.split(' ');
+      const inactiveCatClasses = inactiveClasses.split(' ');
+      const activeTagClassList = activeTagClasses.split(' ');
+      const inactiveTagClassList = inactiveTagClasses.split(' ');
+
+      const formatDate = (d) => {
+        if (!d) return '';
+        const date = new Date(d);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      };
+
+      const updateFilterUI = (cat, tag) => {
+        const hasFilter = cat || tag;
+        clearBtn.hidden = !hasFilter;
+
+        categoryFilters.forEach((btn) => {
+          const val = btn.dataset.value;
+          const active = (val === '' && !cat && !tag) || (val === cat);
+          btn.classList.remove(...activeCatClasses, ...inactiveCatClasses);
+          btn.classList.add(...(active ? activeCatClasses : inactiveCatClasses));
+          btn.setAttribute('aria-current', active ? 'page' : 'false');
+        });
+
+        tagFilters.forEach((btn) => {
+          const val = btn.dataset.value;
+          const active = val === tag;
+          btn.classList.remove(...activeTagClassList, ...inactiveTagClassList);
+          btn.classList.add(...(active ? activeTagClassList : inactiveTagClassList));
+          btn.setAttribute('aria-current', active ? 'page' : 'false');
+        });
+      };
+
+      const updateStatus = () => {
+        if (!loadMoreBtn) return;
+        if (!hasMorePosts) {
+          loadMoreBtn.hidden = true;
+          statusEl.textContent = 'All posts loaded.';
+          return;
+        }
+        loadMoreBtn.hidden = false;
+        statusEl.textContent = 'Scroll down to load more posts.';
+      };
+
+      const createPostCard = (post) => {
+        const clone = template.content.firstElementChild.cloneNode(true);
+
+        const link = clone.querySelector('[data-card-link]');
+        link.href = `/blog/${post.slug}/`;
+        link.setAttribute('aria-label', `Read ${post.title}`);
+
+        const title = clone.querySelector('[data-card-title]');
+        title.href = `/blog/${post.slug}/`;
+        title.textContent = post.title;
+
+        const desc = clone.querySelector('[data-card-desc]');
+        desc.textContent = post.description || '';
+
+        const date = clone.querySelector('[data-card-date]');
+        const d = new Date(post.pubDate);
+        date.setAttribute('datetime', d.toISOString());
+        date.textContent = formatDate(post.pubDate);
+
+        const catLink = clone.querySelector('[data-card-category-link]');
+        catLink.href = `/category/${post.category.toLowerCase()}/`;
+        catLink.textContent = post.category;
+
+        const catLabel = clone.querySelector('[data-card-category-label]');
+        if (catLabel) catLabel.textContent = post.category;
+
+        const img = clone.querySelector('[data-card-img]');
+        const fallback = clone.querySelector('[data-card-img-fallback]');
+        if (post.image && post.image.url) {
+          img.src = post.image.url;
+          img.alt = (post.image.alt || post.title);
+          img.onerror = function () {
+            this.style.display = 'none';
+            if (fallback) fallback.style.display = '';
+          };
+        } else {
+          img.style.display = 'none';
+          if (fallback) fallback.style.display = '';
+        }
+
+        const tagsContainer = clone.querySelector('[data-card-tags]');
+        (post.tags || []).slice(0, 3).forEach((tag) => {
+          const a = document.createElement('a');
+          a.href = `/tags/${tag.toLowerCase()}/`;
+          a.className = 'rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 hover:text-cyan-200';
+          a.textContent = `#${tag}`;
+          tagsContainer.append(a);
+        });
+
+        return clone;
+      };
+
+      const buildQuery = (page) => {
+        let q = `/api/posts?page=${page}&limit=${postsPerPage}`;
+        if (currentCategory) q += '&category=' + encodeURIComponent(currentCategory);
+        if (currentTag) q += '&tag=' + encodeURIComponent(currentTag);
+        return q;
+      };
+
+      const clearGrid = () => {
+        const articles = grid.querySelectorAll('[data-post-card-article]');
+        articles.forEach((a) => a.remove());
+      };
+
+      const fetchAndAppend = async () => {
+        if (loading || !loadMoreBtn) return;
+        loading = true;
+        loadMoreBtn.textContent = 'Loading...';
+
+        try {
+          const nextPage = currentPage + 1;
+          const resp = await fetch(buildQuery(nextPage));
+          if (!resp.ok) throw new Error('Failed to fetch');
+          const data = await resp.json();
+
+          data.posts.forEach((post) => {
+            grid.append(createPostCard(post));
+          });
+
+          currentPage = data.page;
+          hasMorePosts = data.hasMore;
+          updateStatus();
+
+          if (!data.hasMore && observer) observer.disconnect();
+        } catch (err) {
+          statusEl.textContent = 'Failed to load posts. Try again.';
+          console.error(err);
+        } finally {
+          loading = false;
+          loadMoreBtn.textContent = 'Load more posts';
+        }
+      };
+
+      const applyFilter = async (cat, tag) => {
+        if (currentCategory === cat && currentTag === tag) return;
+
+        currentCategory = cat;
+        currentTag = tag;
+        currentPage = 0;
+        hasMorePosts = true;
+
+        updateFilterUI(cat, tag);
+
+        let newUrl = '/blog';
+        const params = new URLSearchParams();
+        if (cat) params.set('category', cat);
+        if (tag) params.set('tag', tag);
+        const qs = params.toString();
+        if (qs) newUrl += '?' + qs;
+        history.pushState({}, '', newUrl);
+
+        loading = true;
+        try {
+          const resp = await fetch(buildQuery(1));
+          if (!resp.ok) throw new Error('Failed to fetch');
+          const data = await resp.json();
+
+          clearGrid();
+          data.posts.forEach((post) => {
+            grid.append(createPostCard(post));
+          });
+
+          total = data.total;
+          currentPage = 1;
+          hasMorePosts = data.hasMore;
+
+          if (countEl) countEl.textContent = String(total);
+          if (emptyEl) emptyEl.classList.toggle('hidden', total !== 0);
+
+          updateStatus();
+
+          if (observer) {
+            observer.disconnect();
+            if (data.hasMore) observer.observe(sentinel);
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          loading = false;
+        }
+      };
+
+      categoryFilters.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          applyFilter(btn.dataset.value, '');
+        });
+      });
+
+      tagFilters.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const newTag = btn.dataset.value === currentTag ? '' : btn.dataset.value;
+          applyFilter(currentCategory, newTag);
+        });
+      });
+
+      clearBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        applyFilter('', '');
+      });
+
+      if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', fetchAndAppend);
+      }
+
+      let observer = null;
+      if ('IntersectionObserver' in window && sentinel && hasMorePosts) {
+        observer = new IntersectionObserver((entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          if (loading || !hasMorePosts) return;
+          fetchAndAppend();
+        }, { rootMargin: '360px 0px' });
+        observer.observe(sentinel);
+      }
+
+      updateStatus();
+    })();
+  </script>
 </BaseLayout>
