@@ -1,0 +1,184 @@
+---
+title: "Jibril - Runtime Security Monitoring for Cloud-Native Infra"
+description: "Jibril uses eBPF to monitor and enforce runtime security policies directly in the Linux kernel — deploy a single binary with negligible overhead and real-time enforcement for ephemeral workloads."
+pubDate: "2026-06-02"
+tags: ["security", "devops", "ebpf", "cloud-native", "kubernetes"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/jibril-runtime-security-monitoring.webp"
+  alt: "Jibril runtime security monitoring thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Jibril uses eBPF to monitor and enforce runtime security policies directly in the Linux kernel — deploy a single binary with under 5% CPU overhead and get real-time detection, enforcement, and detailed process ancestry for cloud-native infrastructure.
+
+## Source and Accuracy Notes
+
+- HN Launch: [Show HN: Jibril – Runtime security monitoring and enforcement for modern infra](https://news.ycombinator.com/item?id=43475398)
+- Product: [jibril.garnet.ai](https://jibril.garnet.ai)
+- Installation: [jibril.garnet.ai/usage/installation](https://jibril.garnet.ai/usage/installation)
+
+## What Is Jibril?
+
+Jibril is a runtime security monitoring and enforcement tool built for modern cloud-native and ephemeral infrastructure. Traditional EDR (Endpoint Detection and Response) tools were designed for long-running servers and physical endpoints — they struggle with containerized workloads, short-lived pods, and serverless functions that spin up and tear down in seconds.
+
+Jibril's core innovation is an **event-less architecture** that leverages eBPF (extended Berkeley Packet Filter) to maintain lightweight state maps directly in the Linux kernel. Instead of buffering and forwarding security events to a user-space agent, Jibril queries kernel state directly on demand. This means it captures exactly what it needs, when it needs it, with minimal overhead.
+
+The result is real-time detection and enforcement that works equally well for:
+
+- GitHub Actions runners that spin up per job and tear down in minutes
+- Kubernetes pods with short lifespans
+- Serverless functions in cloud environments
+- Traditional long-running containers
+
+## How It Works
+
+### The eBPF-Based Sensor Architecture
+
+Traditional runtime security tools work by intercepting system calls and process events, buffering them, then sending them to a user-space processing engine. This creates two problems: the buffer introduces latency, and the user-space agent consumes meaningful CPU and memory.
+
+Jibril takes a different approach. Its eBPF sensor runs inside the kernel itself, maintaining lightweight in-kernel state maps. When a query comes in (or a policy trigger fires), the kernel has the data already — no event buffering needed.
+
+```bash
+Process executes system call
+       ↓
+eBPF sensor in kernel intercepts
+       ↓
+In-kernel state map updated (lightweight)
+       ↓
+Policy engine evaluates against rules
+       ↓
+Enforcement action (block, alert, freeze)
+```
+
+The single binary approach means no sidecars, no kernel modules to compile, and no application code changes required. Deploy it to any Linux environment with a single command.
+
+### Real-Time Detection and Enforcement
+
+Jibril doesn't just detect threats — it can enforce behavioral policies directly in the kernel in real time:
+
+- **Live kernel-state querying** — ask questions like "what network calls were made by this process during the last 5 minutes?"
+- **Process freezing** — freeze suspicious processes immediately on detection
+- **Detailed process ancestry** — track parent-child relationships across fork/exec chains
+- **Source-level context** — understand not just what happened but which code path triggered it
+
+### Deployment in Minutes
+
+The installation is a single binary deployment:
+
+```bash
+# One-line install (k8s example)
+kubectl apply -f https://jibril.garnet.ai/manifests/jibril.yaml
+
+# Standalone Linux (non-containerized)
+curl -fsSL https://get.jibril.garnet.ai | sudo sh
+```
+
+No sidecar injection, no kernel module compilation, no recompiling the application. The sensor starts capturing immediately with a pre-configured set of MITRE-mapped detections.
+
+## Practical Use Cases
+
+### Monitoring GitHub Actions Runners
+
+Modern CI/CD pipelines run third-party actions and scripts in ephemeral runner environments. When a compromised action runs, traditional security tools have no visibility because the pod is gone by the time you look at logs.
+
+With Jibril, you can answer questions like:
+- What network calls were made during my GitHub Actions test workflow?
+- Which dependency triggered an outbound connection to an unknown host?
+- What file system operations did this matrix of steps perform?
+
+### Restricting Process Capabilities
+
+One specific example from the Jibril documentation: blocking a `python3` process from reading `/proc/[pid]/mem` to prevent memory dump attacks. This works at the kernel level — no eBPF program can intercept this once Jibril's policy is in place.
+
+```yaml
+# Example: Block memory dump access
+apiVersion: jibril.garnet.ai/v1
+kind: RuntimePolicy
+metadata:
+  name: block-proc-mem-read
+spec:
+  target:
+    processName: python3
+  rules:
+    - action: block
+      syscalls:
+        - process_vm_readv
+      message: "Blocked python3 from reading another process memory"
+```
+
+### Automatic DNS-Based Threat Response
+
+Jibril integrates with managed blocklists (known cryptomining pools, C2 servers) and can automatically:
+- Block malicious DNS resolutions within Kubernetes pods
+- Update cluster firewall rules in real time when a threat is detected
+- Enforce network-level containment without requiring iptables rules manually
+
+## Deeper Analysis
+
+### What Makes This Different from Falco, Sysdig, or Tracee?
+
+| Feature | Jibril | Falco/Sysdig | Traditional EDR |
+|---|---|---|---|
+| Kernel integration | eBPF (in-kernel) | eBPF (user-space) or kernel module | User-space agents |
+| Deployment model | Single binary, no sidecars | Sidecar or kernel module | User-space install |
+| Event buffering | None (query-based) | Yes (high-volume) | Yes (very high) |
+| Enforcement | In-kernel, real-time | Alert only (typically) | Alert + optional block |
+| Overhead | around 5% CPU typical | 3-8% CPU | 1-5% CPU |
+| Container-native | Yes (ephemeral-safe) | Yes | Poor (designed for long-lived) |
+| Kubernetes native | Yes | Yes | Mixed |
+
+The key difference is the **event-less** architecture. Falco and Sysdig work by consuming a stream of system events — they see everything and filter in user space. Jibril only captures state when something queries it or a policy fires. For ephemeral workloads that live for seconds, an event-based approach misses most of what happened because the workload is gone before the event stream is processed.
+
+### Mitre ATT&CK Coverage
+
+Jibril ships with a pre-configured set of MITRE-mapped detections covering the tactics most relevant to cloud-native and CI/CD environments:
+- TA0004: Privilege Escalation
+- TA0005: Defense Evasion
+- TA0006: Credential Access
+- TA0007: Discovery
+- TA0010: Exfiltration
+
+## Security Notes
+
+**Binary provenance:** The single-binary sensor is signed and verifiable. The installation script fetches the binary over HTTPS with checksum verification.
+
+**No kernel module compilation:** Unlike some eBPF-based tools that require a kernel module (which needs kernel headers), Jibril ships pre-compiled eBPF programs compatible with most modern kernels (5.x+). This avoids the compilation step that often fails in containerized environments.
+
+**Minimal attack surface:** Because the sensor maintains in-kernel state and doesn't buffer events, there's no large event log sitting on disk that could be tampered with by an attacker who compromises the workload.
+
+**Network isolation:** The Jibril sensor communicates with its management plane over a single outbound connection. If your workloads are isolated from the internet, you'll need to allow outbound HTTPS to the management endpoint.
+
+## FAQ
+
+**Q:** Does Jibril require a kernel module or kernel headers to be installed?
+
+**A:** No. Jibril ships with pre-compiled eBPF programs that load into the kernel at runtime. No kernel module compilation, no kernel headers needed. It works on any Linux machine running kernel 5.x or later with eBPF support enabled.
+
+**Q:** How does it handle short-lived containers and ephemeral workloads?
+
+**A:** Because Jibril uses an event-less architecture, it doesn't depend on buffering events from running processes. It queries kernel state on demand, so even if a container only lived for 10 seconds, you can ask "what did this process do?" and get an answer from the kernel's retained state. This works for containers, pods, and serverless functions that traditional event-based tools miss.
+
+**Q:** What is the performance overhead?
+
+**A:** Jibril's documentation states typically under 5% CPU overhead for most workloads. Because it doesn't buffer and forward events like traditional agents do, there's no spike in overhead when a workload is under heavy system load.
+
+**Q:** Can Jibril block malicious processes or only alert?
+
+**A:** Jibril supports enforcement actions — not just detection and alerting. You can configure it to freeze suspicious processes, block network connections, or enforce other behavioral policies directly from the kernel. This is real enforcement, not just logging.
+
+**Q:** Does it work outside Kubernetes (bare metal, VMs, GitHub Actions)?
+
+**A:** Yes. The single binary deployment works on any Linux environment — bare metal servers, VMs, Kubernetes clusters, and ephemeral CI runners. The GitHub Actions use case is explicitly called out in the documentation as a primary target scenario.
+
+## Conclusion
+
+Jibril addresses a real gap in cloud-native runtime security: tools designed for long-running servers struggle with ephemeral workloads that spin up and down in seconds. Its eBPF-based event-less architecture is the right design for this problem — querying kernel state directly is the only way to get visibility into workloads that may be gone before you look.
+
+The single-binary deployment model and under 5% overhead make it practical to deploy across a large fleet without worrying about performance impact. If you're running Kubernetes, GitHub Actions runners, or any ephemeral Linux workload and want runtime security visibility without the overhead of traditional EDR agents, Jibril is worth evaluating.
+
+**Get started:** [jibril.garnet.ai/usage/installation](https://jibril.garnet.ai/usage/installation)
