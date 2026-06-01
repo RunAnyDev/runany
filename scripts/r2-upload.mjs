@@ -1,23 +1,49 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-const slug = process.argv[2] || "drifting-in-space";
-const filePath = process.argv[3] || "/tmp/thumb_drifting.webp";
+// Load .env from repo root
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = resolve(__dirname, "..");
+const dotenv = readFileSync(resolve(root, ".env"), "utf-8");
+for (const line of dotenv.split("\n")) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) continue;
+  const eq = trimmed.indexOf("=");
+  if (eq === -1) continue;
+  const k = trimmed.slice(0, eq).trim();
+  const v = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+  if (!process.env[k]) process.env[k] = v;
+}
+
+const slug = process.argv[2] || process.env.R2_DEFAULT_SLUG || "drifting-in-space";
+const filePath = process.argv[3] || process.env.R2_DEFAULT_PATH || "/tmp/thumb_drifting.webp";
+
+const accountId = process.env.R2_ACCOUNT_ID;
+const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+const bucket = process.env.R2_BUCKET;
+
+if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+  console.error("Missing R2 env vars: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET");
+  process.exit(1);
+}
 
 const s3 = new S3Client({
   region: "auto",
-  endpoint: "https://d6d37dd4a65eea30f2600687beb90345.r2.cloudflarestorage.com",
+  endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
   credentials: {
-    accessKeyId: "9a53717f3e2aa4220c58f79d887bbc50",
-    secretAccessKey: "0b594062d72b90317ce06f4080494a373d7a30afd9bd2bb9678056bc02204291",
+    accessKeyId,
+    secretAccessKey,
   },
 });
 
 const fileData = readFileSync(filePath);
-const key = `runany/blog/thumbnails/${slug}.webp`;
+const key = `${bucket}/blog/thumbnails/${slug}.webp`;
 
 const command = new PutObjectCommand({
-  Bucket: "runany",
+  Bucket: bucket,
   Key: key,
   Body: fileData,
   ContentType: "image/webp",

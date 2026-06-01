@@ -6,6 +6,15 @@ runany.dev is an English tech blog sharing knowledge about AI, developer tools, 
 
 **Important rule:** Agents can commit new posts directly to the repo WITHOUT needing a webhook.
 
+## Security
+
+**❌ NEVER hardcode credentials, API keys, access keys, or secrets in any file.**
+Always read from `~/.env` or environment variables. This includes:
+- R2 `accessKeyId` / `secretAccessKey`
+- `MINIMAX_API_KEY`
+- `GITHUB_TOKEN`
+- Any other API keys or secrets
+
 ---
 
 ## Creating a New Blog Post
@@ -243,7 +252,11 @@ cwebp /tmp/thumb.png -o /tmp/thumb.webp -resize 1200 630 -q 85
 **MDX frontmatter:** thumbnail URL goes in `image.url` field. Body should NOT contain `![]()` markdown image tags — PostLayout renders from frontmatter only.
 
 **R2 upload via Node.js (wrangler --remote is broken for R2):**
-Use the inline Node.js AWS Signature v4 script from the thumbnail Priority 1 section above. The `wrangler r2 object put --remote` command silently fails — returns "Upload complete" but file goes to local mock storage, NOT R2.
+Use `scripts/r2-upload.mjs` (reads credentials from `.env`, no hardcoded keys):
+```bash
+node scripts/r2-upload.mjs [slug] [filepath]
+```
+The `wrangler r2 object put --remote` command silently fails — returns "Upload complete" but file goes to local mock storage, NOT R2.
 
 **Validation:**
 - ✅ All 21 existing thumbnails verified on R2
