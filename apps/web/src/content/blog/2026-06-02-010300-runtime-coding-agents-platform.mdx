@@ -1,0 +1,171 @@
+---
+title: "Runtime – Sandboxed Coding Agents for Your Whole Team"
+description: "Runtime orchestrates coding agents across sandboxes like E2B and Daytona, handling environment setup, secrets injection, and RBAC so your whole team ships with agents without handholding."
+pubDate: "2026-06-02"
+tags: ["ai-agent", "coding-agent", "dev-tools", "yc-p26"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runtime-coding-agents-platform.webp"
+  alt: "Runtime coding agents platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Runtime is a team-wide coding agent infrastructure layer that snaps environments, orchestrates sandboxes, and handles secrets so non-engineers can safely ship with Claude Code or Codex without engineering involvement.
+
+## Source and Accuracy Notes
+
+- Product: [https://runtm.com](https://runtm.com)
+- HN Launch: [https://news.ycombinator.com/item?id=48225040](https://news.ycombinator.com/item?id=48225040) (103 points, YC P26)
+- Docs: [https://docs.runtm.com](https://docs.runtm.com)
+
+## What Is Runtime?
+
+Individual engineers have figured out how to ship with coding agents. Team rollouts break down because:
+
+- Every repo needs one-off local setup before an agent can touch it
+- Skills and context live in one person's head
+- A PM touching a real codebase risks bad deploys or secret leaks
+
+Runtime solves the team-scale problem. It sits between your coding agents (Claude Code, Codex, Devin, etc.) and your infrastructure, providing:
+
+**Environment snapshots** — Docker Compose setups, Kafka, Redis, seeded databases — all restored in milliseconds. The agent boots into a fully wired environment instead of spending 20 minutes figuring out how to run the tests.
+
+**Sandbox orchestration** — Agents run in isolated environments on E2B, Daytona, EC2, or self-hosted Kubernetes. You pick the provider per team or per task.
+
+**Secrets management** — Credentials never touch the agent directly. Runtime injects them through a managed proxy with command allow/deny lists, network egress controls, and per-human, per-agent RBAC.
+
+**Shareable preview URLs** — Every session gets a live URL so the rest of the team can review without needing production access.
+
+## Setup Workflow
+
+### Step 1: Define Your Context Once
+
+Engineering defines the working environment once:
+
+```bash
+runtime init my-project
+# Configure system instructions, skills, scoped integrations
+# Install via CLI, mise, npm, or any package manager
+```
+
+The context includes all service dependencies and the exact state the agent needs to be productive.
+
+### Step 2: Snapshot the Environment
+
+```bash
+runtime snapshot create my-project
+# Captures full running environment including:
+# - Docker Compose services
+# - Databases with seed data
+# - Message queues (Kafka, Redis)
+# Everything spins up in milliseconds on next session
+```
+
+### Step 3: Invite Your Team
+
+```bash
+runtime team add --email pm@company.com --role agent-operator
+# PM can trigger agent runs without engineer involvement
+# RBAC scoped per human and per agent
+```
+
+### Step 4: Run an Agent Session
+
+```bash
+runtime session start --project my-project --agent claude-code
+# Runtime spins up sandbox, injects secrets, applies guardrails
+# Shareable preview URL generated for team review
+```
+
+## Deeper Analysis
+
+### Why This Matters for Team Adoption
+
+The problem Runtime solves isn't about which agent you use — it's about the infrastructure gap between solo agent usage and team-wide rollout. When one engineer uses Claude Code, they already have the context, the secrets, the local setup. When you hand that to a PM, none of that transfers.
+
+Runtime makes the environment portable and the permissions granular. The agent gets exactly what it needs, nothing more.
+
+### Sandbox Provider Flexibility
+
+Rather than locking into one sandbox provider, Runtime lets you choose per context:
+
+- **E2B** — Good for quick, ephemeral workloads
+- **Daytona** — Strong for persistent dev-like environments
+- **EC2** — When you need more control or existing cloud credits
+- **Self-hosted K8s** — Enterprise requirements for data residency
+
+This matters because sandbox pricing and capability tradeoffs change fast. Tying your agent infrastructure to a single provider is risky.
+
+### Secrets Architecture
+
+The managed proxy approach is the right call. Agents that directly hold secrets are a security incident waiting to happen — API keys in context logs, credentials in generated code, long-lived session tokens. Runtime's proxy model means the agent never sees the credential, only the capability it enables.
+
+### Comparison to bare agent usage
+
+| Concern | Bare agent usage | Runtime |
+|---|---|---|
+| Environment setup | Manual per repo | Snapshot + restore |
+| Secrets | In context / env files | Managed proxy |
+| Permissions | All-or-nothing | RBAC per human + agent |
+| Review sharing | Export artifacts | Shareable preview URL |
+| Sandbox isolation | Varies by provider | Consistent across providers |
+
+## Practical Evaluation Checklist
+
+- Does your team have multiple roles (PM, designer, engineer) who need to work with coding agents?
+- Do your repos require non-trivial setup steps before an agent can be productive?
+- Do you have compliance or security requirements around secrets management?
+- Are you currently burning engineering time "hand-holding" agent sessions?
+- Do you need audit trails for who triggered which agent session?
+
+If you answered yes to two or more, Runtime is worth evaluating seriously.
+
+## Security Notes
+
+- Secrets injected through managed proxy — agent never holds raw credentials
+- RBAC scoped per human and per agent — principle of least privilege
+- Network egress controls — agents can't exfiltrate data to arbitrary endpoints
+- Command allow/deny lists — guardrails enforced at infrastructure level
+- Session audit logs — every run traceable to who triggered it
+
+The proxy-based secrets model is the critical security primitive. Without it, any agent session that touches a codebase has a path to expose all credentials in that environment's context.
+
+## FAQ
+
+**Q:** How does Runtime compare to running agents directly on local machines?
+
+**A:** Local agents inherit the developer's full environment — all credentials, all network access, all permissions. Runtime isolates the agent in a sandbox with exactly the access it needs for the task. The agent can still read your codebase but can't reach your production database unless you explicitly grant that.
+
+---
+
+**Q:** Does Runtime work with any coding agent or only specific ones?
+
+**A:** Runtime is agent-agnostic. It works with Claude Code, Codex, Devin, or any agent that uses standard tooling. The sandbox and secrets proxy are universal — the agent just sees a normal working environment.
+
+---
+
+**Q:** What happens when an agent session needs a capability it wasn't granted?
+
+**A:** The managed proxy returns a permission error to the agent and logs the denied attempt. Engineering can adjust RBAC in real time without restarting the session. The agent doesn't get silent fallback — every denied call is tracked.
+
+---
+
+**Q:** Is there a self-hosted option for teams with data residency requirements?
+
+**A:** Yes. Runtime supports self-hosted Kubernetes as a sandbox provider. You control where the data lives and can run the control plane on-prem while still using cloud sandboxes for workloads that don't touch sensitive systems.
+
+## Conclusion
+
+Runtime addresses the real bottleneck in team-wide AI agent adoption: the gap between what one engineer can do alone and what a whole team can do safely. By snapshotting environments, orchestrating sandboxes, and injecting secrets through a managed proxy, it removes the "setup tax" that kills agent rollouts and the security risks that make engineering hesitant to let non-engineers near production codebases.
+
+The team-scale problem for coding agents isn't about model capability — it's about infrastructure. Runtime is infrastructure built for that problem.
+
+If you're trying to roll coding agents beyond your engineering team, this is the missing layer.
+
+**Website:** [https://runtm.com](https://runtm.com)
+
+**HN Launch:** [https://news.ycombinator.com/item?id=48225040](https://news.ycombinator.com/item?id=48225040)
