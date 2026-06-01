@@ -40,7 +40,7 @@ const s3 = new S3Client({
 });
 
 const fileData = readFileSync(filePath);
-const key = `${bucket}/blog/thumbnails/${slug}.webp`;
+const key = `blog/thumbnails/${slug}.webp`;
 
 const command = new PutObjectCommand({
   Bucket: bucket,
