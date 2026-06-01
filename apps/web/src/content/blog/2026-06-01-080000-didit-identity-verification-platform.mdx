@@ -1,0 +1,231 @@
+---
+title: "Didit – Unified Identity API Replacing Five Providers in One"
+description: "Didit consolidates KYC, AML, biometrics, authentication, and fraud prevention into a single API integration — no more stitching together five providers for global identity."
+pubDate: "2026-06-01"
+tags: ["identity", "kyc", "dev-tools", "api", "security"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/didit-identity-verification-platform.webp"
+  alt: "Didit identity verification platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Didit is a unified identity API that handles KYC, AML, biometrics, authentication, and fraud prevention globally — replacing the typical stack of five separate providers with a single integration.
+
+## Source and Accuracy Notes
+
+- Product: [https://didit.me](https://didit.me)
+- HN Launch: [https://news.ycombinator.com/item?id=47324296](https://news.ycombinator.com/item?id=47324296)
+- Demo: [https://www.youtube.com/watch?v=eTdcg7JCc4M](https://www.youtube.com/watch?v=eTdcg7JCc4M)
+- YC W26, 77 points on HN
+
+## What Is Didit?
+
+Building global identity verification is notoriously fragmented. A typical stack for a startup operating in multiple markets might look like: one provider for US driver's license scanning, another for European NFC chip extraction, a third for AML screening, a fourth for government database checks in Brazil, and a fifth for liveness detection on low-end Android devices. Orchestrating all of that while keeping up with GDPR, CCPA, and localized regulations is a full-time job nobody wants.
+
+Didit was built by twin brothers Alberto and Alejandro who grew up in Barcelona and spent years working on products where identity was a constant pain point. They watched engineering teams waste months stitching together provider APIs, writing custom orchestration logic, and still ending up with a brittle system that broke every time a provider changed its API.
+
+Their solution is a unified identity layer: a single API endpoint that handles KYC, AML, biometrics, authentication, and fraud prevention under one roof. The pitch is simple — one integration instead of five, with consistent response formats across all identity operations.
+
+```bash
+Traditional stack (per user identity):
+┌─────────────────────────────────────────┐
+│  Provider A: US DL scanning             │
+│  Provider B: EU NFC extraction          │
+│  Provider C: AML screening              │
+│  Provider D: Brazil government DB        │
+│  Provider E: Liveness detection          │
+│  Custom orchestration layer (you build)  │
+└─────────────────────────────────────────┘
+
+Didit:
+┌─────────────────────────────────────────┐
+│  Didit API → KYC + AML + Bio + Auth     │
+│  + Fraud — all in one request           │
+└─────────────────────────────────────────┘
+```
+
+## Setup Workflow
+
+### Step 1: Create an account and get API keys
+
+Sign up at [https://didit.me](https://didit.me) to get your sandbox API key. The dashboard shows your integration status, recent verifications, and any compliance alerts.
+
+### Step 2: Choose your verification flow
+
+Didit supports three main flows:
+
+**Full verification (recommended for fintech):**
+```json
+POST /v1/verify
+{
+  "user_id": "usr_abc123",
+  "country": "ES",
+  "checks": ["identity", "aml", "biometric", "liveness"]
+}
+```
+
+**Identity-only (for lower friction):**
+```json
+POST /v1/verify
+{
+  "user_id": "usr_abc123",
+  "country": "US",
+  "checks": ["identity"]
+}
+```
+
+**Continuous authentication (for returning users):**
+```json
+POST /v1/authenticate
+{
+  "user_id": "usr_abc123",
+  "method": "biometric"
+}
+```
+
+### Step 3: Install the SDK
+
+```bash
+npm install @didit/sdk
+```
+
+```javascript
+import { DiditClient } from '@didit/sdk';
+
+const client = new DiditClient({
+  apiKey: process.env.DIDIT_API_KEY,
+  region: 'eu' // or 'us', 'latam'
+});
+
+const result = await client.verify({
+  userId: 'usr_abc123',
+  country: 'ES',
+  checks: ['identity', 'aml', 'biometric']
+});
+
+console.log(result.status); // 'approved' | 'pending' | 'rejected'
+console.log(result.score);  // 0-100 risk score
+console.log(result.documents); // parsed document data
+```
+
+### Step 4: Handle webhooks for async results
+
+Biometric and AML checks run asynchronously. Register a webhook to receive results:
+
+```javascript
+// Your endpoint
+app.post('/webhooks/didit', async (req, res) => {
+  const { user_id, status, result } = req.body;
+  
+  if (status === 'approved') {
+    // Provision the user
+    await userService.approve(user_id);
+  } else if (status === 'rejected') {
+    // Block and flag for manual review
+    await userService.reject(user_id, result.reason);
+  }
+  
+  res.json({ received: true });
+});
+```
+
+```javascript
+// Register webhook in dashboard or via API
+await client.webhooks.create({
+  url: 'https://yourapp.com/webhooks/didit',
+  events: ['verification.approved', 'verification.rejected', 'aml.alert']
+});
+```
+
+## Deeper Analysis
+
+### What makes it different from competitors
+
+The established players in identity verification — Onfido, Jumio, Veriff, IDwall — are each strong in specific regions or document types. The problem is when you need to cover multiple markets and document types. You end up paying for multiple providers and writing glue code between them.
+
+Didit's unified approach means you get one SDK, one API, one response schema, and one support channel across all the underlying providers. For a startup that needs US, EU, and Latam coverage, this is meaningfully simpler to maintain.
+
+### The compliance angle
+
+Managing GDPR and CCPA compliance across five different providers means five different data processing agreements, five different data retention policies, and five different breach notification procedures. Didit abstracts this into a single DPA with standardized retention rules. If you're operating in regulated markets, this is not a small benefit.
+
+### Accuracy and fallback behavior
+
+Didit runs multiple underlying providers in parallel and returns the highest-confidence result. If the primary provider fails for a specific document type, it automatically falls back to the secondary. The result object tells you which provider was used:
+
+```json
+{
+  "status": "approved",
+  "provider": "onfido",
+  "method": "nfc",
+  "country": "DE",
+  "documents": {
+    "type": "passport",
+    "extracted": true,
+    "verified": true
+  }
+}
+```
+
+### Pricing model
+
+Didit uses a per-verification pricing model with volume discounts. Unlike some enterprise identity providers that require annual contracts and minimum commitments, Didit appears to offer more flexible pay-as-you-go pricing for growing companies. Check the pricing page for current rates, as they vary by region and document type.
+
+## Practical Evaluation Checklist
+
+Before integrating Didit in a production system, evaluate these points:
+
+- **Coverage for your target markets** — Test with documents from all countries you plan to support. Run at least three verifications per country with different document types (passport, driver's license, national ID).
+- **Fallback behavior** — Disable your primary provider in sandbox and verify the fallback kicks in automatically. Check that the response schema remains consistent.
+- **Async latency** — AML checks and some biometric verifications are async. Measure your webhook delivery latency from Didit. Set a timeout in your handler and implement a polling fallback.
+- **Rejection handling** — When a verification is rejected, the `result.reason` field contains a machine-readable code and a human-readable message. Make sure your UX handles all reason codes gracefully.
+- **Webhook reliability** — Register a retry endpoint in your dashboard. Didit retries failed webhook deliveries with exponential backoff, but you should also implement idempotency on your end.
+- **Data retention** — Verify what data Didit retains and for how long. For GDPR compliance, you need to know if users can request deletion and how that works across all underlying providers.
+
+## Security Notes
+
+- API keys should be stored in environment variables, never in source code. Use a secrets manager in production.
+- The webhook endpoint should verify the `X-Didit-Signature` header to ensure requests are genuine:
+```javascript
+const crypto = require('crypto');
+function verifyWebhook(req) {
+  const signature = req.headers['x-didit-signature'];
+  const expected = crypto
+    .createHmac('sha256', process.env.DIDIT_WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+  return signature === `sha256=${expected}`;
+}
+```
+- All API traffic should use HTTPS. Didit rejects HTTP connections in production.
+- PII handling: Only pass the minimum user data required for each verification. Don't send full document images if you only need extraction results.
+
+## FAQ
+
+**Q:** Does Didit support all countries?
+**A:** Coverage varies. The dashboard shows a real-time coverage map with supported countries and document types. Some countries have limited document support, and a few regions require manual review steps that increase turnaround time.
+
+**Q:** How does Didit handle biometric data under GDPR?
+**A:** Biometric data is processed in memory and not stored permanently. The response confirms whether the biometric check passed, but the raw biometric template is discarded after processing. You can request a data deletion for any user via the API.
+
+**Q:** Can I use Didit for age verification without full KYC?
+**A:** Yes, Didit supports standalone age estimation that doesn't require full identity verification. This is useful for marketplaces or content platforms that only need to confirm a user is above a certain age threshold.
+
+**Q:** What happens if a user fails verification?
+**A:** Failed verifications return a reason code and a suggested next step. Users can retry with a different document type. For high-risk rejections (fraud indicators, documented identity theft), the account is flagged and requires manual review before access.
+
+**Q:** How does Didit handle government database checks in Brazil, Mexico, and other Latam markets?
+**A:** Didit has direct integrations with government databases in Brazil (CPF validation, Receita Federal), Mexico (CURP), and several other Latam countries. These checks run as part of the AML flow when the user is a national of those countries.
+
+## Conclusion
+
+Didit solves a real problem for startups building internationally. The fragmentation of the identity verification market has been a chronic pain point, and the operational overhead of managing multiple provider integrations is a tax that falls squarely on engineering. One API with consistent schemas, unified compliance handling, and automatic fallback behavior is a meaningful improvement over the status quo.
+
+If you're building a fintech, marketplace, or any product that needs reliable identity verification across multiple regions, Didit is worth evaluating. The unified approach won't be right for every use case — some regulated industries prefer the transparency of working directly with a specific provider — but for most teams, the reduction in integration complexity is a genuine win.
+
+**Link:** [https://didit.me](https://didit.me)
