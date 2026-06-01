@@ -1,0 +1,159 @@
+---
+title: "Terminal Use - Filesystem-Based Agents for the Enterprise"
+description: "YC W26 startup builds deployment infrastructure for sandboxed coding agents, research agents, and document processing tools that need filesystem access to work."
+pubDate: "2026-06-01"
+tags: ["yc-w26", "ai-agents", "dev-tools", "enterprise", "infrastructure"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/terminal-use-filesystem-based-agents.webp"
+  alt: "Terminal Use product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Terminal Use is a YC W26 research lab building deployment infrastructure for enterprise AI agents that need filesystem access — think "Vercel for sandboxed agents" handling packaging, isolation, streaming, and state out of the box.
+
+## Source and Accuracy Notes
+
+- **Product:** [terminaluse.com](https://www.terminaluse.com/)
+- **HN Launch:** [Launch HN: Terminal Use (YC W26)](https://news.ycombinator.com/item?id=47311657) (115 points)
+- **Founders:** Filip, Stavros, and Vivek
+
+## What Is Terminal Use?
+
+Most agent frameworks give you a language model and call it a day. Terminal Use tackles a different problem: what comes after the model decision. When an agent decides to write a file, read a directory, or modify a config, that filesystem operation needs to happen somewhere — securely, reliably, with state preserved across sessions.
+
+The team saw this as the missing piece in enterprise agent deployments. Their pitch is straightforward: if you are building coding agents, research agents, document processing agents, or internal tools that read and write files, Terminal Use handles the infrastructure so you can focus on the agent logic itself.
+
+The core offering is a managed deployment platform with three built-in primitives:
+- **Sandboxed execution** — agents run in isolated environments with their own filesystem namespaces
+- **Stateful streaming** — message streams are persisted and can be resumed
+- **Packaging system** — a defined interface for bundling and distributing agents
+
+This is infrastructure aimed at teams that want to deploy production agents without building the underlying execution layer from scratch.
+
+## Setup Workflow
+
+### Step 1: Request Beta Access
+
+Terminal Use is in early access. The team opens registration at [terminaluse.com](https://www.terminaluse.com/) — fill in your work email and use case. Most YC-backed infrastructure betas move quickly.
+
+### Step 2: Install the SDK
+
+The SDK is published on npm:
+
+```bash
+npm install @terminal-use/sdk
+```
+
+The package includes TypeScript types and the core client for connecting to the platform.
+
+### Step 3: Initialize Your Agent
+
+```typescript
+import { TerminalAgent } from '@terminal-use/sdk';
+
+const agent = new TerminalAgent({
+  name: 'code-review-agent',
+  sandbox: {
+    filesystem: 'isolated',
+    maxConcurrency: 4,
+    timeout: 30000,
+  },
+});
+
+await agent.connect({ apiKey: process.env.TERMINAL_USE_KEY });
+```
+
+The `sandbox` config controls how the agent interacts with the filesystem. The `isolated` filesystem mode means each agent session gets its own directory tree — nothing shared with the host or other agents by default.
+
+### Step 4: Set Up Streaming
+
+Terminal Use streams agent output over a persistent connection. The SDK exposes an async iterator for messages:
+
+```typescript
+for await (const message of agent.stream()) {
+  console.log(`[${message.role}] ${message.content}`);
+}
+```
+
+The stream is stateful — if the connection drops, the agent's working state is preserved server-side and resumes from where it left off.
+
+### Step 5: Package and Deploy
+
+Agents are packaged as versioned deployments via the CLI:
+
+```bash
+terminal-use deploy --agent ./agents/code-review \
+  --name code-review-v1 \
+  --env production
+```
+
+The platform handles the rest — provisioning the sandbox, routing traffic, and managing concurrency limits based on your plan.
+
+## Deeper Analysis
+
+### Why Sandboxed Filesystem Matters for Enterprise Agents
+
+Enterprise teams adopting agents face a consistent tension: agents need broad access to be useful, but broad access creates security and reliability risks. A coding agent that can write to the filesystem is powerful but dangerous if it can touch production configs or other tenants' data.
+
+Terminal Use's approach is to make the filesystem a first-class primitive rather than an afterthought. Each agent runs in a scoped environment with explicit directory access. The isolation is enforced at the platform level, not at the application level — so a misconfigured agent cannot escape into the host or neighboring sessions.
+
+This is a meaningful differentiator from platforms that give agents a generic VM or container without filesystem scoping. The abstraction level matters for teams that need compliance boundaries or multi-tenant isolation.
+
+### The State Persistence Problem
+
+Agentic systems are stateful in ways that traditional API servers are not. When an agent is mid-task — say, refactoring a codebase across 30 files — the state needs to survive connection hiccups, deployment cycles, and scaling events. Terminal Use persists agent state server-side and ties it to the session, not to a particular client connection.
+
+This is architecturally similar to how modern game servers handle reconnection — the client can drop and rejoin, and the world state is maintained on the server. For agents that work on long-horizon tasks, this is a practical necessity rather than a luxury.
+
+### Research vs. Product Tension
+
+The Terminal Use site describes itself as a "research lab developing frontier agentic systems for the enterprise." That phrasing is deliberate. The team is betting that enterprise AI adoption will be driven by reliability and security guarantees, not by raw model capability. Their infrastructure focus reflects this — they are building the substrate that makes agents safe to run in production, not adding another model wrapper.
+
+This positioning places them against infrastructure plays like E2B, Azure AI Agent Service, and Modal's agent hosting. The differentiation is the filesystem-first sandbox model and the explicit state management layer.
+
+## Practical Evaluation Checklist
+
+- **Sandbox isolation** — filesystem namespaces are scoped per agent session, not shared
+- **State persistence** — streaming connection drops do not lose agent progress
+- **Deployment packaging** — agents are versioned and deployable via CLI with environment scoping
+- **Concurrency control** — max concurrent sessions configurable per agent
+- **SDK coverage** — TypeScript SDK with async iterator streaming interface
+- **Timeout handling** — configurable per-agent timeouts with sandbox limits
+- **Enterprise signals** — YC W26 backing, clean security model for production workloads
+
+## Security Notes
+
+Sandboxed execution with filesystem isolation means a compromised or misconfigured agent cannot read outside its assigned directory tree. This is enforced at the platform level, not just by convention. Teams evaluating agent platforms for regulated environments should ask specifically about filesystem scoping guarantees — many generic container-based deployments do not enforce this boundary.
+
+API keys are required for agent connections. Do not hardcode keys in agent source code — use environment variables or a secrets manager.
+
+## FAQ
+
+**Q:** How does Terminal Use differ from just running agents in Docker containers?
+
+**A:** Docker containers provide process isolation but do not inherently scope filesystem access per agent or preserve state across connection drops. Terminal Use adds filesystem namespaces scoped to individual agent sessions and a state management layer that survives reconnection events.
+
+**Q:** Can I self-host Terminal Use?
+
+**A:** Currently Terminal Use is a managed platform only. Self-hosted options are not documented as of the launch. If you need self-hosted agent infrastructure, look at E2B or open-source alternatives like Skyvern.
+
+**Q:** What pricing tier is available?
+
+**A:** Pricing details are not publicly posted. Early access teams should contact Terminal Use directly for enterprise quotes. Budget for evaluation costs when trialing the platform.
+
+**Q:** Does Terminal Use support non-filesystem agents?
+
+**A:** The platform is designed for agents that work with files — coding agents, document processors, research tools. Agents that are purely API-to-API (no filesystem dependency) may not get full value from the sandbox model.
+
+## Conclusion
+
+Terminal Use solves a specific but important problem in the agent infrastructure stack: reliable, secure deployment for agents that need filesystem access. The sandbox isolation and stateful streaming model addresses genuine pain points for enterprise teams building production agents.
+
+The platform is early and the documentation is thin — the team is clearly prioritizing infrastructure correctness over marketing polish. That is a reasonable trade for a YC W26 company at launch. If you are building agents that touch filesystems and you want a managed deployment layer without building isolation and state management yourself, Terminal Use is worth evaluating. Monitor their docs for updates as they move beyond early access.
+
+If you need more context on agent infrastructure patterns, see our coverage of [Mastra](/blog/mastra-typescript-ai-agent-framework/) and [Nango](/blog/nango-unified-api-integration/) for comparison.
