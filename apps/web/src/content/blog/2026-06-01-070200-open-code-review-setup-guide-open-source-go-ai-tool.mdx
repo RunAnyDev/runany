@@ -1,0 +1,146 @@
+---
+title: "Alibaba Open Code Review: AI-Powered PR Analysis"
+description: "Battle-tested at Alibaba scale. Hybrid code review combining deterministic pipelines with LLM agents for precise line-level comments — catches NPE, thread-safety, XSS, and SQL injection."
+pubDate: "2026-06-01"
+tags: ["github-trending", "dev-tools", "go", "agent", "code-review"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/open-code-review-setup-guide-open-source-go-ai-tool.webp"
+  alt: "open-code-review GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Alibaba's Open Code Review is a hybrid code review tool combining deterministic static-analysis pipelines with LLM agents. It produces precise, line-level review comments against a fine-tuned ruleset covering NPE, thread-safety, XSS, and SQL injection. Compatible with OpenAI and Anthropic APIs.
+
+## Source and Accuracy Notes
+
+Based on the official [alibaba/open-code-review](https://github.com/alibaba/open-code-review) repository, Apache 2.0 licensed. Architecture details sourced from the repository README and documentation as of June 2026.
+
+## What Is Open Code Review?
+
+Open Code Review is Alibaba's production code review system, now open-sourced. It's been battle-tested across Alibaba's internal codebase — processing millions of pull requests at enterprise scale. The tool combines two complementary approaches: a deterministic rule engine for static-analysis patterns and an LLM agent for contextual, semantic review.
+
+### Why Hybrid Architecture Matters
+
+Pure LLM-based code review is slow and inconsistent — the same code can get different feedback depending on prompt phrasing. Pure static analysis is fast but shallow — it catches syntax patterns but misses semantic bugs. Open Code Review runs the deterministic pipeline first (fast, reproducible), then feeds results to the LLM agent for deeper analysis.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Go 1.21+
+- Git
+- OpenAI or Anthropic API key
+- Git repository to review
+
+### Step 1: Install
+
+```bash
+go install github.com/alibaba/open-code-review/cmd/ocr@latest
+```
+
+### Step 2: Configure
+
+```bash
+# Set your LLM provider
+export OCR_LLM_PROVIDER=openai  # or anthropic
+export OCR_LLM_API_KEY="sk-..."
+export OCR_LLM_MODEL="gpt-4o"   # or claude-sonnet-4-20250514
+```
+
+### Step 3: Run a Review
+
+```bash
+# Review the current branch against main
+ocr review --base main
+
+# Review a specific PR
+ocr review --pr 42
+
+# Review staged changes only
+ocr review --staged
+```
+
+The tool outputs line-level comments with severity classifications, rule references, and suggested fixes.
+
+## Deeper Analysis
+
+### Built-in Ruleset
+
+The deterministic engine ships with production-hardened rules covering:
+
+- **NPE detection**: Null pointer dereference patterns across Java, Go, and Python
+- **Thread safety**: Race conditions, unsynchronized access, deadlock patterns
+- **XSS prevention**: Unsanitized user input reaching DOM or template engines
+- **SQL injection**: Dynamic query construction without parameterization
+- **Resource leaks**: Unclosed connections, file handles, and goroutines
+
+These rules aren't generic lint rules — they're the result of Alibaba's internal bug taxonomy, refined across millions of code reviews.
+
+### Repository-Level Context
+
+Unlike line-by-line linters, Open Code Review builds repository-level context. It traces data flow across files, understands import graphs, and evaluates changes in the context of the full codebase — not just the diff.
+
+### Agent Configuration
+
+The LLM agent layer supports OpenAI and Anthropic APIs. You can tune temperature, max tokens, and model selection. The agent's prompt is configurable, so teams can adjust review strictness and focus areas.
+
+## Practical Evaluation Checklist
+
+- Hybrid architecture: deterministic rules + LLM agent — best of both worlds
+- Battle-tested ruleset refined across millions of Alibaba PRs
+- Repository-level context tracing, not just diff analysis
+- Line-level comments with severity and fix suggestions
+- Configurable agent behavior per team standards
+- Apache 2.0 license — no usage restrictions
+
+## Security Notes
+
+- Code is processed locally; only the diff is sent to the LLM provider
+- Review sensitive code by using a self-hosted LLM endpoint
+- Configure the agent prompt to avoid logging proprietary code
+- API keys handled via environment variables — never hardcoded
+
+### Integration with Git Platforms
+
+Open Code Review integrates with GitHub, GitLab, and Gitee through webhook-driven workflows. When a PR is created, the platform fires a webhook that triggers Open Code Review's analysis pipeline. Results are posted as inline comments on the PR — each finding links to the specific line, the rule that triggered it, and a suggested fix.
+
+For self-hosted GitLab instances, this means you can run automated code review without sending any code to external services. The deterministic rules run entirely on your infrastructure; the LLM agent only calls out if you've configured an external API key. This is particularly important for organizations with data residency requirements or proprietary code that can't leave the corporate network.
+
+## FAQ
+
+**Q: What languages does it support?**
+**A:** Go, Java, Python, TypeScript/JavaScript, and C/C++. The deterministic rules are language-aware; the LLM agent handles all languages.
+
+**Q: How does it compare to CodeRabbit or GitHub Copilot code review?**
+**A:** Open Code Review is self-hosted and open-source — your code never leaves your infrastructure unless you choose to send it to an external LLM. It also combines static rules (fast, deterministic) with LLM review (contextual, semantic), whereas most competitors are LLM-only.
+
+**Q: Can I add my own rules?**
+**A:** Yes. The deterministic rule engine supports custom rules written in Go. The agent prompt is also fully configurable.
+
+**Q: What's the performance on large repos?**
+**A:** It's been tested at Alibaba's scale — repos with millions of lines and thousands of daily PRs. The deterministic pipeline runs in seconds; LLM review time depends on diff size and model latency.
+
+
+### CI/CD Pipeline Integration
+
+Open Code Review is designed to slot into existing CI pipelines. A typical setup runs the deterministic rules on every push (fast, blocking on critical issues) and the LLM agent on PR creation (slower, advisory). The hybrid architecture means you can tune the cost-latency-safety tradeoff precisely:
+
+- Every commit: Run only deterministic rules (seconds, near-zero cost)
+- PR creation: Run deterministic plus LLM agent (minutes, LLM API cost)
+- Release branch: Run full analysis with stricter thresholds
+
+### Custom Rules and Team Standards
+
+Teams can encode their own patterns as deterministic rules. If your organization has specific anti-patterns — deprecated internal APIs, security-sensitive function calls, architectural violations — you can codify them once and enforce them automatically across every review. This scales institutional knowledge: rules capture what senior engineers would flag, and the LLM agent handles what requires semantic understanding.
+
+**Q: How much does it cost to run?**
+**A:** The deterministic rules run locally at zero cost. The LLM agent layer incurs standard API costs per review — roughly a few cents per PR with models like GPT-4o or Claude Sonnet. You control costs by choosing when to invoke the LLM agent.
+
+## Conclusion
+
+Open Code Review brings Alibaba's internal code review rigor to the open-source world. The hybrid architecture — deterministic rules catching known patterns, LLM agents catching semantic issues — is a pragmatic approach that's been proven at massive scale. For teams wanting automated PR review without sending all their code to a third-party service, it's a compelling self-hosted option.

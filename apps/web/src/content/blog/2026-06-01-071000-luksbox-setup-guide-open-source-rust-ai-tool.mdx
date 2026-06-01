@@ -1,0 +1,159 @@
+---
+title: "LUKSbox: Encrypted Cloud Storage Containers Guide"
+description: "Store files securely in cloud storage without trusting the host. Rust encrypted containers with passphrase, FIDO2 (YubiKey), TPM 2.0, and post-quantum ML-KEM keyslots."
+pubDate: "2026-06-01"
+tags: ["github-trending", "dev-tools", "rust", "encryption", "file"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/luksbox-setup-guide-open-source-rust-ai-tool.webp"
+  alt: "LUKSbox GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** LUKSbox creates encrypted containers you can safely store in untrusted cloud storage or shared media. Supports passphrase, FIDO2 hardware keys (YubiKey, Titan), TPM 2.0, and post-quantum (ML-KEM) keyslots. Mounts as a native drive on Linux, macOS, and Windows.
+
+## Source and Accuracy Notes
+
+Based on the official [PentHertz/LUKSbox](https://github.com/PentHertz/LUKSbox) repository as of June 2026. All cryptographic details and platform support sourced from the repository README and source code.
+
+## What Is LUKSbox?
+
+LUKSbox is a Rust-based tool for creating encrypted file containers. You create an encrypted volume, store it anywhere (cloud storage, USB drive, shared network folder), and mount it as a real drive on your operating system. The storage host never sees your data — all encryption and decryption happen locally.
+
+The name references LUKS (Linux Unified Key Setup), the standard Linux disk encryption format. LUKSbox extends that concept with additional key management options and cross-platform support.
+
+### Why Trust-No-One Storage Matters
+
+Cloud storage is convenient but raises trust questions. Your files sit on someone else's servers. If you store sensitive data — client work, financial records, personal documents, intellectual property — you're trusting the provider's access controls, internal security, and legal compliance. LUKSbox eliminates that trust requirement: the cloud provider sees only encrypted blobs.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Rust toolchain (or pre-built binary)
+- FUSE support (built into Linux, macFUSE on macOS, WinFsp on Windows) for mounting as a drive
+- Optional: FIDO2 key (YubiKey, Google Titan, Nitrokey), TPM 2.0 chip, or Windows Hello
+
+### Step 1: Install
+
+```bash
+cargo install luksbox
+```
+
+Pre-built binaries are also available on GitHub Releases.
+
+### Step 2: Create an Encrypted Container
+
+```bash
+# Create a 1GB container with passphrase protection
+luksbox create --size 1G --output my-secure-data.lbox
+
+# Create with FIDO2 hardware key
+luksbox create --size 1G --output my-secure-data.lbox --keyslot fido2
+
+# Create with TPM 2.0 binding (Windows/Linux with TPM)
+luksbox create --size 1G --output my-secure-data.lbox --keyslot tpm
+
+# Create with post-quantum key (ML-KEM-768/1024)
+luksbox create --size 1G --output my-secure-data.lbox --keyslot mlkem768
+```
+
+### Step 3: Mount the Container
+
+```bash
+# Mount to a directory
+luksbox mount my-secure-data.lbox ~/secure-mount
+
+# Unmount when done
+luksbox unmount ~/secure-mount
+```
+
+Once mounted, the container appears as a regular drive. Copy files in, edit them, organize folders — everything is transparently encrypted on disk.
+
+### Step 4: Store Anywhere
+
+Now that your container exists, store the `.lbox` file anywhere:
+
+- Upload to Google Drive, Dropbox, or iCloud
+- Copy to a USB drive for physical transport
+- Store on a NAS or shared network folder
+- Commit to a private Git repository (within size limits)
+
+## Deeper Analysis
+
+### Key Management Options
+
+LUKSbox supports multiple keyslot types, each with different security properties:
+
+| Keyslot | Security Model | Use Case |
+|---|---|---|
+| Passphrase | Knowledge factor | Simple, portable, strength depends on passphrase quality |
+| FIDO2 | Possession factor | Hardware key required — immune to keyloggers and phishing |
+| TPM 2.0 | Device binding | Container only opens on the specific machine that created it |
+| ML-KEM | Post-quantum | Resistant to future quantum computer attacks |
+
+You can configure multiple keyslots per container — for example, a FIDO2 key for daily use and a passphrase for recovery.
+
+### Post-Quantum Readiness
+
+ML-KEM (Module-Lattice-based Key Encapsulation Mechanism) is NIST's standardized post-quantum key encapsulation algorithm. If quantum computers capable of breaking RSA/ECC emerge, containers using ML-KEM keyslots remain secure. This is forward-looking but valuable for long-term data storage.
+
+### Cross-Platform Mounting
+
+LUKSbox uses FUSE (Filesystem in Userspace) to provide native mount support:
+
+- **Linux**: FUSE is built into the kernel
+- **macOS**: Requires macFUSE installation
+- **Windows**: Requires WinFsp installation
+
+The mounted drive behaves like any other filesystem — drag and drop, command-line access, and application access all work normally.
+
+## Practical Evaluation Checklist
+
+- Multiple keyslot types: passphrase, FIDO2, TPM 2.0, post-quantum ML-KEM
+- Cross-platform: Linux, macOS, Windows with native mount support
+- Trust-no-one model: cloud providers see only encrypted data
+- Rust-based for memory safety and performance
+- Open-source: full cryptographic implementation auditable
+- Container files are portable — store anywhere
+
+## Security Notes
+
+- Encryption is only as strong as your key management — a weak passphrase undermines everything
+- FIDO2 keys can be lost or damaged — always configure a recovery keyslot
+- TPM-bound containers won't open on different hardware — not suitable for portable storage
+- ML-KEM is standardized but less battle-tested than traditional algorithms — consider hybrid approaches
+- The container file itself is not hidden — an attacker knows you have encrypted data
+
+## FAQ
+
+**Q: How does this compare to VeraCrypt or Cryptomator?**
+**A:** VeraCrypt creates encrypted volumes with strong security but limited key management options. Cryptomator is file-level encryption optimized for cloud sync. LUKSbox combines container-level encryption with modern key management (FIDO2, TPM, post-quantum) and cross-platform mount support.
+
+**Q: What happens if the container file gets corrupted?**
+**A:** Like any encrypted volume, corruption can make data unrecoverable. Keep backups — the container is just a file, so standard backup tools work.
+
+**Q: Can I resize a container after creation?**
+**A:** Check the latest release notes — container resizing support varies by version.
+
+**Q: Is this suitable for team use?**
+**A:** LUKSbox is designed for individual use. For team scenarios, consider solutions with access control and audit logging.
+
+
+### Performance Characteristics
+
+Encryption performance depends on the algorithm, key size, and underlying hardware. With AES-256 (the default for passphrase and FIDO2 keyslots), modern CPUs with AES-NI instructions achieve near-native disk speeds — typically within 5 to 10 percent of unencrypted I/O. ML-KEM key encapsulation adds negligible overhead since it's used only for key establishment, not bulk data encryption.
+
+Container files grow dynamically with usage, starting at a few KB and expanding to their maximum size as you add files. The container doesn't pre-allocate space — a 10GB container with 500MB of files uses only about 500MB of actual disk space.
+
+### Recovery Planning
+
+Encryption is strong; your recovery plan should be too. Store a backup passphrase or recovery key in a separate physical location. For FIDO2 keys, register at least two hardware keys to the same container. Periodically verify that all keyslots still work — hardware keys can fail, TPMs can be reset by firmware updates. Consider an emergency access procedure documented for your heirs or business partners.
+
+## Conclusion
+
+LUKSbox addresses a specific and growing need: using cloud storage without trusting the cloud provider. By creating portable encrypted containers with modern key management — FIDO2 hardware keys, TPM binding, and post-quantum algorithms — it bridges the gap between convenience and security. For developers storing credentials, client data, or intellectual property in the cloud, it's a practical layer of defense that doesn't require changing your storage workflow.

@@ -1,0 +1,163 @@
+---
+title: "KTX: Semantic Layer for AI Data Agents Guide"
+description: "An executable context layer for data and analytics AI agents. Let Claude Code, Codex, and any agent query data accurately through MCP with skills, memory, and a semantic layer."
+pubDate: "2026-06-01"
+tags: ["github-trending", "dev-tools", "typescript", "agent", "agent-skills"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ktx-ai-data-agen-setup-guide-open-source-typescript-ai-tool.webp"
+  alt: "ktx-ai-data-agents-context GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** KTX is a semantic layer that sits between AI coding agents and your data — letting Claude Code, Codex, and other agents query databases accurately through MCP. Skills, memory, and a semantic understanding layer prevent hallucinated SQL and misinterpreted schemas.
+
+## Source and Accuracy Notes
+
+Based on the official [Kaelio/ktx-ai-data-agents-context](https://github.com/Kaelio/ktx-ai-data-agents-context) repository as of June 2026. Architecture and MCP integration details sourced from the repository README and documentation.
+
+## What Is KTX?
+
+KTX — short for "Kaelio Transform & eXecute" — is a semantic layer purpose-built for AI coding agents working with data. When an agent needs to query a database, it typically generates SQL from schema context. This works for simple queries but breaks down with complex schemas, ambiguous column names, or business logic encoded in data relationships.
+
+KTX provides an intermediate layer that translates agent intent into accurate, optimized queries. It understands your data model at a semantic level — what "active users" means, how revenue is calculated, which tables join for a given question — and exposes this understanding to agents through MCP (Model Context Protocol).
+
+### The Data Agent Problem
+
+AI agents are bad at data work for three reasons:
+
+1. **Schema ambiguity**: Column names like `status` or `type` mean different things in different tables
+2. **Business logic gaps**: SQL correctness doesn't equal business correctness — the query runs but returns wrong answers
+3. **Context limits**: Large schemas don't fit in context windows, so agents work with partial information
+
+KTX solves all three by pre-computing the semantic layer — relationships, definitions, business rules — and exposing only what the agent needs for each query.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Node.js 20+
+- A database (PostgreSQL, MySQL, or Snowflake)
+- An MCP-compatible AI agent (Claude Code, Codex, or others)
+
+### Step 1: Install and Configure
+
+```bash
+npm install -g @kaelio/ktx
+```
+
+### Step 2: Initialize Semantic Layer
+
+```bash
+cd your-project
+ktx init --database postgresql://user:pass@host:5432/mydb
+```
+
+KTX analyzes your schema, infers relationships, and builds the semantic model.
+
+### Step 3: Define Semantic Mappings
+
+Review and refine the auto-generated semantic model:
+
+```yaml
+# ktx/models/users.yaml
+users:
+  table: public.users
+  description: "Registered user accounts"
+  measures:
+    - name: active_users
+      sql: "COUNT(DISTINCT id) FILTER (WHERE last_login > NOW() - INTERVAL '30 days')"
+  dimensions:
+    - name: signup_month
+      sql: "DATE_TRUNC('month', created_at)"
+```
+
+### Step 4: Connect Your Agent
+
+KTX exposes an MCP server that your AI agent connects to:
+
+```json
+{
+  "mcpServers": {
+    "ktx": {
+      "command": "ktx",
+      "args": ["serve"],
+      "env": {
+        "KTX_PROJECT_PATH": "/path/to/project"
+      }
+    }
+  }
+}
+```
+
+Once connected, your agent queries data through KTX's semantic layer instead of generating raw SQL.
+
+## Deeper Analysis
+
+### Agent Memory and Skills
+
+KTX includes agent skills that teach the agent how to use the semantic layer effectively:
+
+- **Query decomposition**: Break complex questions into sub-queries the semantic layer can handle
+- **Result interpretation**: Help the agent explain what the data means, not just what it says
+- **Iterative refinement**: When a query returns surprising results, the skill guides the agent through debugging
+
+### Semantic Layer vs Raw SQL
+
+| Approach | Agent asks | KTX translates to | Result |
+|---|---|---|---|
+| Raw SQL | "Show active users by month" | Agent generates SQL, may or may not be correct | Unreliable |
+| KTX | "Show active users by month" | KTX maps to predefined `active_users` measure | Always correct |
+
+The semantic layer acts as a contract: the agent works with business concepts, KTX handles the SQL implementation.
+
+### Performance Considerations
+
+KTX caches semantic models and query plans. Repeated queries (common in agent workflows where the agent iterates) hit the cache and return instantly. Schema changes trigger automatic model refresh.
+
+## Practical Evaluation Checklist
+
+- Semantic layer eliminates hallucinated SQL from AI agents
+- MCP-native: connects to Claude Code, Codex, and other agents
+- Predefined measures and dimensions ensure business-consistent results
+- Auto-detects schema relationships with manual refinement
+- Includes agent skills for query composition and result interpretation
+- TypeScript-based with npm distribution
+
+## Security Notes
+
+- KTX connects directly to your database — use read-only credentials when possible
+- Semantic model files contain schema information — don't expose them publicly
+- MCP server runs locally — no data is sent to KTX's creators
+- Configure access controls at the database level; KTX doesn't add authentication
+
+## FAQ
+
+**Q: How is this different from a BI tool's semantic layer?**
+**A:** BI semantic layers (Looker, Cube, MetriQL) are designed for human analysts building dashboards. KTX is designed for AI agents — it exposes information in a format agents can reason about and includes agent-specific skills.
+
+**Q: Does it work with NoSQL databases?**
+**A:** Currently focused on relational databases (PostgreSQL, MySQL, Snowflake). NoSQL support may come in future releases.
+
+**Q: Can I use it with self-hosted LLMs?**
+**A:** Yes. KTX is MCP-based and works with any agent that supports MCP, regardless of the underlying LLM.
+
+**Q: What's the learning curve for defining semantic models?**
+**A:** The auto-detection handles basic relationships. Defining business measures and complex joins requires understanding your data model — similar effort to setting up any semantic layer.
+
+
+### Semantic Model Design Patterns
+
+Good semantic model design follows principles similar to API design: expose what agents need, hide implementation details, and maintain backward compatibility. Common patterns include composed measures (defining complex KPIs as combinations of simpler measures), drill-across dimensions (allowing agents to slice any measure by any dimension without teaching join logic), and derived tables (creating virtual tables that join and transform underlying data for business concepts that don't map to a single database table).
+
+### Agent Reasoning Improvements
+
+When agents query through KTX instead of raw SQL, the improvement is qualitative as well as quantitative. The agent reasons at a higher level of abstraction — "show revenue trend by region" rather than constructing multi-table joins with status filters and type checks. This means fewer tokens consumed on SQL generation and error correction, more tokens available for analysis and recommendations, and natural language queries that produce consistent, correct results regardless of phrasing.
+
+## Conclusion
+
+KTX fills a critical gap in the AI agent ecosystem: reliable data access. As more developers use coding agents for data work — generating reports, building dashboards, analyzing trends — the difference between a correct SQL query and a correct business answer becomes critical. KTX's semantic layer ensures agents work with business concepts rather than raw schemas, making data analysis through AI both safer and more accurate. For teams with complex data models and AI-assisted analytics workflows, it's infrastructure worth investing in.
