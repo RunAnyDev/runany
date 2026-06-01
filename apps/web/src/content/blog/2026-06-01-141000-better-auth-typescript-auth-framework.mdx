@@ -1,0 +1,178 @@
+---
+title: "Better Auth – TypeScript Auth Built on Your Own Database"
+description: "Better Auth is a TypeScript authentication framework that puts developers in full control of their auth stack, running on your own database without third-party lock-in or black boxes."
+pubDate: "2026-06-01"
+tags: ["typescript", "authentication", "dev-tools", "open-source", "yc-x25"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/better-auth-typescript-auth-framework.webp"
+  alt: "Better Auth TypeScript authentication framework thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Better Auth is an open-source TypeScript authentication framework that makes rolling your own auth so easy you will never need a third-party service like Auth0 or Clerk.
+
+## Source and Accuracy Notes
+
+- Official site: [https://www.better-auth.com](https://www.better-auth.com)
+- GitHub: [https://github.com/better-auth](https://github.com/better-auth) (community-driven, not a corporate product)
+- HN Launch: [https://news.ycombinator.com/item?id=44030492](https://news.ycombinator.com/item?id=44030492) (259 points, YC X25)
+
+## What Is Better Auth?
+
+Authentication is one of those problems every project eventually faces. You have two broad paths: hand it off to a third-party provider and live with their pricing and limitations, or roll your own and spend weeks getting it right. Better Auth, a YC X25 startup with 259 HN points, is betting that a third option deserves another look.
+
+Better Auth is a comprehensive authentication framework for TypeScript that runs **entirely on your own infrastructure**. It is not a hosted SaaS. You install it as a library in your backend, define your auth flows in code, and it connects directly to your own database. The goal is to make self-hosted auth so painless that the third-party alternative becomes the more complicated choice.
+
+The framework covers the full spectrum from simple email/password setups to enterprise-grade patterns like multi-factor authentication, passkeys, and OAuth providers. Because it compiles down to your own database schema, you own every byte of user data. There is no vendor lock-in, no per-seat pricing, and no opaque middleware between you and your users.
+
+## Key Features
+
+### Self-Hosted, No Black Box
+
+Better Auth runs as a library in your Node.js or Bun server. Your auth logic lives in your codebase, your user records live in your database, and your session tokens are yours to manage. This matters for compliance, cost control, and the philosophical preference of not handing credentials to a third party.
+
+### Comprehensive Protocol Support
+
+The framework ships with built-in handlers for:
+
+- Email and password authentication
+- OAuth providers (Google, GitHub, Apple, and more)
+- Passkeys and WebAuthn
+- Multi-factor authentication with TOTP
+- Email magic links and one-time codes
+- Session management with refresh tokens
+
+Rather than stitching together five different packages, you get a unified API surface that covers all of these. The framework handles the quirks across providers so you do not have to.
+
+### TypeScript-First Design
+
+Better Auth is written in TypeScript and ships with full type definitions. The configuration API is declarative and typed, so your IDE catches mistakes before you ship. For teams standardizing on TypeScript, this avoids the friction of working across JS/TS boundaries.
+
+### Embedded in Your Backend
+
+Unlike hosted auth services that redirect users to an external page, Better Auth renders auth UIs inline within your own application. You maintain full control over the user experience, branding, and flow. The framework also provides headless utilities if you prefer to build your own UI on top of the auth logic.
+
+### Extensible Plugin Architecture
+
+New authentication methods can be added as plugins. The architecture treats core auth primitives as extension points, so custom flows like organization-scoped SSO or device fingerprinting fit into the framework rather than alongside it.
+
+## Quick Start
+
+### Step 1: Install the Package
+
+```bash
+npm install @better-auth/core
+# For specific adapters:
+npm install @better-auth/adapter-bun
+npm install @better-auth/adapter-pg
+```
+
+### Step 2: Initialize the Auth Instance
+
+```typescript
+import { createAuth } from "@better-auth/core";
+import {BetterAuth} from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+
+const auth = createAuth({
+  database: drizzleAdapter(db),
+  emailAndPassword: {
+    enabled: true,
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+  secret: process.env.BETTER_AUTH_SECRET,
+});
+```
+
+### Step 3: Add Auth Endpoints
+
+```typescript
+// In your server routing file
+app.use(auth.handler);
+```
+
+### Step 4: Use in Your Frontend
+
+```typescript
+import { createClient } from "better-auth/react";
+
+const authClient = createClient({
+  backendURL: "http://localhost:3000",
+});
+
+// Sign up
+await authClient.signUp.email({
+  email: "user@example.com",
+  password: "secure-password",
+});
+
+// Sign in
+await authClient.signIn.email({
+  email: "user@example.com",
+  password: "secure-password",
+});
+```
+
+## Deeper Analysis
+
+Better Auth occupies an interesting middle ground in the auth tooling landscape. On one side sits Auth0, Clerk, and WorkOS, which handle everything as hosted services but at per-seat prices that scale uncomfortably for large user bases. On the other side sits NextAuth and Passport.js, which are free and self-hosted but leave significant implementation work on the table.
+
+Better Auth leans toward the self-hosted, free, and developer-controlled end while doing substantially more of the heavy lifting than earlier alternatives. The 259 HN points reflect genuine developer enthusiasm for a library that removes friction rather than adding abstractions.
+
+The TypeScript-first approach is worth noting. Many auth libraries treat TypeScript as an afterthought with incomplete types or generic `any` annotations. Better Auth's configuration object is fully typed, so if you try to pass an invalid OAuth provider or a missing required field, your build or your editor catches it immediately.
+
+The plugin architecture also signals that the team is thinking about extensibility from day one. Auth requirements evolve as products grow, and a framework that makes adding passkey support or a new OAuth provider a plugin update rather than a migration is more durable over the long term.
+
+## Practical Evaluation Checklist
+
+- [ ] npm package installs cleanly with no peer dependency conflicts
+- [ ] Drizzle ORM adapter works with existing schema
+- [ ] Social providers (Google, GitHub) complete OAuth flow without errors
+- [ ] Session refresh token rotation works correctly
+- [ ] Password reset and email verification flows function end-to-end
+- [ ] TypeScript types are accurate and do not require type assertions
+- [ ] Auth endpoints respond within acceptable latency on own hardware
+- [ ] Plugin registration API works as documented
+- [ ] Database migration strategy does not drop existing user records
+- [ ] Works in Bun, Node.js, and Edge runtime environments
+
+## Security Notes
+
+Better Auth stores session tokens server-side and issues signed, HTTP-only cookies. The framework does not store passwords in plaintext; it applies bcrypt or argon2 by default for password hashing. The OAuth flow uses state parameters and PKCE for CSRF and authorization interception protection.
+
+Because the framework runs on your own infrastructure, the security posture depends on your deployment environment. Ensure your database is not publicly accessible, your `BETTER_AUTH_SECRET` is a strong random value, and your TLS certificates are valid in production. The framework itself follows current security best practices, but the surrounding infrastructure is your responsibility.
+
+## FAQ
+
+**Q:** How is this different from NextAuth.js or Auth.js?
+**A:** NextAuth/Auth.js is tied to the Next.js ecosystem and focuses on Next.js server components. Better Auth is framework-agnostic, runs in any Node.js or Bun server, and provides a more comprehensive built-in feature set including passkeys, TOTP MFA, and a plugin system without requiring additional packages.
+
+**Q:** Does it support database X?
+**A:** Better Auth ships adapters for Drizzle ORM, Prisma, and SQL nodes, with more adapters in active development. The adapter pattern means you can connect to any database with a SQL interface by writing a thin wrapper.
+
+**Q:** Can I use this with a frontend framework other than React?
+**A:** Yes. The core library is framework-agnostic. The project provides official React and Solid clients, and the underlying REST-like API can be consumed from any framework with an HTTP client.
+
+**Q:** What happens if I need to migrate users from another auth provider?
+**A:** Because Better Auth uses standard password hashing (bcrypt/argon2), you can import hashed passwords from other systems if they use compatible formats. OAuth provider linking allows users to connect existing provider accounts to new Better Auth identities.
+
+**Q:** Is there a hosted or managed version?
+**A:** No. Better Auth is purely self-hosted. There is no SaaS offering. You own your auth infrastructure completely.
+
+## Conclusion
+
+Better Auth is a serious attempt to solve the auth stack problem for TypeScript developers who want ownership without the implementation burden. It covers the full surface area of authentication methods, stays out of your database, and costs nothing beyond your own infrastructure.
+
+The 259 HN points and YC X25 backing signal that the approach resonates with developers frustrated by the tradeoffs of existing solutions. If you have ever paid a third-party auth provider per-seat fees or spent weeks building password reset flows from scratch, Better Auth deserves a look.
+
+Start at [better-auth.com](https://www.better-auth.com) and run through the quick start. If your auth requirements fit the framework's coverage, the time savings over rolling your own are substantial.
