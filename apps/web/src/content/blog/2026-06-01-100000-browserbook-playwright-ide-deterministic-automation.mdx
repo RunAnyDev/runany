@@ -1,0 +1,169 @@
+---
+title: "BrowserBook - Playwright IDE for Browser Automation"
+description: "BrowserBook is a Mac IDE that writes deterministic Playwright scripts instead of AI agents that drift. Built by a YC F24 startup that automated healthcare and prioritized reliability over buzz."
+pubDate: "2026-06-01"
+tags: ["dev-tools", "browser-automation", "playwright", "yc-f24", "productivity"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/browserbook-ide-deterministic-browser-automation.webp"
+  alt: "BrowserBook IDE for deterministic browser automation"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** BrowserBook is a Mac IDE that replaces unreliable AI browser agents with deterministic Playwright scripts, using a TypeScript REPL with notebook-style cells and an AI assistant that reads the live DOM.
+
+## Source and Accuracy Notes
+
+- **Website:** [browserbook.com](https://browserbook.com)
+- **Download:** Mac app (Apple Silicon optimized)
+- **Demo:** [YouTube walkthrough](https://www.youtube.com/watch?v=ODGJBCNqGUI)
+- **Founded:** YC F24 (Fall 2024 batch) by Chris, Jorrie, and Evan
+- **HN:** [Launch HN thread](https://news.ycombinator.com/item?id=46232434) — 77 points
+
+## What Is BrowserBook?
+
+Browser agents sound great in demos — open-ended LLM reasoning, handling any UI variation. The reality is different. High latency on every action, token costs that spiral with context depth, and agents that silently drift off-script after a few steps.
+
+BrowserBook takes the opposite bet. Instead of handing a browser to an AI and hoping it stays on track, you write Playwright scripts in a purpose-built IDE. The scripts are deterministic, repeatable, and debuggable in a way no browser agent can match.
+
+The team came out of YC F24 with a healthcare automation company. They used browser agents to automate EMRs, practice management software, and payment portals — and hit all four classic failure modes:
+
+1. **Speed** — High latency on every LLM call vs. direct scripting
+2. **Cost** — Burned through tokens maintaining all the context needed for accuracy
+3. **Reliability** — Agents drifted on multi-step tasks in unpredictable ways
+4. **Debuggability** — Fixing drift meant tweaking prompts and re-running the whole thing
+
+They found scripting was the right model, but existing tooling was painful. BrowserBook is their solution.
+
+## The IDE Setup
+
+BrowserBook is an Electron app. That gives it direct access to a Chrome instance inside the app window — no cloud browser needed during development.
+
+The core environment is a standalone TypeScript REPL wired to an inline browser instance. As you write code, you see the browser respond in real time alongside your editor. No context switching, no headless mode guessing.
+
+The REPL runs like a Jupyter notebook — you write automation logic in individual cells and execute them one at a time. Reset the browser state from a cell, run just that step, iterate fast. You are not forced to re-execute the entire automation every time you change one selector.
+
+The AI coding assistant reads the live DOM of the current page to suggest automation logic. It knows what elements exist, what attributes they have, and can generate Playwright selectors from context rather than you hunting through DevTools. The AI writes code here — not executes actions — which is exactly where it adds the most value.
+
+Helper functions ship for common automation tasks: screenshot capture, structured data extraction, and managed authentication flows for sites that require login.
+
+### Step 1: Install the Mac app
+
+Download from [browserbook.com](https://browserbook.com) — Apple Silicon optimized build.
+
+```bash
+# The app runs Playwright under the hood
+# Ensure Playwright browsers are available
+npx playwright install chromium
+```
+
+### Step 2: Create a new automation project
+
+Start a new notebook-style file. Each cell is a TypeScript snippet that runs against the live browser instance.
+
+```typescript
+// Cell 1: Navigate and wait for the target app
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('https://your-target-app.com');
+```
+
+### Step 3: Use the DOM-aware AI assistant
+
+With the browser停在 a page, open the AI panel. It reads the current DOM tree and can generate Playwright selectors and action sequences. Ask it to "extract the invoice table rows" or "click the approve button for the first pending item" and it writes the TypeScript for you.
+
+```typescript
+// AI-generated selector for a dynamic element
+const rowSelector = 'table.invoice-list tbody tr.pending';
+const rows = await page.locator(rowSelector).all();
+for (const row of rows) {
+  const amount = await row.locator('td.amount').innerText();
+  console.log(`Invoice: ${amount}`);
+}
+```
+
+### Step 4: Run in the hosted environment via API
+
+Once your script is stable, deploy it to BrowserBook's hosted environment for API-driven execution. This is where Kernel's cloud browser infra comes in — anti-detection capabilities, proxies, and stealth mode handle sites that block automated clients.
+
+```typescript
+// Export your notebook as an API-callable automation
+// POST to BrowserBook hosted endpoint
+const runId = await browserbook.deploy({
+  script: './invoice-approver.ts',
+  env: { TARGET_URL: 'https://app.example.com' },
+  schedule: '0 9 * * *', // cron syntax for recurring runs
+});
+```
+
+## Deeper Analysis
+
+### Why scripting beats agents for repeated tasks
+
+Browser agents work well for one-off tasks that require judgment — "find me the cheapest flight next Tuesday." They fall apart for anything that needs to run reliably every Monday at 9am.
+
+Scripted automation does not need to reason about the UI. It knows exactly what elements to target, what sequence to follow, and what constitutes success or failure. When the target site changes, the script breaks visibly and immediately — not silently with a wrong result.
+
+BrowserBook leans into this with what they call "offensive programming" — the code is deployed into an environment you do not control, so it will break. The IDE is designed around that reality: fast iteration, cell-level execution, clear failure signals.
+
+### The Jupyter notebook model for browser automation
+
+The notebook interface is the right abstraction for this use case. Browser automation is inherently stateful and iterative — you navigate, observe, write a step, test it, repeat. Traditional test runners force you into a linear script where changing one step means re-executing everything. A cell-based REPL respects that workflow.
+
+Each cell can run independently against the current browser state. You can open a page, interact with it manually in the embedded browser, then write a cell to automate the next step from wherever the browser currently is. This is closer to a REPL than a test suite.
+
+### AI as code generator, not action executor
+
+BrowserBook puts the AI in a familiar role — it writes code that you review and run. This is the correct scope for LLM assistance in deterministic automation. The model can read the DOM, understand the page structure, and generate plausible selectors. It cannot reliably execute a 20-step automation without drift.
+
+When a script breaks because the site changed, the AI can suggest repairs based on the new DOM state. This is tractable. Fixing a prompt that steered an agent off-track is not.
+
+## Practical Evaluation Checklist
+
+- **Deterministic output** — Same script, same site, same result every run
+- **Cell-level debugging** — No need to re-run full automation to test one step
+- **DOM-aware AI assistant** — Selector suggestions from live page state
+- **Local dev with cloud execution** — Electron app for development, Kernel infra for production API runs
+- **Anti-detection hosting** — Stealth mode and proxies for sites that block automation
+- **Auth management** — Built-in helpers for login flows, not just unauthenticated scraping
+
+## Security Notes
+
+- Scripts execute against third-party websites — your cloud credentials for those sites live in your BrowserBook environment
+- API deployment to BrowserBook's hosted infra means your automation logic runs on their infrastructure — review their data handling policies before automating sensitive workflows
+- No built-in credential storage encryption at rest — use environment variables and secrets management for production deployments
+
+## FAQ
+
+**Q:** Is this only for Mac?
+**A:** Yes, the initial release is Mac-only with Apple Silicon optimization. Windows and Linux are not yet available.
+
+**Q:** How is this different from writing Playwright scripts in VS Code?
+**A:** VS Code gives you a text editor. BrowserBook gives you a live browser alongside the editor, a notebook-style REPL for cell-by-cell execution, and an AI assistant that reads the current DOM state to suggest selectors. The workflow is fundamentally more interactive — you are not switching between editor and headless browser.
+
+**Q:** Can I run these scripts on a schedule without managing infrastructure?
+**A:** Yes. BrowserBook offers hosted execution via API. You deploy your notebook as an automation and call it on a schedule (cron syntax) or on-demand via webhook. The hosting uses Kernel under the hood for browser infra.
+
+**Q:** What happens when a site changes its UI and breaks my script?
+**A:** The script fails visibly with a clear error — not silently with wrong data. The AI assistant can analyze the new DOM state and suggest repairs. You update the affected cells and redeploy.
+
+**Q:** Does this replace browser agents like Browserbase or Portkey?
+**A:** No. Browser agents handle open-ended tasks where the agent figures out the steps. BrowserBook scripts are for tasks where you already know the steps and need them to run correctly every time. They solve different problems.
+
+**Q:** Is there a free tier?
+**A:** The Mac IDE is free to download. API execution runs are billed per run — the pricing model is on their website.
+
+## Conclusion
+
+BrowserBook addresses a real gap in the browser automation stack. Teams that moved to AI agents for web tasks discovered that reliability, cost, and debuggability all suffered. Scripting solves those problems but existing tooling makes it painful.
+
+The notebook-style TypeScript REPL with a live browser side panel is the right UX for this. Cell-level execution removes the biggest friction point of traditional automation frameworks. The DOM-aware AI assistant handles the part that actually needs intelligence — generating correct selectors — without risking the stability of the execution layer.
+
+If you are running browser agents in production and seeing drift, cost overruns, or opaque failures, BrowserBook is worth evaluating. It is not a replacement for agents — it is the right tool for the tasks where agents were the wrong tool in the first place.
+
+Download at [browserbook.com](https://browserbook.com).
