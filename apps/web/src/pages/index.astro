@@ -6,13 +6,14 @@ import { getCollection } from 'astro:content';
 const allPosts = await getCollection('blog', ({ data }) => !data.draft);
 const sortedPosts = allPosts.sort((a, b) => b.id.localeCompare(a.id));
 const featuredPosts = sortedPosts.filter(p => p.data.featured).slice(0, 3);
-const recentPosts = sortedPosts;
 const postsPerPage = 6;
-const hasMoreRecentPosts = recentPosts.length > postsPerPage;
-const topics = ['AI setup', 'developer tools', 'self-hosted', 'local LLM'];
+const recentPosts = sortedPosts.slice(0, postsPerPage);
+const hasMoreRecentPosts = sortedPosts.length > postsPerPage;
 const siteUrl = 'https://runany.dev';
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
-const toIsoDate = (date) => date instanceof Date ? date.toISOString() : new Date(date).toISOString();
+const toIsoDate = (date: any) => date instanceof Date ? date.toISOString() : new Date(date).toISOString();
+const topics = ['AI setup', 'developer tools', 'self-hosted', 'local LLM'];
+
 const structuredData = [
   {
     '@context': 'https://schema.org',
@@ -27,7 +28,7 @@ const structuredData = [
     '@type': 'Blog',
     name: 'runany.dev',
     url: siteUrl,
-    blogPost: recentPosts.slice(0, 12).map(post => ({
+    blogPost: sortedPosts.slice(0, 12).map(post => ({
       '@type': 'BlogPosting',
       headline: post.data.title,
       url: `${siteUrl}/blog/${getSlug(post.id)}/`,
@@ -105,11 +106,9 @@ const structuredData = [
       <p class="text-sm font-semibold uppercase tracking-[0.24em] text-violet-300">Recent Posts</p>
       <h2 class="mt-2 text-3xl font-bold text-white">Latest developer guides</h2>
     </div>
-    <div id="home-post-grid" class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3" data-posts-per-page={postsPerPage}>
-      {recentPosts.map((post, index) => (
-        <div data-home-post-card class:list={[index >= postsPerPage && 'hidden']}>
-          <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} />
-        </div>
+
+      {recentPosts.map(post => (
+        <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} />
       ))}
     </div>
 
@@ -131,53 +130,161 @@ const structuredData = [
   </section>
 
   {hasMoreRecentPosts && (
-    <script is:inline>
-      const homePostGrid = document.querySelector('#home-post-grid');
-      const homeLoadMoreButton = document.querySelector('#home-load-more-posts');
-      const homeStatusText = document.querySelector('#home-infinite-scroll-status');
-      const homeSentinel = document.querySelector('#home-infinite-scroll-sentinel');
+    <template id="home-post-card-template">
+      <article class="group relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/75 shadow-2xl shadow-slate-950/30 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/40 hover:shadow-cyan-950/30" data-post-card>
+        <a data-card-link href="" class="block" aria-label="">
+          <div class="relative aspect-[16/9] overflow-hidden bg-slate-900">
+            <img data-card-img src="" alt="" width="600" height="338" class="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
+            <div data-card-img-fallback class="relative h-full w-full bg-gradient-to-br from-violet-500/25 via-slate-800 to-cyan-400/25" style="display:none">
+              <div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.10)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.10)_1px,transparent_1px)] bg-[size:28px_28px] opacity-35"></div>
+              <div class="absolute left-5 top-5 rounded-full border border-white/15 bg-slate-950/55 px-3 py-1 text-xs font-semibold text-cyan-100 backdrop-blur">
+                <span data-card-category-label></span>
+              </div>
+            </div>
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-transparent to-transparent"></div>
+          </div>
+        </a>
+        <div class="p-5">
+          <div class="mb-3 flex items-center justify-between gap-3 text-xs font-medium text-slate-400">
+            <a data-card-category-link href="" class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-cyan-200 hover:border-cyan-300/50"></a>
+            <time data-card-date datetime=""></time>
+          </div>
+          <h3 class="mb-3 text-xl font-bold leading-tight text-white">
+            <a data-card-title href="" class="hover:text-cyan-200 transition-colors"></a>
+          </h3>
+          <p data-card-desc class="mb-4 line-clamp-2 text-sm leading-6 text-slate-400"></p>
+          <div data-card-tags class="flex flex-wrap gap-2"></div>
+        </div>
+      </article>
+    </template>
 
-      if (homePostGrid && homeLoadMoreButton && homeStatusText && homeSentinel) {
-        const posts = Array.from(homePostGrid.querySelectorAll('[data-home-post-card]'));
-        const postsPerPage = Number(homePostGrid.dataset.postsPerPage || 6);
-        let visibleCount = postsPerPage;
+    <script>
+      (function () {
+        const grid = document.querySelector('#home-post-grid');
+        const loadMoreBtn = document.querySelector('#home-load-more-posts');
+        const statusEl = document.querySelector('#home-infinite-scroll-status');
+        const sentinel = document.querySelector('#home-infinite-scroll-sentinel');
+        const template = document.querySelector('#home-post-card-template');
+
+        if (!grid || !loadMoreBtn || !statusEl || !sentinel || !template) return;
+
+        const postsPerPage = Number(grid.dataset.postsPerPage || 6);
+        let hasMorePosts = true;
+        let loadedCount = postsPerPage; // page 1 already rendered
+        let currentPage = 1;
+        let loading = false;
+
+        const formatDate = (d) => {
+          if (!d) return '';
+          const date = new Date(d);
+          return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        };
 
         const updateStatus = () => {
-          const remainingCount = Math.max(posts.length - visibleCount, 0);
-          if (remainingCount === 0) {
-            homeLoadMoreButton.hidden = true;
-            homeStatusText.textContent = 'All posts loaded.';
+          if (!hasMorePosts) {
+            loadMoreBtn.hidden = true;
+            statusEl.textContent = 'All posts loaded.';
             return;
           }
-
-          homeStatusText.textContent = `${remainingCount} more posts available.`;
+          statusEl.textContent = 'Scroll down to load more posts.';
         };
 
-        const showMorePosts = () => {
-          const nextVisibleCount = Math.min(visibleCount + postsPerPage, posts.length);
+        const createPostCard = (post) => {
+          const clone = template.content.firstElementChild.cloneNode(true);
 
-          posts.slice(visibleCount, nextVisibleCount).forEach((post) => {
-            post.classList.remove('hidden');
+          const link = clone.querySelector('[data-card-link]');
+          link.href = `/blog/${post.slug}/`;
+          link.setAttribute('aria-label', `Read ${post.title}`);
+
+          const title = clone.querySelector('[data-card-title]');
+          title.href = `/blog/${post.slug}/`;
+          title.textContent = post.title;
+
+          const desc = clone.querySelector('[data-card-desc]');
+          desc.textContent = post.description || '';
+
+          const date = clone.querySelector('[data-card-date]');
+          const d = new Date(post.pubDate);
+          date.setAttribute('datetime', d.toISOString());
+          date.textContent = formatDate(post.pubDate);
+
+          const catLink = clone.querySelector('[data-card-category-link]');
+          catLink.href = `/category/${post.category.toLowerCase()}/`;
+          catLink.textContent = post.category;
+
+          const catLabel = clone.querySelector('[data-card-category-label]');
+          if (catLabel) catLabel.textContent = post.category;
+
+          const img = clone.querySelector('[data-card-img]');
+          const fallback = clone.querySelector('[data-card-img-fallback]');
+          if (post.image && post.image.url) {
+            img.src = post.image.url;
+            img.alt = (post.image.alt || post.title);
+            img.onerror = function () {
+              this.style.display = 'none';
+              if (fallback) fallback.style.display = '';
+            };
+          } else {
+            img.style.display = 'none';
+            if (fallback) fallback.style.display = '';
+          }
+
+          const tagsContainer = clone.querySelector('[data-card-tags]');
+          (post.tags || []).slice(0, 3).forEach((tag) => {
+            const a = document.createElement('a');
+            a.href = `/tags/${tag.toLowerCase()}/`;
+            a.className = 'rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 hover:text-cyan-200';
+            a.textContent = `#${tag}`;
+            tagsContainer.append(a);
           });
 
-          visibleCount = nextVisibleCount;
-          updateStatus();
+          return clone;
         };
 
-        homeLoadMoreButton.addEventListener('click', showMorePosts);
-        updateStatus();
+        const fetchAndAppend = async () => {
+          if (loading) return;
+          loading = true;
+          loadMoreBtn.textContent = 'Loading...';
 
+          try {
+            const nextPage = currentPage + 1;
+            const resp = await fetch('/api/posts?page=' + nextPage + '&limit=' + postsPerPage);
+            if (!resp.ok) throw new Error('Failed to fetch');
+            const data = await resp.json();
+
+            data.posts.forEach((post) => {
+              grid.append(createPostCard(post));
+            });
+
+            loadedCount += data.posts.length;
+            currentPage = data.page;
+            hasMorePosts = data.hasMore;
+            updateStatus();
+
+            if (!data.hasMore && observer) observer.disconnect();
+          } catch (err) {
+            statusEl.textContent = 'Failed to load posts. Try again.';
+            console.error(err);
+          } finally {
+            loading = false;
+            loadMoreBtn.textContent = 'Load more posts';
+          }
+        };
+
+        loadMoreBtn.addEventListener('click', fetchAndAppend);
+
+        let observer = null;
         if ('IntersectionObserver' in window) {
-          const observer = new IntersectionObserver((entries) => {
+          observer = new IntersectionObserver((entries) => {
             if (!entries.some((entry) => entry.isIntersecting)) return;
-            showMorePosts();
-
-            if (visibleCount >= posts.length) observer.disconnect();
+            if (loading || !hasMorePosts) return;
+            fetchAndAppend();
           }, { rootMargin: '360px 0px' });
-
-          observer.observe(homeSentinel);
+          observer.observe(sentinel);
         }
-      }
+
+        updateStatus();
+      })();
     </script>
   )}
 </BaseLayout>
