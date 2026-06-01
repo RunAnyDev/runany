@@ -193,13 +193,13 @@ prompt = (
     "Create a 16:9 tech blog hero thumbnail for runany.dev. "
     "Topic: [Tool Name] – [short desc]. "
     "Context: [1-2 sentence product description]. "
-    "Visual: dark navy (#0a0f1a) background, stylized browser window frame, "
-    "cyan (#00d4ff) and electric blue (#0066ff) neural connection lines, "
-    "abstract data flows. "
-    "Style: futuristic dev workstation, terminal aesthetic, clean minimal, high contrast. "
+    "Repository: [GitHub full_name if applicable]. "
+    "Visual cues: [language/tech stack], [star count or key feature]. "
+    "Style: futuristic developer workstation, multi-agent AI orchestration, abstract config panels without readable characters, connected nodes, subtle GitHub/tooling references. "
+    "Color palette: dark navy (#0a0f1a), cyan (#00d4ff), electric blue (#0066ff), emerald (#00ff88) accents. "
     "Composition: centered browser-like window with glowing blue border, "
-    "generative abstract tech patterns, emerald (#00ff88) accent highlights. "
-    "Strict: NO text, NO letters, NO numbers, NO words, NO logos, NO UI labels."
+    "generative abstract tech patterns, clean editorial banner, strong focal object, high contrast, generous negative space for title overlay. "
+    "Strict: NO text, NO letters, NO numbers, NO words, NO logos, NO UI labels, NO code glyphs, NO captions, NO fake font rendering anywhere in the image."
 )
 
 payload = json.dumps({
