@@ -1,0 +1,232 @@
+---
+title: "Koreo – Platform Engineering Toolkit for Kubernetes"
+description: "Koreo is an open-source meta-controller programming language that unifies configuration management and resource orchestration on Kubernetes, treating infra as composable building blocks."
+pubDate: "2026-06-01"
+tags: ["kubernetes", "platform-engineering", "devops", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/koreo-platform-engineering-kubernetes.webp"
+  alt: "Koreo platform engineering Kubernetes thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Koreo is an open-source meta-controller programming language for Kubernetes that unifies configuration management and resource orchestration — treat your infra as composable Lego blocks with controller-driven workflows.
+
+## Source and Accuracy Notes
+
+- Official site: [https://koreo.dev](https://koreo.dev)
+- GitHub (if available): check [koreo.dev](https://koreo.dev) for open-source repo
+- HN Show HN: [Show HN: Koreo – A platform engineering toolkit for Kubernetes](https://news.ycombinator.com/item?id=43644351) (120 points)
+
+## What Is Koreo?
+
+Koreo is built by [Real Kinetic](https://realkinetic.com/), a company that has spent years helping organizations implement platform engineering. Their core complaint with existing tooling:
+
+- **Terraform** treats infrastructure as "one-shot" — you run `apply`, it does its thing, and that's it. No built-in reconciliation loop.
+- **Helm** doesn't scale with complexity. Overlays and values piling up become unmanageable.
+- **Kustomize** has the same problem — it handles patches okay but breaks down when configurations grow.
+- **Crossplane** is closer to what they want but still has limitations.
+
+Koreo takes the **Kubernetes controller model** — the reconcile loop pattern where a controller watches desired state and continuously works to make reality match it — and applies it to infrastructure and configuration management. It is, in their own words, a "meta-controller programming language."
+
+### How It Differs from Existing Tools
+
+The key difference from Helm/Kustomize is Koreo's **unified approach to config management AND resource orchestration**. In Helm, you can use `lookup` to reference existing resources, but only if they're already in the cluster. With Koreo, the output of one resource can be used as the input to another — resources can depend on each other in a programmable way, not just a template-replacement way.
+
+```bash
+# Conceptual Koreo workflow (pseudo-syntax)
+# Define a base configuration
+base = Configuration("./base")
+
+# Apply an overlay
+app = base.apply("./ overlays/production")
+
+# Define a resource whose output feeds into another
+database = Resource("postgres", spec=app.spec.database)
+api = Resource("api", spec=app.spec.api, depends_on=[database])
+```
+
+This "depends_on" model lets you compose resources into workflows — treating Kubernetes resources as reusable, parameterized Lego blocks rather than one-off YAML manifests.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Kubernetes cluster (1.21+)
+- `kubectl` configured
+- Docker (for building custom controllers)
+
+### Step 1: Install Koreo CLI
+
+```bash
+# Download the latest release for your platform
+curl -sSL https://get.koreo.dev | bash
+
+# Verify installation
+koreo version
+```
+
+### Step 2: Initialize a Koreo Project
+
+```bash
+# Create a new Koreo project
+koreo init my-platform
+
+cd my-platform
+# Expected structure:
+# my-platform/
+#   koreo.yaml       # Project manifest
+#   base/             # Base configurations
+#   overlays/         # Environment-specific overlays
+#   resources/        # Resource definitions
+```
+
+### Step 3: Define Your First Resource
+
+Create a simple deployment resource in `resources/deployment.yaml`:
+
+```yaml
+apiVersion: koreo.dev/v1
+kind: Resource
+metadata:
+  name: nginx-deployment
+spec:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: nginx
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: nginx
+    template:
+      metadata:
+        labels:
+          app: nginx
+      spec:
+        containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+          - containerPort: 80
+```
+
+### Step 4: Apply to Cluster
+
+```bash
+# Preview what would be applied
+koreo plan
+
+# Apply to cluster (runs controller loop)
+koreo apply
+```
+
+### Step 5: Verify the Controller Loop
+
+```bash
+# Check that Koreo CRDs are installed
+kubectl get crd | grep koreo
+
+# Check your resources
+kubectl get resources -n default
+
+# Watch the reconcile loop in action
+koreo status
+```
+
+## Deeper Analysis
+
+### The "Meta-Controller" Concept
+
+Traditional Kubernetes controllers (Deployment, StatefulSet, etc.) manage one specific resource type. Koreo lets you program compositions of controllers — define a set of resources and their dependency graph, then let Koreo manage the entire plan through its reconcile loop.
+
+For example, you can model a complete platform:
+1. Provision a managed database (Cloud SQL, RDS, etc.) via Crossplane
+2. Run a migration job
+3. Deploy the application
+4. Configure a CDN distribution
+5. Set up monitoring
+
+All of these are coordinated through a single Koreo plan, with proper ordering based on `depends_on`.
+
+### Configuration Management
+
+Koreo has similarities to KCL, Jsonnet, and Cue — it's a configuration language where you can define base configurations and apply overlays/patches. The difference is that Koreo is also an orchestration tool. You don't just generate YAML; you execute a plan and let the controller handle drift.
+
+```jsonnet
+// base.k - define base config
+{
+  replicas: 3,
+  image: "nginx:1.25",
+  resources: {
+    cpu: "100m",
+    memory: "128Mi"
+  }
+}
+```
+
+```jsonnet
+// production.k - production overlay
+local base = import "base.k";
+base {
+  replicas: 10,
+  resources: {
+    cpu: "500m",
+    memory: "512Mi"
+  }
+}
+```
+
+### Real-World Use Cases
+
+- **Internal Developer Platforms (IDPs)**: Build self-service infrastructure with proper guardrails
+- **Multi-team environments**: Share base configs across teams with appropriate overlays
+- **Complex infrastructure**: Manage Terraform state + Kubernetes resources in one coherent system
+- **GitOps workflows**: Koreo's reconcile loop works naturally with GitOps patterns
+
+## Practical Evaluation Checklist
+
+- Does it handle cross-resource dependencies cleanly?
+- Is the CLI intuitive for someone familiar with kubectl?
+- Does it integrate with existing tools (Helm, Crossplane, Terraform)?
+- Is the programming model extensible for custom controllers?
+- Does the reconcile loop handle edge cases like partial failures?
+
+## Security Notes
+
+- Koreo runs as a Kubernetes controller — ensure proper RBAC policies are in place
+- The controller needs permissions to manage the resources defined in your plans
+- Review the Koreo CRD definitions before applying untrusted configurations
+- Network policies should restrict which namespaces the controller can operate in
+
+## FAQ
+
+**Q:** How does Koreo compare to Crossplane?
+**A:** Crossplane is a specific provider implementation — it handles cloud resources via compositions. Koreo sits at a higher level, orchestrating multiple resource types (including Crossplane) through a unified programming model. Think of Koreo as the orchestration layer and Crossplane as one of the provisioners it can manage.
+
+**Q:** Can I use Koreo alongside existing Helm charts?
+**A:** Yes. Koreo can manage Helm releases as resources within its plan. You can import existing Helm charts and apply Koreo's overlay system on top of them.
+
+**Q:** Does Koreo replace Terraform?
+**A:** Not entirely. Koreo targets Kubernetes-native infrastructure. For non-Kubernetes resources (cloud accounts, IAM policies outside Kubernetes), Terraform remains the standard. Koreo's sweet spot is the layer above raw infrastructure — the platform that developers interact with.
+
+**Q:** What languages are supported for writing Koreo plans?
+**A:** Koreo uses its own configuration language (similar to Jsonnet/KCL). You write `.k` files that define resources and their relationships.
+
+**Q:** Is Koreo production-ready?
+**A:** Real Kinetic uses it commercially for client work. The open-source release is recent — check the GitHub repo for version and maturity signals before using it in critical production environments.
+
+## Conclusion
+
+Koreo fills a real gap in the platform engineering toolchain. Terraform, Helm, and Crossplane each solve part of the problem, but none give you a unified, controller-driven model for managing complex infrastructure with proper dependency ordering and reconciliation.
+
+If you're building an Internal Developer Platform and finding that Helm charts become unmanageable at scale, or that Terraform's one-shot model doesn't give you the self-healing properties you want — Koreo is worth evaluating.
+
+The "meta-controller programming language" framing is ambitious. Whether the model scales to truly complex platforms remains to be seen, but the core idea — treat Kubernetes resources as composable, dependent building blocks with a reconcile loop — is sound.
+
+Start with a small, non-critical use case to evaluate. The [official docs at koreo.dev](https://koreo.dev) have walkthroughs for getting started.
