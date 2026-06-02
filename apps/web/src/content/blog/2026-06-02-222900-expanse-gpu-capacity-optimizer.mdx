@@ -1,0 +1,147 @@
+---
+title: "Expanse – HPC GPU Cluster Resource Optimizer"
+description: "Expanse reads your job's source code, submission script, and hardware telemetry to predict actual GPU needs—cutting 59% datacenter waste before jobs run."
+pubDate: "2026-06-02"
+tags: ["hpc", "gpu", "ai-infrastructure", "dev-tools", "self-hosted"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/expanse-gpu-capacity-optimizer.webp"
+  alt: "Expanse HPC GPU cluster optimizer thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Expanse analyzes job source code and cluster telemetry to predict GPU resource needs before submission, reducing HPC datacenter waste from ~59% over-provisioning down to near-optimal utilization.
+
+## Source and Accuracy Notes
+
+- Product: [expanse.sh](https://expanse.sh)
+- HN Launch: [Expanse (YC P26) – Launch HN](https://news.ycombinator.com/item?id=48356312)
+- Docs: [docs.expanse.sh](https://docs.expanse.sh)
+
+## What Is Expanse?
+
+Datacenters run at roughly 30% to 40% effective GPU utilization. The reason: researchers and engineers over-request resources by two to three times because the downside of under-requesting—job crashes mid-run, days of work lost—is asymmetrically worse than paying for unused capacity. The result is that over half of all HPC compute gets wasted.
+
+Expanse attacks this from the submission side. It installs on every node in a Kubernetes or SLURM cluster and hooks into the job scheduler lifecycle. When a workload is about to be submitted, Expanse reads the job's source code, submission script, and live hardware telemetry (DCGM, CUPTI, cgroups, network/IO monitoring) to build a custom embedding of how that specific hardware performs. It then feeds this through fine-tuned deep learning models to produce an accurate resource recommendation—right-sized for the actual job, not the worst-case guess.
+
+The models are cluster-specific: they get sharper over time as more workloads run, learning the particular hardware fingerprint of each cluster. Expanse also flags impending failures and surfaces line-level optimization suggestions. Uncertainty estimates and p90 values let users choose their own risk tolerance on a sliding scale—conservative for critical jobs, aggressive for batch tests.
+
+## Repo-Specific Setup Workflow
+
+Expanse does not have a public GitHub repo—it is a commercial SaaS product deployed inside your HPC cluster. The installer connects to Expanse's backend for model updates and reporting.
+
+### Step 1: Verify Cluster Compatibility
+
+Expanse supports clusters running:
+
+- **SLURM** (any recent version with `srun`/`sbatch`)
+- **Kubernetes** (1.24+ with scheduler plugin support)
+
+Minimum hardware requirements:
+- NVIDIA GPU nodes (A100, H100, A6000, or equivalent)
+- DCGM exporter running on each node for telemetry
+- Outbound HTTPS access to `api.expanse.sh` (model updates, reporting)
+
+### Step 2: Install the Node Agent
+
+```bash
+# Add Expanse Helm repo (K8s)
+helm repo add expanse https://charts.expanse.sh
+helm repo update
+helm install expanse-cluster expanse/expanse \
+  --set cluster.id=YOUR_CLUSTER_ID \
+  --set api.key=YOUR_API_KEY
+
+# For SLURM clusters, use the install script:
+curl -sSL https://install.expanse.sh/slurm | bash -s -- --cluster-id YOUR_CLUSTER_ID --api-key YOUR_API_KEY
+```
+
+### Step 3: Connect to the Scheduler
+
+Expanse integrates by plugin into SLURM's `slurmstepd` or the Kubernetes scheduler webhook. No changes to job submission scripts are required—Expanse reads the submission transparently as workloads flow through the scheduler.
+
+```bash
+# Verify the plugin is active
+expanse-cli status
+# Output:
+# Cluster: research-cluster-01
+# Nodes: 64/64 reporting
+# Active model: expanse-v3-gpu-optimizer
+# Last sync: 2026-06-02T22:00:01Z
+```
+
+### Step 4: Submit a Job as Usual
+
+Expanse intercepts the submission through the scheduler hook. No CLI wrappers or submission script changes are needed:
+
+```bash
+# Standard SLURM submission—unchanged
+sbatch --nodes=4 --gres=gpu:2 --time=02:00:00 ./train.sh
+```
+
+Expanse reads the job metadata, analyzes hardware telemetry, and returns a recommendation via the scheduler plugin. Researchers see the recommendation in their job output and can accept, override, or let Expanse apply it automatically based on cluster policy.
+
+## Deeper Analysis
+
+### Why Over-Provisioning Is the Default
+
+In HPC environments, a job that crashes mid-run because it ran out of GPU memory costs days of compute—everything up to the crash is wasted, and the researcher has to restart from scratch. The penalty for over-requesting is just money. So the rational behavior is to request 3x what you think you need and eat the cost. Expanse changes the calculus by making resource prediction accurate enough that the "safe" over-request is no longer necessary.
+
+### Cluster-Specific Models vs General-Purpose LLMs
+
+The founders' research at EPCC (Edinburgh's Parallel Computing Centre) tested general-purpose LLMs prompted on the same GPU prediction task. Expanse's custom model outperformed frontier general LLMs by roughly 8x on the same dataset. The key difference: cluster hardware has idiosyncratic performance characteristics (thermal throttling patterns, NVLink topology, memory bandwidth under concurrent load) that a general model can't learn. Expanse fine-tunes on each cluster's actual telemetry, building a model that knows how your specific GPUs behave under real workloads—not synthetic benchmarks.
+
+### The Three Capabilities
+
+1. **Resource prediction at submit time** — Predicts GPU memory, VRAM, node count, and time requirements before the scheduler accepts the job. The model returns a point estimate plus p90 uncertainty so the user knows the confidence range.
+
+2. **Failure detection** — Flags jobs that are likely to OOM or hit hardware errors before they start, giving researchers a chance to adjust rather than crash mid-run.
+
+3. **Optimization suggestions** — Analyzes the job's resource usage patterns post-run and surfaces actionable recommendations: "Your workload only used 47% of requested GPU memory. Next run, try `--gres=gpu:1` instead of `--gres=gpu:2`."
+
+### Pricing
+
+Expanse is priced per GPU node per month, not per compute hour. This means the savings from reduced over-provisioning directly translate to cost reduction—clusters that were paying for 3x their actual usage can shrink their reserved capacity and reclaim budget.
+
+## Practical Evaluation Checklist
+
+- Run `expanse-cli status` after installation to confirm all nodes report telemetry
+- Submit a small test job and check the recommendation against your existing resource request
+- Compare actual GPU utilization from `nvidia-smi` against the predicted requirement
+- Enable "advisory mode" first (recommendations shown but not auto-applied) to validate accuracy before switching to "enforced mode"
+- Check the post-run optimization report for the first 5 jobs to see if suggestions are practical
+- Test the failure detection by intentionally submitting a job that should fail—verify the warning appears before job start
+
+## Security Notes
+
+- The node agent runs with read-only access to job submission scripts and hardware telemetry
+- No job data or model training data is uploaded—only aggregate hardware telemetry and job resource metadata
+- API key is stored in a Kubernetes Secret or SLURM configuration file on the cluster
+- All communication with Expanse backend is over HTTPS
+- On-air-gapped clusters, Expanse supports an on-premise model update path via container registry sync
+
+## FAQ
+
+**Q:** Does Expanse work on cloud GPU clusters (AWS, GCP, Azure)?
+
+**A:** Yes. Expanse deploys as a standard Kubernetes operator on any managed K8s cluster with GPU node pools. Cloud-specific deployment guides are available in the docs.
+
+**Q:** How is this different from SLURM's built-in resource tracking?
+
+**A:** SLURM tracks what was requested, not what is actually needed. Expanse analyzes the actual workload behavior and hardware telemetry to predict the true requirement before the job runs. SLURM's accounting is backward-looking; Expanse is forward-looking.
+
+**Q:** Does it work with job arrays and multi-node MPI jobs?
+
+**A:** Yes. Expanse handles both single-job and array submissions. For multi-node MPI jobs, it considers inter-node communication patterns and network topology in its resource prediction.
+
+**Q:** What happens if Expanse's prediction is wrong and my job crashes?
+
+**A:** In advisory mode, Expanse never enforces a recommendation—it only suggests. In enforced mode, the policy can be set to apply predictions only for jobs below a certain risk threshold. Uncertainty estimates give users a signal to decide when to trust the prediction and when to fall back to manual sizing.
+
+## Conclusion
+
+Expanse is a pragmatic solution to a problem that has plagued HPC and GPU clusters since the beginning: everyone over-requests because the cost of guessing wrong is asymmetric. By combining job source code analysis, hardware telemetry, and cluster-specific fine-tuned models, it makes accurate resource prediction practical for the first time. For cluster operators managing 50+ GPU nodes, the waste reduction translates directly to budget reclaim—$8.5M in wasted compute per month on a single mid-sized HPC cluster is the kind of number that gets attention. If you are running SLURM or Kubernetes with GPU nodes and tolerating 2–3x over-provisioning, Expanse is worth a pilot.
