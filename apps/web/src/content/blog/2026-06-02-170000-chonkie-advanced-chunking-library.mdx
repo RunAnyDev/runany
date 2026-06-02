@@ -1,0 +1,220 @@
+---
+title: "Chonkie - Open-Source RAG Chunking Library"
+description: "Chonkie is a lightweight, fast RAG chunking library for Python and TypeScript. Up to 33x faster than LangChain, supports semantic, token, sentence, and code chunking."
+pubDate: "2026-06-02"
+tags: ["open-source", "rag", "python", "dev-tools", "ai-setup"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/chonkie-advanced-chunking-library.webp"
+  alt: "Chonkie open-source RAG chunking library thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Chonkie is a lightweight RAG chunking library with Python and TypeScript support. It runs up to 33x faster than LangChain and LlamaIndex with a ~15MB install, supporting token, sentence, recursive, semantic, and code chunking strategies.
+
+## Source and Accuracy Notes
+
+- Product: [https://chonkie.ai](https://chonkie.ai)
+- GitHub (Python): [https://github.com/chonkie-inc/chonkie](https://github.com/chonkie-inc/chonkie) (4,120 stars)
+- GitHub (TypeScript): [https://github.com/chonkie-inc/chonkie-ts](https://github.com/chonkie-inc/chonkie-ts) (344 stars)
+- Benchmarks: [https://github.com/chonkie-inc/chonkie/blob/main/BENCHMARKS.md](https://github.com/chonkie-inc/chonkie/blob/main/BENCHMARKS.md)
+
+## What Is Chonkie?
+
+Chonkie is an open-source library for chunking and embedding text data, purpose-built for RAG (Retrieval-Augmented Generation) pipelines and semantic search. Two founders built it after growing frustrated with existing options: either lacking advanced chunking strategies or bloated with dependencies. The library ships as a ~15MB install versus the 80–170MB overhead of many alternatives, while delivering up to 33x faster token chunking in internal benchmarks.
+
+The library supports both Python and TypeScript with feature parity across the two implementations. Beyond basic text splitting, Chonkie implements several advanced chunking strategies drawn from recent RAG research papers.
+
+## Chunking Strategies
+
+Chonkie implements seven distinct chunking strategies, each targeting a different data type or retrieval scenario:
+
+**Token Chunking** splits text by token count — the most common approach, useful when you need precise control over context window usage.
+
+**Sentence Chunking** groups sentences together based on tokenizer boundaries. This preserves natural language flow better than raw token counting.
+
+**Recursive Chunking** repeatedly splits text using hierarchical separators (newlines, sentences, words) until chunks fall within the target size. It handles irregular text structures more gracefully than fixed-size approaches.
+
+**Semantic Chunking** uses embedding similarity to find natural breaking points where content shifts significantly. Unlike token-based methods, it respects semantic boundaries rather than arbitrary token counts.
+
+**Semantic Double Pass** (from a 2024 paper) first chunks text semantically, then merges related chunks to reduce fragmentation while maintaining retrieval quality.
+
+**Code Chunking** parses source code into an AST (Abstract Syntax Tree) and splits at syntactically meaningful boundaries — function definitions, class declarations, import blocks — preserving code structure through the chunking process.
+
+**Late Chunking** (from a 2024 paper) derives chunk embeddings from embedding a longer document, capturing broader context before splitting. This often produces more meaningful embeddings than chunking first then embedding.
+
+## Setup Workflow
+
+### Step 1: Install Chonkie
+
+```bash
+pip install chonkie
+```
+
+The default install is around 15MB. Chonkie uses a modular dependency system — install only the components you need. Core chunking has zero external dependencies.
+
+For specific tokenizers:
+
+```bash
+pip install chonkie[transformers]   # HuggingFace transformers
+pip install chonkie[tokenizers]      # SentencePiece
+pip install chonkie[tiktoken]        # OpenAI tiktoken
+```
+
+### Step 2: Basic Token Chunking
+
+```python
+from chonkie import TokenChunker
+
+chunker = TokenChunker(
+    chunk_size=512,    # tokens per chunk
+    overlap=64          # overlap between chunks
+)
+
+documents = [
+    "Your long document text goes here...",
+    "Second document..."
+]
+
+chunks = chunker.chunk(documents)
+
+for chunk in chunks:
+    print(f"Chunk: {chunk.text[:50]}... | Tokens: {chunk.token_count}")
+```
+
+### Step 3: Semantic Chunking with Embeddings
+
+```python
+from chonkie import SemanticChunker
+from chonkie.embedding import SentenceTransformerEmbedding
+
+embedding = SentenceTransformerEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+
+chunker = SemanticChunker(
+    embedding=embedding,
+    threshold=0.5,     # similarity threshold for splitting
+    min_chunk_size=128
+)
+
+chunks = chunker.chunk(documents)
+```
+
+### Step 4: Code Chunking
+
+```python
+from chonkie import CodeChunker
+
+chunker = CodeChunker(
+    language="python",   # or "javascript", "rust", etc.
+    chunk_size=1024
+)
+
+code_files = ["src/main.py", "src/utils.py"]
+chunks = chunker.chunk(code_files)
+
+for chunk in chunks:
+    print(f"File: {chunk.metadata['file']} | Type: {chunk.metadata['node_type']}")
+```
+
+### Step 5: Vector DB Integration via Handshakes
+
+Chonkie provides thin "handshake" functions for popular vector databases:
+
+```python
+from chonkie import SemanticChunker
+from chonkie.handshake import pgvector, chroma, qdrant
+
+chunker = SemanticChunker()
+chunks = chunker.chunk(documents)
+
+# Push to pgvector
+pgvector.from_chunks(chunks, table="documents", connection=db_conn)
+
+# Push to Chroma
+chroma.from_chunks(chunks, collection="docs")
+
+# Push to Qdrant
+qdrant.from_chunks(chunks, collection_name="documents")
+```
+
+Handshakes are available for pgvector, Chroma, TurboPuffer, and Qdrant.
+
+## Deeper Analysis
+
+### Benchmarks
+
+The team published benchmarks comparing Chonkie against LangChain and LlamaIndex:
+
+- Token chunking: **33x faster** than LangChain, **28x faster** than LlamaIndex
+- Memory footprint: **~15MB** default install vs **80–170MB** for alternatives
+- Semantic chunking: uses running mean pooling for efficient similarity computation
+
+The benchmark methodology is documented in the repo. Results are reproducible.
+
+### Architecture Decisions
+
+Chonkie avoids dependencies for core chunking logic. The tokenizer adapters (transformers, tiktoken, tokenizers) are optional — if you don't specify one, Chonkie falls back to a built-in tokenizer. This makes the library usable in environments where installing large ML dependencies is impractical.
+
+The modular design extends to embedding providers. Instead of hardcoding support for specific services, Chonkie uses a handler interface — pass any embedding provider that implements the expected interface. Built-in handlers cover SentenceTransformer, Model2Vec, and OpenAI.
+
+### Late Chunking vs Semantic Chunking
+
+Late Chunking (Campos, 2024) and Semantic Chunking solve different problems. Late Chunking embeds the full document, then derives chunk embeddings from the document-level embedding using pooling. This captures cross-sentence context that semantic similarity alone might miss. Semantic Chunking groups sentences by local similarity — better for identifying topic shifts within a document. The two strategies are complementary: Late Chunking works well for coherent long-form content; Semantic Chunking excels at detecting boundaries in heterogeneous documents.
+
+### Research Foundation
+
+Chonkie implements two recent chunking papers:
+
+1. **Late Chunking** ([arXiv:2409.04701](https://arxiv.org/abs/240904701)): Document-level embedding followed by chunk-level pooling
+2. **Slumber Chunking** ([arXiv:2406.17526](https://arxiv.org/abs/2406.17526)): Recursive chunking with LLM-verified split points for reduced token usage and higher quality chunks
+
+## Practical Evaluation Checklist
+
+- Install: `pip install chonkie` — zero dependency install works
+- Token chunking: produces consistent token counts across runs
+- Semantic chunking: threshold controls chunk count — lower threshold = more chunks
+- Code chunking: AST parsing correctly identifies function/class boundaries
+- Handshake integrations: test with your specific vector DB version
+- Late Chunking: requires an embedding model — without one, falls back to Recursive
+- Batch processing: documents list chunks efficiently in one call
+
+## Security Notes
+
+- Chonkie does not send data to external services by default
+- Embedding providers (OpenAI, HuggingFace) require API keys configured by the user
+- No telemetry or call-home behavior
+- Code Chunking reads files from disk — ensure sandboxing if processing untrusted code
+
+## FAQ
+
+**Q: How does Chonkie compare to LangChain's text splitting?**
+
+**A:** In the team's benchmarks, Chonkie is up to 33x faster on token chunking operations. It also has a much smaller footprint (~15MB vs 80–170MB) and zero required dependencies for core chunking. LangChain's text splitter is a single strategy; Chonkie offers seven distinct strategies with different retrieval trade-offs.
+
+**Q: Can I use Chonkie without an embedding model?**
+
+**A:** Yes. Token, Sentence, Recursive, Code, and Semantic chunking (token-based) all work without an embedding model. Semantic (embedding-based) and Late Chunking require one.
+
+**Q: Does Chonkie support batch processing?**
+
+**A:** Yes. Pass a list of documents to `chunker.chunk()` and it processes them sequentially. For very large document sets, consider chunking in parallel with `multiprocessing` since each document is independent.
+
+**Q: How do I choose which chunking strategy?**
+
+**A:** For general text with token constraints: Token or Recursive. For maintaining semantic coherence: Semantic or Late Chunking. For source code: Code Chunking. The Chonkie repo includes guidance for matching strategy to use case.
+
+**Q: Is there a hosted version?**
+
+**A:** The team offers hosted and on-premise versions with OCR, extra metadata, all embedding providers, and managed vector databases for teams wanting a fully managed pipeline. Reach out via the Cal.com link on the product site.
+
+## Conclusion
+
+Chonkie fills a specific gap in the RAG tooling landscape: a focused, fast, lightweight chunking library that doesn't require adopting a full framework. With both Python and TypeScript implementations, seven chunking strategies including two backed by recent research papers, and integrations with the major vector databases, it is a practical choice for teams building retrieval-focused applications.
+
+The ~15MB install and zero-dependency core make it deployable in environments where pulling in LangChain or LlamaIndex would be overkill. The benchmark results are impressive but, as always, validate against your specific data and retrieval requirements before committing to a library.
+
+GitHub: [chonkie-inc/chonkie](https://github.com/chonkie-inc/chonkie) (4,120 stars) | [chonkie-inc/chonkie-ts](https://github.com/chonkie-inc/chonkie-ts) (344 stars)
