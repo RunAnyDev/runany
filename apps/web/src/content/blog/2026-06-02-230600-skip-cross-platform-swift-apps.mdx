@@ -1,0 +1,176 @@
+---
+title: "Skip – Cross-Platform Native Apps From One Swift Codebase"
+description: "Skip transpiles Swift/SwiftUI into native Android apps via Kotlin, letting you ship to iOS and Android from a single Swift codebase with no cross-platform runtime penalty."
+pubDate: "2026-06-02"
+tags: ["ios", "android", "swift", "cross-platform", "open-source"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/skip-cross-platform-swift-apps.webp"
+  alt: "Skip cross-platform Swift apps thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Skip converts Swift/SwiftUI code into native Android apps via Kotlin, letting you maintain one codebase and ship to both iOS and Android without cross-platform UI penalties.
+
+## Source and Accuracy Notes
+
+- GitHub: [skiptools/skip](https://github.com/skiptools/skip) (3,061 stars)
+- Website: [skip.tools](https://skip.tools)
+- Documentation: [skip.dev/docs](https://skip.dev/docs)
+
+## What Is Skip?
+
+Skip is an open-source build tool that transpiles Swift and SwiftUI into Kotlin and Jetpack Compose. You write your app once in Swift, and Skip generates fully native Android and iOS projects from the same source. The resulting Android app is a first-class Kotlin/Jetpack Compose application with no runtime bridge or cross-platform UI layer.
+
+The key difference from other cross-platform tools is philosophy: Skip does not introduce a new UI framework. It faithfully maps SwiftUI concepts to their Jetpack Compose equivalents. If SwiftUI supports a view, modifier, or animation, Skip attempts to produce the equivalent Compose code. The output is real, readable Kotlin that you can open in Android Studio and debug with standard Android tooling.
+
+### How the Transpilation Works
+
+Skip ships as a Gradle plugin. Point it at a Swift package containing your shared code, and it generates a complete Android app structure alongside the iOS app. The Swift code is compiled to an Android library via Swift.org's official Android support, then wrapped in a shell Android project that Jetpack Compose drives. Every SwiftUI view becomes a Compose function, and SwiftUI animations map to Compose animations.
+
+The current version requires macOS to build iOS targets (Swift.org's Android toolchain does not support iOS targets), but the Android build works on Linux. The generated Kotlin is stable and production-quality — you can ship it to the Play Store with confidence.
+
+## Setup Workflow
+
+### Step 1: Install Prerequisites
+
+You need macOS with Xcode and the Swift toolchain. For Android output, install the Swift for Android toolchain from [swift.org](https://swift.org/download) and add it to your PATH. Also ensure you have Gradle and Android Studio on your machine.
+
+### Step 2: Create a Swift Package
+
+```bash
+mkdir MyApp && cd MyApp
+swift package init --type library
+```
+
+Your shared app logic lives in a Swift package. Structure it like a standard SwiftUI app:
+
+```swift
+import SwiftUI
+
+@main
+struct MyAppApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        Text("Hello from Skip!")
+            .font(.largeTitle)
+            .padding()
+    }
+}
+```
+
+### Step 3: Configure Skip
+
+Add the Skip Gradle plugin to your Swift package's `Package.swift`:
+
+```swift
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "MyApp",
+    platforms: [.iOS(.v16), .android(.v34)],
+    products: [.library(name: "MyApp", targets: ["MyApp"])],
+    dependencies: [],
+    targets: [.target(name: "MyApp", dependencies: [])]
+)
+```
+
+Then add `plugins { id("tools.skip") }` to the generated Android project's `build.gradle.kts`.
+
+### Step 4: Build Both Platforms
+
+```bash
+# iOS (macOS only)
+swift build --target MyApp
+
+# Android
+./gradlew assembleDebug
+```
+
+The Android APK lands in `android/app/build/outputs/apk/debug/`. Open it in Android Studio to inspect the generated Kotlin and debug normally.
+
+## Deeper Analysis
+
+### What Skip Does Well
+
+**Single source of truth.** SwiftUI developers already write platform-agnostic code by default. Skip extends that abstraction to Android without introducing a custom UI layer. If you know SwiftUI, you already know how to write Skip code.
+
+**Real native output.** The generated Kotlin is not a compatibility shim — it is idiomatic Jetpack Compose that any Android developer can read and modify. You can drop down to raw Kotlin for platform-specific features and integrate with existing Android libraries without going through a bridge.
+
+**Shared business logic.** Model objects, networking code, and business rules written in Swift are shared across both platforms. The transpiler handles Swift's type system and standard library, generating equivalent Kotlin data classes and functions.
+
+**Full SwiftUI coverage.** Skip supports the core SwiftUI view hierarchy, modifiers, animations, state management (`@State`, `@Binding`, `@Observable`), and navigation. It maps `NavigationStack` to Jetpack Navigation, `List` to `LazyColumn`, and `ZStack`/`VStack`/`HStack` to their Compose equivalents.
+
+### Current Limitations
+
+**macOS required for iOS builds.** This is a hard constraint. The Swift compiler's Android support targets only Android native targets, not iOS. You need a Mac to build the iOS side.
+
+**No watchOS/tvOS/macOS targets.** Skip targets iOS and Android only. Watch, TV, and Mac Catalyst are not yet supported.
+
+**Some SwiftUI gaps.** Advanced features like custom `Layout` subclasses and some third-party SwiftUI libraries may not transpile cleanly. The project is active and these gaps are narrowing with each release.
+
+**Gradle-heavy workflow.** The Android side is a full Gradle project, which means fastlane or Gradle plugin integration for CI. If you are used to pure Xcode workflows for iOS, the Android side will feel heavier.
+
+### When Skip Is the Right Choice
+
+- Teams with Swift/iOS expertise building consumer apps on both platforms
+- Apps where the UI is primarily standard SwiftUI components
+- Projects where the business logic dominates and UI complexity is moderate
+- When you want to maintain one code base without sacrificing native quality on either platform
+
+Skip is not trying to be React Native or Flutter — it is a transpiler, not a cross-platform runtime. If you want maximum code sharing with minimum UI friction, it is the most direct path for Swift teams.
+
+## Practical Evaluation Checklist
+
+- Swift package structure set up with proper iOS/Android platform targets
+- Transpiled Kotlin builds without errors in Android Studio
+- SwiftUI views render correctly on both platforms
+- Navigation and state management work across both targets
+- Generated Kotlin is readable and debuggable
+- Play Store submission tested from the generated APK
+
+## Security Notes
+
+Skip transpiles to vanilla Kotlin — no custom runtime, no proprietary libraries. The generated code is standard Jetpack Compose that Android security tools already understand. Your app inherits the same security posture as any native Kotlin Android app.
+
+## FAQ
+
+**Q:** Does Skip require a runtime or interpreter on Android?
+
+**A:** No. The generated Android app is a standard Kotlin/Jetpack Compose application with no Skip runtime dependency. It is a normal APK that receives Play Store updates and passes standard Play Store security review.
+
+**Q:** Can I use Swift packages from the ecosystem?
+
+**A:** Most pure-Swift packages work. The transpiler handles the Swift standard library and common packages. Any package with iOS-specific or C-interop dependencies may require workarounds. Check the [compatibility table](https://skip.dev/docs/packages) in the docs for tested packages.
+
+**Q:** How does Skip compare to Kotlin Multiplatform (KMP)?
+
+**A:** KMP compiles Kotlin to multiple targets; Skip compiles Swift to multiple targets. KMP targets share Kotlin logic while UI stays platform-native. Skip shares Swift logic and transpiles SwiftUI to Compose for Android. If your team lives in Swift, Skip keeps you there. If you prefer Kotlin, KMP is more natural. Both produce real native apps with no cross-platform runtime penalty.
+
+**Q:** Can I debug the generated Kotlin in Android Studio?
+
+**A:** Yes. The generated Kotlin is a first-class Android project. Set breakpoints, use the profiler, inspect views with Layout Inspector — everything works exactly as it does in a native Kotlin project.
+
+**Q:** What SwiftUI features are not yet supported?
+
+**A:** Custom `Layout` subclasses, some advanced animations, and select third-party SwiftUI libraries. The project maintains a [roadmap](https://skip.dev/docs/roadmap) with feature status. File an issue on GitHub if you hit a gap — the team is responsive.
+
+## Conclusion
+
+Skip solves a specific problem well: letting SwiftUI developers target Android without learning Kotlin or abandoning their codebase. The transpilation produces real, readable Kotlin that any Android developer can maintain, and the resulting app is indistinguishable in quality from a hand-written native Android app.
+
+If your team writes Swift and needs both iOS and Android, Skip is the most direct path to native dual-platform output without a cross-platform UI runtime. The 3,000-star GitHub community and active development signal that it is not a weekend project — it is a serious tool with momentum.
+
+Try it at [skip.tools](https://skip.tools) or dig into the source at [github.com/skiptools/skip](https://github.com/skiptools/skip).
