@@ -6,6 +6,7 @@ import UnoCSS from '@unocss/astro';
 export default defineConfig({
   site: 'https://runany.dev',
   output: 'static',
+  trailingSlash: 'always',
   integrations: [
     mdx(),
     sitemap({
