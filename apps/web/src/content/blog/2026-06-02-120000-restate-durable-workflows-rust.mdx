@@ -1,0 +1,237 @@
+---
+title: "Restate – Durable Workflows Built in Rust"
+description: "Restate is an open-source durable execution runtime built in Rust, bringing low-latency workflow orchestration to JavaScript and Java with a lightweight single-binary deployment."
+pubDate: "2026-06-02"
+tags: ["durable-execution", "rust", "workflow-engine", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/restate-durable-workflows-rust.webp"
+  alt: "Restate durable workflows Rust product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Restate is an open-source durable execution runtime built in Rust, giving you durable workflows and RPC handlers with sub-100ms latency — deployable as a single binary on your laptop or a production server.
+
+## Source and Accuracy Notes
+
+- Product: [restate.dev](https://restate.dev/)
+- GitHub: [github.com/restatedev/restate](https://github.com/restatedev/restate) (3.9k stars)
+- Docs: [docs.restate.dev](https://docs.restate.dev)
+- HN Show HN (185 pts): [story #40659160](https://news.ycombinator.com/item?id=40659160)
+
+## What Is Restate?
+
+Restate is a workflow-as-code platform built around the concept of **durable execution** — the ability to pause and resume code execution across failures, so your workflows never lose state even if the underlying process crashes.
+
+Built in Rust using Tokio, Restate implements a lightweight, log-centric architecture that handles workflow state, durable RPC invocations, virtual objects (actor-style entities), and durable promises all in a single self-contained binary. No external dependencies beyond durable disk storage.
+
+The key differentiator is latency. Restate achieves roughly 50ms roundtrip for a three-step durable workflow handler running on EBS with fsync per step — a figure that puts it well within the range of interactive application response times, not batch workflow territory.
+
+## Core Concepts
+
+### Durable RPC Handlers
+
+The foundation of Restate is not the workflow, but the **durable RPC handler**. Any RPC call into a Restate service becomes durable by default — if the handler crashes mid-execution, Restate replays it from the last checkpoint without you writing any explicit retry or saga logic.
+
+```text
+Client → Restate Runtime → Service Handler
+              ↓
+         Durable Log
+         (stores invocation + state)
+```
+
+### Virtual Objects
+
+Virtual objects turn RPC handlers into virtual actors — single-threaded entities with persistent state. Each invocation is routed to the correct instance, and state survives across crashes. This gives you the actor model semantics without a separate runtime.
+
+### Durable Workflows
+
+On top of durable RPC, Restate adds explicit workflow semantics: multi-step sequences with built-in checkpointing. Any `await` becomes a durable yield point. If the process dies mid-step, execution resumes from that exact point when it restarts.
+
+## Architecture
+
+```bash
+┌──────────────────────────────────────────────────────┐
+│                   Your Application                    │
+│   Node/JS Service     Java/Kotlin Service             │
+└──────────┬────────────────────────┬───────────────────┘
+           │                        │
+           └──────────┬───────────────┘
+                      │ gRPC / HTTP
+                      ↓
+┌──────────────────────────────────────────────────────┐
+│              Restate Runtime (Rust)                   │
+│  ┌─────────────┐  ┌──────────┐  ┌────────────────┐  │
+│  │ Durable Log │  │  State   │  │  Virtual Obj   │  │
+│  │  + Storage  │  │ Machine  │  │   Registry     │  │
+│  └─────────────┘  └──────────┘  └────────────────┘  │
+└──────────────────────────────────────────────────────┘
+           ↓
+    Durable Storage (local disk / EBS)
+```
+
+The runtime is a single binary (`restate-server`) with no JVM or Node.js dependency. Your services are separate processes that communicate with it over gRPC.
+
+## Installation
+
+### Step 1: Download the Runtime
+
+```bash
+# Linux/macOS
+curl -L https://github.com/restatedev/restate/releases/latest/download/restate-x86_64-unknown-linux-musl.tar.gz | tar xz
+
+# Or via npm
+npm install -g @restatedev/restate
+```
+
+### Step 2: Start the Runtime
+
+```bash
+# Start in single-node mode (sufficient for local dev)
+./restate
+
+# Or with Docker
+docker run -p 8080:8080 -v restate-data:/tmp/restate \
+  ghcr.io/restatedev/restate:latest
+```
+
+### Step 3: Write a Durable Service
+
+**TypeScript / JavaScript:**
+
+```typescript
+import { RestateRuntime, ServiceContext } from "@restatedev/restate";
+
+// Define a durable workflow
+const orderService = {
+  processOrder: async (ctx: ServiceContext, orderId: string) => {
+    // Step 1: Reserve inventory — durable, survives crashes
+    await ctx.run(async () => {
+      await inventoryService.reserve(orderId);
+    });
+
+    // Step 2: Process payment — durable
+    const payment = await ctx.run(async () => {
+      return await paymentService.charge(orderId);
+    });
+
+    // Step 3: Schedule delivery — durable
+    return await ctx.run(async () => {
+      await deliveryService.schedule(orderId, payment);
+    });
+  },
+};
+
+const runtime = new RestateRuntime()
+  .addService("orderService", orderService)
+  .bind();
+```
+
+**Java / Kotlin:**
+
+```java
+import dev.restate.sdk.*;
+
+public class OrderService {
+
+    @Workflow
+    public String processOrder(String orderId, WorkflowContext ctx) {
+        // Step 1: Reserve inventory
+        ctx.awitable(() -> inventoryService.reserve(orderId));
+
+        // Step 2: Process payment
+        PaymentResult payment = ctx.awitable(() -> paymentService.charge(orderId));
+
+        // Step 3: Schedule delivery
+        return ctx.awitable(() -> deliveryService.schedule(orderId, payment));
+    }
+}
+```
+
+### Step 4: Deploy
+
+```bash
+# Deploy to a server
+scp restate-server user@prod:/usr/local/bin/
+ssh user@prod
+nohup ./restate-server --node-name production > restate.log 2>&1 &
+
+# Point your service at it
+RESTATE_ENDPOINT=http://prod:8080 node my-service.js
+```
+
+## Latency Benchmark
+
+Restate's log-centric design is explicitly built for low latency. From their HN announcement:
+
+| Configuration | Latency (3-step workflow) |
+|---|---|
+| Local SSD | ~10ms roundtrip |
+| EBS with fsync | ~50ms roundtrip |
+| Network-attached storage | ~80–100ms |
+
+Compare this to systems that rely on event-sourcing databases or external message queues — those typically add 200–500ms per durable step. Restate's in-process durable log keeps this path short.
+
+## Developer Experience
+
+### SDK Design Philosophy
+
+The team explicitly aimed for familiar APIs. Looking at a Restate service handler, you write standard async/await code with no DSL or code generation pipeline. The `ctx.awitable()` wrapper makes a call durable, but the underlying code looks like ordinary async JavaScript or Java.
+
+```typescript
+// This is just standard async/await — familiar to any JS developer
+const result = await ctx.awitable(() => someAsyncCall(param));
+```
+
+The only new primitives are `ServiceContext`, `WorkflowContext`, and the `awitable` wrapper — minimal surface area compared to most workflow engines.
+
+### Observability
+
+Restate integrates with OpenTelemetry for distributed tracing across durable invocations. Since each workflow step is a logged unit, you get full replay capability in tracing UIs — replay a trace step-by-step through failures, not just a static snapshot of the final state.
+
+### Scaling
+
+The single-binary runtime handles both single-node deployments (good for local dev and small production loads) and multi-node clusters via a built-in consensus layer. The consensus layer ensures all nodes agree on workflow state, giving you resilience without a separate orchestrator like etcd or ZooKeeper.
+
+## Security Notes
+
+- The runtime uses standard TLS for service-to-runtime communication when deployed with HTTPS endpoints
+- Durable log data on disk is not encrypted at rest by default — use encrypted volumes (LUKS, EBS encryption) in production
+- The runtime runs as a standard process with no special privileges — follow least-privilege principles for the service accounts it runs under
+
+## FAQ
+
+**Q:** How does Restate compare to Temporal?
+
+**A:** Both implement durable execution, but Temporal is older, more feature-rich, and has a heavier operational footprint. Restate's runtime is a single Rust binary with no external dependencies — Temporal requires a separate frontend, backend, and Elasticsearch cluster. Restate also has a deliberate focus on low-latency (sub-100ms for multi-step workflows), while Temporal prioritizes durability guarantees over latency.
+
+**Q:** Can I use Restate without rewriting existing services?
+
+**A:** Yes — you can wrap existing gRPC or HTTP services with a Restate sidecar and gradually migrate handlers to use durable primitives. The migration path is additive, not a full rewrite.
+
+**Q:** Is Restate production-ready?
+
+**A:** The project is open-source (MIT SDKs, BSL runtime) and actively developed. The HN announcement showed real production-like latency benchmarks. As with any relatively new open-source workflow engine, evaluate community size and maturity for your specific reliability requirements before production use.
+
+**Q:** What languages are supported?
+
+**A:** JavaScript/TypeScript and Java/Kotlin at launch. The core runtime is language-agnostic (gRPC-based), so additional language SDKs can be built against the same protocol.
+
+**Q:** Does it run on ARM / Apple Silicon?
+
+**A:** The release artifacts target x86_64. For ARM (including Apple Silicon and ARM servers), you can build from source — the Rust codebase compiles cleanly with `cargo build --release` on ARM targets.
+
+## Conclusion
+
+Restate tackles the gap between "durable workflow engines that work but add 200ms+ per step" and "regular async code that dies on every crash." The Rust-built runtime is genuinely lightweight — a single binary you can run locally without Docker or a cloud service — while still providing durable execution semantics that production services need.
+
+The 3.9k GitHub stars and 185 HN points reflect genuine developer interest in a simpler approach to durable execution. If you've been evaluating Temporal, Conductor, or Prefect and found them heavyweight, Restate is worth a weekend experiment.
+
+**Quick install:**
+```bash
+curl -L https://github.com/restatedev/restate/releases/latest/download/restate-x86_64-unknown-linux-musl.tar.gz | tar xz && ./restate
+```
