@@ -1,0 +1,134 @@
+---
+title: "Convoy - Open Source Webhooks Service"
+description: "Convoy is an open-source webhooks service that makes it easy to publish, deliver, and manage webhooks like Stripe and Twilio. Deploy as a container."
+pubDate: "2026-06-02"
+tags: ['webhooks', 'open-source', 'api-tools', 'devops']
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/convoy-open-source-webhooks-service.webp"
+  alt: "Convoy open source webhooks service thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Convoy is an open-source webhooks gateway that handles event delivery, retries, and security — deploy it as a container and publish webhooks like Stripe and Twilio.
+
+## Source and Accuracy Notes
+
+- Official site: https://getconvoy.io
+- GitHub: https://github.com/frain-dev/convoy
+- Docs: https://getconvoy.io/docs/guide
+
+## What Is Convoy?
+
+Convoy is an open-source webhooks service built for API providers who need to push event notifications reliably. It handles the full lifecycle: signing payloads, delivering events, applying retries, and providing a management UI for manual replay.
+
+The problem it solves: implementing webhooks from scratch looks simple (it's just HTTP POST, right?) but rapidly becomes complex — endpoint health, multiple subscriber endpoints, rate limiting, security against replay attacks, rolling secrets, and payload filtering all pile up. Convoy handles all of this out of the box.
+
+Built with developers in mind: language-agnostic, cloud-native, and deployable as a container anywhere — AWS, Azure, GCP, or on-premise.
+
+## Architecture
+
+Convoy has three core components:
+
+```bash
+REST API Server  →  Job Queue (in-memory or Redis)  →  Storage Layer (on-disk or MongoDB)
+```
+
+Developers push events via the REST API, Convoy signs the payload, saves events to storage, enqueues them on the job queue, and delivers to subscriber endpoints. Workers handle retries and delivery confirmation.
+
+The managed service charges $1 per 5k events, but the open-source version is fully functional and free to self-host.
+
+## Setup Workflow
+
+### Step 1: Download and Run
+
+Download the binary or Docker image from getconvoy.io/download:
+
+```bash
+# Pull the Docker image
+docker pull getconvoy/convoy
+
+# Run with a config file
+docker run -v $(pwd)/convoy.json:/cfg/convoy.json getconvoy/convoy --config /cfg/convoy.json
+```
+
+### Step 2: Create an Application
+
+```bash
+curl -X POST http://localhost:5005/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-api", "type": "outgoing"}'
+```
+
+### Step 3: Register an Endpoint
+
+```bash
+curl -X POST http://localhost:5005/v1/projects/<project_id>/endpoints \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://your-app.com/webhook", "description": "My webhook consumer"}'
+```
+
+### Step 4: Publish an Event
+
+```bash
+curl -X POST http://localhost:5005/v1/projects/<project_id>/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <api_key>" \
+  -d '{"endpoint_ids": ["<endpoint_id>"], "data": {"event": "payment.completed"}}'
+```
+
+## Deeper Analysis
+
+**Strengths:**
+- Open-source and self-hostable — no vendor lock-in
+- Cloud-native (runs as a container) — deploy anywhere
+- Built-in retry logic with configurable backoff
+- Security features: replay attack prevention, rolling secrets
+- Management UI for manual event replay and endpoint monitoring
+- Supports both in-memory and Redis for the job queue
+
+**Limitations:**
+- MongoDB is required for production storage — no PostgreSQL option in the current version
+- No built-in clustering for high availability yet
+- Documentation is growing but still sparse in some areas
+
+**Compared to ngrok/webhookrelay:** Convoy is purpose-built for webhook event delivery with retry semantics, whereas ngrok is primarily a tunneling tool. Webhookrelay is similar but closed-source and managed-only.
+
+## Practical Evaluation Checklist
+
+- [ ] Download and start Convoy via Docker
+- [ ] Create a project and register an endpoint
+- [ ] Publish a test event and verify delivery
+- [ ] Check the management UI for delivery status
+- [ ] Test retry behavior by simulating a failed endpoint
+- [ ] Review the signed payload format and verify signature validation
+
+## Security Notes
+
+Convoy signs every outbound payload with a rolling secret. Subscribers should validate the `Convoy-Signature` header before processing events. The signing scheme follows the same pattern as Stripe's webhook signature validation.
+
+Retries use exponential backoff with jitter to avoid thundering herd problems on recovering endpoints.
+
+## FAQ
+
+**Q:** Can I use Convoy without MongoDB?
+**A:** The current version requires MongoDB for event persistence. An on-disk storage option exists for development but is not recommended for production.
+
+**Q:** How does Convoy handle endpoint failures?
+**A:** Failed deliveries are retried with exponential backoff. The retry schedule and max attempts are configurable per endpoint. The management UI allows manual replay of any failed event.
+
+**Q:** Is there a managed version?
+**A:** Yes, getconvoy.io offers a hosted managed service at $1 per 5k events. The open-source version is identical in functionality.
+
+**Q:** What's the difference between Convoy and something like SQS fan-out?
+**A:** Convoy is purpose-built for webhook delivery with built-in signature validation, endpoint management, and retry semantics. SQS fan-out is a general-purpose message queue that requires significant glue code to deliver webhooks reliably.
+
+## Conclusion
+
+Convoy fills a real gap for API providers who need reliable webhook delivery without building and maintaining it themselves. It's production-ready, self-hostable, and handles the hard parts: retries, signatures, and endpoint management. If you're publishing webhooks today and doing it manually, Convoy is worth 20 minutes to set up. The open-source version covers everything most teams need; the managed service is there if you want zero ops.
+
+GitHub: https://github.com/frain-dev/convoy
