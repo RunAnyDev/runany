@@ -1,0 +1,139 @@
+---
+title: "Antigravity SDK – Build AI Agents on Google Antigravity"
+description: "The official Python SDK for Google Antigravity. Build AI agents with Gemini, MCP tools, custom skills, and managed infrastructure. Async-first API with typed schemas and serverless deployment."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ai-agent", "python", "google"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/antigravity-sdk-python.webp"
+  alt: "antigravity-sdk-python GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The Antigravity Python SDK lets you build AI agents that leverage Google Antigravity's managed infrastructure, Gemini models, MCP tool servers, and custom skills. Define agents in Python with typed schemas and deploy as persistent services with built-in monitoring.
+
+## Source and Accuracy Notes
+
+- Repository: [google-antigravity/antigravity-sdk-python](https://github.com/google-antigravity/antigravity-sdk-python) (1,300+ stars, Apache 2.0 license)
+- Official Google-supported SDK
+- Built on Gemini API, MCP protocol, and asyncio
+
+## What Is Antigravity SDK?
+
+The Antigravity Python SDK is the official client library for Google Antigravity, a managed platform for building and running AI agents. It abstracts infrastructure management — scaling, state persistence, logging — while giving developers direct control over agent behavior, tool selection, and skill composition.
+
+Key capabilities:
+
+- **Agent definition**: Declare agents as Python classes with typed input/output schemas and tool bindings
+- **MCP integration**: Connect to Model Context Protocol servers for tool discovery and execution
+- **Custom skills**: Package domain knowledge as shareable skill modules with versioning
+- **Managed infrastructure**: Agents deploy as persistent services with auto-scaling and health checks
+- **Observability**: Built-in tracing, logging, and cost tracking per agent invocation
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install antigravity-sdk
+```
+
+### Step 2: Authenticate
+
+```bash
+antigravity auth login
+```
+
+Or set `ANTIGRAVITY_API_KEY` in your environment.
+
+### Step 3: Define an Agent
+
+```python
+from antigravity import Agent, tool
+from pydantic import BaseModel
+
+class SearchResult(BaseModel):
+    title: str
+    url: str
+    snippet: str
+
+class ResearchAgent(Agent):
+    name = "research-agent"
+    model = "gemini-2.5-pro"
+
+    @tool
+    async def web_search(self, query: str) -> list[SearchResult]:
+        """Search the web and return results."""
+        ...
+
+    @tool
+    async def summarize(self, text: str) -> str:
+        """Summarize text with Gemini."""
+        ...
+
+agent = ResearchAgent()
+result = await agent.run("What's new in AI agent frameworks?")
+```
+
+### Step 4: Deploy
+
+```bash
+antigravity deploy research-agent
+```
+
+The agent runs as a persistent service on Antigravity's infrastructure with auto-scaling, health checks, and a REST API endpoint.
+
+## Deeper Analysis
+
+The SDK's MCP integration uses the standard Model Context Protocol for tool discovery. You add MCP servers to your agent configuration and the SDK handles connection lifecycle, tool listing, and parameter validation. This means any MCP-compatible server — database connectors, API wrappers, browser automation — becomes available to your agent without custom integration code.
+
+The skills system supports versioning and composability. A skill is a Python package with a `skill.yaml` manifest describing its capabilities, dependencies, and compatibility. Skills can be published to Antigravity's registry or kept private. Agents compose multiple skills, and the platform resolves version conflicts.
+
+The deployment model uses Cloud Run-style serverless infrastructure. Agents scale to zero when idle and scale up on demand. State is managed through Antigravity's persistence layer — agents can use `self.state` as a typed dictionary that survives restarts and deployments.
+
+## Practical Evaluation Checklist
+
+- [ ] Official Google SDK with Apache 2.0 license
+- [ ] MCP protocol integration for tool discovery
+- [ ] Versioned skills with dependency resolution
+- [ ] Serverless deployment with auto-scaling
+- [ ] Async-first API with typed Pydantic schemas
+- [ ] Built-in tracing and cost tracking
+
+## Security Notes
+
+Agents run on Google's managed infrastructure with IAM-based access control. API keys and secrets are managed through Antigravity's secret store, not hardcoded. MCP tool access is scoped per agent — an agent can only use tools from explicitly bound MCP servers.
+
+## FAQ
+
+**Q: How is Antigravity different from Vertex AI Agent Builder?**
+**A:** Antigravity focuses on the developer experience — you write Python agent classes, not UI-configured flows. It's a code-first platform with managed infrastructure.
+
+**Q: Do I need a Google Cloud account?**
+**A:** Yes — Antigravity runs on Google Cloud infrastructure. Billing flows through your GCP project.
+
+**Q: Can I use non-Gemini models?**
+**A:** Currently Gemini models are first-class. The SDK supports custom model endpoints for other providers.
+
+**Q: What's the cold start latency?**
+**A:** Scale-to-zero cold starts are typically under 2 seconds. Warm instances respond in milliseconds.
+
+
+The skills system includes a dependency resolver that handles version conflicts gracefully. If Skill A requires `pandas>=2.0` and Skill B requires `pandas>=1.5,<2.0`, the resolver surfaces the conflict at build time with clear resolution guidance. Skills are distributed as Python packages with a `skill.yaml` manifest, so they follow standard Python packaging conventions — pip install, version pinning, and virtual environment isolation all work as expected.
+
+The MCP integration handles connection lifecycle with automatic reconnection and health checking. If an MCP server restarts, the SDK detects the disconnection, retries with exponential backoff, and re-lists tools once reconnected. Tool schemas are cached locally, so the agent can start making tool calls without waiting for a full tool discovery round-trip on every invocation. The MCP transport layer supports both stdio (for local servers) and HTTP/SSE (for remote servers), with TLS and authentication configured through the agent's deployment manifest.
+
+State persistence uses a typed dictionary with Pydantic validation. Agent state is serialized to Antigravity's persistence layer on every state mutation and restored on cold starts. You can define state schemas with Pydantic models for full type checking. State mutations are atomic — if an agent crashes mid-update, the state rolls back to the last committed version. This is particularly important for long-running agents that accumulate context over hours or days.
+
+The deployment model deserves attention for its production posture. Agents deploy with configurable auto-scaling: min/max instances, CPU and memory targets, and concurrency limits per instance. Health checks use both liveness (is the agent process running?) and readiness (can the agent make LLM calls?) probes. The REST API endpoint includes automatic OpenAPI spec generation from the agent's input/output Pydantic models, so external services can discover and call your agent without manual API documentation.
+
+**Q: How does billing work for deployed agents on Antigravity?**
+**A:** Billing flows through your GCP project. Antigravity cost tracking shows per-agent usage with model-level granularity. You can set spend limits per agent in the deployment manifest to prevent cost overruns.
+
+## Conclusion
+
+The Antigravity SDK brings Google's infrastructure muscle to AI agent development without the usual cloud-platform complexity. The combination of MCP tool integration, versioned skills, and serverless deployment makes it a strong option for teams that want managed infrastructure but still want to write agents as code, not as YAML configs.

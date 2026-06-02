@@ -1,0 +1,127 @@
+---
+title: "Butterbase OSS – Open Source Backend with AI Gateway"
+description: "Butterbase OSS is an open-source backend-as-a-service with a built-in AI gateway. Postgres, auth, storage, edge functions — self-hostable with Docker Compose and multi-provider LLM routing."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "backend", "self-hosted", "typescript"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/butterbase-oss.webp"
+  alt: "butterbase-oss GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Butterbase OSS is an open-source backend-as-a-service built on Postgres. It bundles authentication, file storage, edge functions, and an AI gateway with provider routing into one self-hostable platform. Think Supabase, but with native LLM infrastructure baked in.
+
+## Source and Accuracy Notes
+
+- Repository: [butterbase-ai/butterbase-oss](https://github.com/butterbase-ai/butterbase-oss) (1,000+ stars)
+- Tech stack: TypeScript, PostgreSQL, Docker
+- Self-hostable with Docker Compose
+
+## What Is Butterbase OSS?
+
+Butterbase OSS is a backend platform that combines the standard BaaS feature set with first-class AI infrastructure. Where Supabase or Appwrite require you to bolt on a separate LLM gateway, Butterbase includes one natively — routing requests across OpenAI, Anthropic, and other providers with caching, rate limiting, and fallback.
+
+The platform provides:
+
+- **Postgres database**: Full Postgres with row-level security and auto-generated REST/GraphQL APIs
+- **Auth**: Email/password, OAuth providers, magic links, and JWT session management
+- **Storage**: S3-compatible object storage with access policies
+- **Edge functions**: Deno-based serverless functions with TypeScript
+- **AI gateway**: Multi-provider LLM routing with caching, cost tracking, and fallback chains
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Clone and Start
+
+```bash
+git clone https://github.com/butterbase-ai/butterbase-oss.git
+cd butterbase-oss
+docker compose up -d
+```
+
+This starts Postgres, the API server, the storage service, and the dashboard.
+
+### Step 2: Access the Dashboard
+
+Open `http://localhost:3000` and create your admin account. The dashboard manages tables, auth, storage buckets, functions, and AI gateway config.
+
+### Step 3: Configure the AI Gateway
+
+In the dashboard, add provider keys:
+
+```text
+OpenAI:    sk-...
+Anthropic: sk-ant-...
+```
+
+Set routing rules — primary provider, fallback chain, and per-model rate limits.
+
+### Step 4: Call the AI Gateway
+
+```typescript
+const response = await fetch('http://localhost:8000/ai/chat', {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: JSON.stringify({
+    model: 'gpt-4.1',
+    messages: [{ role: 'user', content: 'Hello' }],
+  }),
+});
+```
+
+The gateway handles caching, rate limiting, and provider fallback transparently.
+
+## Deeper Analysis
+
+Butterbase's standout feature is the unified AI gateway. Instead of running a separate proxy like LiteLLM or Portkey, the gateway is integrated with the auth and database layers. This means LLM requests are authenticated with the same JWT tokens as database queries, and AI usage is tracked per user in the same Postgres instance.
+
+The edge functions use Deno, which provides secure-by-default execution — functions can't access the filesystem or network unless explicitly permitted. Functions can call the AI gateway, query the database, and access storage with scoped service tokens.
+
+The auto-generated APIs follow the PostgREST convention — define a table, get a REST API with filtering, pagination, and row-level security. GraphQL is available for clients that prefer it. Both respect the same RLS policies.
+
+Caching in the AI gateway uses semantic similarity — identical or near-identical prompts return cached responses, reducing cost for repetitive queries. Cache TTL and similarity threshold are configurable per route.
+
+## Practical Evaluation Checklist
+
+- [ ] Postgres-based with auto-generated REST/GraphQL APIs
+- [ ] Built-in AI gateway with multi-provider routing
+- [ ] Deno edge functions with secure-by-default execution
+- [ ] S3-compatible storage with access policies
+- [ ] Self-hostable via Docker Compose
+- [ ] Row-level security across all data access
+
+## Security Notes
+
+Self-hosting keeps all data and LLM traffic on your infrastructure. Row-level security enforces access control at the database layer — even compromised application code can't bypass RLS policies. The AI gateway uses the same auth tokens as data access, so LLM usage is attributable per user. Provider API keys are stored encrypted in the database, never in client code. When deploying to production, configure HTTPS and rotate the JWT secret.
+
+## FAQ
+
+**Q: How does this compare to Supabase?**
+**A:** Butterbase covers the same BaaS ground (Postgres, auth, storage, functions) but adds a native AI gateway. Supabase requires a separate LLM proxy; Butterbase integrates it with auth and usage tracking.
+
+**Q: Can I use only the AI gateway without the rest?**
+**A:** The platform is integrated, but you can run minimal config and use primarily the gateway. The database and auth services are required for the gateway's per-user tracking.
+
+**Q: What LLM providers does the gateway support?**
+**A:** OpenAI, Anthropic, and any OpenAI-compatible endpoint. Add custom providers via the gateway config.
+
+**Q: Does it support real-time subscriptions?**
+**A:** Yes — Postgres logical replication powers real-time subscriptions on table changes, similar to Supabase Realtime.
+
+
+The AI gateway's caching layer is more sophisticated than simple exact-match caching. It uses embedding-based semantic similarity to detect when a new prompt is sufficiently similar to a cached one — within a configurable cosine similarity threshold, the cached response is returned instead of making a new API call. This is particularly valuable for multi-user applications where different users ask essentially the same question with slightly different wording. Cache entries include the original prompt, the model response, token counts, and cost, so you can measure cache effectiveness.
+
+The edge functions runtime (Deno) deserves attention for its security model. Unlike Node.js where any module can access the filesystem and network, Deno requires explicit permissions. Butterbase's function runtime enforces these permissions per function — a function declared with `--allow-net=api.openai.com` can only make network requests to that specific host. Functions can't access the filesystem unless `--allow-read` and `--allow-write` are explicitly granted with path restrictions. This granular permission model means a compromised function has a severely limited blast radius.
+
+Row-level security in Butterbase follows the PostgREST convention with policies defined in SQL. A policy like "users can only see their own data" translates to `auth.uid() = user_id` in the policy definition and is enforced at the database level — even if application code is compromised, RLS policies cannot be bypassed. The auto-generated REST and GraphQL APIs respect these same policies, so a single policy definition secures all access paths.
+
+The dashboard includes an API playground with auto-generated docs from your database schema. For the AI gateway, it shows real-time usage graphs — requests per model, tokens consumed, cost incurred — broken down by user and endpoint. The cost tracking can be configured with dollar amounts per token to match your provider's pricing, and budget alerts can be set per user, per model, or globally. When a budget threshold is crossed, the gateway can either block further requests or route to a cheaper fallback model.
+
+## Conclusion
+
+Butterbase OSS is a compelling option for teams building AI-powered apps who want backend and LLM infrastructure in one self-hosted package. The integrated AI gateway — sharing auth and usage tracking with the database layer — eliminates the operational overhead of running a separate proxy. For new AI app projects, it's worth evaluating against the Supabase-plus-gateway combination.

@@ -1,0 +1,142 @@
+---
+title: "World2Agent – Open Protocol for AI Agent Perception"
+description: "World2Agent standardizes how AI agents perceive the real world — screenshots, device state, sensor data — into a typed protocol. TypeScript SDK with React hooks for proactive environmental agents."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ai-agent", "protocol", "typescript"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/world2agent.webp"
+  alt: "world2agent GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** World2Agent is an open protocol that standardizes how AI agents perceive real-world context — device screens, sensor data, user activity. It provides a TypeScript SDK with React hooks and a proactive agent runtime that watches for environmental triggers.
+
+## Source and Accuracy Notes
+
+- Repository: [machinepulse-ai/world2agent](https://github.com/machinepulse-ai/world2agent) (1,200+ stars, Apache 2.0 license)
+- Tech stack: TypeScript, React, WebSockets
+- Protocol-agnostic — works with any LLM or agent framework
+
+## What Is World2Agent?
+
+World2Agent (W2A) solves the perception problem for AI agents. Most agents operate on text or structured data, but real-world applications require agents that can see what's on a screen, know which window is focused, read sensor data, and react to user activity patterns.
+
+The W2A protocol defines a standard format for "world state" — a typed snapshot of the user's digital environment:
+
+```typescript
+interface WorldState {
+  timestamp: number;
+  activeWindow: { title: string; app: string; url?: string };
+  screenshots: { primary?: string; secondary?: string };
+  clipboard?: string;
+  sensors: { idle: boolean; typing: boolean; micActive: boolean };
+  focus: { app: string; duration: number };
+}
+```
+
+Agents subscribe to world state updates and react based on defined triggers — no polling, no scraping.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install
+
+```bash
+npm install @world2agent/sdk @world2agent/react
+```
+
+### Step 2: Start the W2A Provider
+
+The desktop provider captures world state from the operating system:
+
+```bash
+npx @world2agent/provider
+```
+
+This runs in the background and broadcasts world state to connected agents.
+
+### Step 3: Build a Proactive Agent
+
+```typescript
+import { World2Agent } from '@world2agent/sdk';
+
+const agent = new World2Agent({
+  name: 'meeting-notes',
+  triggers: [
+    { type: 'app-focused', app: 'zoom.us', action: 'start-notes' },
+    { type: 'screenshot-change', threshold: 0.3, action: 'screen-changed' },
+  ],
+  onTrigger: async (event, worldState) => {
+    // Agent decides what to do based on trigger + world state
+    if (event.action === 'start-notes') {
+      await takeNotes(worldState);
+    }
+  },
+});
+
+agent.start();
+```
+
+### Step 4: React Integration
+
+```tsx
+import { useWorldState } from '@world2agent/react';
+
+function AgentOverlay() {
+  const worldState = useWorldState();
+  return <div>Active app: {worldState.activeWindow.app}</div>;
+}
+```
+
+## Deeper Analysis
+
+The protocol's design separates perception from action. World state is a read-only snapshot — agents observe it and decide what to do, but never modify it directly. This prevents agents from interfering with each other's perception.
+
+Trigger definitions use a declarative syntax: "when Zoom is focused, start the meeting notes agent." Triggers can compose — an agent can activate only when multiple conditions are met (Zoom is focused AND microphone is active AND it's during work hours).
+
+The React hooks enable building agent-aware UIs. An overlay component can display agent status, suggestions, or actions based on real-time world state. This is useful for copilot-style interfaces that appear contextually.
+
+Security is protocol-level: world state data stays local by default. The provider runs on the user's machine and agents connect via local WebSocket. No world state data is sent to cloud services unless the agent explicitly does so.
+
+## Practical Evaluation Checklist
+
+- [ ] Typed protocol for world state perception
+- [ ] Declarative triggers with composable conditions
+- [ ] React hooks for agent-aware UI
+- [ ] Local-first — no cloud dependency for protocol layer
+- [ ] Apache 2.0 license
+
+## Security Notes
+
+The W2A provider captures screen content, window titles, and clipboard data — sensitive information. It runs locally and broadcasts only over localhost WebSocket by default. Agents connecting to the provider have access to all world state — only connect agents you trust. Do not expose the provider port to network interfaces.
+
+## FAQ
+
+**Q: What operating systems are supported?**
+**A:** macOS and Windows currently. Linux support is in development.
+
+**Q: How is this different from computer-use agents?**
+**A:** Computer-use agents take screenshots and issue mouse/keyboard commands. W2A provides structured, typed world state — agents don't need to parse screenshots with vision models to know what app is focused.
+
+**Q: Can I use W2A with Claude or GPT?**
+**A:** Yes — the protocol is agent-framework-agnostic. Your agent receives typed world state objects, not raw pixels.
+
+**Q: Does the provider affect system performance?**
+**A:** The provider is lightweight — it uses OS-level window management APIs, not screen recording. Screenshots are captured on trigger, not continuously.
+
+
+The trigger system supports composable conditions using AND/OR/NOT operators. An agent can activate only when multiple conditions are met simultaneously — for example, "Zoom is focused AND microphone is active AND it's between 9am-5pm AND no other agent is currently active." This composability prevents agent collision (two agents trying to act on the same world state simultaneously) and avoids false triggers during off-hours or meetings where the user is presenting rather than taking notes.
+
+The world state polling uses OS-level accessibility and window management APIs, not screen recording. On macOS, this means `CGWindowListCopyWindowInfo` for window titles and `CGEventSourceSecondsSinceLastEventType` for idle detection. On Windows, it uses `GetForegroundWindow` and `GetLastInputInfo`. The polling frequency is configurable (default 500ms) with debouncing to avoid redundant agent triggers when the user rapidly switches between apps. This lightweight approach means the provider uses negligible CPU and memory — typically under 50MB RAM and 0.5% CPU on modern hardware.
+
+The protocol includes a privacy mode that redacts specific data fields before broadcasting. If configured, window titles can be replaced with app names (e.g., "Slack" instead of "Slack - #engineering - "critical server outage""), clipboard contents can be excluded, and URLs can be stripped from browser window titles. This gives teams control over what level of detail agents can observe, balancing utility with privacy concerns. Privacy settings are configured per agent, not globally — a meeting notes agent might see more detail than a general-purpose assistant.
+
+For integration with existing agent frameworks, the SDK provides adapters for Claude Computer Use and OpenAI's computer-use tools. These adapters convert W2A world state into the format expected by each framework, so agents built on these platforms can use structured W2A perception instead of raw screenshot analysis. The adapters also handle action translation — W2A's declarative trigger model maps to framework-specific event loops.
+
+## Conclusion
+
+World2Agent fills a gap in the agent ecosystem: structured, real-time environmental awareness. The typed protocol and declarative triggers make it practical for building proactive agents that react to what's happening on screen, not just to explicit user prompts. For desktop agent developers, this is the perception layer that bridges "type a command" and "observe what I'm doing."

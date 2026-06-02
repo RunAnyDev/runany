@@ -1,0 +1,125 @@
+---
+title: "ClawSweeper – AI Maintenance Bot for GitHub Repositories"
+description: "An AI-powered GitHub maintenance bot that reviews issues and PRs on schedule, writes conservative reports, syncs review comments, and auto-closes items with policy-enforced guardrails. MIT licensed."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ai", "automation", "typescript"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/clawsweeper.webp"
+  alt: "clawsweeper GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ClawSweeper is an AI-powered maintenance bot for GitHub repositories. It scans open issues and PRs, writes conservative review reports, syncs public review comments, and can auto-close items or apply guarded fixes — all with policy-enforced guardrails. MIT licensed.
+
+## Source and Accuracy Notes
+
+- Repository: [openclaw/clawsweeper](https://github.com/openclaw/clawsweeper) (1,700+ stars, MIT license)
+- Tech stack: TypeScript, GitHub Actions, GitHub App webhooks
+- Currently used in production for `openclaw/openclaw` and `openclaw/clawhub`
+
+## What Is ClawSweeper?
+
+ClawSweeper is a conservative, policy-driven maintenance bot for GitHub repositories. Unlike generic auto-close bots that blindly close stale issues, ClawSweeper runs an AI review on every open item, writes a durable report, and syncs a public review comment that maintainers can read and act on.
+
+At a high level, ClawSweeper:
+
+- Reviews open issues and PRs on a schedule and on GitHub events
+- Writes one durable Markdown report per item with evidence and reasoning
+- Syncs one marker-backed public review comment per item, edited in place
+- Closes only unchanged, high-confidence, policy-allowed proposals
+- Routes maintainer commands such as `@clawsweeper review`, `@clawsweeper fix`, and `@clawsweeper automerge`
+- Repairs opted-in PRs through a bounded Codex review/fix loop before merge
+- Publishes dashboard state to a dedicated repository
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Fork and Deploy
+
+```bash
+git clone https://github.com/openclaw/clawsweeper.git
+cd clawsweeper
+```
+
+### Step 2: Configure Repository Targets
+
+Edit the config to specify which repositories to review:
+
+```yaml
+targets:
+  - owner/repo1
+  - owner/repo2
+policies:
+  close_stale_after_days: 90
+  require_maintainer_approval: true
+```
+
+### Step 3: Set Up GitHub Actions
+
+ClawSweeper runs as a GitHub Actions workflow with a schedule trigger and repository_dispatch events:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday
+  repository_dispatch:
+    types: [clawsweeper-review]
+```
+
+### Step 4: Install GitHub App (Optional)
+
+For maintainer commands like `@clawsweeper review`, install the GitHub App for webhook-based command routing.
+
+## Deeper Analysis
+
+ClawSweeper's architecture is designed around a principle of conservative action. Every mutation — comment posted, issue closed, PR merged — is rechecked against live GitHub state immediately before execution. If the state has changed since the review was generated, the action is skipped.
+
+The review pipeline includes compact related issue and PR context from explicit links, linked closing PRs, and existing local reports. This gives the LLM enough context to reason about duplicates, superseded items, and dependencies without overwhelming the prompt window.
+
+For PRs with the autofix flag, ClawSweeper enters a bounded Codex review/fix loop. Codex gets read-only access to review the PR and suggest changes, but never write credentials. The fix is applied by the bot in a separate step, and the result is re-reviewed before automerge. This separation of review (read-only) from apply (bot-only) is a deliberate safety design.
+
+Dashboard state is published to a dedicated repository (`openclaw/clawsweeper-state`), giving maintainers a single place to see the bot's activity, decisions, and current review status across all tracked repositories.
+
+## Practical Evaluation Checklist
+
+- [ ] Policy-enforced auto-close requires high confidence and no state changes
+- [ ] Codex review has read-only access — no write credentials during review
+- [ ] Maintainer commands route through GitHub App webhooks
+- [ ] Dashboard state published for audit trail
+- [ ] Snapshot-based review prevents race conditions
+- [ ] MIT license
+
+## Security Notes
+
+ClawSweeper's Codex integration is read-only during review — the agent never gets write credentials. All GitHub mutations go through the bot's own token. Review comments include hidden verdict/action markers, not visible prose, for trusted repair flows. Do not grant the bot admin permissions on repositories unless autofix and automerge are explicitly desired.
+
+## FAQ
+
+**Q: How is this different from GitHub's stale bot?**
+**A:** GitHub's stale bot uses time-based rules. ClawSweeper runs AI review on each item, writes a human-readable report, and only acts on high-confidence, policy-approved items that haven't changed.
+
+**Q: Can ClawSweeper review private repositories?**
+**A:** Yes — deploy your own instance with a token that has access to private repos.
+
+**Q: Does the Codex integration cost money?**
+**A:** Codex review is opt-in per PR with the autofix label. Without the label, only the LLM review runs — the GPT model is configurable.
+
+**Q: What happens if the review is wrong?**
+**A:** ClawSweeper only closes unchanged items after the review period. If it's wrong, reopen the issue and the bot won't re-close it — the state change prevents re-action.
+
+
+The "apply" pipeline deserves attention for its conservative design. When an autofix label is applied, Codex gets read-only access to the PR diff and surrounding code. It generates a suggested fix, which the bot writes to a temporary branch (never to the PR directly). The bot then runs the project's test suite against the fix before even considering it. If tests pass, the fix is pushed to the PR branch with a detailed comment explaining the changes. The original PR author or a maintainer must explicitly approve before merge — the bot never auto-merges without a policy-defined maintainer gate.
+
+The review report format is designed for maintainer efficiency. Each report includes a verdict (close, keep, needs-info), a confidence score (0-100), the evidence that led to the verdict, and a proposed public comment. The report is stored as a Markdown file in a versioned state repository, so the complete review history is auditable. If a verdict turns out to be wrong, maintainers can trace back through the evidence and refine the review policy.
+
+Related issue discovery is more sophisticated than simple label matching. The bot extracts explicit links from issue bodies (GitHub issue/PR references, URLs), finds linked closing PRs, and uses keyword clustering to identify potential duplicates. It doesn't auto-close based on "looks similar" — it flags the potential duplicate in the review comment and lets maintainers decide. The clustering uses TF-IDF with configurable thresholds, so teams can tune how aggressively the bot suggests duplicates.
+
+For repository dispatch events (immediate review on issue open or PR submit), the bot skips the full scheduled review pipeline and runs a targeted review focused on the single item. This gives contributors near-immediate feedback — within 30-90 seconds of opening an issue — while the scheduled pipeline handles the backlog. The event-triggered review also includes opt-in live GitHub issue search for additional context.
+
+## Conclusion
+
+ClawSweeper takes repository maintenance automation beyond stale-bot territory into AI-assisted review. The conservative action philosophy — recheck before every mutation, read-only agent access, policy-enforced close decisions — makes it safe enough for production repositories. For open-source maintainers drowning in backlog, it's a practical way to surface actionable items and safely close the truly dead ones.

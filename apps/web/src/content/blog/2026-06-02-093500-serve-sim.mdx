@@ -1,0 +1,131 @@
+---
+title: "Serve Sim – npx for Apple iOS Simulators"
+description: "Serve Sim is npx for Apple iOS simulators. Spawns simulators on demand with a single command, exposes them via HTTP for screenshots and interaction, and runs headlessly for AI agents and CI pipelines."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ios", "cli", "typescript"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/serve-sim.webp"
+  alt: "serve-sim GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Serve Sim is `npx serve` but for Apple iOS simulators. It spawns simulators on demand with a single command, exposes them via HTTP/WebSocket for screenshots and interaction, and is designed for headless use by AI agents and CI pipelines. Built by Expo's Evan Bacon.
+
+## Source and Accuracy Notes
+
+- Repository: [EvanBacon/serve-sim](https://github.com/EvanBacon/serve-sim) (1,200+ stars, Apache 2.0 license)
+- Author: Evan Bacon (Expo team)
+- Requires macOS with Xcode installed
+
+## What Is Serve Sim?
+
+Serve Sim eliminates the friction of launching iOS simulators programmatically. Instead of opening Xcode, picking a scheme, choosing a device, and waiting for the simulator to boot, you run a single command:
+
+```bash
+npx serve-sim
+```
+
+It boots an iPhone simulator, starts a local server, and exposes the simulator via HTTP endpoints for screenshots, taps, swipes, and app installation. AI coding agents can interact with the simulator through structured API calls rather than brittle UI automation.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install (macOS Only)
+
+```bash
+npx serve-sim
+```
+
+Or install globally:
+
+```bash
+npm install -g serve-sim
+serve-sim
+```
+
+### Step 2: Choose a Device
+
+```bash
+serve-sim --device "iPhone 16 Pro"
+serve-sim --device "iPad Air 13-inch (M3)"
+```
+
+Lists available devices with `serve-sim --list-devices`.
+
+### Step 3: API Endpoints
+
+Once running, the simulator exposes:
+
+```text
+GET  /screenshot          → PNG screenshot of current screen
+POST /tap?x=100&y=200     → Tap at coordinates
+POST /swipe?dx=0&dy=-300  → Swipe gesture
+POST /home                → Press home button
+POST /install?url=...      → Install .app from URL
+```
+
+### Step 4: Headless Mode for CI
+
+```bash
+CI=1 serve-sim --headless
+```
+
+No GUI window opens. Perfect for CI pipelines and AI agent integration.
+
+## Deeper Analysis
+
+The architecture uses `simctl` (Xcode's command-line simulator control tool) under the hood but wraps it in an HTTP API. This is significant for agent workflows — agents can call structured REST endpoints instead of shelling out to `xcrun simctl` and parsing text output.
+
+The screenshot endpoint returns raw PNG bytes, which AI models with vision capabilities can analyze directly. An agent could take a screenshot, send it to a vision model for analysis, then send a tap command based on what it sees.
+
+The headless mode (`CI=1`) uses Xcode's headless simulator support, which has been available since Xcode 9 but was historically underutilized because the `simctl` CLI wasn't designed for programmatic use. Serve Sim bridges that gap.
+
+## Practical Evaluation Checklist
+
+- [ ] Works on macOS with Xcode 16+
+- [ ] Headless mode for CI and agent integration
+- [ ] HTTP API for screenshots, taps, swipes, app installation
+- [ ] No Xcode project or scheme needed
+- [ ] Apache 2.0 license
+
+## Security Notes
+
+Serve Sim spawns real iOS simulators with full filesystem access. The HTTP API has no authentication — only bind to localhost in production. Do not expose the server to a network interface. When used by AI agents, restrict the agent's access to the simulator's HTTP port rather than giving it raw shell access.
+
+## FAQ
+
+**Q: Does this work on Linux or Windows?**
+**A:** No — macOS only, since it wraps Xcode's `simctl` which requires Xcode.
+
+**Q: Can I run multiple simulators at once?**
+**A:** Yes. Run multiple `serve-sim` instances on different ports with different `--device` flags.
+
+**Q: What's the use case for AI agents?**
+**A:** An AI coding agent can build an iOS app, install it in a simulator via Serve Sim's API, take screenshots, verify UI layout, and iterate — all programmatically.
+
+**Q: How is this different from Detox or Appium?**
+**A:** Serve Sim is much lighter — it's a thin HTTP wrapper over simctl, not a full test framework. Use it when you need simple programmatic simulator access, not complex UI test scenarios.
+
+
+The WebSocket interface is what enables real-time agent interaction. Beyond the REST endpoints for screenshots and taps, a WebSocket connection streams the simulator's screen as compressed frames at up to 30 FPS. This means an AI agent with vision capabilities can "watch" the simulator in near real-time, analyzing UI state and responding to animations or transitions. The frame format is raw PNG over the WebSocket binary channel, so there's no encoding overhead.
+
+Under the hood, Serve Sim wraps `xcrun simctl` with process management that handles simulator lifecycle — boot, wait-for-ready, shutdown — reliably. `simctl` has notoriously inconsistent output formats across Xcode versions; Serve Sim normalizes these into structured JSON responses. When you call `POST /tap?x=100&y=200`, the server translates coordinates to the simulator's coordinate space (accounting for device scale factor) and issues the precise `simctl` command. When the simulator needs to reboot (e.g., after an OS update), Serve Sim detects the state change and re-initializes cleanly.
+
+For CI pipelines, the `--headless` flag uses Xcode's headless simulator mode, which skips rendering to a display entirely. This means CI machines without a GUI can still run iOS simulators. Combined with the `--timeout` flag (auto-shutdown after inactivity), you can run simulator tests in parallel across multiple CI workers without worrying about orphaned simulator processes consuming resources. The timeout defaults to 5 minutes but is configurable — useful for long-running agent workflows.
+
+**Q: Can I take screenshots at specific device sizes?**
+**A:** Yes. The device model determines screen size. Use different device flags for different resolutions. iPad Pro gives 2048x2732, iPhone 16 Pro gives 1206x2622 screenshots.
+
+**Q: How fast is the screenshot endpoint for real-time use?**
+**A:** Screenshots typically complete in 100-300ms depending on device model and screen complexity. The WebSocket stream pushes frames at up to 30 FPS, giving near-real-time visual feedback for agent monitoring.
+
+**Q: Does Serve Sim support iOS dark mode or accessibility settings?**
+**A:** The simulator uses system defaults. For dark mode testing, toggle it in the simulator settings manually. Accessibility features like Dynamic Type can be tested by adjusting settings within the running simulator through the Settings app.
+
+## Conclusion
+
+Serve Sim solves a deceptively simple problem — making iOS simulators scriptable — and does it with the same zero-config philosophy as `npx serve`. The headless mode and HTTP API make it a natural fit for AI agent workflows and CI pipelines. For iOS developers building agent-driven testing or screenshot automation, this removes an entire class of Xcode build system headaches.

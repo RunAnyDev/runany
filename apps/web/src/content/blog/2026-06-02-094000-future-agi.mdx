@@ -1,0 +1,140 @@
+---
+title: "Future AGI – Open Source LLM Observability Platform"
+description: "Future AGI is a self-hostable platform for evaluating, observing, and improving LLM apps. Includes tracing, evals, simulation, datasets, an AI gateway, and guardrails — all Apache 2.0 licensed."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ai-agent", "observability", "llm"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/future-agi.webp"
+  alt: "future-agi GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Future AGI is an open-source, self-hostable observability platform for LLM apps. It bundles tracing, evals, simulation, datasets, an AI gateway for rate limiting and fallbacks, and content guardrails into a single Apache 2.0-licensed Python package.
+
+## Source and Accuracy Notes
+
+- Repository: [future-agi/future-agi](https://github.com/future-agi/future-agi) (1,000+ stars, Apache 2.0 license)
+- Tech stack: Python, FastAPI, PostgreSQL, React dashboard
+- Self-hostable — no cloud dependency
+
+## What Is Future AGI?
+
+Future AGI is an all-in-one observability and evaluation platform for LLM-powered applications. It targets teams that need production-grade monitoring and testing but want to self-host rather than pay for SaaS observability tools.
+
+The platform includes six integrated modules:
+
+- **Tracing**: OpenTelemetry-compatible spans for every LLM call, tool invocation, and agent step
+- **Evals**: Define test suites with assertions, LLM-as-judge scoring, and regression detection
+- **Simulations**: Run agents against synthetic scenarios to test edge cases before deployment
+- **Datasets**: Version-controlled prompt datasets with A/B comparison
+- **AI Gateway**: Request routing with rate limiting, retry logic, and provider fallback
+- **Guardrails**: Content safety checks on inputs and outputs with configurable policies
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/future-agi/future-agi.git
+cd future-agi
+pip install -e .
+```
+
+### Step 2: Start the Server
+
+```bash
+future-agi serve
+```
+
+Runs on `http://localhost:8000` with the dashboard on port 8001.
+
+### Step 3: Instrument Your Code
+
+```python
+from future_agi import FutureAGI
+
+client = FutureAGI(api_key="local")
+
+@client.trace(name="my_agent")
+def run_agent(query: str):
+    response = client.llm_call(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": query}],
+    )
+    return response
+```
+
+### Step 4: Define Evals
+
+```python
+from future_agi.evals import EvalSuite
+
+suite = EvalSuite("customer_support")
+suite.add_case(
+    input="How do I reset my password?",
+    expected_contains=["reset", "password", "email"],
+)
+suite.run(agent=run_agent)
+```
+
+## Deeper Analysis
+
+Future AGI's integrated approach eliminates the common pain of stitching together separate tools for tracing (Langfuse), evals (Braintrust), and guardrails (Guardrails AI). All modules share the same data store, so a failed eval automatically links to the trace that produced it.
+
+The AI gateway module is particularly useful for cost control. You can configure rate limits per model, set fallback chains (try Claude first, fall back to GPT-4.1-mini if rate-limited), and track cost per request across providers.
+
+The simulation engine generates synthetic user inputs based on your dataset patterns, letting you stress-test agents against unexpected inputs before they hit production. Guardrails plug into the gateway, not the application code, so content policies are enforced centrally regardless of which provider or model handles the request.
+
+## Practical Evaluation Checklist
+
+- [ ] Self-hostable — no external service dependency
+- [ ] OpenTelemetry-compatible tracing
+- [ ] LLM-as-judge evals with regression detection
+- [ ] AI gateway with rate limiting, retry, fallback
+- [ ] Simulation engine for synthetic testing
+- [ ] Apache 2.0 license
+
+## Security Notes
+
+Self-hosting means you control all data — no prompts or responses leave your infrastructure. The gateway's guardrails module includes prompt injection detection and content filtering. API keys for LLM providers are stored in the platform's config, not in application code.
+
+## FAQ
+
+**Q: How does this compare to Langfuse or Braintrust?**
+**A:** Future AGI bundles tracing, evals, gateway, and guardrails into one self-hosted package. Langfuse focuses on tracing; Braintrust on evals. Here you get all four without integration work.
+
+**Q: Can I use it as just a gateway without the observability features?**
+**A:** Yes — run `future-agi gateway` to start only the AI gateway module. The other modules are optional.
+
+**Q: What databases are supported?**
+**A:** PostgreSQL for production. SQLite for development and single-machine deployments.
+
+**Q: Does it support streaming responses?**
+**A:** Yes — trace spans capture streaming chunks and aggregate them for eval scoring.
+
+
+The tracing system is OpenTelemetry-compatible, which means you can export spans to any OTLP collector — Jaeger, Grafana Tempo, Datadog, or Honeycomb. Each trace captures the full request lifecycle: the prompt as sent, the raw LLM response, token counts per model, latency breakdown (time-to-first-token, total generation time), and any tool calls the agent made. For multi-agent systems, traces link parent and child spans, so you can follow a request as it flows through multiple agents.
+
+The AI gateway module is more than a proxy — it's a cost-control layer with business logic. Rate limits can be per-user (limit each employee to 100 requests/day on expensive models), per-model (cap GPT-4.1 at 1000 requests/hour), or per-endpoint. Fallback chains support priority ordering: primary = Claude Sonnet, secondary = GPT-4.1, tertiary = local Ollama model. When the primary returns a rate-limit error, the gateway retries with the secondary transparently. Cost tracking aggregates by user, model, and endpoint, with configurable budget alerts.
+
+The simulation engine generates test inputs by analyzing your production prompt patterns and creating variants — rephrased questions, edge cases with missing parameters, adversarial inputs designed to test guardrails, and high-token-count payloads that stress rate limits. You can run simulations on a schedule (daily before deployment) or on-demand (before a model upgrade). Results include pass/fail rates per eval suite and regression detection against the previous run's baseline.
+
+The guardrails module uses a pluggable architecture — you can use OpenAI's moderation API, a custom classifier, or regex-based rules. Guardrails apply to both inputs (reject toxic or off-topic prompts before they reach the LLM) and outputs (block sensitive content in generated responses). Each guardrail action is configurable: block, flag for review, or rewrite.
+
+**Q: Can I export data to migrate away from Future AGI?**
+**A:** Yes. All data lives in your PostgreSQL database. Export traces, evals, and datasets as CSV or JSON using the built-in export tools or direct SQL queries. No vendor lock-in.
+
+**Q: How does the simulation engine generate test scenarios?**
+**A:** It analyzes production prompt patterns and creates variants: rephrased questions, edge cases with missing parameters, adversarial inputs, and high-token payloads. You can run simulations on schedule or on demand before deployments.
+
+**Q: What is the minimum setup required to evaluate Future AGI?**
+**A:** Run with SQLite and the built-in server. No external dependencies beyond Python. You can evaluate tracing, evals, and gateway features on a laptop before committing to a PostgreSQL production setup.
+
+## Conclusion
+
+Future AGI addresses the tool fragmentation that plagues LLM application development. By combining tracing, evals, simulations, gateway, and guardrails in a single self-hosted package, it reduces the operational overhead of running AI agents in production. For teams that want observability without vendor lock-in, the Apache 2.0 license and self-hosted architecture are compelling.

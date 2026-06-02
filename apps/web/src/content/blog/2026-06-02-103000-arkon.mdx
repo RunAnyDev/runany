@@ -1,0 +1,128 @@
+---
+title: "Arkon – Self-Hosted Enterprise AI Knowledge Hub"
+description: "Arkon compiles company docs into an AI knowledge wiki and serves it to Claude via MCP with role-based access control. Self-hosted with Docker with department-scoped knowledge and audit logging."
+pubDate: "2026-06-02"
+tags: ["github-trending", "self-hosted", "enterprise-ai", "mcp", "python"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/arkon.webp"
+  alt: "arkon GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Arkon turns scattered company documents into a structured AI knowledge wiki and serves it to Claude and other LLMs via the Model Context Protocol. Every employee gets the right context, filtered by department and role — automatically and securely.
+
+## Source and Accuracy Notes
+
+- Repository: [nduckmink/arkon](https://github.com/nduckmink/arkon) (900+ stars, PolyForm Internal Use license)
+- Tech stack: Python, FastAPI, PostgreSQL, pgvector, Docker
+- MCP server: OAuth 2.1 + PKCE authentication
+- License note: source-available, not OSI open source — free for internal use only
+
+## What Is Arkon?
+
+Arkon solves the organizational knowledge fragmentation problem for AI. In most companies, employees copy-paste documents into chatbots, producing inconsistent context, security risks, and duplicated work. Arkon centralizes organizational knowledge into a wiki that LLMs can access through a single, permission-scoped endpoint.
+
+Key capabilities:
+
+- **MRP pipeline**: Documents go through a Map → Reduce → Plan-review → Refine → Verify → Commit process that compiles them into interlinked wiki pages with source traceability
+- **Department and global scopes**: Each department gets its own scoped wiki, document set, and roster. Cross-department knowledge lives in a global scope
+- **Fine-grained RBAC**: Viewer, Contributor, Editor, and Admin roles with granular permissions like `doc:read:own_dept` and `wiki:edit:all`
+- **MCP server**: Employees connect Claude Desktop via OAuth 2.1 + PKCE — no manual token copying
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Deploy with Docker
+
+```bash
+git clone https://github.com/nduckmink/arkon.git
+cd arkon
+docker compose up -d
+```
+
+### Step 2: Access the Wiki Browser
+
+Open `http://localhost:8080` and create an admin account. The wiki browser features a three-panel layout: page tree (left), content viewer (center), and backlinks with an interactive knowledge graph (right).
+
+### Step 3: Upload Documents
+
+Add your organization's documents — SOPs, policies, engineering docs, HR guidelines. The MRP pipeline compiles them into wiki pages with a human-reviewable plan before any page is written.
+
+### Step 4: Configure Departments
+
+Create department scopes (Engineering, HR, Legal, etc.) and assign members. Each department gets its own wiki, document set, and access policies.
+
+### Step 5: Connect Claude via MCP
+
+In Claude Desktop, add the MCP server URL:
+
+```json
+{
+  "mcpServers": {
+    "arkon": {
+      "url": "https://your-arkon-server/mcp"
+    }
+  }
+}
+```
+
+Claude Desktop opens a browser for OAuth login with your Arkon credentials. After authentication, Claude has access to your organization's wiki — filtered by your department and role.
+
+## Deeper Analysis
+
+The MRP pipeline is Arkon's most architecturally significant component. Unlike vector databases that just chunk and index, MRP compiles documents through a structured pipeline:
+
+- **Map**: Parse documents and extract key claims, topics, and relationships
+- **Reduce**: Group related claims across documents
+- **Plan-review**: Generate a human-reviewable plan showing which wiki pages will be created or updated — editors can regenerate with feedback
+- **Refine**: Write wiki pages with source traceability
+- **Verify**: Cross-reference claims against source documents
+- **Commit**: Publish pages with version history
+
+Page merge replaces simple overwrite — when a new source touches an existing wiki page, content is LLM-merged so prior knowledge is preserved. Images are handled with vision captions baked into source text before compilation.
+
+The OAuth 2.1 + PKCE integration with Claude is well-implemented. Users don't need to copy API tokens — they click "Connect" in Claude, authenticate in their browser, and the token exchange happens automatically. The server returns only the knowledge scoped to that user's departments.
+
+## Practical Evaluation Checklist
+
+- [ ] Structured MRP pipeline with human-reviewable plans
+- [ ] Department-level knowledge isolation enforced at API/MCP/search layers
+- [ ] OAuth 2.1 + PKCE for Claude Desktop integration
+- [ ] Interactive knowledge graph visualization
+- [ ] Version history and rollback on all pages
+- [ ] Audit log for privileged actions
+
+## Security Notes
+
+The PolyForm Internal Use license means free for internal use, but commercial redistribution requires a separate license. Department-level isolation is enforced at the API, MCP, and search layers — a user in Engineering cannot query HR documents. MCP authentication uses OAuth with scoped tokens — tokens expire and are bound to the authenticated user's departments. Audit logs track all privileged actions, settings changes, plan approvals, and role updates. When self-hosting, use HTTPS, rotate database credentials, and regularly review the audit log.
+
+## FAQ
+
+**Q: How is this different from a RAG system?**
+**A:** RAG retrieves chunks and appends them to the LLM prompt. Arkon compiles documents into a structured wiki first, then serves complete wiki pages through MCP. The key difference is the compilation step — the LLM gets coherent, organized knowledge, not raw document fragments.
+
+**Q: Can I use this with non-Claude LLMs?**
+**A:** Arkon exposes a standard MCP server. Any LLM client supporting MCP can connect. Claude Desktop has the smoothest integration via OAuth.
+
+**Q: Is this truly open source?**
+**A:** Source-available under PolyForm Internal Use — free for internal company use. OSI-approved open source it is not. Check the license for commercial redistribution terms.
+
+**Q: How does page merge handle conflicting information?**
+**A:** The LLM detects conflicts and flags them in the plan-review stage. Editors decide how to resolve before the page is written.
+
+
+The knowledge graph visualization deserves attention for how it aids navigation in large wikis. Each page is a node, and edges represent cross-references — wikilinks between pages, source document citations, and topic relationships. The graph can be filtered by scope (view only Engineering department pages) or by relationship type (show only document citations). Clicking a node opens the corresponding page in the content viewer, making the graph an interactive navigation aid rather than just a static visualization.
+
+The page version history includes full diffs between versions, with the option to revert to any previous version. Changes are attributed to the user or system that made them — MRP pipeline edits are labeled as system changes with the source document reference, while manual edits are attributed to the user. This attribution is crucial for audit compliance in regulated industries where knowledge base accuracy needs to be traceable.
+
+The OAuth 2.1 + PKCE implementation follows the latest OAuth best practices without the complexity of manual token management. When a user adds Arkon as an MCP server in Claude Desktop, Claude opens the system browser to Arkon's authorization endpoint. The user logs in with their Arkon credentials, the authorization code is exchanged via PKCE (Proof Key for Code Exchange), and an access token is returned. The token is scoped to the user's department permissions, so Claude sees only the knowledge the user is authorized to access. Tokens expire after a configurable duration and refresh automatically.
+
+For organizations with compliance requirements, the audit log covers every privileged action with timestamp, user, action type, target resource, and before/after values for settings changes. Plan approvals (MRP pipeline review stage) are logged with the editor's identity and any feedback provided. The audit log is queryable through the wiki browser and exportable as CSV for external compliance tooling. This level of auditability is rare in knowledge management tools and is a key differentiator for regulated industries.
+
+## Conclusion
+
+Arkon addresses a real enterprise pain point: how to give AI assistants consistent, accurate organizational knowledge without every employee pasting documents into separate chat sessions. The MRP pipeline, department-scoped access, and OAuth MCP integration make it production-viable. For companies standardizing on AI assistants, a centralized knowledge hub with access controls is infrastructure that pays for itself in consistency and security.

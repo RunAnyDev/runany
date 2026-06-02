@@ -1,0 +1,147 @@
+---
+title: "DeepSeek-Reasonix – Agent Framework for DeepSeek Models"
+description: "DeepSeek-Reasonix is a TypeScript agent framework built for DeepSeek models with structured reasoning, tool calling, and multi-step planning. Captures R1 reasoning traces for debugging."
+pubDate: "2026-06-02"
+tags: ["github-trending", "dev-tools", "ai-agent", "deepseek", "typescript"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/deepseek-reasonix.webp"
+  alt: "deepseek-reasonix GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DeepSeek-Reasonix is a TypeScript agent framework purpose-built for DeepSeek models. It captures R1 reasoning traces, supports tool calling with structured schemas, and provides a built-in monitoring UI for inspecting agent thought processes in real time.
+
+## Source and Accuracy Notes
+
+- Repository: [esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (1,600+ stars)
+- Built for DeepSeek V3 and DeepSeek R1 models
+- Tech stack: TypeScript, Express, React monitoring dashboard
+
+## What Is DeepSeek-Reasonix?
+
+DeepSeek-Reasonix is an agent framework that takes full advantage of DeepSeek R1's reasoning capabilities. While generic agent frameworks treat all LLMs the same, Reasonix taps into DeepSeek's native reasoning tokens — the chain-of-thought traces that R1 generates before producing its final answer.
+
+The framework provides three layers:
+
+- **Reasoning engine**: Captures and exposes R1's internal reasoning traces. You can inspect what the model "thought" before it acted.
+- **Tool system**: Define tools with Zod schemas. The framework handles tool selection, parameter validation, and result injection.
+- **Monitoring UI**: A React dashboard that visualizes agent runs — prompt, reasoning trace, tool calls, and final output — in a timeline view.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/esengine/DeepSeek-Reasonix.git
+cd DeepSeek-Reasonix
+npm install
+```
+
+### Step 2: Configure API Key
+
+```bash
+cp .env.example .env
+```
+
+Add your DeepSeek API key:
+
+```text
+DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+### Step 3: Run an Agent
+
+```ts
+import { ReasonixAgent } from './src/agent';
+
+const agent = new ReasonixAgent({
+  model: 'deepseek-reasoner',
+  tools: [searchTool, calculatorTool],
+  maxSteps: 10,
+});
+
+const result = await agent.run('Compare the GDP of Japan and Germany in 2024');
+console.log(result.output);
+console.log(result.reasoningTrace); // R1's internal chain of thought
+```
+
+### Step 4: Launch the Monitoring Dashboard
+
+```bash
+npm run dashboard
+```
+
+Open `http://localhost:3001` to see agent runs in real time.
+
+## Deeper Analysis
+
+The key differentiator is DeepSeek R1's reasoning tokens. Most agent frameworks discard the model's internal reasoning — they only see the final tool call or text output. Reasonix captures the full reasoning trace, which is invaluable for debugging agent failures. When an agent makes a wrong tool call, you can see exactly what analysis led to that decision.
+
+The tool system uses Zod for schema validation, which gives TypeScript users full type safety. Tool definitions look like this:
+
+```ts
+const searchTool = {
+  name: 'web_search',
+  description: 'Search the web for current information',
+  parameters: z.object({
+    query: z.string().describe('Search query'),
+    maxResults: z.number().optional().default(5),
+  }),
+  execute: async ({ query, maxResults }) => {
+    // Search implementation
+  },
+};
+```
+
+The monitoring dashboard uses Server-Sent Events (SSE) for real-time updates. Each agent run streams its state — prompt received, reasoning started, tool called, result received — as events that the React dashboard renders as a timeline.
+
+## Practical Evaluation Checklist
+
+- [ ] Captures DeepSeek R1 reasoning traces for debugging
+- [ ] Zod-based tool schemas with full TypeScript inference
+- [ ] Real-time monitoring dashboard with SSE streaming
+- [ ] Configurable max steps and token budgets
+- [ ] Agent state serializable for checkpointing
+
+## Security Notes
+
+The framework executes tool functions in the same Node.js process as the agent. Tool functions have full process access — sandbox them appropriately. API keys are read from environment variables (not hardcoded). The monitoring dashboard has no authentication by default; only expose it on localhost or behind a reverse proxy with auth.
+
+## FAQ
+
+**Q: Does Reasonix work with non-DeepSeek models?**
+**A:** It's optimized for DeepSeek R1/V3. Other models work through the OpenAI-compatible interface but won't produce reasoning traces.
+
+**Q: How is the reasoning trace different from regular logging?**
+**A:** Regular logging shows inputs and outputs. The reasoning trace captures R1's internal chain of thought — the model's analysis before it decides what action to take.
+
+**Q: Can I run Reasonix with a local DeepSeek model via Ollama?**
+**A:** Yes — point `DEEPSEEK_BASE_URL` to your Ollama endpoint. R1 reasoning traces require the DeepSeek-R1 model specifically.
+
+**Q: Is there a Python version?**
+**A:** Currently TypeScript only. The architecture is language-agnostic and a Python port is possible.
+
+
+The reasoning trace capture works by intercepting DeepSeek R1's native reasoning tokens — the model's internal monologue that appears before the final answer. In the DeepSeek API, these tokens are returned in a `reasoning_content` field separate from the `content` field. Reasonix stores both, so you can replay an agent run and see exactly what analysis preceded each decision. This is transformative for debugging: instead of wondering "why did the agent call the wrong tool?", you can read its reasoning step by step.
+
+The monitoring dashboard visualizes this as a timeline with expandable nodes. Each node shows the prompt sent, the reasoning trace received, the tool called, and the tool's output. Timestamps and latency are tracked per step, so bottlenecks are immediately visible — if the "web search" tool takes 3 seconds per call and the agent calls it 5 times, you know where to optimize.
+
+The framework also supports agent state serialization for checkpointing. If an agent run fails at step 7 of 10, you can resume from step 6 rather than starting over. The serialized state includes the conversation history, reasoning traces, tool call history, and any accumulated data. This is particularly useful for long-running agent tasks where restarts are expensive. The checkpoint format is JSON, so it's portable and debuggable.
+
+For production use, Reasonix provides a middleware system for adding custom logic to the agent pipeline — authentication checks before tool execution, logging hooks, cost tracking, and rate limiting. Middleware runs in order around each agent step, giving you control over every stage of the agent's decision loop without modifying framework code.
+
+**Q: What is the performance overhead of capturing reasoning traces?**
+**A:** Minimal. Reasoning traces are part of DeepSeek R1 API response. Reasonix stores them alongside the content. The only added cost is storage, not latency or token usage beyond what the API returns.
+
+**Q: Can I use Reasonix with DeepSeek V3 instead of R1?**
+**A:** Yes, but V3 does not produce reasoning traces. The framework works with any DeepSeek model, but only R1 generates the internal chain-of-thought content that the trace capture feature is built for.
+
+## Conclusion
+
+DeepSeek-Reasonix fills a specific gap: agent infrastructure that treats reasoning as a first-class observable. For teams building agents on DeepSeek models, the reasoning trace capture alone justifies adoption — it turns opaque agent failures into debuggable decision trees. The monitoring dashboard and Zod tool system are well-implemented complements.
