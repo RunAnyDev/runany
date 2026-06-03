@@ -3,7 +3,7 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import type { PostFrontmatter, PostSummary } from '@runany/shared';
 
-const BLOG_DIR = path.join(process.cwd(), 'apps/web/src/content/blog');
+const BLOG_DIR = path.join('/Users/friday/personal/runany/apps/web/src/content/blog');
 
 function getPostFiles(): string[] {
   if (!fs.existsSync(BLOG_DIR)) {
@@ -20,6 +20,8 @@ function parsePostFile(filename: string): { frontmatter: PostFrontmatter; conten
     
     const slug = filename.replace(/\.mdx?$/, '');
     
+    const image = data.image && typeof data.image === 'object' ? data.image : null;
+    
     return {
       frontmatter: {
         title: data.title || slug,
@@ -30,6 +32,7 @@ function parsePostFile(filename: string): { frontmatter: PostFrontmatter; conten
         tags: data.tags || [],
         author: data.author || 'Anonymous',
         published: data.published !== false,
+        image: image,
       },
       content,
     };
@@ -44,7 +47,7 @@ export function getAllPosts(): PostSummary[] {
 
   for (const file of files) {
     const parsed = parsePostFile(file);
-    if (parsed && parsed.frontmatter.published !== false) {
+    if (parsed && parsed.frontmatter.draft !== true) {
       posts.push(parsed.frontmatter);
     }
   }

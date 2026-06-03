@@ -1,5 +1,6 @@
 export interface PostFrontmatter {
   title: string;
+  image?: { url: string; alt: string };
   date: string;
   slug: string;
   excerpt?: string;
