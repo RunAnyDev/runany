@@ -1,0 +1,153 @@
+---
+title: "InsForge - Agent-Native Backend Built for Coding Agents"
+description: "InsForge is an open-source agent-native backend that gives coding agents a Postgres database, auth, storage, edge functions, and an AI gateway, driven through a CLI plus skills."
+pubDate: "2026-06-04"
+tags: ["ai-coding", "dev-tools", "backend", "open-source", "agents"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/insforge-agent-native-backend.webp"
+  alt: "InsForge agent-native backend product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** InsForge is an open-source, agent-native backend platform that hands a coding agent a Postgres database, authentication, storage, edge functions, compute, hosting, and an AI model gateway, all driven through a CLI plus reusable agent skills. The core idea is that the agent inspects the live backend through structured introspection endpoints instead of guessing from outdated context, which fixes the recurring failure mode of agents overwriting schema, breaking migrations, or creating duplicate tables.
+
+## Source and Accuracy Notes
+
+- Product site: [insforge.dev](https://insforge.dev)
+- AI discovery index: [insforge.dev/llms.txt](https://insforge.dev/llms.txt)
+- Agent skill document: [insforge.dev/skill.md](https://insforge.dev/skill.md)
+- HN launch: [Show HN: InsForge](https://news.ycombinator.com/item?id=45528161) (Oct 9 2025, 10 points, 1 comment)
+- GitHub monorepo: [github.com/InsForge/InsForge](https://github.com/InsForge/InsForge) (10,857 stars, Apache-2.0, TypeScript, last updated Jun 3 2026)
+- Agent skills repo: [github.com/InsForge/insforge-skills](https://github.com/InsForge/insforge-skills)
+- Comparison pages: [vs Supabase](https://insforge.dev/alternatives/insforge-vs-supabase), [vs Firebase](https://insforge.dev/alternatives/insforge-vs-firebase), [vs hosted Postgres](https://insforge.dev/alternatives/insforge-vs-hosted-postgres)
+- Author: Hang Huang, founder
+
+## What Is InsForge?
+
+InsForge is a Postgres-based backend that is built for an agent to drive end to end. The headline positioning is "backend built for agentic development", and the product surface matches that thesis: every service is reachable from the CLI, from agent skills, and from the SDK, and the project metadata is exposed through a `metadata` command so a coding agent always knows what is configured.
+
+The platform bundles a single binary-style stack:
+
+```bash
+Postgres + pgvector
+Realtime (WebSockets over database changes)
+Authentication (OAuth, JWT, row-level security)
+S3-compatible object storage
+Deno-based edge functions
+AI model gateway (OpenRouter-compatible)
+Hosting / deployment
+```
+
+The interesting design choice is that the agent never has to guess. InsForge exposes structured introspection endpoints for the schema, relations, functions, triggers, policies, routes, storage, roles, documentation, logs, and events. The agent calls those endpoints, sees the live state, and acts on it.
+
+## The Problem InsForge Solves
+
+When a coding agent like Cursor or Claude Code builds a full-stack app, it usually works from a stale mental model of the backend. The agent guesses at column names, table relations, and function signatures, then writes migrations that conflict with the live schema. The failure pattern shows up in three places:
+
+```bash
+# 1. Storage, edge functions, and database logic get rewritten
+#    because the agent does not see how they connect.
+# 2. Database migrations collide with foreign keys or miss functions
+#    because the agent never inspects the live schema.
+# 3. The agent recreates tables or adds columns that already exist,
+#    which breaks deploys.
+```
+
+These are not coding errors. They are context errors. The agent had no structured way to read the actual backend before acting, so it wrote code that looked right against an imagined schema.
+
+InsForge fixes this by giving the agent a `metadata` endpoint, a CLI that surfaces the configured services, and a skills layer that tells the agent which command to call when. The agent is no longer hallucinating the backend; it is asking the backend what it has.
+
+## How a Coding Agent Uses InsForge
+
+The workflow is documented at `/skill.md` and the official skills repo at `InsForge/insforge-skills`. A typical session looks like this:
+
+### Step 1: Authenticate the agent
+
+```bash
+npx @insforge/cli login      # one-time sign-in
+npx @insforge/cli link       # link the current directory to a project
+npx @insforge/cli current    # verify the link
+```
+
+Always invoke the CLI through `npx` rather than installing it globally. The package `@insforge/cli` is published to npm; the corresponding application SDK is `@insforge/sdk`.
+
+### Step 2: Let the agent install its own skills
+
+After `login` and `link`, the CLI installs the official InsForge agent skills into the project. From that point, the commands `db`, `storage`, `functions`, `deploy`, and the rest come with built-in guidance that tells the agent when to call them and what to expect.
+
+```bash
+npx @insforge/cli metadata
+# Surfaces the project's configured services, schemas, and capabilities.
+```
+
+For application code, install the SDK the same way you would any npm dependency:
+
+```bash
+npm install @insforge/sdk
+```
+
+### Step 3: Drive the backend from skills
+
+The agent's skills repo at `InsForge/insforge-skills` contains the operational patterns for the database, storage, functions, and deploy commands. A coding agent that has those skills loaded treats them as the source of truth for the right command sequence and the right parameter shape.
+
+For autonomous agent registration, InsForge is in preview — the platform can issue a scoped credential on the user's behalf without a human sign-up form, but it is not yet generally available. For now, every new project still requires a one-time human `login`.
+
+## Deeper Analysis
+
+### Agent-native versus serverless
+
+The platform sits in a category between Supabase and a hosted Postgres. Compared to Supabase, InsForge leans harder into the agent driver model: the CLI is the primary interface, skills replace dashboard clicking, and introspection is a first-class endpoint. Compared to a raw hosted Postgres, InsForge bundles auth, storage, edge functions, realtime, and an AI gateway on top of the database, so a coding agent can ship a full-stack app without bolting on a half-dozen other services.
+
+### AI gateway through OpenRouter
+
+The AI model gateway exposes LLMs through an OpenRouter-compatible interface. A coding agent can call models without the application code caring which provider the request lands on. This is useful when an agent needs to switch between a fast local model for routine work and a frontier model for hard steps, without the application code holding a per-provider abstraction layer.
+
+### Realtime and storage without extra services
+
+Realtime is built on database change events over WebSockets, so the agent does not need a separate pub/sub service to push state into the UI. Storage is S3-compatible with bucket-level access policies, so the agent can drop assets behind a serverless function the same way it would on any other cloud.
+
+## Practical Evaluation Checklist
+
+Before adopting InsForge on a real project, run through this list:
+
+- Confirm the project is small enough that Postgres is a comfortable primary store. InsForge is not a multi-model database, and its realtime story is bound to Postgres change events.
+- Pick the model gateway strategy up front. If you want to mix frontier and local models behind one API, the OpenRouter-compatible gateway is a fit. If you need direct first-party access to a specific provider, expect to add a thin adapter.
+- Decide which coding agent will be the primary driver. The skills are designed for CLI-driven agents like Claude Code and Cursor; the experience on a less CLI-oriented agent is thinner.
+- Plan for the autonomous registration preview. Until that ships, a human has to log in once per project.
+
+## Security Notes
+
+Authentication is JWT-based with row-level security on Postgres, so application code can express access control as policies rather than middleware. Storage supports bucket-level access policies, and edge functions run on Deno with the same request-scoping model that the Deno Deploy platform uses. OAuth is supported, and the introspection endpoints do not bypass RLS, so a coding agent cannot read data it has not been granted.
+
+The CLI uses `npx` rather than global installs, which keeps the dependency surface scoped to a project. For CI, pin the `@insforge/cli` version so the agent's skills are deterministic across runs.
+
+## FAQ
+
+**Q: Is InsForge self-hostable?**
+
+**A:** Yes. The monorepo at `github.com/InsForge/InsForge` is Apache-2.0 licensed and the README documents a self-host path. The hosted product on `insforge.dev` is the convenience layer; the stack itself is open source.
+
+**Q: How does InsForge compare to Supabase?**
+
+**A:** Both bundle Postgres, auth, storage, realtime, and edge functions. InsForge is positioned as the agent-native option: the CLI plus skills are the primary interface, introspection endpoints are first class, and the AI gateway is included. Supabase is broader as a platform, with more polished dashboards, a longer track record, and a bigger community. If your primary user is a coding agent and your primary interface is the CLI, InsForge is the better fit. If your primary user is a human developer and your primary interface is the dashboard, Supabase still wins on ecosystem.
+
+**Q: Do I need to install the CLI globally?**
+
+**A:** No. InsForge is explicit that the CLI should be invoked through `npx @insforge/cli` rather than installed globally. This keeps the dependency surface scoped to a project and makes CI runs deterministic when the version is pinned.
+
+**Q: Can the agent register itself without a human login?**
+
+**A:** Autonomous agent registration is in preview. The platform can issue a scoped credential on the user's behalf without a human sign-up form, but it is not yet generally available. For now, every new project needs a one-time human `login`.
+
+**Q: Which coding agents work with InsForge?**
+
+**A:** The skills and CLI are designed for CLI-driven agents like Claude Code and Cursor. The skill patterns are agent-agnostic, so any agent that can shell out and read a SKILL.md can use them, but the published skills are tuned for the Cursor/Claude Code workflow.
+
+## Conclusion
+
+InsForge is one of the more interesting experiments in the agent-native backend category. The bet is that as coding agents become the primary consumers of backend APIs, the platform's value moves from the dashboard to introspection, skills, and the CLI. The 10.8K stars, the Apache-2.0 license, the agent skill document served at `/skill.md`, and the AI gateway bundled into the same stack make it a credible target for a team that is already running agents on a Postgres-plus stack. If you are choosing between InsForge and Supabase today, the deciding factor is whether the agent is your primary user or your human developer is.
