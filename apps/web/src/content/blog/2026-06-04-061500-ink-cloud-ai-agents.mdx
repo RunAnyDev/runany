@@ -1,0 +1,179 @@
+---
+title: "Ink – Cloud Infrastructure Built for AI Agents"
+description: "Ink is a deployment platform designed for AI agents, with MCP, Skills, and CLI integrations. Agents ship services in under a minute, billed per-minute while running."
+pubDate: "2026-06-04"
+tags: ["ai-agents", "dev-tools", "mcp", "deployment", "cloud-infrastructure"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ink-cloud-ai-agents.webp"
+  alt: "Ink cloud infrastructure for AI agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Ink is a cloud platform whose primary users are AI agents, not humans. It exposes compute, databases, DNS, and custom domains through a CLI, an MCP server, and Claude/Cursor-compatible Skills, so an agent can deploy a full-stack service with one call and get a live URL back in under a minute.
+
+## Source and Accuracy Notes
+
+- Product site: [ml.ink](https://ml.ink)
+- Docs: [docs.ml.ink](https://docs.ml.ink)
+- HN: [Show HN: Ink – Deploy full-stack apps from AI agents via MCP or Skills](https://news.ycombinator.com/item?id=47337028) (32 points)
+- HN launch was on March 31, 2026; the platform is in active development with a free trial, Hobby, Pro, and Enterprise tiers.
+
+## What Is Ink?
+
+Ink is a deployment platform explicitly designed for AI agents as the primary user. The founding premise is that today's AI agents can write code, but the last mile — packaging, infrastructure, domains, secrets, observability — still requires a human to wire everything up. Ink collapses that last mile into a single surface that agents can call directly.
+
+Instead of an agent juggling Vercel for frontend, a separate Postgres provider, a DNS registrar, a secrets manager, and a logging service, Ink gives the agent one CLI, one MCP server, and one set of Skills that cover all of those concerns. The agent calls `service_create` or `template_deploy`, and Ink auto-detects the framework, builds it, provisions storage and DNS, deploys to a live URL, and returns structured result data the agent can act on.
+
+```bash
+# Agent-side call (one command deploys a full-stack service)
+ink service create --repo my-app --domain my-app.dev.example.com
+# → returns: {"url": "https://my-app.dev.example.com", "service_id": "..."}
+```
+
+The product tagline on the homepage captures the positioning cleanly: **"Your agent can write code — now let it ship."**
+
+## How Ink Differs From a Normal PaaS
+
+Most platforms (Render, Fly, Railway, Vercel) are built around a developer pulling from a Git repo and clicking buttons in a dashboard. Ink treats the agent as a first-class actor. That changes a few design decisions that show up in the docs:
+
+- **One auth, one workspace, one set of tools.** Compute, databases, DNS, secrets, domains, usage, and metrics all live behind a single CLI/MCP surface. Agents don't have to maintain credentials for five different providers.
+- **DNS zone delegation.** Hand a parent domain to Ink once (for example `dev.example.com`), and agents can create any subdomain under it instantly. No manual record editing, no propagation wait.
+- **Built-in git hosting.** Agents can push code to a managed Ink repository and trigger a deploy without an external GitHub account. GitHub integration remains a first-class option for developers who already have a repo.
+- **Structured error responses for LLMs.** When a deploy fails, the response is a JSON reason code with a suggested next action, not a 30-line stack trace. The agent reads the error, fixes the code, and redeploys autonomously.
+- **Per-minute billing.** Agents query their credit balance through the CLI or MCP before they spend. No per-seat, no per-agent pricing; you only pay for compute, memory, storage, and egress while services are actually running.
+
+The platform also includes real-time metrics (CPU, memory, network) and structured logs that are accessible through the same CLI and MCP. An agent can read its own runtime metrics, detect a spike, and scale a service without a human being in the loop.
+
+## Setup Workflow
+
+### Step 1: Create an account and grab an API key
+
+Sign up at [ml.ink](https://ml.ink) — no credit card required. The Free Trial tier ships with $5 of one-time usage credits, 0.5 total vCPU, 512 Mi of memory, up to 0.25 vCPU per service, three services, and 10 Gi of storage. That's enough to ship a small demo and exercise the agent workflow end to end.
+
+### Step 2: Install the CLI
+
+```bash
+# macOS / Linux
+curl -fsSL https://ml.ink/install.sh | sh
+
+# Or via npm
+npm install -g @ink/cli
+```
+
+After installation, authenticate with the API key you got in step one:
+
+```bash
+ink login
+# paste API key when prompted
+```
+
+The same auth also unlocks the MCP server and Skills — they share the credential.
+
+### Step 3: Add the MCP server to your agent
+
+If your agent supports MCP (Claude Code, Cursor, OpenAI Codex, Windsurf, VS Code Continue, Gemini CLI, Kimi Code, OpenCode, and Antigravity are listed as compatible on the Ink site), point it at the Ink MCP server:
+
+```json
+{
+  "mcpServers": {
+    "ink": {
+      "command": "ink",
+      "args": ["mcp", "serve"],
+      "env": {
+        "INK_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+After restart, the agent sees Ink's tools in its tool list: `service_create`, `service_get`, `service_update`, `service_list`, `service_delete`, `repo_create`, `repo_get_token`, `template_list`, `template_deploy`, `volume_list`, `volume_resize`, `domain_add`, `domain_remove`, `dns_add_record`, `dns_list_records`, `account_status`, plus the observability tools.
+
+### Step 4: Hand the agent a task
+
+A representative agent prompt looks like this:
+
+> Build a small Express API that proxies the GitHub REST API and exposes `/users/:login`. Deploy it to Ink, attach a custom domain I delegated to Ink, and give me the live URL.
+
+The agent reads the prompt, calls `template_list` to find an Express template, calls `service_create` with the template reference, waits for the build to finish, calls `domain_add` and `dns_add_record` to wire the custom domain, and finally returns the live URL. The whole loop — from first tool call to a reachable HTTPS endpoint — typically completes in under a minute.
+
+### Step 5: Monitor and iterate
+
+From the dashboard or through the agent, watch real-time CPU, memory, and network I/O. Build and runtime logs are filterable by level (`@level:error`) and full-text searchable. When the agent reads its own logs and metrics, it can detect a regression, roll back, or scale a service autonomously.
+
+## Repo and Service Lifecycle
+
+Ink models two top-level objects: services and templates. A service is a running deployment (one framework, one URL, one set of env vars). A template is a deployable starting point — a fresh Express API, a Next.js SSR app, a Python REST API, a Vue + FastAPI analytics stack, a SvelteKit full-stack project, and so on. The current docs list around thirty templates covering React, Next.js, Python, Node, Go, Vue, FastAPI, SvelteKit, TanStack, Rails, Laravel, Spring, Flask, Django, .NET, Elixir, Bun, Deno, Haskell, Zig, Streamlit, and Gradio.
+
+```bash
+# List templates available to your account
+ink template list
+
+# Deploy a template as a new service
+ink template deploy --template nextjs-ssr --name marketing-site
+# → returns a live *.ml.ink URL; replace with a custom domain later
+
+# Provision a managed database
+ink volume create --name primary-db --size 10Gi
+# Credentials are returned in the response; the agent can store them in env vars directly
+```
+
+The Git flow is intentionally flexible. By default, services deploy from a managed Ink repository (which is the path of least resistance for autonomous agents). If you already maintain a GitHub repo, connect it and Ink will redeploy on every push. Either way, the agent can also push code through the CLI to a managed repo without an external Git provider.
+
+## Pricing and Tiers
+
+Ink is usage-based and intentionally fine-grained so an agent can reason about cost:
+
+| Plan | Monthly | Included Credits | Compute Cap | Service Cap |
+|------|---------|------------------|-------------|-------------|
+| Free Trial | $0 | $5 one-time | 0.5 vCPU / 512 Mi | 3 services |
+| Hobby | $5 | $5 / month | 10 vCPU / 20 Gi | 25 services |
+| Pro | $20 | $20 / month | 100 vCPU / 80 Gi | 200 services |
+| Enterprise | Custom | Custom | 800 vCPU / 400 Gi | 1,000 services |
+
+Per-minute usage rates are published and stable: $0.000393 per vCPU-minute, $0.000161 per GB-minute of memory, $0.0000035 per GB-minute of persistent volume, $0.05 per GB of egress, and free ingress. An agent can call `account_status` to check its credit balance before it spends — that's the "transparent billing for autonomous agents" line on the pricing page, and it's what makes per-minute pricing practical in a fully agentic workflow.
+
+## Practical Evaluation Checklist
+
+Before adopting Ink as the default deploy surface for an autonomous agent, walk through these:
+
+- **Cost ceiling.** Confirm the agent has a hard cap on what it can spend per session. The credit-balance query is available, but the guardrail has to live in your agent's policy layer.
+- **Idempotency of tool calls.** A re-run after a partial failure shouldn't double-provision a database or spin up two copies of the same service. The CLI and MCP tools should be safe to retry; verify on the templates you actually use.
+- **Secret handling.** Agents often need API keys to call third-party services. Ink supports managed environment variables and secrets; double-check that secrets are not echoed back in tool responses or logs.
+- **Rollback path.** When an autonomous agent ships a bad deploy, it should be able to roll back to the previous commit, not just redeploy the broken version. The CLI exposes `service_update` for this — exercise it before you trust it.
+- **Observability loop.** The agent should read its own metrics and logs after every deploy. If the loop is human-dependent, you've lost most of the value of running the agent on Ink in the first place.
+
+## Security Notes
+
+- Auth is a single API key, used by the CLI, MCP server, and Skills. Treat the key as a long-lived secret — rotate it, scope it per agent where possible, and never commit it to a repo.
+- DNS zone delegation is the recommended way to expose a custom domain; this avoids a human editing records in a registrar dashboard. Make sure the delegation doesn't widen the attack surface beyond the subdomain you intend to share with agents.
+- The free trial and Hobby plans share a workspace across the agents you register. If you have multiple agents in the same workspace, separate them into different projects with role-based access, or upgrade to Enterprise for shared workspaces with audit logs and member invitations.
+- Egress is metered at $0.05/GB. A misbehaving agent that streams large amounts of data to an external endpoint can burn through credits fast. The credit-balance query exists precisely so the agent can self-limit.
+
+## FAQ
+
+**Q: How is Ink different from Render, Fly, or Railway?**
+**A:** Those platforms are built around a developer clicking in a dashboard. Ink is built around an agent calling tools. That changes how auth, git, observability, DNS, and error responses are designed — the agent gets one CLI, one MCP server, and one set of Skills, and the error responses are structured JSON instead of stack traces.
+
+**Q: Do I have to use the agent workflow?**
+**A:** No. The Ink dashboard exposes a traditional UI with service logs, metrics, and DNS. You can drive the platform from the dashboard, from the CLI as a developer, or through the MCP server as an agent. Same backend, three different surfaces.
+
+**Q: Which agents are supported?**
+**A:** Claude Code, Cursor, OpenAI Codex, Windsurf, VS Code Continue, Gemini CLI, Kimi Code, OpenCode, and Antigravity are all listed as compatible on the Ink site. Any agent that speaks MCP can connect.
+
+**Q: What about GitHub?**
+**A:** GitHub integration is a first-class option. Connect a repo, push code, Ink redeploys on every commit. For autonomous agents that don't want an external Git provider, Ink also offers a managed repository that the agent can push to directly.
+
+**Q: Is the platform stable enough for production?**
+**A:** Ink is in active development. The pricing, MCP surface, and template list are all evolving. For early-stage agentic projects, that's fine — and the per-minute billing and free trial make it cheap to evaluate. For a production-critical workload with a hard SLA, the Enterprise tier adds a custom SLA, dedicated infrastructure, and air-gapped deployment options.
+
+## Conclusion
+
+Ink is one of the first deployment platforms that treats an AI agent as the primary user rather than the human at the keyboard. The CLI, the MCP server, the Skills, the structured error responses, the credit-balance queries — every layer is shaped around an autonomous loop where the agent ships, monitors, and iterates without waiting on a human.
+
+If you're already running an agent that writes code and you've been hand-holding the deploy step, Ink is the cleanest way to close that loop. The free trial is enough to exercise the full workflow; the Hobby plan is enough to ship a real side project. For teams running multiple agents in production, the Pro and Enterprise tiers add the workspace, observability, and SLA controls you need.
