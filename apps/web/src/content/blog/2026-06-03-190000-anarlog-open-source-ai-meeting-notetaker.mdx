@@ -1,0 +1,196 @@
+---
+title: "anarlog - Open-Source AI Meeting Notetaker That Runs Locally"
+description: "anarlog (formerly Hyprnote) is a local-first, privacy-first AI meeting notetaker. Transcribe on-device, BYO LLM, MIT-licensed, 8.5K GitHub stars."
+pubDate: "2026-06-03"
+tags: ["ai", "open-source", "self-hosted", "meeting-tools", "privacy"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/anarlog-meeting-notes-ai.webp"
+  alt: "anarlog open-source AI meeting notetaker thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** anarlog is a local-first AI meeting notetaker that transcribes audio and summarizes your meetings without sending anything to a cloud. It's the open-source answer to Granola, built in Rust + Tauri, MIT-licensed, and supports any OpenAI-compatible LLM.
+
+## Source and Accuracy Notes
+
+- Project page: [anarlog.so](https://anarlog.so)
+- Source repository: [github.com/fastrepl/anarlog](https://github.com/fastrepl/anarlog)
+- License: MIT
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306) (270 points, YC S25)
+
+The project launched on HN as **Hyprnote** in early 2026. It has since been renamed twice — first to **char**, then to **anarlog** — as the team split their work into two projects. **anarlog** is the open-source, local-first meeting notetaker that remains in this repository. **char** (at [char.com](https://char.com)) is a separate, hosted productivity product the team is now building. The MIT license, GitHub history, and code are unchanged.
+
+## What Is anarlog?
+
+anarlog is a desktop app that records meetings, transcribes them locally, and turns rough notes into an editable summary. It runs on macOS (Apple Silicon), Linux, and Windows, and stores every meeting as a markdown file on your local disk. You do not need to invite a bot to your calls — anarlog captures both your microphone and system audio, then processes everything on-device.
+
+The product positioning is straightforward: it is the **open-source Granola alternative** for people who cannot send meeting audio to a third-party server. Some companies have banned popular AI notetakers over data concerns. anarlog exists for the rest of us — and for the folks who just want their notes under their own control.
+
+The current product is built on:
+
+- **Tauri** for the desktop shell
+- **Rust** for the audio engine, transcription, and LLM inference glue
+- **React + TypeScript** for the UI
+- **Whisper** (local) for speech-to-text
+- **HyprLLM** (a fine-tuned Qwen3 1.7B model) for the on-device summarization default
+- Any **OpenAI-compatible LLM endpoint** (OpenAI, Anthropic, Gemini, OpenRouter, Ollama, LM Studio) as a custom provider
+
+## Why Local-First Matters
+
+Most AI meeting tools follow a familiar pattern: invite a bot to your call, send audio to a remote API, get a summary back. The trade-offs are real:
+
+- **Privacy** — your meeting audio is leaving the room
+- **Latency** — round-tripping audio to a remote server adds delay
+- **Cost** — you pay per minute for transcription and LLM tokens
+- **Vendor lock-in** — your data lives in someone else's database
+- **Bot fatigue** — some companies and clients refuse to allow AI bots on calls
+
+anarlog avoids all five. Audio is captured locally. Transcription runs on-device with Whisper. Summarization defaults to the local HyprLLM model. If you want cloud LLMs, you bring your own API key and the audio is still processed in the local pipeline first.
+
+The output is also local: every meeting is a `.md` file on disk. You can grep them, sync them with iCloud/Dropbox/Syncthing, version them in git, or back them up however you want. There is no hosted account model, no tracking, and no telemetry.
+
+## Setup Workflow
+
+### Step 1: Download the desktop app
+
+Grab the latest release for your platform from the GitHub releases page:
+
+```bash
+# macOS (Apple Silicon)
+open https://github.com/fastrepl/anarlog/releases/latest
+# download anarlog_*_aarch64.dmg
+```
+
+For Linux and Windows builds, the same releases page has `.deb`, `.AppImage`, `.msi`, and `.exe` artifacts depending on the latest release.
+
+### Step 2: Grant microphone and screen-capture permission
+
+The first time you launch anarlog, macOS will prompt for:
+
+- **Microphone access** — required for capturing your voice
+- **System audio capture** (Screen Recording permission on macOS) — required for capturing the other side of the call without a bot
+
+If you skip the system audio step, anarlog still works for in-person meetings and voice memos.
+
+### Step 3: Take rough notes during the meeting
+
+Open anarlog, hit record, and start typing rough notes. anarlog records the audio in the background and saves your typed notes to the same file. You do not need to format anything — the app handles that after the meeting.
+
+### Step 4: Generate a summary
+
+When the meeting ends, anarlog transcribes the audio locally with Whisper, then sends your rough notes plus the transcript to whatever LLM endpoint is configured. With the default HyprLLM model, this happens entirely on-device. With a custom OpenAI-compatible endpoint, only the notes-plus-transcript pair is sent to that endpoint.
+
+```bash
+# Example: run with a local Ollama endpoint
+OLLAMA_HOST=http://localhost:11434 anarlog --llm ollama:llama3
+```
+
+### Step 5: Edit and keep the result
+
+anarlog produces an editable summary block right below your original rough notes. The whole file is markdown, so you can copy it into Notion, Obsidian, your CRM, or a Slack message without a conversion step.
+
+## Architecture Notes
+
+anarlog is not just a frontend wrapper around Whisper. The audio path is non-trivial:
+
+```bash
+Microphone (mic) ──┐
+                   ├──> AEC + VAD ──> Whisper (local) ──> Transcript.md
+System audio ──────┘                                            │
+                                                                ▼
+User rough notes ──────────────────────────────────> LLM (default: HyprLLM)
+                                                                │
+                                                                ▼
+                                                       Summary (editable)
+```
+
+The AEC (acoustic echo cancellation) stage is necessary because the mic captures both the user's voice and the system audio playing out of the speakers. Without it, every word from the meeting would be doubled in the transcript. The AEC crate lives at `crates/aec/` in the repo.
+
+Whisper inference is wired through `crates/whisper/` with a streaming input so you get partial transcripts during long meetings instead of waiting until the end.
+
+The LLM glue layer at `crates/llama/` is what swaps between the local HyprLLM model and any OpenAI-compatible endpoint. The interface is the same, so the swap is a config change, not a code change.
+
+## Deeper Analysis
+
+### HyprLLM: a fine-tuned 1.7B model for meeting notes
+
+The team's pitch is that for meeting summarization, a small fine-tuned model can outperform a much larger off-the-shelf one. The model is fine-tuned from Qwen3 1.7B, which is small enough to run on a MacBook Air's CPU in real time and on Apple Silicon via the Metal backend in a few hundred milliseconds per request.
+
+The trade-off is clear: HyprLLM produces terser, more structured summaries than Claude or GPT-4 would, and it sometimes misses nuance on long meetings. The team is honest about this — the README explicitly says "still not that good, we can make it a lot better" and that the 2nd iteration of the model is in progress.
+
+For users who want better summaries and do not care about pure-local inference, the OpenAI/Anthropic/Ollama custom endpoint is the path.
+
+### Granola vs anarlog
+
+Granola is the canonical AI meeting notetaker in 2025-2026. It works well, looks polished, and has a free tier plus a paid Pro tier. The product narrative is: take rough notes, get a clean summary, export anywhere.
+
+The anarlog counter-narrative is:
+
+- **Granola sends audio to a server.** anarlog does not, by default.
+- **Granola locks your notes into its app and account.** anarlog writes `.md` files to your disk.
+- **Granola is closed source.** anarlog is MIT and you can fork it.
+- **Granola is paid.** anarlog is free, and you only pay if you choose to use a paid LLM endpoint.
+- **Granola has a hosted-only roadmap.** anarlog's roadmap includes self-hosting and a plugin system modeled on VSCode.
+
+The price of going with anarlog is that the UI is less polished and the default model is less capable than GPT-4. For some users, that is an acceptable trade.
+
+### Local transcription performance
+
+Whisper on a MacBook Air M2 runs roughly at 0.3x to 1x real time depending on the model size (tiny/base/small/medium). The default is the `small` model, which is good enough for English meetings and runs at around 0.5x real time on Apple Silicon. That means a 30-minute meeting finishes transcription in about 15 minutes on the same laptop you used for the meeting.
+
+If you are processing back-to-back meetings, switching to the `tiny` model and post-correcting the transcript manually is faster than waiting for `medium` to finish.
+
+## Practical Evaluation Checklist
+
+Before adopting anarlog, validate these on your own setup:
+
+- [ ] Does the desktop app launch on your platform (macOS / Linux / Windows)?
+- [ ] Can you grant microphone and system audio permission without breaking the OS?
+- [ ] Does the default HyprLLM summary quality meet your bar, or do you need a cloud LLM endpoint?
+- [ ] Does the local Whisper transcription hit an acceptable speed on your hardware?
+- [ ] Where do the `.md` files land by default, and can you point that at iCloud / Dropbox / Syncthing / git?
+- [ ] Is the model swap path documented well enough for your team to configure it?
+- [ ] Are there any privacy or compliance constraints (HIPAA, GDPR, SOC 2) that an open-source local-first tool solves better than a hosted alternative?
+
+## Security Notes
+
+Because anarlog runs locally, the security model is the security of your laptop. Some things to keep in mind:
+
+- **Audio files** are stored in the app's data directory. If you want to encrypt them, you need to use a disk-level encryption tool (FileVault, LUKS, BitLocker).
+- **Notes** are markdown files in the same data directory. Treat them like any other file with sensitive content.
+- **Custom LLM endpoints** send your notes-plus-transcript to that endpoint. If you point anarlog at OpenAI, that data is now at OpenAI under their terms. If you point it at Ollama on the same laptop, the data never leaves.
+- **No telemetry** in the open-source build. The team does not collect analytics. If you build from source, you can confirm this.
+- **License** is MIT, so you can audit, fork, and self-host without restrictions. The team is at [github.com/fastrepl](https://github.com/fastrepl) and the maintainers are public.
+
+## FAQ
+
+**Q: Is anarlog the same as Hyprnote or char?
+A: It is the same codebase, renamed twice. The project launched on HN as Hyprnote (YC S25), was briefly called char, and is now maintained as anarlog in this repository. char.com is a separate hosted product the team is now building. The open-source meeting-notetaker code is unchanged and remains MIT-licensed.
+
+**Q: Does anarlog really run entirely offline?
+A: Yes, with the default configuration. Whisper transcription is local. The default HyprLLM summarization is local. The only network call is the OS update check. If you want a cloud LLM for better summaries, you opt in via the custom endpoint setting and the data flow is documented.
+
+**Q: Can I use my own LLM API key with anarlog?
+A: Yes. Any OpenAI-compatible endpoint works — OpenAI, Anthropic (via their OpenAI-compatible shim), Gemini, OpenRouter, Ollama, LM Studio, or a self-hosted vLLM/TabbyAPI server. The configuration is a base URL plus a model name.
+
+**Q: How does anarlog compare to Granola on summary quality?
+A: Granola's default model is a larger closed-source model that produces more polished, more verbose summaries. anarlog's default HyprLLM is a 1.7B fine-tuned model that produces terser, more structured output. The team is explicit that HyprLLM is a work in progress. If summary quality is the priority, use a cloud LLM endpoint; if local-first is the priority, accept that the default model is good but not great.
+
+**Q: Can I sync anarlog notes across devices?
+A: The notes are plain markdown files on disk, so any sync tool works — iCloud Drive, Dropbox, Syncthing, git, or a custom rsync setup. There is no proprietary sync channel.
+
+**Q: Does anarlog support Windows or Linux?
+A: Yes, the GitHub releases page ships builds for macOS (Apple Silicon and Intel), Windows (.msi / .exe), and Linux (.deb / .AppImage). The README is explicit that the Apple Silicon build is the most-tested path.
+
+## Conclusion
+
+anarlog is the open-source answer to a question that is increasingly being asked in 2026: how do I get AI meeting notes without sending my meeting audio to someone else's server? It is not as polished as Granola, and the default model is not as capable as GPT-4. But the local-first architecture, the MIT license, and the markdown-on-disk storage model are the right defaults for teams that care about privacy, control, and ownership of their notes.
+
+If you are a developer or a security-conscious team that has been avoiding AI notetakers because of the data flow, anarlog is worth an afternoon of setup. Download the latest release, point your LLM endpoint at Ollama on the same laptop, and you have a meeting notetaker that never touches the network.
+
+If you are a non-technical user who wants the most polished UX, Granola is still the right answer. anarlog is the right answer for everyone who has been quietly uncomfortable with the bot-in-the-call model.
