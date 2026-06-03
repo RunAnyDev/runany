@@ -2,6 +2,7 @@
 import BaseLayout from '@/layouts/BaseLayout.astro';
 import PostCard from '@/components/PostCard.astro';
 import { getCollection } from 'astro:content';
+import { getIndexableTags } from '@/utils/tags';
 
 const allPosts = await getCollection('blog', ({ data }) => !data.draft);
 const sortedPosts = allPosts.sort((a, b) => b.id.localeCompare(a.id));
@@ -9,10 +10,16 @@ const featuredPosts = sortedPosts.filter(p => p.data.featured).slice(0, 3);
 const postsPerPage = 9;
 const recentPosts = sortedPosts.slice(0, postsPerPage);
 const hasMoreRecentPosts = sortedPosts.length > postsPerPage;
+const indexableTags = getIndexableTags(allPosts);
 const siteUrl = 'https://runany.dev';
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
 const toIsoDate = (date: any) => date instanceof Date ? date.toISOString() : new Date(date).toISOString();
-const topics = ['AI setup', 'developer tools', 'self-hosted', 'local LLM'];
+const topics = [
+  { label: 'AI setup', slug: 'ai-setup' },
+  { label: 'developer tools', slug: 'developer-tools' },
+  { label: 'self-hosted', slug: 'self-hosted' },
+  { label: 'Local LLM', slug: 'llm' },
+];
 const categoryCards = [
   {
     slug: 'ai-setup',
@@ -59,30 +66,6 @@ const structuredData = [
   },
   {
     '@context': 'https://schema.org',
-    '@type': 'Person',
-    name: 'Du',
-    url: siteUrl,
-  },
-  {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: 'runany.dev',
-    url: siteUrl,
-    logo: {
-      '@type': 'ImageObject',
-      url: `${siteUrl}/favicon.svg`,
-    },
-    sameAs: [
-      'https://twitter.com/runanydev',
-    ],
-    contactPoint: {
-      '@type': 'ContactPoint',
-      email: 'du@runany.dev',
-      contactType: 'customer service',
-    },
-  },
-  {
-    '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
@@ -114,8 +97,8 @@ const structuredData = [
         </div>
         <div class="mt-8 flex flex-wrap gap-3">
           {topics.map(topic => (
-            <a href={`/tags/${topic.toLowerCase().replaceAll(' ', '-')}/`} class="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200">
-              {topic}
+            <a href={`/tags/${topic.slug}/`} class="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200">
+              {topic.label}
             </a>
           ))}
         </div>
@@ -169,7 +152,7 @@ const structuredData = [
         </div>
         <div class="grid grid-cols-1 gap-6 md:grid-cols-3">
           {featuredPosts.map(post => (
-            <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} featured={true} />
+            <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} indexableTags={indexableTags} image={post.data.image} featured={true} />
           ))}
         </div>
       </div>
@@ -182,7 +165,7 @@ const structuredData = [
 
     <div id="home-post-grid" class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" data-posts-per-page={postsPerPage}>
       {recentPosts.map(post => (
-        <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} image={post.data.image} />
+        <PostCard title={post.data.title} description={post.data.description} pubDate={post.data.pubDate} slug={getSlug(post.id)} category={post.data.category} tags={post.data.tags} indexableTags={indexableTags} image={post.data.image} />
       ))}
     </div>
 
@@ -232,7 +215,7 @@ const structuredData = [
       </article>
     </template>
 
-    <script>
+    <script define:vars={{ indexableTags }}>
       (function () {
         const grid = document.querySelector('#home-post-grid');
         const loadMoreBtn = document.querySelector('#home-load-more-posts');
@@ -304,11 +287,20 @@ const structuredData = [
 
     const tagsContainer = clone.querySelector('[data-card-tags]');
     (post.tags || []).slice(0, 3).forEach(function (tag) {
-      const a = document.createElement('a');
-      a.href = '/tags/' + tag.toLowerCase() + '/';
-      a.className = 'rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10 hover:text-cyan-200';
-      a.textContent = '#' + tag;
-      tagsContainer.appendChild(a);
+      const normalizedTag = tag.toLowerCase();
+      const className = 'rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300';
+      if (indexableTags.includes(normalizedTag)) {
+        const a = document.createElement('a');
+        a.href = '/tags/' + normalizedTag + '/';
+        a.className = className + ' hover:bg-white/10 hover:text-cyan-200';
+        a.textContent = '#' + tag;
+        tagsContainer.appendChild(a);
+      } else {
+        const span = document.createElement('span');
+        span.className = className;
+        span.textContent = '#' + tag;
+        tagsContainer.appendChild(span);
+      }
     });
 
     return clone;
