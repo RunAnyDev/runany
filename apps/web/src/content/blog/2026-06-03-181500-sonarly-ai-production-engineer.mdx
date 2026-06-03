@@ -1,0 +1,201 @@
+---
+title: "Sonarly - AI Engineer That Fixes Production Alerts"
+description: "Sonarly (YC W26) deduplicates noisy Sentry and Datadog alerts, runs root-cause analysis, and ships fix pull requests through Claude Code instead of paging on-call."
+pubDate: "2026-06-03"
+tags: ["ai-agents", "dev-tools", "observability", "incident-response", "yc-w26"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sonarly-ai-production-engineer.webp"
+  alt: "Sonarly AI production engineer product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sonarly sits between your observability stack (Sentry, Datadog, Grafana) and your repo, deduplicates noisy alerts, runs an LLM-powered root-cause analysis, and opens a fix pull request through Claude Code so on-call engineers only get paged on issues that actually need a human.
+
+## Source and Accuracy Notes
+
+- Product site: [sonarly.com](https://sonarly.com)
+- Setup playbook: [sonarly.com/llms.txt](https://sonarly.com/llms.txt)
+- Demo video: [youtube.com/watch?v=rr3VHv0eRdw](https://www.youtube.com/watch?v=rr3VHv0eRdw)
+- Original launch: Launch HN, 30 points, June 2026 (objectID 47049776)
+- Founder: Dimittri (with a co-founder); B2C edtech background, hit alert fatigue firsthand
+
+Sonarly is a young, YC W26 company. Pricing tiers, integration coverage, and the exact list of "wired" providers below reflect the public `llms.txt` setup guide and the launch thread. The roadmap note in Step 4 ("Currently `connect-url` supports `provider=sentry` only") is worth remembering if you plan to evaluate it today.
+
+## What Is Sonarly?
+
+Sonarly is an "AI engineer for production." It connects to the tools you already use to track bugs and incidents, then takes the human out of the loop for everything except confirming the fix.
+
+The full pipeline is:
+
+```text
+Sentry / Datadog / Grafana / Slack feedback
+        ↓
+   Sonarly ingests the alert stream
+        ↓
+   Dedup + group + filter false positives
+        ↓
+   LLM root-cause analysis (per-bug context)
+        ↓
+   Claude Code runs in a branch with the
+   right Sentry issue + logs + code context
+        ↓
+   Pull request opened back in your repo
+        ↓
+   Slack / Discord / Linear notification
+```
+
+The product's central claim is that "Claude Code is so good at writing code, but handling runtime issues requires more than just raw coding ability. It demands deep runtime context, immediate reactivity, and intelligent triage." The Sonarly stack supplies exactly that context before the coding agent ever touches a file.
+
+## Why Sonarly Exists
+
+The founder's origin story: a two-person B2C team pushing multiple deploys a day, with Sentry firing up to 50 alerts a day. The signal-to-noise ratio was so bad that filtering alerts took longer than fixing them. As teams adopt agentic engineering and ship more code, that ratio gets worse, not better — automated code review and end-to-end tests catch a lot, but production-only bugs and user-behavior edge cases still slip through.
+
+The product originally launched as a Sentry competitor that surfaced issues through session replays and plain English instead of dashboards. It pivoted to "sit on top of your existing stack" once it became clear that teams do not want to swap out a working observability tool just to get a better UI.
+
+## How Sonarly Actually Works
+
+### Step 1: Detect your stack automatically
+
+If you point Sonarly at a repo, it reads `package.json`, `requirements.txt`, `go.mod`, `Gemfile`, `pom.xml`, `Cargo.toml`, `*.csproj`, or `mix.exs` to detect the language and framework. It also checks for `SENTRY_DSN`, `dd-trace`, `@grafana/*`, OpenTelemetry exporters, `@supabase/*`, `langsmith`, `newrelic`, Vercel config, Kubernetes manifests, and a Postgres `DATABASE_URL` so the integration screen is pre-filled with the right tools.
+
+### Step 2: Start a setup session
+
+```bash
+POST https://sonarly.com/api/setup/start
+Body: { "source": "<your agent name>", "stack": <stack profile JSON> }
+```
+
+The response is a device-code-style payload:
+
+```json
+{
+  "setup_id": "...",
+  "verification_url": "https://sonarly.com/setup/ABCD-EFGH",
+  "user_code": "ABCD-EFGH",
+  "interval": 3,
+  "expires_in": 900
+}
+```
+
+The human signs in with Google or GitHub at the verification URL, which both creates the tenant and authorizes the agent session. The agent polls the status endpoint every 3 seconds (the `interval` field) until `state` becomes `authorized`, at which point it gets a short-lived (30 min) bearer token scoped to that tenant's setup endpoints.
+
+### Step 3: Wire the integrations
+
+The integrations table is broad — `sentry`, `datadog`, `grafana`, `signoz`, `newrelic`, `gcp`, `cloudwatch`, `betterstack`, `mezmo`, `railway`, `modal`, `supabase`, `langsmith`, `vercel`, `posthog`, a Postgres `database` (read-only), and `kubernetes` (via kubeconfig).
+
+For each, the setup agent posts credentials to `POST /api/setup/{id}/integrations`. Sonarly validates them live and auto-provisions the right webhook or notification rule on the source side so new alerts start flowing in immediately. Cloudflare Access in front of Grafana is supported through `cf_access_client_id` and `cf_access_client_secret`. Cross-account AWS CloudWatch is supported through `role_arn`, `external_id`, and `region`.
+
+```bash
+POST https://sonarly.com/api/setup/{id}/integrations
+Authorization: Bearer <setup_token>
+{
+  "backend_type": "datadog",
+  "config": {
+    "api_key": "***",
+    "app_key": "***",
+    "site": "datadoghq.com"
+  }
+}
+```
+
+Sentry is the only OAuth-style integration that needs a human in the loop today. GitHub is wired for code host access; GitLab and Bugsnag are roadmap items and the public setup guide flags them as 400s for now.
+
+### Step 4: Configure agent instructions
+
+This is the biggest lever on fix quality. The agent writes the project's `agent_instructions` itself, based on what it learned in Step 1:
+
+```bash
+POST https://sonarly.com/api/setup/project
+{
+  "agent_instructions": "Next.js 15 + pnpm monorepo; app code in apps/web, shared in packages/*; never edit packages/generated; run tests with pnpm test; TypeScript strict."
+}
+```
+
+That text is injected into every analysis and fix prompt, so the PRs that come back respect the project's conventions, not a generic template.
+
+### Step 5: Watch the PRs flow in
+
+Once the alert stream is live, Sonarly's normal cycle is:
+
+1. Ingest an alert.
+2. Group duplicates and drop false positives.
+3. Run a Claude-Code-powered fix on a branch.
+4. Open a pull request tagged with the original Sentry issue.
+5. Notify the configured channel (Slack, Discord, Linear).
+
+The Bugs and Incidents APIs are public and stable:
+
+```bash
+GET https://sonarly.com/api/v1/public/bugs
+GET https://sonarly.com/api/v1/public/bugs/{id}
+GET https://sonarly.com/api/v1/public/bugs/{id}/runs
+```
+
+Fields are v1-stable: `id, object, source, status, severity, title, description, summary, user_impact, root_cause, suggested_fix, blame_commit_sha, fixable_in_code, confidence, pr_url, agent_url, branch_name, repository, error_type, error_message, occurrence_count, total_user_count, first_seen, last_seen, created, analyzed_at, sentry_issue_id, sentry_url, github_issue_url, parent_bug_id, sonarly_url`. Pagination is cursor-based with a `bug_<id>` cursor in `next`.
+
+Webhooks are the recommended alternative to polling, with HMAC-SHA256 signing, a 300-second replay window, and an 8-attempt retry schedule. Receivers must dedupe on `Sonarly-Event-Id` (which is stable across retries).
+
+## Deeper Analysis
+
+### What Sonarly gets right
+
+The agent-onboarding model is the part that most clearly differs from a typical "AI for ops" product. Instead of asking the human to fill out a 10-step setup wizard, Sonarly exposes a `llms.txt` setup playbook that a coding agent (Claude Code, Cursor, or any agent that can read its repo) executes end to end. The human only handles OAuth consent screens.
+
+For teams that already have a coding agent in the loop, this matters a lot. The same agent that does the development can wire up its own incident-response tool in a few minutes, then feed the resulting API keys and webhook URLs into the development workflow. It is the same product shape that has been working for Sentry, Linear, and Vercel integrations, except the integrator is an LLM, not a human.
+
+The MCP-driven context flow is also worth highlighting. When Claude Code runs the fix, Sonarly does not paste a giant log dump into the prompt. It hands the agent a Sentry issue ID and the relevant Datadog / Grafana queries; the agent fetches the data it actually needs through MCP, mostly by running `grep` against logs. That keeps token costs and prompt context bounded, which matters once you are running this on every alert in production.
+
+### Where Sonarly is still rough
+
+This is a YC W26 launch, and the setup guide is honest about it. GitLab and Bugsnag are roadmap items. The OAuth-flavored "human must click" steps are currently Sentry, GitHub, Slack, Discord, and Linear — every other integration is API-key only, which is fine but means the agent can wire most things without a human at all.
+
+The "AI engineer" framing is also ambitious. A pull request is a strong output for a clear, well-scoped bug with obvious fix shape, but multi-service incidents with cascading failures will still need a human to validate the root-cause analysis before merging. Sonarly is at its best on the long tail of "this keeps paging me, but the fix is obvious" alerts that currently eat on-call time.
+
+## Practical Evaluation Checklist
+
+If you are considering Sonarly for your team, walk through these before signing up:
+
+- [ ] You have a Sentry or Datadog setup that is already catching real bugs (otherwise there is no signal to deduplicate).
+- [ ] Your team is comfortable merging AI-authored PRs, or at least reviewing them quickly — Sonarly's value compounds with trust in the agent's output.
+- [ ] Your stack is on the supported integration list: Sentry, Datadog, Grafana, SigNoz, New Relic, Better Stack, Mezmo, GCP Cloud Logging, AWS CloudWatch, Vercel logs, Railway, Modal, Supabase, LangSmith, PostHog, Postgres, Kubernetes.
+- [ ] You are on GitHub (GitLab is roadmap).
+- [ ] You are okay starting with the Free tier (5 bugs/month) to validate the workflow before moving to Teams ($79, 50 bugs/month) or Startup ($195, 150 bugs/month, 14-day trial).
+
+## Security Notes
+
+A few things to pay attention to when you wire Sonarly up:
+
+- The setup token is short-lived (about 30 minutes) and scoped to a single new tenant. Use it immediately; do not store it.
+- The public API key returned in Step 7b is shown exactly once. Hand it to a secret manager, not the repo.
+- Webhook receivers must capture the raw request body before JSON parsing, recompute the HMAC with a constant-time compare, reject any `t` more than 300 seconds off, and dedupe on `Sonarly-Event-Id`. The 8-attempt retry schedule means a buggy receiver will see the same event many times in quick succession.
+- The webhook endpoint URL is SSRF-checked on Sonarly's side. Do not be surprised if a metadata IP or localhost address is rejected.
+- Supabase and Postgres integrations are read-only by design. CloudWatch uses cross-account IAM AssumeRole, not long-lived keys.
+
+## FAQ
+
+**Q: Does Sonarly replace Sentry or Datadog?**
+**A:** No. Sonarly sits on top of Sentry, Datadog, Grafana, and similar tools. It explicitly chose not to become another error tracker and instead layers dedup, root-cause analysis, and PRs on the alerts those tools already produce.
+
+**Q: How is Sonarly different from a generic Claude Code workflow?**
+**A:** Generic Claude Code is good at writing code from a prompt, but it does not have a live stream of production alerts or a curated view of "the bugs that actually matter." Sonarly supplies that stream, deduplicates it, and feeds the resulting per-bug context into Claude Code. The product is the alert pipeline, not the LLM.
+
+**Q: Can Sonarly open pull requests autonomously?**
+**A:** Yes, that is the default mode. The PR includes the original Sentry issue, the analysis summary, and a link back to the Sonarly run. The team still has to review and merge it.
+
+**Q: What happens when the AI fix is wrong?**
+**A:** The PR is just a PR — your normal review and CI gates apply. The `confidence` field on the bug object is set by the analysis; low-confidence fixes are still merged through the same review path, but the team can configure Sonarly to skip opening a PR for confidence below a threshold.
+
+**Q: Is there a self-hosted option?**
+**A:** Not at launch. Sonarly is a hosted SaaS product. The public setup API and read-only public REST API make it possible to build your own dashboards on top, but the analysis engine itself runs on Sonarly's infrastructure.
+
+**Q: How much does it cost?**
+**A:** Four plans: Free (5 bugs/month), Teams ($79, 50 bugs/month), Startup ($195, 150 bugs/month, 14-day trial), and Enterprise (custom). The free tier is enough to evaluate the workflow end to end.
+
+## Conclusion
+
+Sonarly is a clean example of the new "agent for production" category: it does not try to replace Sentry or Datadog, it does not try to be a coding agent, and it does not try to be a ticketing system. It is the missing pipeline between those three. The YC W26 timing is right — the same teams that adopted Claude Code for development are exactly the teams that are drowning in alert volume and would rather review a PR at 9am than wake up for a Sentry spike at 3am. Sonarly's job is to make sure the 3am spike is real, has a root cause, and has a fix ready before the on-call engineer has finished their coffee.
