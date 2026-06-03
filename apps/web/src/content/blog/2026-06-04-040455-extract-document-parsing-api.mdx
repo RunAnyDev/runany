@@ -1,0 +1,219 @@
+---
+title: "Extract - Document Parsing API Faster Than Textract"
+description: "Extract is a YC P25 hosted OCR and document parsing API that turns PDFs, PPTX, DOCX, and scans into text chunks with bounding boxes. 81.9% accuracy, 2x faster than AWS Textract, $3 per 1K pages."
+pubDate: "2026-06-04"
+tags: ["ai-tools", "document-ai", "ocr", "yc-p25", "api"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/extract-document-parsing-api.webp"
+  alt: "Extract document parsing API product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Extract is a YC P25 hosted document parsing API that combines an algorithmic pipeline with a custom VLM, returns text chunks with bounding boxes, beats AWS Textract, Reducto, and LlamaParse on accuracy in their own benchmark, and costs $3 per 1,000 pages.
+
+## Source and Accuracy Notes
+
+Official site: [extract.page](https://extract.page) · Docs: [docs.extract.page](https://docs.extract.page) · Show HN thread (YC P25, 3 pts, 3 Jun 2026) on [Hacker News](https://news.ycombinator.com/item?id=48384498). All numbers and API examples in this post come from the team's launch post, the public docs index at `docs.extract.page/llms.txt`, and the OpenAPI spec at `docs.extract.page/openapi.json`.
+
+## What Is Extract?
+
+Extract is a hosted document parsing API built by the same team behind YouLearn (an AI learning app that processes millions of pages internally). It converts PDFs, PPTX, DOCX, and scanned documents into structured chunks of text plus extracted figures, each with a bounding box, page number, chunk type, and confidence score. The output schema is identical whether you call the synchronous endpoint or the async batch lane.
+
+Two things make Extract different from the usual OCR-as-a-service offering:
+
+- **A two-stage pipeline with a custom VLM.** The system first tries to pull native text out of the document directly. Only on pages that need OCR does it invoke a vision-language model that the team trained themselves. A synthetic data generation pipeline recreates the documents the model gets wrong, so retraining is targeted rather than hand-labeled.
+- **Element-level bounding boxes.** Every chunk you receive points back to its exact position on the page as `[x0, y0, x1, y1]` in PDF user-space points. That is what makes it useful as a source-of-truth for RAG, form population, and audit trails, not just a "give me some text" call.
+
+The team published a benchmark on 130 human-labeled difficult real-world pages comparing Extract against AWS Textract, Extend, Reducto, LlamaParse, and Unstructured. Extract is #1 on text accuracy (81.9%) and word-overlap F1 (84.5%), second on grounded accuracy, competitive on layout IoU, and at least 2x faster than every parser tested.
+
+## Why It Matters
+
+Document parsing is one of the most boring but most important pieces of an AI workflow. Almost every RAG pipeline, agent with file access, or form-filling automation eventually has to face a messy PDF. Most teams default to AWS Textract because it is the easy button, even though it is slow and expensive at scale, or to one of the modern hosted parsers without realizing how much accuracy and cost variance there is between them.
+
+If Extract's benchmark numbers hold up on real customer data, the case is straightforward: a 71% to 92% text accuracy jump in a week, at the same speed and roughly 5x cheaper than Textract, is a real win for teams that have been quietly overpaying for OCR they can barely trust.
+
+## Pricing and Surfaces
+
+There are two surfaces, sharing the same extraction engine and the same per-page billing:
+
+- **Sync** — `POST /v1/extract` (document reachable by URL) and `POST /v1/extract/file` (multipart upload). One document in, results back in seconds. Best for real-time agent loops, screenshots, and small batches.
+- **Async batch** — `POST /v1/files` to stage documents, `POST /v1/batches` to submit them, then poll for per-item status. Built for hundreds or thousands of files where you do not want to manage thousands of synchronous HTTP calls.
+
+The hosted API accepts exactly four knobs: `url` (for the sync-by-URL surface), `extract_text`, `extract_images`, and `ocr` (with values `auto`, `never`, or `force`). Page limit, max size, OCR provider, and image/OCR thresholds are intentionally not user-configurable.
+
+Pricing is $3 per 1,000 pages, which the team pegs as roughly 5x cheaper than AWS Textract with layout and tables enabled. Batch uploads and results have a 3-day retention window by default (longer on request).
+
+## Step 1: Create an API Key
+
+Sign in at [extract.page/dashboard](https://extract.page/dashboard) and generate an API key. Set it as `EXTRACT_API_KEY` in your shell so the curl and Python examples below can read it from the environment.
+
+```bash
+export EXTRACT_API_KEY="..."
+```
+
+## Step 2: Extract by URL (Sync)
+
+When the document is already reachable over HTTP — an S3 presigned URL, a public PDF on arXiv, a CDN link — the JSON endpoint is the simplest call:
+
+```bash
+curl -X POST https://api.extract.page/v1/extract \
+  -H "X-API-KEY: $EXTRACT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://arxiv.org/pdf/1706.03762.pdf"
+  }'
+```
+
+The response is a JSON document with a `chunks` array. Each chunk carries `page_content`, `page_no`, `bbox` (in PDF user-space points), `chunk_type`, `confidence`, and optionally an `image_url`, `image_b64`, or `image_mime` for figures.
+
+Equivalent Python:
+
+```python
+import os, requests
+
+r = requests.post(
+    "https://api.extract.page/v1/extract",
+    headers={"X-API-KEY": os.environ["EXTRACT_API_KEY"]},
+    json={"url": "https://arxiv.org/pdf/1706.03762.pdf"},
+    timeout=120,
+)
+r.raise_for_status()
+doc = r.json()
+print(len(doc["chunks"]), "chunks")
+```
+
+## Step 3: Extract by Upload (Sync)
+
+When the document bytes are local — agent output, a webhook payload, a file from disk — use the multipart endpoint so you do not have to stage the file at a public URL first:
+
+```bash
+curl -X POST https://api.extract.page/v1/extract/file \
+  -H "X-API-KEY: $EXTRACT_API_KEY" \
+  -F "file=@paper.pdf"
+```
+
+Python:
+
+```python
+import os, requests
+
+with open("paper.pdf", "rb") as f:
+    r = requests.post(
+        "https://api.extract.page/v1/extract/file",
+        headers={"X-API-KEY": os.environ["EXTRACT_API_KEY"]},
+        files={"file": ("paper.pdf", f, "application/pdf")},
+        timeout=120,
+    )
+r.raise_for_status()
+doc = r.json()
+print(len(doc["chunks"]), "chunks")
+```
+
+## Step 4: Submit a Batch (Async)
+
+For hundreds or thousands of files, looping the sync endpoint works but ties up an HTTP connection per call. The batch lane uploads files to S3 directly, lets you submit many at once, and returns a single `batch_id` you can poll.
+
+The flow is:
+
+1. `POST /v1/files` per file → returns `file_id` plus a presigned S3 PUT URL.
+2. `PUT` the bytes to the presigned URL — they never transit Extract's API.
+3. `POST /v1/batches` with the list of `file_id`s → returns a `batch_id` with `status="pending"`.
+4. `GET /v1/batches/{id}` poll loop → per-item status as workers complete them.
+5. `GET /v1/batches/{id}/items/{id}/result` → 302 to a presigned S3 GET URL.
+
+```python
+import asyncio, os
+from pathlib import Path
+
+import httpx
+
+API = "https://api.extract.page"
+HEADERS = {"X-API-KEY": os.environ["EXTRACT_API_KEY"]}
+
+async def upload(client: httpx.AsyncClient, path: Path) -> str:
+    meta = (await client.post(
+        f"{API}/v1/files",
+        json={"filename": path.name, "size_bytes": path.stat().st_size},
+    )).json()
+    async with httpx.AsyncClient() as raw:
+        await raw.put(
+            meta["upload"]["url"],
+            content=path.read_bytes(),
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=600,
+        )
+    return meta["id"]
+```
+
+Three properties worth knowing up front: bytes never transit the API (everything goes through presigned S3), uploaded inputs and result blobs auto-expire after 3 days, and `POST /v1/batches` accepts an `Idempotency-Key` header so a retry returns the same `batch_id` instead of double-billing.
+
+## Step 5: Use the Output
+
+The response schema is the same for sync and batch. A typical chunk looks like:
+
+```json
+{
+  "page_content": "Attention Is All You Need...",
+  "page_no": 1,
+  "bbox": [72.0, 720.0, 540.0, 760.0],
+  "chunk_type": "text",
+  "confidence": 0.98
+}
+```
+
+For figures, `image_url` (hosted, presigned) or `image_b64` plus `image_mime` give you back the rendered image. Pair `bbox` with `page_no` and you have a citation-ready span — useful for RAG provenance, audit trails on form fills, and any UI that wants to highlight the source span on the original page.
+
+## Practical Evaluation Checklist
+
+Before committing to a parser, run it on your own hard documents. The team offers a free benchmark: send a few PDFs, they run Extract against the same set, and reply with results in a few days.
+
+Things to check in your own eval:
+
+- **Text accuracy** on a hand-labeled subset of your real documents — not synthetic benchmark pages.
+- **Bounding box quality** — does `bbox` actually point at the right span when you render it on the page?
+- **Cost per 1K pages** including OCR-forced runs on scans, not just text-only PDFs.
+- **3-day retention** — does the default work for your data lifecycle, or do you need a longer retention contract?
+- **Sync vs batch latency** — sync is fine for one document in an agent loop, but bulk ingestion should go through the batch lane.
+- **OpenAPI spec** lives at `docs.extract.page/openapi.json` — you can generate typed clients for the four-knob surface area.
+
+## Security Notes
+
+- API keys are passed via the `X-API-KEY` header. Treat them like any other secret — load from environment, never check into git, and rotate via the dashboard if exposed.
+- The async batch lane uploads files directly to S3 via presigned PUT URLs that Extract returns. Your bytes never transit Extract's API server, but they do sit in the team's S3 bucket for 3 days. Confirm that the retention window is acceptable for any documents with regulatory residency requirements.
+- Pass an `Idempotency-Key` on `POST /v1/batches` if you might retry — the team guarantees the same `batch_id` within the 3-day window.
+- The hosted API does not expose page limit, max size, or OCR provider knobs. If you need to tune those, the right move is to send the team your real documents and ask for a benchmark on them, not to assume a different parser will be more flexible.
+
+## FAQ
+
+**Q: How does Extract compare to AWS Textract, Reducto, or LlamaParse in practice?**
+
+**A:** On the team's 130-page benchmark against difficult real-world documents, Extract ranked first on text accuracy (81.9%) and word-overlap F1 (84.5%), second on grounded accuracy, and was at least 2x faster than every parser it was tested against. At $3 per 1,000 pages, it is roughly 5x cheaper than Textract with layout and tables enabled. Independent reproduction on your own documents is the only way to know if the numbers hold for your workload — the team will run a free benchmark if you send them PDFs.
+
+**Q: Does Extract handle scanned documents, or only native text PDFs?**
+
+**A:** Both. The pipeline first tries to pull native text directly out of the document and only invokes OCR on pages that need it. The `ocr` field on the request accepts `auto` (default), `never`, or `force` so you can pin behavior per request.
+
+**Q: Can I get the bounding boxes back so I can render citations?**
+
+**A:** Yes. Every chunk in the response carries a `bbox` field as `[x0, y0, x1, y1]` in PDF user-space points, plus the `page_no`. For figures, the chunk includes `image_url` (presigned hosted link) or `image_b64` with `image_mime`.
+
+**Q: What happens to my files after the batch finishes?**
+
+**A:** Uploaded inputs and result blobs both auto-expire after 3 days. The deadline for inputs is "uploaded until a worker fetches it" — once a worker pulls the bytes into memory, the processing itself has no time limit. If you need a longer retention window, the team will bump it to a week or more on request.
+
+**Q: Is there a free tier or open-source version?**
+
+**A:** Pricing is $3 per 1,000 pages with no free tier mentioned. The team offers a free benchmark on your own documents if you email them, but the API itself is paid. There is no open-source release at the time of writing.
+
+**Q: How do I avoid double-billing on a retried batch submission?**
+
+**A:** Pass an `Idempotency-Key` header on `POST /v1/batches`. Resubmitting the same key within the 3-day window returns the same `batch_id` rather than creating a duplicate batch.
+
+## Conclusion
+
+Extract is a solid new option in a category that has been stuck on "use Textract or hand-roll something with Tesseract." The combination of a custom VLM only invoked on the hard pages, element-level bounding boxes, and an async batch lane that uploads directly to S3 makes it worth a benchmark run on your own messiest PDFs. At $3 per 1,000 pages it is also cheap enough to be a default for new projects rather than a last-resort upgrade.
