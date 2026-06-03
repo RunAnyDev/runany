@@ -10,53 +10,35 @@ const sortedPosts = allPosts.sort((a, b) => {
   return b.id.localeCompare(a.id);
 });
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
-const categories = [...new Set(allPosts.map(p => p.data.category))];
-const tags = [...new Set(allPosts.flatMap(p => p.data.tags))];
-
-const selectedCategory = Astro.url.searchParams.get('category') || '';
-const selectedTag = Astro.url.searchParams.get('tag') || '';
+const categories = [...new Set(allPosts.map((post) => post.data.category))].sort();
+const tags = [...new Set(allPosts.flatMap((post) => post.data.tags))].sort();
 
 const maxVisibleTags = 6;
-const sortedTags = selectedTag
-  ? [
-      ...tags.filter(t => t.toLowerCase() === selectedTag.toLowerCase()),
-      ...tags.filter(t => t.toLowerCase() !== selectedTag.toLowerCase()),
-    ]
-  : tags;
-const visibleTags = sortedTags.slice(0, maxVisibleTags);
-const hiddenTags = sortedTags.slice(maxVisibleTags);
+const visibleTags = tags.slice(0, maxVisibleTags);
+const hiddenTags = tags.slice(maxVisibleTags);
 const hasMoreTags = hiddenTags.length > 0;
 
-const activeClasses = 'bg-cyan-300 text-slate-950';
-const inactiveClasses = 'border border-white/10 bg-white/5 text-slate-300 hover:text-cyan-200';
-const activeTagClasses = 'bg-violet-300 text-slate-950';
-const inactiveTagClasses = 'border border-white/10 bg-white/5 text-slate-300 hover:text-violet-200';
-
-const filteredPosts = sortedPosts.filter(post => {
-  if (selectedCategory && post.data.category.toLowerCase() !== selectedCategory.toLowerCase()) return false;
-  if (selectedTag && !post.data.tags.map(t => t.toLowerCase()).includes(selectedTag.toLowerCase())) return false;
-  return true;
-});
-
 const postsPerPage = 6;
-const initialPosts = filteredPosts.slice(0, postsPerPage);
-const initialTotal = filteredPosts.length;
+const initialPosts = sortedPosts.slice(0, postsPerPage);
+const initialTotal = sortedPosts.length;
 const hasMore = initialTotal > postsPerPage;
 
 const siteUrl = 'https://runany.dev';
+const pageTitle = 'Developer Blog – AI Setup, Dev Tools & Local LLMs';
+const pageDescription = 'Browse tutorials, tool reviews, and setup guides covering AI setup, developer tools, local LLMs, self-hosted services, and automation workflows at runany.dev.';
 const structuredData = [
   {
     '@context': 'https://schema.org',
     '@type': 'Blog',
     name: 'runany.dev Blog',
-    description: 'Browse tutorials, tool reviews, and setup guides covering AI setup, developer tools, local LLMs, self-hosted services, and automation workflows at runany.dev.',
+    description: pageDescription,
     url: `${siteUrl}/blog/`,
     inLanguage: 'en-US',
   },
   {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
-    itemListElement: filteredPosts.map((post, index) => ({
+    itemListElement: sortedPosts.map((post, index) => ({
       '@type': 'ListItem',
       position: index + 1,
       url: `${siteUrl}/blog/${getSlug(post.id)}/`,
@@ -72,35 +54,15 @@ const structuredData = [
     ],
   },
 ];
-
-const pageTitle = selectedCategory
-  ? `${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)} Posts`
-  : selectedTag
-  ? `#${selectedTag} Posts`
-  : 'Developer Blog – AI Setup, Dev Tools & Local LLMs';
 ---
 
-<BaseLayout title={pageTitle} description="Browse tutorials, tool reviews, and setup guides covering AI setup, developer tools, local LLMs, self-hosted services, and automation workflows at runany.dev." canonicalURL={`${siteUrl}/blog/`} structuredData={structuredData}>
+<BaseLayout title={pageTitle} description={pageDescription} canonicalURL={`${siteUrl}/blog/`} structuredData={structuredData}>
   <section class="mx-auto max-w-6xl px-4 py-12 md:py-16">
     <nav aria-label="Breadcrumb" class="mb-6 text-sm">
       <ol class="flex flex-wrap items-center gap-2 text-slate-500">
         <li><a href="/" class="hover:text-cyan-300">Home</a></li>
         <li>›</li>
         <li><span class="text-slate-300">Blog</span></li>
-        {selectedCategory && (
-          <>
-            <li>›</li>
-            <li><a href="/blog/" class="hover:text-cyan-300">All Posts</a></li>
-            <li>›</li>
-            <li><span class="text-slate-300 capitalize">{selectedCategory}</span></li>
-          </>
-        )}
-        {selectedTag && !selectedCategory && (
-          <>
-            <li>›</li>
-            <li><span class="text-slate-300">#{selectedTag}</span></li>
-          </>
-        )}
       </ol>
     </nav>
 
@@ -114,121 +76,87 @@ const pageTitle = selectedCategory
 
     <section aria-labelledby="categories-heading">
       <h2 id="categories-heading" class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-400">Categories</h2>
-      <div class="mb-10 grid gap-5 rounded-3xl border border-white/10 bg-slate-900/45 p-5 md:grid-cols-2">
-        <div>
-          <div class="flex flex-wrap gap-2" id="blog-category-filters">
-            <a href="/blog/" data-filter="category" data-value="" class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', !selectedCategory && !selectedTag ? activeClasses : inactiveClasses]}>
-              All
-            </a>
-            {categories.map(cat => (
-              <a href={`/category/${cat.toLowerCase()}/`} data-filter="category" data-value={cat.toLowerCase()} class:list={['rounded-full px-4 py-2 text-sm font-medium transition-colors', selectedCategory === cat.toLowerCase() ? activeClasses : inactiveClasses]}>
-                {cat}
-              </a>
-            ))}
-          </div>
-        </div>
+      <div class="mb-10 grid gap-4 rounded-3xl border border-white/10 bg-slate-950/60 p-6 md:grid-cols-3">
+        <a href="/blog/" class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 px-5 py-4 text-sm font-medium text-cyan-200 transition hover:bg-cyan-300/20">All posts</a>
+        {categories.map((category) => (
+          <a href={`/category/${category.toLowerCase()}/`} class="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-medium capitalize text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200">
+            {category}
+          </a>
+        ))}
+      </div>
+    </section>
 
-        <div>
-          <h3 class="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Tags</h3>
-          <div class="flex flex-wrap gap-2" id="blog-tag-filters">
-            {visibleTags.map(tag => (
-              <a href={`/tags/${tag.toLowerCase()}/`} data-filter="tag" data-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
-                #{tag}
-              </a>
-            ))}
-            {hasMoreTags && (
-              <div id="blog-hidden-tags" class="hidden contents">
-                {hiddenTags.map(tag => (
-                  <a href={`/tags/${tag.toLowerCase()}/`} data-filter="tag" data-value={tag.toLowerCase()} class:list={['rounded-full px-3 py-1.5 text-sm transition-colors', selectedTag === tag.toLowerCase() ? activeTagClasses : inactiveTagClasses]}>
-                    #{tag}
-                  </a>
-                ))}
-              </div>
-            )}
-            {hasMoreTags && (
-              <button id="blog-tag-toggle" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:text-cyan-200">
-                +{hiddenTags.length} more
-              </button>
-            )}
-            {selectedCategory || selectedTag ? (
-              <a href="/blog/" id="blog-clear-btn" class="rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm text-red-400 hover:bg-red-500/20">
-                Clear filters
-              </a>
-            ) : null}
-          </div>
+    <section aria-labelledby="tags-heading">
+      <div class="mb-4 flex items-center justify-between gap-4">
+        <h2 id="tags-heading" class="text-sm font-semibold uppercase tracking-wider text-slate-400">Popular tags</h2>
+        {hasMoreTags && (
+          <button id="blog-tag-toggle" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:border-violet-300/40 hover:text-violet-200" type="button">
+            +{hiddenTags.length} more
+          </button>
+        )}
+      </div>
+      <div class="mb-10 rounded-3xl border border-white/10 bg-slate-950/60 p-6">
+        <div class="flex flex-wrap gap-3">
+          {visibleTags.map((tag) => (
+            <a href={`/tags/${tag.toLowerCase()}/`} class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 transition hover:border-violet-300/40 hover:text-violet-200">
+              #{tag}
+            </a>
+          ))}
+          {hasMoreTags && (
+            <div id="blog-hidden-tags" class="hidden contents">
+              {hiddenTags.map((tag) => (
+                <a href={`/tags/${tag.toLowerCase()}/`} class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 transition hover:border-violet-300/40 hover:text-violet-200">
+                  #{tag}
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
 
     <section aria-labelledby="posts-heading">
-      <h2 id="posts-heading" class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-400">
-        {selectedCategory || selectedTag ? 'Filtered Posts' : 'All Posts'}
-      </h2>
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <h2 id="posts-heading" class="text-sm font-semibold uppercase tracking-wider text-slate-400">All Posts</h2>
+        <button id="load-more-btn" class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-300/20" type="button">
+          Load more posts
+        </button>
+      </div>
       <div class="mb-4 flex items-center justify-between">
         <p class="text-sm text-slate-400" id="post-count">{initialTotal} posts</p>
         <div class="flex items-center gap-3" id="share-buttons">
           <span class="text-sm text-slate-500">Share:</span>
-          <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(siteUrl + '/blog')}&text=${encodeURIComponent('Tech notes for AI-first developers')}`} target="_blank" rel="noopener" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200" aria-label="Share on X (Twitter)">
+          <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(siteUrl + '/blog/')}&text=${encodeURIComponent('Tech notes for AI-first developers')}`} target="_blank" rel="noopener" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200" aria-label="Share on X (Twitter)">
             X
           </a>
-          <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(siteUrl + '/blog')}`} target="_blank" rel="noopener" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200" aria-label="Share on LinkedIn">
+          <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(siteUrl + '/blog/')}`} target="_blank" rel="noopener" class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200" aria-label="Share on LinkedIn">
             in
           </a>
         </div>
       </div>
+
+      <div id="posts-grid" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {initialPosts.map((post) => (
+          <PostCard
+            title={post.data.title}
+            description={post.data.description}
+            pubDate={post.data.pubDate}
+            slug={getSlug(post.id)}
+            category={post.data.category}
+            tags={post.data.tags}
+            image={post.data.image}
+          />
+        ))}
+      </div>
+
+      {hasMore && <div id="sentinel" class="mt-8 h-1" aria-hidden="true"></div>}
+
+      <p id="empty-state" class:list={['mt-12 text-center text-slate-500', initialTotal !== 0 ? 'hidden' : '']}>
+        No posts found.
+      </p>
+
+      <div id="status" class="mt-4 text-center text-sm text-slate-500" aria-live="polite"></div>
     </section>
-
-    <div id="posts-grid" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-      {initialPosts.map(post => (
-        <article data-post-card-article>
-          <a href={`/blog/${getSlug(post.id)}/`} class="group block rounded-2xl border border-white/10 bg-slate-900/60 p-6 transition hover:border-cyan-300/40" data-post-link>
-            {post.data.image && (
-              <div class="mb-4 overflow-hidden rounded-xl border border-white/10 bg-slate-950">
-                <img
-                  src={post.data.image.url}
-                  alt={post.data.image.alt || post.data.title}
-                  width="400"
-                  height="225"
-                  class="h-40 w-full object-cover transition duration-300 group-hover:scale-105"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </div>
-            )}
-            <div class="mb-3 flex items-center gap-2 text-xs text-slate-500">
-              <span class="rounded-full bg-cyan-300/10 px-2.5 py-1 font-semibold text-cyan-200">{post.data.category}</span>
-              <time datetime={new Date(post.data.pubDate).toISOString()}>
-                {new Date(post.data.pubDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </time>
-            </div>
-            <h3 class="mb-2 text-lg font-bold text-white group-hover:text-cyan-200">{post.data.title}</h3>
-            <p class="mb-4 line-clamp-2 text-sm text-slate-400">{post.data.description}</p>
-            <div class="flex flex-wrap gap-1.5" data-card-tags>
-              {(post.data.tags || []).slice(0, 3).map(tag => (
-                <span class="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300">#{tag}</span>
-              ))}
-            </div>
-          </a>
-        </article>
-      ))}
-    </div>
-
-    {hasMore && (
-      <>
-        <div id="sentinel" class="h-1" aria-hidden="true"></div>
-        <div class="mt-8 text-center">
-          <button id="load-more-btn" class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-8 py-3 font-semibold text-cyan-200 transition hover:bg-cyan-300/20">
-            Load more posts
-          </button>
-        </div>
-      </>
-    )}
-
-    <p id="empty-state" class:list={['mt-12 text-center text-slate-500', initialTotal !== 0 ? 'hidden' : '']}>
-      No posts found matching your filters.
-    </p>
-
-    <div id="status" class="mt-4 text-center text-sm text-slate-500" aria-live="polite"></div>
   </section>
 
   <script define:vars={{ postsPerPage, initialTotal, hasMore }}>
@@ -236,36 +164,15 @@ const pageTitle = selectedCategory
       const grid = document.getElementById('posts-grid');
       const loadMoreBtn = document.getElementById('load-more-btn');
       const sentinel = document.getElementById('sentinel');
-      const countEl = document.getElementById('post-count');
-      const emptyEl = document.getElementById('empty-state');
       const statusEl = document.getElementById('status');
-      const clearBtn = document.getElementById('blog-clear-btn');
       const tagToggle = document.getElementById('blog-tag-toggle');
+      const hiddenTags = document.getElementById('blog-hidden-tags');
 
-      const categoryFilters = document.querySelectorAll('[data-filter="category"]');
-      const tagFilters = document.querySelectorAll('[data-filter="tag"]');
-
-      let currentCategory = '';
-      let currentTag = '';
       let currentPage = 1;
-      let total = initialTotal;
+      const total = initialTotal;
       let hasMorePosts = hasMore;
       let loading = false;
-
-      const params = new URLSearchParams(window.location.search);
-      currentCategory = params.get('category') || '';
-      currentTag = params.get('tag') || '';
-
-      const updateFilterUI = (cat, tag) => {
-        categoryFilters.forEach(btn => {
-          const isActive = btn.dataset.value === cat && !tag;
-          btn.className = `rounded-full px-4 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-cyan-300 text-slate-950' : 'border border-white/10 bg-white/5 text-slate-300 hover:text-cyan-200'}`;
-        });
-        tagFilters.forEach(btn => {
-          const isActive = btn.dataset.value === tag;
-          btn.className = `rounded-full px-3 py-1.5 text-sm transition-colors ${isActive ? 'bg-violet-300 text-slate-950' : 'border border-white/10 bg-white/5 text-slate-300 hover:text-violet-200'}`;
-        });
-      };
+      let observer = null;
 
       const updateStatus = () => {
         const showing = Math.min(currentPage * postsPerPage, total);
@@ -274,40 +181,37 @@ const pageTitle = selectedCategory
 
       const createPostCard = (post) => {
         const clone = document.createElement('article');
+        clone.className = 'group relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/75 shadow-2xl shadow-slate-950/30 transition duration-300 hover:-translate-y-1 hover:border-cyan-300/40 hover:shadow-cyan-950/30';
         clone.setAttribute('data-post-card-article', '');
 
         const date = new Date(post.pubDate);
         const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const imageMarkup = post.image ? `
+          <div class="relative aspect-[16/9] overflow-hidden bg-slate-900">
+            <img src="${post.image.url}" alt="${post.image.alt || post.title}" width="600" height="338" class="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-transparent to-transparent"></div>
+          </div>` : '';
+        const tagMarkup = (post.tags || []).slice(0, 3).map((tag) => `
+          <span class="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300">#${tag}</span>`).join('');
 
         clone.innerHTML = `
-          <a href="/blog/${post.slug}/" class="group block rounded-2xl border border-white/10 bg-slate-900/60 p-6 transition hover:border-cyan-300/40" data-post-link>
-            ${post.image ? `<div class="mb-4 overflow-hidden rounded-xl border border-white/10 bg-slate-950">
-              <img src="${post.image.url}" alt="${post.image.alt || post.title}" width="400" height="225" class="h-40 w-full object-cover transition duration-300 group-hover:scale-105" loading="lazy" decoding="async" />
-            </div>` : ''}
-            <div class="mb-3 flex items-center gap-2 text-xs text-slate-500">
-              <span class="rounded-full bg-cyan-300/10 px-2.5 py-1 font-semibold text-cyan-200">${post.category}</span>
+          <a href="/blog/${post.slug}/" class="block" aria-label="Read ${post.title}">
+            ${imageMarkup}
+          </a>
+          <div class="p-5">
+            <div class="mb-3 flex items-center justify-between gap-3 text-xs font-medium text-slate-400">
+              <a href="/category/${post.category.toLowerCase()}/" class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-cyan-200 hover:border-cyan-300/50">${post.category}</a>
               <time datetime="${date.toISOString()}">${formattedDate}</time>
             </div>
-            <h3 class="mb-2 text-lg font-bold text-white group-hover:text-cyan-200">${post.title}</h3>
-            <p class="mb-4 line-clamp-2 text-sm text-slate-400">${post.description}</p>
-            <div class="flex flex-wrap gap-1.5" data-card-tags>
-              ${(post.tags || []).slice(0, 3).map(tag => `<span class="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300">#${tag}</span>`).join('')}
-            </div>
-          </a>
+            <h3 class="mb-3 text-xl font-bold leading-tight text-white">
+              <a href="/blog/${post.slug}/" class="hover:text-cyan-200 transition-colors">${post.title}</a>
+            </h3>
+            <p class="mb-4 line-clamp-2 text-sm leading-6 text-slate-400">${post.description}</p>
+            <div class="flex flex-wrap gap-2">${tagMarkup}</div>
+          </div>
         `;
+
         return clone;
-      };
-
-      const buildQuery = (page) => {
-        let q = `/api/posts?page=${page}&limit=${postsPerPage}`;
-        if (currentCategory) q += '&category=' + encodeURIComponent(currentCategory);
-        if (currentTag) q += '&tag=' + encodeURIComponent(currentTag);
-        return q;
-      };
-
-      const clearGrid = () => {
-        const articles = grid.querySelectorAll('[data-post-card-article]');
-        articles.forEach((a) => a.remove());
       };
 
       const fetchAndAppend = async () => {
@@ -317,7 +221,7 @@ const pageTitle = selectedCategory
 
         try {
           const nextPage = currentPage + 1;
-          const resp = await fetch(buildQuery(nextPage));
+          const resp = await fetch(`/api/posts?page=${nextPage}&limit=${postsPerPage}`);
           if (!resp.ok) throw new Error('Failed to fetch');
           const data = await resp.json();
 
@@ -329,7 +233,10 @@ const pageTitle = selectedCategory
           hasMorePosts = data.hasMore;
           updateStatus();
 
-          if (!data.hasMore && observer) observer.disconnect();
+          if (!data.hasMore) {
+            if (observer) observer.disconnect();
+            loadMoreBtn.style.display = 'none';
+          }
         } catch (err) {
           statusEl.textContent = 'Failed to load posts. Try again.';
           console.error(err);
@@ -339,80 +246,11 @@ const pageTitle = selectedCategory
         }
       };
 
-      const applyFilter = async (cat, tag) => {
-        if (currentCategory === cat && currentTag === tag) return;
-
-        currentCategory = cat;
-        currentTag = tag;
-        currentPage = 0;
-        hasMorePosts = true;
-
-        updateFilterUI(cat, tag);
-
-        let newUrl = '/blog';
-        const params = new URLSearchParams();
-        if (cat) params.set('category', cat);
-        if (tag) params.set('tag', tag);
-        const qs = params.toString();
-        if (qs) newUrl += '?' + qs;
-        history.pushState({}, '', newUrl);
-
-        loading = true;
-        try {
-          const resp = await fetch(buildQuery(1));
-          if (!resp.ok) throw new Error('Failed to fetch');
-          const data = await resp.json();
-
-          clearGrid();
-          data.posts.forEach((post) => {
-            grid.append(createPostCard(post));
-          });
-
-          total = data.total;
-          currentPage = 1;
-          hasMorePosts = data.hasMore;
-
-          if (countEl) countEl.textContent = String(total);
-          if (emptyEl) emptyEl.classList.toggle('hidden', total !== 0);
-
-          updateStatus();
-
-          if (observer) {
-            observer.disconnect();
-            if (data.hasMore) observer.observe(sentinel);
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          loading = false;
-        }
-      };
-
-      categoryFilters.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          applyFilter(btn.dataset.value, '');
-        });
-      });
-
-      tagFilters.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const newTag = btn.dataset.value === currentTag ? '' : btn.dataset.value;
-          applyFilter(currentCategory, newTag);
-        });
-      });
-
-      if (clearBtn) {
-        clearBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          applyFilter('', '');
-        });
-      }
-
       if (loadMoreBtn) {
+        if (!hasMorePosts) loadMoreBtn.style.display = 'none';
         loadMoreBtn.addEventListener('click', fetchAndAppend);
       }
 
-      let observer = null;
       if ('IntersectionObserver' in window && sentinel && hasMorePosts) {
         observer = new IntersectionObserver((entries) => {
           if (!entries.some((entry) => entry.isIntersecting)) return;
@@ -422,19 +260,16 @@ const pageTitle = selectedCategory
         observer.observe(sentinel);
       }
 
-      if (tagToggle && document.getElementById('blog-hidden-tags')) {
+      if (tagToggle && hiddenTags) {
         tagToggle.addEventListener('click', () => {
-          const hiddenTags = document.getElementById('blog-hidden-tags');
           const isHidden = hiddenTags.classList.contains('hidden');
           hiddenTags.classList.toggle('hidden', !isHidden);
           hiddenTags.classList.toggle('contents', isHidden);
-          tagToggle.textContent = isHidden ? 'Show less' : '+' + hiddenTags.querySelectorAll('button').length + ' more';
-          tagToggle.style.display = '';
+          tagToggle.textContent = isHidden ? 'Show less' : `+${hiddenTags.querySelectorAll('a').length} more`;
         });
       }
 
       updateStatus();
-    })();
+    });
   </script>
 </BaseLayout>
-        <li><a href="/blog/" class="hover:text-cyan-300">All Posts</a></li>
