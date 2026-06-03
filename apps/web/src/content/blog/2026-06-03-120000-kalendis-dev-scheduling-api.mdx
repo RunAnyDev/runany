@@ -1,0 +1,144 @@
+---
+title: "Kalendis – Scheduling API That Handles Time Zones and DST"
+description: "Kalendis is an API-first scheduling backend that handles recurrence rules, time zones, DST transitions, and conflict-safe bookings so your team never double-books a room or misses a meeting."
+pubDate: "2026-06-03"
+tags: ["api-platform", "dev-tools", "scheduling", "calendar"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kalendis-dev-scheduling-api.webp"
+  alt: "Kalendis Scheduling API product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kalendis is an API-first scheduling backend that handles the gnarly parts of calendar scheduling — recurrence, time zones, DST, and conflict-free bookings — so you can focus on your UI.
+
+## Source and Accuracy Notes
+
+- Product: [https://kalendis.dev](https://kalendis.dev)
+- HN Launch: [Show HN: Kalendis](https://news.ycombinator.com/item?id=45956154)
+- MCP tool generates typed clients for Next.js, Express, Fastify, and NestJS
+
+## What Is Kalendis?
+
+Kalendis is a scheduling API built for developers who need reliable calendar logic without building it themselves. The core problem it solves: dates and times are surprisingly hard. Recurrence rules have edge cases, DST transitions shift clocks backward or forward, and conflict detection requires checking overlaps across any timezone.
+
+Instead of spending weeks building this correctly, you plug in Kalendis and get:
+
+- **Availability engine** — recurring rules plus one-off exceptions and blackout periods, returned in a clean queryable shape
+- **Conflict-safe booking endpoints** — create events without worrying about double-booking
+- **MCP tool** — generates typed clients and API route handlers for Next.js, Express, Fastify, and NestJS, so you can scaffold calls straight from your IDE or agent tooling
+
+The HN launch post describes it as: "You keep your UI; we handle the gnarly parts."
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+```bash
+npm install @kalendis/sdk
+```
+
+### Step 2: Configure Your Calendar
+
+```typescript
+import { KalendisClient } from '@kalendis/sdk';
+
+const kalendis = new KalendisClient({
+  apiKey: process.env.KALENDIS_API_KEY,
+  timezone: 'America/New_York',
+});
+
+// Create a recurring availability rule
+const rule = await kalendis.availability.create({
+  pattern: 'WEEKLY',
+  days: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+  startTime: '09:00',
+  endTime: '17:00',
+  timezone: 'America/New_York',
+});
+
+console.log(rule.id); // 'avail_abc123'
+```
+
+### Step 3: Book Without Conflicts
+
+```typescript
+// Attempt a booking — Kalendis returns conflict error if overlaps exist
+const booking = await kalendis.bookings.create({
+  slotId: 'avail_abc123',
+  startTime: '2026-06-15T10:00:00Z',
+  endTime: '2026-06-15T11:00:00Z',
+  title: 'Team Sync',
+  participants: ['alice@example.com', 'bob@example.com'],
+});
+
+console.log(booking.id); // 'book_xyz789'
+```
+
+### Step 4: Query Availability
+
+```typescript
+// Find open slots that fit a meeting of given duration
+const slots = await kalendis.availability.find({
+  duration: 60, // minutes
+  range: {
+    start: '2026-06-15T00:00:00Z',
+    end: '2026-06-30T23:59:59Z',
+  },
+  timezone: 'America/New_York',
+});
+
+console.log(slots); // [{ start: '...', end: '...' }, ...]
+```
+
+## Deeper Analysis
+
+Kalendis targets a specific pain point: calendar edge cases. Every developer who has built scheduling into an app knows the trap — recurrence seems simple until you hit DST, when a meeting that was at 2 PM becomes 3 PM after the clocks spring forward. Or you create a recurring meeting and a participant creates a one-off override, and now both events exist and overlap.
+
+The API-first approach means it's backend-only — you bring your own UI. This is the right call for teams building custom scheduling UIs or embedding scheduling into existing products. The MCP tool is interesting because it brings the same logic into AI agent tooling — an agent can discover and call Kalendis endpoints to check availability or book meetings on behalf of a user.
+
+The MCP client generation is the standout feature: instead of reading docs and writing HTTP calls, you get typed TypeScript clients that match your stack. This mirrors how GitHub's MCP tool works — typed wrappers reduce friction and eliminate a class of integration bugs.
+
+The 18 HN points are low but the tool is genuine. API-first scheduling is a real developer pain point that rarely gets covered because it's infrastructure rather than a flashy AI feature.
+
+## Practical Evaluation Checklist
+
+- Rate limit and pricing model not yet documented — evaluate before production use
+- SDK currently available for Node.js/TypeScript — check for Python or Go SDK if needed
+- DST handling is the key differentiator — test with a meeting that spans a DST boundary
+- Conflict detection covers only direct overlap — no soft conflict (near-miss) detection
+- MCP tool means it works with AI agents that support Model Context Protocol
+
+## Security Notes
+
+- API key authentication required for all endpoints
+- Booking operations are idempotent — duplicate submission of the same booking returns the existing record rather than creating a duplicate
+- No third-party calendar sync — Kalendis owns availability and booking data, not your Google or Outlook calendar
+
+## FAQ
+
+**Q:** Does Kalendis sync with Google Calendar or Outlook?
+
+**A:** Not in the current launch. Kalendis owns the availability and booking data. If you need Google/Outlook sync, you would need to build that layer yourself using their webhooks or polling the booking endpoints.
+
+**Q:** How does DST handling work?
+
+**A:** Kalendis stores all times in UTC and converts to the specified timezone for display. When a DST transition occurs, the system handles the offset automatically — a meeting scheduled for 2 PM in `America/New_York` stays at 2 PM local time after the transition, even if the UTC timestamp shifts.
+
+**Q:** Can I create one-off exceptions to a recurring rule?
+
+**A:** Yes. The availability API supports blackout periods and one-off exceptions. You can mark a specific slot as unavailable or redirect it to a different time without modifying the underlying recurrence rule.
+
+**Q:** Is there a free tier?
+
+**A:** Pricing was not specified in the launch post. Check [kalendis.dev](https://kalendis.dev) for current pricing tiers.
+
+## Conclusion
+
+Kalendis solves a specific but painful infrastructure problem: getting calendar scheduling right is harder than it looks, and most teams end up building fragile logic that breaks on DST. The API-first approach with MCP tool generation makes it a natural fit for developer tools and AI agent workflows. If you're building anything that involves booking time slots across time zones, this is worth evaluating before rolling your own recurrence engine.
+
+**Link:** [https://kalendis.dev](https://kalendis.dev)
