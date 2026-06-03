@@ -1,0 +1,177 @@
+---
+title: "One - Agent Infrastructure for Every App (Formerly Pica)"
+description: "One (formerly Pica) is a Rust-based open-source agent infrastructure layer that gives any AI agent managed auth, audit logs, MCP access, and 70,000+ tools across 400+ apps via one CLI."
+pubDate: "2026-06-03"
+tags: ["ai-agents", "mcp", "agent-infrastructure", "rust", "dev-tools"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/one-agent-infrastructure.webp"
+  alt: "One (formerly Pica) agent infrastructure product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** One (formerly Pica) is a Rust-based open-source agent infrastructure platform that wires any AI agent into 400+ apps and 70,000+ actions through one CLI, a hosted MCP server, AuthKit for managed OAuth/API keys, a JSON-native Flow runtime for multi-step work, and built-in audit logs and guardrails.
+
+## Source and Accuracy Notes
+
+- Product site: [withone.ai](https://www.withone.ai/)
+- Documentation: [docs.withone.ai](https://docs.withone.ai/)
+- Open-source repo: [github.com/withoneai/pica](https://github.com/withoneai/pica) (1,482 stars, Rust)
+- Original Show HN: objectID 42781017, 63 points, late 2025
+- Company self-description: "the world's largest app knowledge base is now open source"
+
+The team rebranded from Pica to One after the Show HN launch and the older `picaos.com` domain now redirects to `withone.ai`. Stats like "70,988 tools", "20,000+ developers", and the customer logo wall (Google, Microsoft, Cisco, Figma, Docker, JetBrains, Postman, HubSpot, ElevenLabs, etc.) come from the live product page; integrations and counts change frequently, so treat them as a snapshot.
+
+## What Is One?
+
+One is an agent infrastructure layer that sits between an AI agent and the rest of the SaaS world. Instead of writing bespoke OAuth flows, scraping API docs, building tool definitions by hand, and wiring token refreshes for every integration, you install a single CLI and let the agent discover, authenticate, and call 70,000+ actions across 400+ platforms.
+
+The platform is built in Rust for the performance-critical pieces (auth, action dispatch, the Flow runtime) and exposes a managed MCP server plus a TypeScript SDK that any MCP-compatible client (Claude Desktop, Cursor, Claude Code, Cline, etc.) can attach to. The community edition of the core lives at `withoneai/pica`; the cloud product at [app.withone.ai](https://app.withone.ai) handles the heavy lifting (connection hosting, token refresh, observability, billing) so your agent does not have to.
+
+The three big problems One tries to solve:
+
+1. **Auth and token plumbing for hundreds of APIs.** OAuth 2.0, OAuth 1.0a, API keys, Basic Auth — One normalizes all of them behind one `connect` flow. Tokens refresh automatically; your agent never hits a 401.
+2. **Action knowledge and tool definitions.** Every platform has hundreds of endpoints. One ships a verified knowledge base of method signatures, required fields, pagination patterns, and integration gotchas so the agent does not have to guess.
+3. **Operational visibility and guardrails.** Every agent action is logged with full audit trail, and you can scope actions to a user, a tenant, or require human-in-the-loop approval for sensitive calls (sending email, deleting records, moving money).
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+npm i -g @withone/cli
+one init
+```
+
+The init command opens the dashboard so you can grab an API key and link it to your local CLI. The whole flow is meant to be done in under a minute — there is no local server to run, no Docker compose, no schema to migrate.
+
+### Step 2: Connect the apps you care about
+
+```bash
+one authkit connect
+```
+
+This opens a Plaid-style connect flow for any of the 400+ supported platforms — Gmail, Slack, HubSpot, Linear, Shopify, Stripe, Notion, GitHub, and so on. Each connection is scoped to your account by default; if you are building a multi-tenant product, AuthKit gives each end-user their own isolated credentials with full tenant separation.
+
+### Step 3: Install the One MCP server into your agent
+
+```bash
+# Claude Code / Cursor / Cline / any MCP client
+one mcp install
+```
+
+This adds One to your agent's MCP config so it can search, introspect, and execute actions through the standard tool-calling interface. From there, the agent can ask "send an email through Gmail" or "create a HubSpot contact from this lead" and One handles auth, rate limits, and error normalization.
+
+For a hosted MCP endpoint you can also just point your client at:
+
+```text
+https://mcp.withone.ai/v1/<your-key>
+```
+
+### Step 4: Chain multi-step work with Flow
+
+For workflows that span multiple apps (HubSpot to Linear to Slack to Gmail), One ships a JSON-native Flow runtime. The agent generates or edits the flow, then you execute it:
+
+```bash
+one flow execute customer-onboarding.json
+```
+
+Flows are explicit JSON, not a hidden visual builder, so they are easy to inspect, version in git, and have the agent modify safely. Twelve step types cover actions, branching, loops, parallel execution with concurrency caps, while loops, and sub-flow composition.
+
+## Deeper Analysis
+
+### Why agent infrastructure matters
+
+Anyone who has built a serious AI agent knows the real work is not the model — it is the last mile of plumbing. You have to:
+
+- Read API docs for the third-party services you want to call.
+- Write a typed SDK or hand-roll HTTP clients.
+- Handle OAuth flows, refresh tokens, and error codes for each one.
+- Maintain action definitions in a format the model can use.
+- Implement audit logging and permissions to keep your agent from going off the rails.
+- Wire scheduling, retries, and state for long-running work.
+
+One is the bet that this plumbing is generic enough — and common enough across every team building agents — that it should be a product rather than something every team re-invents. The fact that the customer logo wall includes Google, Microsoft, Cisco, Figma, Docker, and JetBrains suggests that bet is paying off in production at scale.
+
+### What the MCP angle changes
+
+Model Context Protocol turned the "every agent has its own bespoke tool interface" problem into a standard. One's hosted MCP server is the practical realization of this for production agents: instead of maintaining your own tool-calling server, you point your client at One and inherit 400+ tools instantly. The agent's tool budget becomes a configuration problem, not a build problem.
+
+For teams already using Claude Code, Cursor, or any MCP-compatible client, this means the integration is one config line, not a multi-day project. For teams building their own agents, the TypeScript SDK is the alternative path — same primitives, but you wire them up yourself.
+
+### The Flow runtime and agent-readable workflows
+
+Most "agent workflow" tools are visual builders. That is great for humans, terrible for agents. One chose to make flows JSON-native precisely because agents are good at generating and inspecting JSON and bad at manipulating opaque visual graphs. The result is workflows that an agent can:
+
+- Generate from a prompt
+- Inspect before execution (read every step, see every required field)
+- Modify safely in place (add a step, swap a tool, change a selector)
+- Version in git (a flow is just a file)
+
+Selectors like `$.steps.deal.response.name` make data flow between steps explicit and inspectable, which is what you want when an agent is the one writing the workflow.
+
+### Practical evaluation: where One fits and where it does not
+
+**Good fit:**
+- B2B SaaS products that need to ship native integrations fast.
+- Internal tools and agents that touch lots of third-party APIs (sales ops, support ops, marketing ops).
+- Multi-tenant products where each customer brings their own credentials.
+- Teams that want to expose a "natural language to action" surface in their product without building the whole stack.
+
+**Less good fit:**
+- Pure local/offline agents (One is a cloud platform with a managed plane).
+- Integrations with APIs that require a custom, on-prem gateway.
+- Use cases where the model itself is the bottleneck — One cannot make a bad model write better code.
+
+## Practical Evaluation Checklist
+
+Before adopting One for a production agent, verify:
+
+- [ ] All the third-party apps your agent needs are in the 400+ supported platforms list at [withone.ai/platforms](https://www.withone.ai/platforms).
+- [ ] The actions your agent needs are exposed in the action knowledge base (search via `one platforms --category <category>`).
+- [ ] Token refresh and storage are handled by One (you do not need to persist any credentials yourself).
+- [ ] Audit logs cover the actions your security team needs to see (most are logged by default; check the docs for the exceptions).
+- [ ] If you are multi-tenant, AuthKit's tenant isolation matches your compliance posture (SSO, SCIM, scoped credentials are all there).
+- [ ] The Flow runtime's step types cover your control flow (12 types including parallel with concurrency caps, loops, and sub-flows).
+- [ ] You can fall back to the TypeScript SDK if MCP is not the right surface for your client.
+
+## Security Notes
+
+One holds the credentials for every connection your agent makes. That is the point — and the risk. A few things to know:
+
+- **Connection isolation.** Each end-user gets their own scoped credentials, so a compromise in one tenant cannot reach another.
+- **Token storage.** OAuth tokens and API keys live in One's vault, encrypted at rest. They never touch your agent's runtime.
+- **Action-level guardrails.** You can require human approval for sensitive actions (e.g., "send email from user X") and lock down destructive actions per-tenant.
+- **Audit trail.** Every agent action is logged with full context — who, what, when, and the parameters the agent sent.
+- **SOC 2 and enterprise identity.** SSO, SCIM, and granular access policies are all in the platform.
+
+For production agents, this is roughly the same security posture as a well-run internal integration platform — and probably better than the bespoke OAuth implementation most teams ship on day one.
+
+## FAQ
+
+**Q: How is One different from LangChain or LlamaIndex?**
+**A:** LangChain and LlamaIndex are frameworks for building agent logic (chains, retrieval, prompt orchestration). One is infrastructure for the integration layer — auth, actions, observability, scheduling, multi-tenant credentials. You can use One inside a LangChain agent, or alongside LlamaIndex, or on its own with raw LLM calls. The layers are complementary.
+
+**Q: Is the open-source community edition enough to ship a product?**
+**A:** The community edition of the Rust core is still on GitHub, but the README explicitly says it is "no longer actively maintained" and that the latest features live in the cloud platform. For a real production deployment, use the cloud product. The community edition is useful for learning the architecture and for contributing to the knowledge base.
+
+**Q: Can One replace writing my own MCP server?**
+**A:** For most teams, yes. The hosted MCP server at `mcp.withone.ai` exposes 400+ tools out of the box, so you point your client at it and you are done. The exception is if you need custom internal tools that are not on any third-party platform — for those, you would still write your own MCP server and register it alongside One.
+
+**Q: What does it cost?**
+**A:** One is free to install and use the CLI. The cloud platform has a free tier (limited connections/actions/month) and paid tiers that scale with usage. Check the live pricing page for current numbers; the team iterates on packaging as the product matures.
+
+**Q: How do Flow workflows differ from Temporal or Inngest?**
+**A:** Temporal and Inngest are general-purpose durable execution engines. Flow is purpose-built for cross-app agent work — it bakes in the action knowledge, the auth, and the JSON-native format that agents can read and write. If your workflows are mostly inside one app, Temporal or Inngest is the right choice. If they are mostly "call API A, then call API B, then call API C" across many SaaS tools, Flow is the more direct fit.
+
+## Conclusion
+
+One is a focused bet that the hard part of building production AI agents is not the model — it is everything around the model. By packaging auth, action knowledge, observability, scheduling, and a JSON-native workflow runtime into one platform, it lets a small team ship an agent that touches the same SaaS stack a real human does, without first re-implementing the entire B2B integration industry.
+
+The rebrand from Pica to One, the 1,482 GitHub stars on the community edition, and the customer logo wall (Google, Microsoft, Cisco, Figma, JetBrains) are signals that the bet is landing. If you are building an agent that needs to do anything beyond "talk to a single API", One is worth a serious look.
+
+Start at [withone.ai](https://www.withone.ai/), install the CLI, and connect the first app. Most teams have a working MCP-backed agent in under fifteen minutes.
