@@ -1,0 +1,163 @@
+---
+title: "Relvy – On-Call Runbooks That Fix Themselves"
+description: "Relvy is an AI agent that automates on-call runbooks, analyzing telemetry data and code at scale to help DevOps teams resolve incidents faster."
+pubDate: "2026-06-03"
+tags: ["devops", "ai-agent", "sre", "automation", "incident-response"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/relvy-ai-runbook-automation.webp"
+  alt: "Relvy AI runbook automation thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Relvy is an AI agent that automates on-call runbooks for software teams — it analyzes telemetry and code during incidents to suggest or automatically execute remediation steps.
+
+## Source and Accuracy Notes
+
+- Product: [relvy.ai](https://www.relvy.ai)
+- HN Launch: [Show HN: Relvy (YC F24)](https://news.ycombinator.com/item?id=47702647) — 48 points
+
+## What Is Relvy?
+
+On-call engineering is a solved problem in theory — runbooks exist, alerts fire, engineers respond. In practice, the theory falls apart the moment an incident hits at 3 AM. Runbooks are outdated, alerts lack context, and the engineer handling the incident is often the one who wrote the system years ago and has since forgotten every edge case.
+
+Relvy tackles this with an AI agent equipped with tools that can analyze telemetry data and code at scale. During an incident, instead of manually digging through dashboards, grepping logs, and piecing together what broke, engineers get an AI assistant that already has the context — understands the service graph, knows the recent deployments, and can correlate the alert with actual code changes.
+
+The agent doesn't just suggest fixes — it executes them. Teams define the boundary of what Relvy can touch, and the agent operates within it. If something is safety-critical or requires human approval, Relvy surfaces the finding and defers. Everything else gets handled automatically.
+
+## How Relvy Works
+
+At its core, Relvy is a retrieval-augmented generation system purpose-built for incident response. When an alert fires:
+
+1. **Context gathering** — Relvy pulls in recent deployment history, git blame data, config changes, and metric anomalies that preceded the alert
+2. **Causal reasoning** — It maps the alert to specific code paths and infrastructure changes using a graph of service dependencies
+3. **Runbook execution** — Matching runbooks are identified and executed. If no runbook matches, Relvy generates remediation steps based on the causal graph
+4. **Human review loop** — Action items that fall outside the pre-approved automation scope are surfaced to the on-call engineer with full context
+
+The key is that Relvy maintains a live model of your infrastructure — not a static diagram, but a continuously updated dependency graph that reflects what's actually deployed, not what was deployed six months ago.
+
+## Setup Workflow
+
+Getting Relvy running requires three integrations:
+
+### Step 1: Connect Your Telemetry Stack
+
+Relvy integrates with the standard observability stack. At minimum, you need:
+
+- **Metrics** — Prometheus or OpenTelemetry metrics via a compatible receiver
+- **Logs** — Structured logs from your application layer
+- **Traces** — Distributed traces (OpenTelemetry collector supported)
+
+```bash
+# Install the Relvy OpenTelemetry collector sidecar
+docker run -d --name relvy-otel \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  -e RELVY_API_KEY=your_api_key \
+  ghcr.io/relvyai/otel-collector:latest
+```
+
+### Step 2: Link Your Source Control
+
+```bash
+# Install the Relvy GitHub app and grant repo access
+relvy auth github --repo-owner your_org --repo-name your_repo
+```
+
+Relvy uses the git history to correlate deployments with metric anomalies — when a service starts behaving unexpectedly after a commit, Relvy knows which change is the likely culprit.
+
+### Step 3: Define Automation Boundaries
+
+In the Relvy dashboard, define which actions the agent can take autonomously. These are grouped into safety tiers:
+
+| Tier | Actions | Requires Approval |
+|---|---|---|
+| **Safe** | Restart a pod, roll back a deployment, drain a node | No |
+| **Guarded** | Modify auto-scaling rules, change feature flags | Yes — on-call engineer |
+| **Critical** | Database writes, network policy changes | Always requires approval |
+
+## Deeper Analysis
+
+### Why This Matters for SRE Teams
+
+The SRE handbook talks about toil — repetitive work that doesn't compound. On-call is the biggest source of toil in most engineering orgs. The same alert fires, the same engineer runs the same checklist, and the same root cause gets the same band-aid fix.
+
+Relvy's approach treats on-call as a knowledge management problem, not just an automation problem. The runbooks exist — they're just not findable or executable at the right moment. By tying runbooks to the causal graph of your infrastructure, Relvy makes sure the right runbook fires for the right incident, automatically.
+
+### The AI Agent Architecture
+
+Relvy's agent is built around a tool-calling model — specifically, it uses a fine-tuned model that's trained on incident response corpora. The tools it has access to are:
+
+- **Metric queries** — read Prometheus / OpenTelemetry
+- **Log search** — structured log retrieval with time-window constraints
+- **Deployment history** — git log with blame information
+- **Runbook execution** — pre-defined remediation steps with approval gates
+- **Chat notifications** — Slack, PagerDuty, Teams integration for human-in-the-loop steps
+
+This is not a generic LLM writing runbooks — it's a domain-specific agent that knows how to navigate your infrastructure. The distinction matters when you're trustng an AI with production access.
+
+### Integration with Existing On-Call Stack
+
+Relvy slots into the existing PagerDuty / Opsgenie workflow rather than replacing it. When an incident fires:
+
+1. PagerDuty alert fires → engineer gets paged
+2. Relvy simultaneously starts its causal analysis
+3. By the time the engineer opens their laptop, Relvy has a preliminary finding
+4. If the finding falls in the "safe" automation tier, it's already been executed — the incident is resolved before the engineer fully wakes up
+5. If human approval is needed, the engineer sees the full context Relvy gathered and approves or overrides
+
+## Practical Evaluation Checklist
+
+- [ ] Connected telemetry stack within 30 minutes
+- [ ] GitHub app installed and repo access granted
+- [ ] First incident test — trigger a non-critical alert and observe Relvy's response
+- [ ] Reviewed automation tier boundaries with your on-call team
+- [ ] Verified Slack/Teams integration for approval notifications
+- [ ] Tested a "guarded" tier action — confirm the approval flow works
+- [ ] Checked that runbook executions appear in your incident timeline
+
+## Security Notes
+
+**Production access** — Relvy needs read access to your telemetry and write access to execute runbooks. The write access is scoped to the automation tiers you define. A misconfigured "critical" tier boundary could allow unintended production changes.
+
+**Data residency** — Relvy processes telemetry data in your cloud environment. For on-prem deployments, a self-hosted option exists — contact the team via their website.
+
+**Audit log** — Every action Relvy takes (query, suggestion, execution, approval) is logged and visible in the dashboard. This matters for compliance teams that need to show who/what made a production change during an incident.
+
+## FAQ
+
+**Q:** How does Relvy handle incidents that don't have a matching runbook?
+
+**A:** Relvy generates remediation steps from the causal graph. If it detects a spike in error rate correlated with a recent deployment, it will suggest a rollback with the specific commit SHA that introduced the regression.
+
+---
+
+**Q:** Can Relvy execute database migrations or schema changes?
+
+**A:** No. Database operations are in the "critical" tier by default and require explicit human approval every time. Relvy will surface the migration but never execute it without a human in the loop.
+
+---
+
+**Q:** How does Relvy avoid cascading failures when its own actions cause issues?
+
+**A:** Relvy applies a "blast radius" check before any automated action — if the proposed fix affects more than a configured threshold of services (e.g., restarting 10+ pods simultaneously), it defers to human approval.
+
+---
+
+**Q:** Does Relvy support multi-cloud or hybrid infrastructure?
+
+**A:** Yes. Relvy's telemetry collector runs anywhere OpenTelemetry runs — AWS, GCP, Azure, and on-prem Kubernetes clusters are all supported.
+
+## Conclusion
+
+On-call automation has been attempted before — often with brittle scripts that break at the exact moment you need them. Relvy's approach is different because it's grounded in actual infrastructure state, not static configuration. When an incident fires, you get an AI agent that already knows your system, has the relevant telemetry, and can either fix the problem or tell you exactly what's broken and why.
+
+If your team spends more than a few hours per week on reactive incident response, the automation upside is real. Start with a non-critical service, define conservative automation tiers, and expand from there as confidence grows.
+
+**Links:**
+- [relvy.ai](https://www.relvy.ai) — product site
+- [HN Launch Thread](https://news.ycombinator.com/item?id=47702647) — community discussion
