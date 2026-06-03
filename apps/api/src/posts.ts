@@ -47,7 +47,7 @@ export function getAllPosts(): PostSummary[] {
 
   for (const file of files) {
     const parsed = parsePostFile(file);
-    if (parsed && parsed.frontmatter.draft !== true) {
+    if (parsed && parsed.frontmatter.published !== false) {
       posts.push(parsed.frontmatter);
     }
   }
