@@ -1,0 +1,276 @@
+---
+title: "AnySearch MCP Server: Unified Real-Time Search for AI Agents"
+description: "AnySearch MCP Server exposes real-time web search, vertical domain search (finance, academic, security, code), batch queries, and URL content extraction as MCP tools for AI coding agents."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "mcp", "search", "ai-agents", "python"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/anysearch-mcp-server.webp"
+  alt: "AnySearch MCP Server GitHub tool guide thumbnail"
+draft: false
+---
+
+![AnySearch MCP Server GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/anysearch-mcp-server.webp)
+
+## TL;DR
+
+> **TL;DR:** AnySearch MCP Server gives AI coding agents real-time web search, vertical domain search across finance/academic/security/code, parallel batch queries, and full-page content extraction — all as structured MCP tools with zero setup for anonymous users.
+
+## Source and Accuracy Notes
+
+This post is based on the official [AnySearch MCP Server repository](https://github.com/anysearch-ai/anysearch-mcp-server). The MCP server natively supports Streamable HTTP (MCP spec 2025-03-26+), with stdio and SSE transports available via proxy tools. Anonymous access works without an API key; higher rate limits require a key from [anysearch.com/console/api-keys](https://anysearch.com/console/api-keys).
+
+## What Is AnySearch MCP Server?
+
+AnySearch MCP Server exposes the AnySearch API as a set of Model Context Protocol tools. Instead of calling a REST API directly, an AI coding agent sees structured tools — `search`, `get_sub_domains`, `batch_search`, and `extract` — that map naturally to research and information-gathering tasks.
+
+### Four tools, four capabilities
+
+**`search`** — Execute a natural language query against general web search or a vertical domain. Supports general queries and domain-specific search across finance, academic, security, legal, and code verticals.
+
+**`get_sub_domains`** — Query the vertical domain directory before running a domain-specific search. Returns a Markdown table of valid `sub_domain` values and their parameter schemas. This is required before any search that uses a `domain` parameter — the agent must discover the correct sub-domain routing key.
+
+**`batch_search`** — Execute 1–5 independent search queries in parallel within a single tool call. One query failure doesn't block others — each query is independent.
+
+**`extract`** — Fetch the full content of a URL and return it as Markdown. Truncated at 50,000 characters. Useful for deep-diving on a result without leaving the agent context.
+
+### Key design decisions
+
+**Anonymous access works.** AnySearch MCP Server doesn't require an API key. Without a key, you get lower rate limits, but every feature functions immediately. This makes the server a zero-friction addition to any agent's tool set.
+
+**Key priority is explicit.** If you do configure a key, it follows a clear hierarchy: CLI flag `--api_key` > `Authorization` header > `ANYSEARCH_API_KEY` env var > `.env` file > anonymous access. This means you can hardcode a key for a specific session or load it from environment without changing the tool invocation.
+
+**Streamable HTTP native support.** The server implements the MCP spec 2025-03-26 Streamable HTTP transport. For agents that support it (OpenCode, Claude Desktop 2025.6+), no proxy is needed. For older agents, stdio and SSE are available via proxy tools.
+
+## Repo-Specific Setup Workflow
+
+### Streamable HTTP (OpenCode, Claude Desktop 2025.6+)
+
+For agents with native Streamable HTTP support, configuration is a single JSON entry.
+
+**OpenCode** (`~/.opencode/config.json` or project `opencode.json`):
+
+```json
+{
+  "mcp": {
+    "anysearch": {
+      "type": "remote",
+      "url": "https://api.anysearch.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ANYSEARCH_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop 2025.6+** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "type": "streamable-http",
+      "url": "https://api.anysearch.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ANYSEARCH_API_KEY}"
+      }
+    }
+  }
+}
+
+Without an API key, omit the `headers` section entirely. The server switches to anonymous access automatically.
+
+### stdio via mcp-remote (Claude Desktop legacy, VS Code Copilot, Cline)
+
+For agents that only support stdio transport, use [`mcp-remote`](https://github.com/geelen/mcp-remote) as a proxy.
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.anysearch.com/mcp",
+        "--header",
+        "Authorization: Bearer ${ANYSEARCH_API_KEY}"
+      ]
+    }
+  }
+}
+
+**VS Code Copilot** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "anysearch": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.anysearch.com/mcp",
+        "--header",
+        "Authorization: Bearer ${ANYSEARCH_API_KEY}"
+      ]
+    }
+  }
+}
+
+**Cline** (VS Code settings):
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.anysearch.com/mcp",
+        "--header",
+        "Authorization: Bearer ${ANYSEARCH_API_KEY}"
+      ]
+    }
+  }
+}
+
+### stdio via supergateway
+
+An alternative stdio proxy is [`supergateway`](https://github.com/supercorp-ai/supergateway), which supports SSE output as well:
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "supergateway",
+        "--streamableHttp",
+        "https://api.anysearch.com/mcp",
+        "--oauth2Bearer",
+        "${ANYSEARCH_API_KEY}"
+      ]
+    }
+  }
+}
+
+### SSE via supergateway (Cursor, Windsurf)
+
+For agents that only support SSE transport, run a local SSE proxy:
+
+```bash
+npx -y supergateway \
+  --streamableHttp https://api.anysearch.com/mcp \
+  --outputTransport sse \
+  --port 8000 \
+  --oauth2Bearer <your_api_key>
+
+Then configure your agent to point to the local proxy:
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+**Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "anysearch": {
+      "serverUrl": "http://localhost:8000/sse"
+    }
+  }
+}
+
+The SSE proxy must remain running while the agent is active. Consider running it as a background service or systemd unit.
+
+### Get an API key
+
+Visit [anysearch.com/console/api-keys](https://anysearch.com/console/api-keys) to create a free key. Higher rate limits are the main benefit. If your key is exhausted and the server returns a newly registered key, the agent should ask for your confirmation before persisting the new key.
+
+## Deeper Analysis
+
+### When to use batch_search
+
+`batch_search` handles up to 5 independent queries in a single call. The use case is parallel research — for example, searching the same term across multiple verticals (finance, academic, security) simultaneously, or searching different terms related to the same task. If one query fails, the others still return.
+
+The tradeoff: results come back as a flat list, so the agent needs to correlate them. For single-intent research, `search` is cleaner.
+
+### The get_sub_domains dependency
+
+Domain-specific search requires calling `get_sub_domains` first. The server returns a Markdown table with valid `sub_domain` values — for example, `finance.us_stock` for US equity data. The agent must use these exact values; the server won't accept arbitrary domain strings.
+
+This is a deliberate design. It prevents agents from inventing sub-domain keys and getting empty results. The trade-off is an extra round-trip before domain-specific searches, but it guarantees the agent always works with valid routing keys.
+
+### Rate limiting behavior
+
+Without an API key, anonymous access has lower rate limits. The server doesn't return a hard error — it serves the request but throttles. For light research tasks, anonymous access is fine. For high-volume agent workflows, an API key is worth setting up.
+
+### Transport choice matters
+
+Native Streamable HTTP eliminates the proxy overhead entirely. For OpenCode and Claude Desktop 2025.6+, the server connects directly without a local process. For older Claude Desktop, Cursor, and Windsurf, the proxy adds a process to manage but is a one-time setup.
+
+## Practical Evaluation Checklist
+
+- [ ] Configure AnySearch MCP server in OpenCode, Claude Desktop, or other agent
+- [ ] Run `search` for a general web query — verify results return
+- [ ] Call `get_sub_domains` with a domain like "finance"
+- [ ] Use a sub_domain from the response in a subsequent `search` call
+- [ ] Execute `batch_search` with 3 independent queries — verify parallel execution
+- [ ] Run `extract` on a URL from a search result — verify Markdown output
+- [ ] Test without API key (anonymous) vs. with key — compare rate limit behavior
+- [ ] Test proxy restart for SSE (Cursor/Windsurf) — confirm reconnection
+- [ ] Verify `max_results` parameter (1–10, default 10) works
+- [ ] Check that domain search returns more targeted results than general search
+
+## Security Notes
+
+- **API key in headers** — if you store the API key in a config file (`opencode.json`, `claude_desktop_config.json`), ensure that file is not committed to version control. Use environment variable substitution (`${ANYSEARCH_API_KEY}`) where supported, or load from a `.env` file.
+- **SSE proxy** — the local supergateway proxy runs as a local HTTP server. If you expose it on `0.0.0.0` instead of `localhost`, other processes on your machine can reach it. Keep the proxy bound to `localhost` unless you have a specific reason not to.
+- **URL extraction** — `extract` fetches full page content from arbitrary URLs. If your agent processes user-provided URLs, be aware that extracted content is passed to the LLM. Don't feed untrusted HTML to a model that executes it.
+
+## FAQ
+
+**Q: Does AnySearch MCP Server support voice or image search?**
+**A:** No. The current tools are text search, domain-specific search, batch text search, and URL extraction. Voice and image search are not yet available.
+
+**Q: What's the difference between `domain` and `sub_domain` in the search tool?**
+**A:** `domain` is the broad vertical category (e.g., `finance`, `academic`, `security`). `sub_domain` is the specific routing key within that vertical (e.g., `finance.us_stock`). Always call `get_sub_domains` before using a `domain` parameter — the response tells you which `sub_domain` values are valid.
+
+**Q: Can I use AnySearch without an API key?**
+**A:** Yes. Every feature works with anonymous access at lower rate limits. Add an API key only if you hit rate limits or need higher throughput.
+
+**Q: How does the agent handle an exhausted API key?**
+**A:** If the key is exhausted and the server returns a newly registered key, the agent should ask for your confirmation before persisting the new key. If no new key is returned, the agent informs you and suggests configuring a new API key.
+
+**Q: Does the SSE proxy need to stay running?**
+**A:** Yes. For Cursor and Windsurf, the SSE proxy must remain active for the agent to reach the AnySearch server. Run it as a background process or systemd service to avoid reconnecting manually after each restart.
+
+**Q: What does "parallel batch search" mean in practice?**
+**A:** `batch_search` executes up to 5 queries simultaneously in a single MCP tool call. Each query is independent — one failure doesn't block the others. Results come back as a flat list; the agent correlates them by query position.
+
+## Conclusion
+
+AnySearch MCP Server turns the AnySearch API into a set of first-class tools for AI coding agents. The combination of general search, vertical domain search, batch queries, and URL extraction covers the full research loop — from broad exploration to deep-dive on a specific result.
+
+The anonymous-access design is the standout feature. Zero-friction setup means you can add search capability to any agent without managing credentials. For high-volume workflows, an API key bumps the rate limits, but it's never required.
+
+The Streamable HTTP native support means OpenCode and modern Claude Desktop users get the cleanest experience — no proxy, no local process, just a direct connection to the AnySearch API.

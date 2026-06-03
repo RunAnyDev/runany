@@ -1,0 +1,170 @@
+---
+title: "OpenLake: GPU-Native Storage in Rust"
+description: "High-throughput GPU storage engine built on Rust and io_uring — GPUDirect Storage, RDMA, erasure coding, 6x higher throughput than conventional object stores."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "rust", "ai-infrastructure", "storage", "gpu"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openlake.webp"
+  alt: "OpenLake GitHub tool guide thumbnail"
+draft: false
+---
+
+![OpenLake GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/openlake.webp)
+
+## TL;DR
+
+> **TL;DR:** OpenLake is a high-throughput, low-latency object storage engine built on Rust and io_uring — designed for AI training and inference clusters where data moves from NVMe to GPU VRAM with zero-copy RDMA, delivering 6x the throughput of conventional object stores.
+
+## Source and Accuracy Notes
+
+This post is based on the official [OpenLake repository](https://github.com/openlake-project/openlake) (Apache-2.0, Rust). Requires Rust 1.91+, Linux for io_uring production use (macOS builds but runs on kqueue for development). Benchmarks show 225 MiB/s GET at sub-10ms p50 with c=512, comparing against MinIO and RustFS. Community on [Discord](https://discord.gg/TNXqVSnP6x), website at [theopenlake.com](https://theopenlake.com).
+
+## What Is OpenLake?
+
+Training and inference clusters spend a significant fraction of their wall clock time moving bytes from storage into GPU memory. Conventional object stores put the host CPU, the page cache, and several userspace copies directly in that path. OpenLake takes the opposite stance — removing kernel involvement entirely and using GPUDirect Storage with RDMA to move data directly from peer NIC into GPU VRAM.
+
+### Key architectural decisions
+
+**io_uring, thread per core.** Built on the [`compio`](https://github.com/compio-rs/compio) completion-based async runtime. One runtime per core, pinned, no work stealing. The HTTP frontend and the storage engine run on the same thread, so a request never crosses a core boundary on the hot path.
+
+**No kernel involvement.** GPUDirect Storage and RDMA enable data to move from peer NIC directly into GPU VRAM without touching host memory or the page cache. This eliminates the copy overhead that conventional object stores can't avoid.
+
+**Erasure coded.** SIMD Reed-Solomon across striped erasure coding provides reduced storage cost compared to replication, with high throughput that avoids the CPU overhead of conventional EC implementations.
+
+**PacedRDMA.** A novel congestion control algorithm for high-throughput RDMA. Credit-based memory management absorbs request bursts, minimizing tail latencies. Supports S3 over RDMA.
+
+### Benchmark results
+
+OpenLake sustains **225 MiB/s GET at sub-10ms p50** with c=512 (concurrency 512). This is **3x MinIO** and **9x RustFS** at the same concurrency level. The benchmark CLI (`phenomenal`) drives a `LocalFsBackend` directly for diagnostics and microbenchmarks.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Stable Rust 1.91 or newer (pinned via `rust-toolchain.toml`)
+- Linux for production (io_uring driver)
+- macOS builds and runs against kqueue for development
+
+### Step 1: Install Rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup default stable
+```
+
+### Step 2: Clone and build
+
+```bash
+git clone https://github.com/openlake-project/openlake.git
+cd openlake
+cargo build --release --workspace
+```
+
+### Step 3: Run microbenchmarks
+
+The `phenomenal` CLI drives a `LocalFsBackend` for diagnostics and microbenchmarks. Not an S3 client, but the quickest way to confirm the build works and see local throughput:
+
+```bash
+./target/release/phenomenal bench --n 100000 --size 4096 --concurrency 64
+
+This runs 100,000 operations at 4 KB size with 64 concurrent connections against local filesystem storage.
+
+### Step 4: Start the cluster
+
+Write one TOML config file per node. The full schema lives at the top of [`crates/phenomenal_server/src/config.rs`](https://github.com/openlake-project/openlake/blob/main/crates/phenomenal_server/src/config.rs).
+
+Start `openlaked` on each host with its own config:
+
+```bash
+./target/release/openlaked --config node0.toml
+
+Talk to the cluster with any S3 client:
+
+```bash
+aws --endpoint-url http://10.0.0.10:9000 s3 mb s3://demo
+aws --endpoint-url http://10.0.0.10:9000 s3 cp ./checkpoint.safetensors s3://demo/
+aws --endpoint-url http://10.0.0.10:9000 s3 ls s3://demo/
+```
+
+### Node config example
+
+```toml
+[node]
+host = "10.0.0.10"
+port = 9000
+
+[storage]
+type = "local"  # or "rdma" for GPUDirect Storage paths
+path = "/data/openlake"
+
+[cluster]
+peers = ["10.0.0.11", "10.0.0.12"]
+erasure_coding = true
+```
+
+## Deeper Analysis
+
+### Why object store performance matters for AI workloads
+
+AI training jobs checkpoint model weights and optimizer states to object storage. With large models (tens to hundreds of billions of parameters), checkpoint sizes can reach hundreds of gigabytes. The time spent writing and reading checkpoints directly impacts training throughput — a slow object store means GPUs sit idle waiting for data.
+
+Inference clusters load model weights from storage on startup or during hot-swap updates. For large models served across a cluster, the storage layer's throughput determines how quickly new instances spin up.
+
+Conventional object stores like MinIO are built for general-purpose workloads. They go through the Linux page cache, copy data through userspace, and rely on kernel networking. For NVMe-backed instances this is fast enough for many cases, but GPU training clusters push the limits.
+
+OpenLake's zero-copy path eliminates the page cache and userspace copies from the critical path. RDMA moves data from the NIC directly into GPU VRAM, and GPUDirect Storage enables the GPU to DMA directly from NVMe. The result is a storage layer that keeps GPUs fed without bottlenecking on the storage path.
+
+### Erasure coding vs. replication
+
+Replication (3x for production data) provides durability but triples storage cost. Erasure coding achieves the same durability at much lower overhead — typically 1.2–1.5x for comparable fault tolerance. OpenLake uses SIMD-accelerated Reed-Solomon encoding across striped chunks, maintaining high throughput even with EC enabled.
+
+### Thread per core design
+
+Most async runtimes use work-stealing to balance load across threads. OpenLake pins one runtime to each core with no cross-core handoff on the hot path. This means the HTTP handler and storage engine collaborate within a single thread, avoiding the synchronization overhead that comes with cross-core communication.
+
+For AI storage workloads, where a single request might involve RDMA transfer, erasure coding, and NVMe operation, keeping everything in one thread eliminates lock contention and cache-line bouncing.
+
+## Practical Evaluation Checklist
+
+- [ ] Install Rust 1.91+ and clone the repository
+- [ ] Build the workspace in release mode
+- [ ] Run `phenomenal bench` to verify build and see local throughput
+- [ ] Configure a single-node cluster via TOML
+- [ ] Start `openlaked` and verify S3 API is reachable
+- [ ] Run `aws s3 mb` and `aws s3 cp` operations against the cluster
+- [ ] Test with multi-node cluster configuration
+- [ ] Benchmark GET and PUT operations at varying concurrency (c=64, c=256, c=512)
+- [ ] Verify erasure coding behavior with node failure simulation
+- [ ] Test RDMA configuration if hardware supports GPUDirect Storage
+
+## Security Notes
+
+- **Network exposure** — openlaked binds to the configured host/port. Use firewall rules or private networking to restrict access to trusted nodes in the cluster.
+- **No authentication in default config** — the TOML config doesn't include auth settings by default. Enable S3 authentication before exposing the cluster to untrusted networks.
+- **Erasure coding integrity** — verify that reconstructed data from partial-node-failure scenarios matches expected checksums. RDMA and GPUDirect paths introduce hardware that should be validated in your environment.
+
+## FAQ
+
+**Q: What's the difference between OpenLake and MinIO?**
+**A:** MinIO is a general-purpose S3-compatible object store. OpenLake is purpose-built for AI infrastructure — it removes kernel involvement via GPUDirect Storage and RDMA, uses a thread-per-core architecture on compio/io_uring, and applies SIMD Reed-Solomon erasure coding. Benchmarks show 3x MinIO throughput at c=512.
+
+**Q: Does OpenLake support the full S3 API?**
+**A:** OpenLake's S3 API covers the core operations needed for ML workloads: bucket management, object PUT/GET/DELETE, multipart upload, and listing. Check the [comparison page](https://theopenlake.com/compare.html) for the full feature matrix.
+
+**Q: Can I run OpenLake on macOS for development?**
+**A:** Yes. OpenLake builds on macOS and runs against kqueue instead of io_uring. Performance characteristics differ from the Linux production path. Use macOS for local development and testing; deploy Linux for production clusters.
+
+**Q: What hardware does GPUDirect Storage require?**
+**A:** GPUDirect Storage requires NVIDIA GPUs with NVLink or PCIe-attached NVMe, plus a network card that supports RDMA (InfiniBand or RDMA over Converged Ethernet). The storage cluster nodes need compatible hardware. Without RDMA, OpenLake falls back to the standard io_uring path.
+
+**Q: How does PacedRDMA handle congestion?**
+**A:** PacedRDMA uses credit-based memory management to absorb request bursts. When many requests arrive simultaneously, credits buffer them without packet loss or retransmission, minimizing tail latencies. This is critical for ML training where stragglers (slow workers waiting on data) directly impact overall job time.
+
+## Conclusion
+
+OpenLake targets the storage bottleneck in AI training and inference clusters. By removing kernel involvement through GPUDirect Storage and RDMA, it achieves throughput levels that conventional object stores can't match — 6x MinIO at high concurrency, with sub-10ms p50 latency.
+
+For teams running large-scale ML workloads on premises or in private cloud environments, OpenLake provides a storage layer designed around GPU architecture rather than retrofitted from general-purpose object storage. The Rust implementation, erasure coding, and thread-per-core design reflect a deliberate trade-off: complexity in the storage engine in exchange for simplicity in the data path.

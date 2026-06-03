@@ -1,0 +1,229 @@
+---
+title: "Stash: Persistent Memory for AI Agents Across Sessions"
+description: "Persistent memory layer for AI agents across sessions — 9-stage consolidation turns observations into facts, relationships, patterns, and wisdom over time."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "python", "ai-agents", "mcp", "memory", "postgres"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/stash.webp"
+  alt: "Stash GitHub tool guide thumbnail"
+draft: false
+---
+
+![Stash GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/stash.webp)
+
+## TL;DR
+
+> **TL;DR:** Stash gives AI agents persistent memory — a 9-stage consolidation pipeline turns raw observations across sessions into facts, relationships, patterns, and wisdom. Self-hosted via Docker, works with any MCP-compatible agent, and has a free hosted cloud beta.
+
+## Source and Accuracy Notes
+
+This post is based on the official [Stash repository](https://github.com/alash3al/stash) (Apache-2.0, Python). Runs entirely via Docker Compose — Postgres + pgvector for storage, MCP server over SSE for agent connectivity. Cloud version available at [usestash.io](https://usestash.io/) (free during beta, written from scratch, no shared code with this repo).
+
+## What Is Stash?
+
+Every LLM starts every conversation from zero. Stash fixes that. It gives agents persistent memory so they don't need to re-explain context at the start of every session. The system turns raw conversation observations into structured knowledge — facts, relationships, causal links, patterns, contradictions, goal tracking, failure patterns, and hypothesis verification.
+
+### The 9-stage consolidation pipeline
+
+Stash processes new data through nine stages, each building on the previous:
+
+1. **Facts** — extract concrete statements from conversations
+2. **Relationships** — connect facts that share entities or context
+3. **Patterns** — find recurring behaviors or themes across facts
+4. **Contradictions** — flag when new information conflicts with established knowledge
+5. **Goal tracking** — monitor progress toward stated objectives
+6. **Failure patterns** — identify recurring failure modes
+7. **Hypothesis verification** — track predictions and their outcomes
+8. **Causal links** — establish cause-effect relationships
+9. **Wisdom** — synthesize patterns and causal links into actionable insights
+
+Each stage only processes data since the last run, so the pipeline scales efficiently across many sessions.
+
+### What it does for agents
+
+A cognitive layer sits between the agent and the world. When the agent finishes a session, Stash consolidates what happened. The next session starts not from scratch but from a knowledge base that includes previous context, established preferences, and tracked goals.
+
+This means:
+- No more re-explaining project context at the start of every session
+- Agents that learn from previous failures
+- Knowledge that compounds across sessions instead of evaporating
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose
+- An OpenAI-compatible API key or local Ollama
+
+### Step 1: Clone and configure
+
+```bash
+git clone https://github.com/alash3al/stash.git
+cd stash
+cp .env.example .env
+
+Edit `.env` with your API key and model. For OpenAI:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4
+
+For local Ollama (fully private):
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3
+```
+
+### Step 2: Start everything
+
+```bash
+docker compose up
+
+This starts:
+- **Postgres** — primary database with pgvector extension for embeddings
+- **pgvector** — vector similarity search for semantic memory
+- **MCP server** — SSE endpoint for agent connectivity
+- **Background consolidation worker** — runs the 9-stage pipeline
+
+The MCP server exposes at `http://localhost:8080/sse`.
+
+### Step 3: Connect an agent
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "stash": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+
+**Cursor** (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "stash": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+
+**OpenCode** (`~/.config/opencode/config.json`):
+
+```json
+{
+  "mcp": {
+    "stash": {
+      "type": "remote",
+      "url": "http://localhost:8080/sse",
+      "enabled": true
+    }
+  }
+}
+
+**Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "stash": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+
+### Step 4: Use the tools
+
+Once connected, the agent has access to Stash's MCP tools:
+
+- `init` — initialize memory for the current project/context
+- `remember` — store a fact or observation
+- `recall` — retrieve relevant memories for the current task
+
+The consolidation worker runs the 9-stage pipeline on new data in the background, so recall results improve over time.
+
+## Fully Local Setup (Ollama)
+
+For complete privacy with no cloud API dependency:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3
+EMBEDDING_MODEL=all-minilm:latest
+
+This uses Ollama for both the reasoning model and embeddings. See [`docs/LOCAL_OLLAMA.md`](https://github.com/alash3al/stash/blob/main/docs/LOCAL_OLLAMA.md) for the full guide.
+
+## Deeper Analysis
+
+### Why sessions don't naturally persist
+
+LLMs are stateless by design — each API call is independent. This is a feature for reliability and cost, but it means every conversation starts fresh. Agents that work on long-term projects lose context at the end of each session, requiring users to re-explain what they've already established.
+
+Stash bridges this gap by capturing what matters from each session and making it available to the next. The agent writes observations through `remember`, and the consolidation pipeline turns them into structured knowledge that `recall` can retrieve.
+
+### pgvector for semantic search
+
+Stash uses pgvector for storing and searching embeddings. When `recall` is called, Stash embeds the query and searches for semantically similar memories. This means you can ask about "the database schema we discussed last week" and get the relevant memory even if those exact words weren't used in that session.
+
+### The consolidation worker
+
+The background worker runs the 9-stage pipeline continuously. New memories are staged through each stage in order — facts first, then relationships, then patterns. This means recall results become richer over time as the system builds up a connected knowledge graph.
+
+Contradictions are flagged when new information conflicts with established knowledge. The agent can be notified of these conflicts and resolve them, improving the reliability of future recall.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone and start Stash via `docker compose up`
+- [ ] Verify Postgres and MCP server are running (`http://localhost:8080/sse`)
+- [ ] Connect Claude Desktop or Cursor to the MCP server
+- [ ] Run `init` to create a memory context for a project
+- [ ] Use `remember` to store a fact about the project
+- [ ] End the session and start a new one
+- [ ] Run `recall` to retrieve the stored fact
+- [ ] Add several more memories and verify relationships form
+- [ ] Test contradiction detection — add conflicting facts
+- [ ] Verify the consolidation worker processes new data
+- [ ] Test the Ollama-only setup for fully local operation
+- [ ] Check the Stash cloud beta at usestash.io
+
+## Security Notes
+
+- **Local storage** — all memory data stays in your Postgres instance. No data is sent to the Stash cloud unless you explicitly use usestash.io.
+- **API keys** — store keys in `.env`, never commit the file. For local Ollama, no API key is needed.
+- **Memory content** — whatever you `remember` is stored and embedded. Don't store sensitive secrets in agent memory — use a dedicated secrets manager instead.
+- **Cloud beta** — the hosted Stash at usestash.io is a separate codebase with no shared code. Understand its data handling policy before storing sensitive project information there.
+
+## FAQ
+
+**Q: How does Stash differ from a simple key-value store?**
+**A:** A key-value store saves raw data. Stash processes that data through a 9-stage pipeline that turns raw observations into structured knowledge — facts, relationships, patterns, contradictions. Recall retrieves semantically similar memories, not just exact-key matches.
+
+**Q: Can I use Stash without Docker?**
+**A:** The recommended path is Docker Compose. Manual setup is possible — see the repo for custom configuration. Docker ensures Postgres, pgvector, and the MCP server all start together with correct configuration.
+
+**Q: What happens if I clear a memory?**
+**A:** Stash doesn't currently support deletion through the MCP tools. If you need to remove specific memories, connect directly to the Postgres instance and delete the relevant rows.
+
+**Q: Does Stash work with local models only?**
+**A:** Yes. Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `.env` to use Ollama exclusively. The [LOCAL_OLLAMA.md](https://github.com/alash3al/stash/blob/main/docs/LOCAL_OLLAMA.md) guide covers the full setup.
+
+**Q: How does the consolidation pipeline decide what matters?**
+**A:** The agent decides what to `remember`. Stash stores it, embeds it, and runs the consolidation pipeline. The pipeline processes what was stored — it doesn't filter what gets stored. Be intentional about what you remember to keep memory useful.
+
+**Q: What's the difference between Stash and the cloud version?**
+**A:** The [usestash.io](https://usestash.io/) cloud is a separate codebase written from scratch. Feature sets differ — some things in this repo aren't in the cloud, and vice versa. The cloud is multi-tenant and scalable; this repo is for self-hosting.
+
+## Conclusion
+
+Stash solves the amnesia problem for AI agents by providing a persistent memory layer that improves across sessions. The 9-stage consolidation pipeline builds structured knowledge from raw observations, and semantic recall means agents find relevant context without exact-key matching.
+
+For developers working on long-term projects with coding agents, Stash means never starting from scratch. The project context, established conventions, and tracked goals persist across sessions — and the consolidation pipeline makes them more useful over time.
+
+The fully local Ollama path keeps everything on your infrastructure with no external API dependency, making it practical for privacy-sensitive projects.

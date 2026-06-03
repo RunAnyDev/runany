@@ -1,0 +1,207 @@
+---
+title: "re_gent: Version Control for What Your AI Agent Actually Did"
+description: "Version control purpose-built for AI coding agents — blame which prompt wrote any line, inspect full change context, and track every agent turn as a content-addressed step."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "go", "ai-agents", "version-control", "claude-code"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/re-gent.webp"
+  alt: "re_gent GitHub tool guide thumbnail"
+draft: false
+---
+
+![re_gent GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/re-gent.webp)
+
+## TL;DR
+
+> **TL;DR:** re_gent tracks every AI coding agent turn as a content-addressed step — so you can see what the agent did, which prompt wrote any line, and inspect any change in full context. No more "it was working five minutes ago" without a way to find out why.
+
+## Source and Accuracy Notes
+
+This post is based on the official [re_gent repository](https://github.com/regent-vcs/re_gent) (Apache-2.0, Go). Works with Claude Code, Codex, and OpenCode. Install via Homebrew or `go install`. Session activity is tracked automatically; no manual commits needed.
+
+## What Is re_gent?
+
+AI agents have no version control of their own. You know the pain: "it was working five minutes ago," "why did you change that file," "go back to before the refactor." With git, you can trace a change. With an agent, you often can't.
+
+re_gent fixes that by tracking agent activity in `.regent/` (like `.git/`), creating content-addressed snapshots of every tool-using turn — what changed, why, and who asked for it.
+
+### Three primitives
+
+- **`rgt log`** — what did this session do?
+- **`rgt blame`** — which prompt wrote this line?
+- **`rgt show`** — inspect the full context for any step
+
+These should already exist. Now they do.
+
+### How it stores agent activity
+
+Every tool-using turn creates a **Step** — a content-addressed snapshot:
+
+```text
+Step {
+  parent:      <previous-step-hash>
+  tree:        <workspace-snapshot>
+  causes:      [{ tool_name: "Edit", args: <input>, result: <output> }]
+  session_id:  "claude_code:claude-20260502-143021"
+  timestamp:   "2026-05-02T14:30:21Z"
+}
+
+Steps form a **DAG**. Each session has its own branch. Common ancestors dedupe. You get git-level auditability for agent activity without changing how the agent works.
+
+## Repo-Specific Setup Workflow
+
+### Install via Homebrew (macOS/Linux)
+
+```bash
+brew tap regent-vcs/tap
+brew install regent
+
+### Install via Go
+
+```bash
+go install github.com/regent-vcs/regent/cmd/rgt@latest
+
+### Initialize in a project
+
+```bash
+cd your-project
+rgt init
+
+This creates `.regent/` with the content-addressed object store, SQLite query index, and config. Work with Claude Code, Codex, or OpenCode normally — activity is tracked automatically in the background.
+
+### View session history
+
+```bash
+rgt log
+
+Output:
+
+    Step a1b2c3d  |  2 min ago  |  Tool: Edit
+│ File: src/handler.go
+│ Added error handling to request handler
+│ + 5 lines, - 2 lines
+
+Step d4e5f6g  |  5 min ago  |  Tool: Write
+│ File: tests/handler_test.go
+│ Created unit tests for handler
+│ + 23 lines
+
+Step f8g9h0i  |  8 min ago  |  Tool: Bash
+│ Command: go mod tidy
+│ Cleaned up dependencies
+
+### Blame any line
+
+```bash
+rgt blame src/handler.go:42
+
+Output:
+
+    Line 42: func handleRequest(w http.ResponseWriter, r *http.Request) {
+
+Step:    a1b2c3d4e5f6
+Session: claude-20260502-143021
+Tool:    Edit
+Prompt:  "Add error handling to reject non-GET requests"
+
+### Inspect full context for any step
+
+```bash
+rgt show a1b2c3d
+
+Output:
+
+    Step a1b2c3d4e5f6
+Parent: d4e5f6g7h8i9
+Session: claude-20260502-143021
+Time: 2026-05-02 14:30:21
+
+Tool: Edit
+File: src/handler.go
+
+Changes:
++ func handleRequest(w http.ResponseWriter, r *http.Request) {
++     if r.Method != "GET" {
++         http.Error(w, "Method not allowed", 405)
++         return
++     }
+- func handleRequest(w http.ResponseWriter, r *http.Request) {
+
+Conversation:
+User: "Add error handling to reject non-GET requests"
+Assistant: "I'll add method validation to the handler..."
+
+### Track multiple concurrent sessions
+
+```bash
+rgt sessions
+
+Output:
+
+    Active Sessions:
+claude_code:claude-20260502-143021  |  3 steps  |  Last: 2 min ago
+codex_cli:codex-20260502-091534     |  7 steps  |  Last: 2 hours ago
+
+$ rgt log --session claude_code:claude-20260502-143021
+# Filter history by session
+
+## Deeper Analysis
+
+### Content-addressed storage
+
+re_gent uses BLAKE3 content hashing for object storage in `.regent/objects/`. Every step is referenced by its hash, not by sequence number. This means the DAG is tamper-evident — if any step's content changes, its hash changes, which breaks the parent's reference.
+
+The SQLite index in `.regent/index.db` provides fast queries over the step history. You can search by file, session, tool, or time range without scanning all objects.
+
+### Isolation per agent
+
+Each agent subprocess is bound to its own worktree and isolated `$HOME`. This means agents never mutate your dirty checkout or shell profile. re_gent stores the workspace snapshot (file tree state) alongside the step, so you can reconstruct what the workspace looked like at any point.
+
+### DAG vs. linear history
+
+Unlike git, where commits form a linear (or branching) chain, re_gent's steps form a DAG. This is because multiple agents can work simultaneously, or a single agent can branch its own exploration. The DAG structure supports both concurrent sessions and exploratory branches without requiring a "merge" step.
+
+## Practical Evaluation Checklist
+
+- [ ] Install re_gent via Homebrew or Go
+- [ ] Run `rgt init` in a git repository
+- [ ] Start Claude Code and make some changes
+- [ ] Run `rgt log` and verify steps appear
+- [ ] Run `rgt blame` on a recently modified line
+- [ ] Run `rgt show` on a step to see full context
+- [ ] Start a second agent session and verify branch
+- [ ] Run `rgt sessions` to see both active sessions
+- [ ] Filter `rgt log` by `--session` to see one session's history
+- [ ] Verify `.regent/` is gitignored
+
+## Security Notes
+
+- **No credentials stored** — re_gent tracks code changes and prompts, not credentials or secrets. Don't store API keys in code that gets snapshotted.
+- **`.regent/` gitignored** — the local state directory is gitignored by default. Don't un-ignore it — step data is not meant for sharing, it's for local audit.
+- **Content-addressed integrity** — the BLAKE3 hash chain means step tampering is detectable. If someone modifies a step's content, its hash changes and breaks the chain reference.
+
+## FAQ
+
+**Q: Does re_gent replace git?**
+**A:** No. re_gent tracks agent activity, not human-reviewed code. Use git for commits, PRs, and human collaboration. Use re_gent for agent activity audit. You can manually promote agent steps to git commits when appropriate.
+
+**Q: How does re_gent know when the agent is working?**
+**A:** It monitors the agent subprocess lifecycle. When Claude Code, Codex, or OpenCode starts, re_gent begins tracking. When the session ends, the final state is committed. No manual intervention needed.
+
+**Q: Can I revert to a previous agent state?**
+**A:** re_gent provides visibility, not restoration. You can see what changed and why, but restoring a previous state requires manual git operations. The workspace snapshot in each step can be inspected to understand what the files looked like.
+
+**Q: Does re_gent work with multiple agents simultaneously?**
+**A:** Yes. Each concurrent session gets its own branch in the DAG. Use `rgt sessions` to see all active sessions and filter log output by session.
+
+**Q: What's in `.regent/`?**
+**A:** `objects/` — content-addressed blobs (BLAKE3 hashes); `refs/` — session pointers; `index.db` — SQLite query index; `config.toml` — re_gent configuration. All gitignored.
+
+## Conclusion
+
+re_gent adds the version control layer that AI coding agents have always needed. Three commands — `log`, `blame`, `show` — give you the auditability that git provides for human changes, adapted for the way agents work: step-based, prompt-driven, content-addressed.
+
+For teams that use Claude Code, Codex, or OpenCode on non-trivial projects, re_gent means you can trace any line back to the prompt that wrote it, understand why a change was made, and compare agent behavior across sessions. It's the missing piece between "the agent changed something" and "I understand exactly what and why."

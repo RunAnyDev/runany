@@ -1,0 +1,208 @@
+---
+title: "CC Desktop Switch: Third-Party Providers for Claude Desktop"
+description: "A desktop app for Claude Desktop that manages third-party providers — DeepSeek, Kimi, Zhipu, Alibaba, Xiaomi MiMo — with a local gateway for model mapping."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "python", "claude-desktop", "anthropic", "third-party"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cc-desktop-switch.webp"
+  alt: "CC Desktop Switch GitHub tool guide thumbnail"
+draft: false
+---
+
+![CC Desktop Switch GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/cc-desktop-switch.webp)
+
+## TL;DR
+
+> **TL;DR:** CC Desktop Switch gives Claude Desktop users a GUI for managing third-party Anthropic-compatible API providers — DeepSeek, Kimi, Zhipu GLM, Alibaba Bailian, Xiaomi MiMo, and custom endpoints — with a local gateway for model mapping, protocol compatibility, and upstream key management.
+
+## Source and Accuracy Notes
+
+This post is based on the official [CC Desktop Switch repository](https://github.com/lonr-6/cc-desktop-switch) (MIT, Python/PyInstaller). Focused on Claude Desktop (Windows and macOS), not CLI tools like `farion1231/cc-switch`. Since v1.0.18, Claude Desktop is configured to call the local CC Desktop Switch gateway at `127.0.0.1`. Keep the app running in the background when using third-party providers.
+
+## What Is CC Desktop Switch?
+
+CC Desktop Switch is a lightweight desktop app that manages third-party Anthropic-compatible API providers for Claude Desktop. It provides a simple UI for provider setup, model mapping, health checks, and local gateway compatibility — targeting regular desktop users rather than CLI power users.
+
+### Supported providers
+
+- **DeepSeek** — including DeepSeek 1M context and Max reasoning options
+- **Kimi** — including K2.6 models
+- **Zhipu GLM** — including GLM-5.1 models
+- **Alibaba Cloud Bailian** — including Qwen 1M context
+- **Xiaomi MiMo**
+- **Custom providers** — add any Anthropic-compatible endpoint
+
+### Key features
+
+- **Local gateway** — keeps model mapping, protocol compatibility, extra headers, and upstream keys under local control
+- **Model mapping** — translates upstream model IDs (e.g., `deepseek-v4-pro`, `kimi-k2.6`) to Claude-safe routes exposed in Claude Desktop's model menu
+- **Only mapped routes shown** — since v1.0.19, only explicitly mapped Claude slots appear in the model menu. Unmapped routes are rejected rather than silently falling back to an internal default.
+- **Provider health checks** — connectivity checks, model availability checks, SSE streaming validation
+- **Proxy support** — custom upstream HTTP/SOCKS proxy
+- **Prevent duplicate instances** — launching the shortcut again brings the existing window forward
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Download
+
+Get the latest release from [CC Desktop Switch Releases](https://github.com/lonr-6/cc-desktop-switch/releases/latest):
+
+- **Windows installer:** `CC-Desktop-Switch-v<version>-Windows-Setup.exe`
+- **Windows portable:** `CC-Desktop-Switch-v<version>-Windows-Portable.zip`
+- **macOS installer:** `CC-Desktop-Switch-v<version>-macOS-arm64.pkg`
+- **macOS drag-and-drop:** `CC-Desktop-Switch-v<version>-macOS-arm64.dmg`
+
+Windows builds are not Authenticode-signed — Windows may show an unknown publisher warning. Release assets include `.sha256`, `.sig`, and the public key for integrity verification.
+
+### Step 2: Open and configure
+
+Launch CC Desktop Switch. The app shows:
+
+- **Provider management page** — list of configured providers
+- **Add provider** — pick a preset or add custom endpoint
+
+To add DeepSeek:
+1. Click Add Provider → DeepSeek preset
+2. Enter your DeepSeek API key
+3. Adjust model mappings if needed
+4. Click `Apply to Claude Desktop`
+5. Fully quit and reopen Claude Desktop
+
+### Step 3: Verify the gateway
+
+Default ports:
+- **Admin UI:** `http://127.0.0.1:18081`
+- **Local gateway:** `http://127.0.0.1:18080`
+
+If the desktop window won't open, use the browser fallback UI:
+
+```text
+http://127.0.0.1:18081
+
+To check if ports are occupied (Windows):
+
+```powershell
+netstat -ano | findstr :18081
+netstat -ano | findstr :18080
+
+### Step 4: Restart Claude Desktop
+
+Claude Desktop reads third-party inference configuration during startup. After applying a provider, fully quit Claude Desktop and reopen it. Closing the chat window is often not enough.
+
+## Model Mapping Explained
+
+Claude Desktop expects Claude-family model names. Third-party providers use different IDs — `deepseek-v4-pro`, `kimi-k2.6`, `glm-5.1`, `qwen3.6-plus`.
+
+CC Desktop Switch keeps the real upstream model IDs inside the local gateway and exposes Claude-safe route names to Claude Desktop. Since v1.0.19, only explicitly mapped Claude slots appear in the model menu. The `Default` slot remains an internal fallback and is not shown as a menu item.
+
+Example mapping for DeepSeek:
+- Upstream: `deepseek-chat` → Claude-safe: `claude-sonnet-4`
+- Upstream: `deepseek-reasoner` → Claude-safe: `claude-sonnet-4-5`
+- Upstream: `deepseek-v4-pro` → Claude-safe: `claude-sonnet-4-7`
+
+## Development Setup
+
+```bash
+git clone https://github.com/lonr-6/cc-desktop-switch.git
+cd cc-desktop-switch
+pip install -r requirements.txt
+python main.py
+
+Browser fallback for development:
+
+```bash
+python main.py --browser
+
+### Verification
+
+```bash
+# Python compile check
+python -m compileall -q backend main.py tests
+
+# Unit tests
+python -m unittest discover -s tests -v
+
+# Frontend JS lint
+node --check frontend/js/api.js
+node --check frontend/js/app.js
+node --check frontend/js/i18n.js
+```
+
+## Deeper Analysis
+
+### Model mapping architecture
+
+CC Desktop Switch uses a local gateway at `127.0.0.1:18080` that translates upstream model IDs to Claude-safe routes. When Claude Desktop sends a request, the gateway intercepts it, applies the configured model mapping, forwards to the upstream provider, and returns the response — all without exposing raw provider model IDs to Claude Desktop.
+
+The model mapping is explicit: only slots you configure appear in Claude Desktop's model menu. Since v1.0.19, unmapped routes are rejected rather than falling back to a default. This prevents confusion when a provider changes its available models.
+
+### Preset configurations
+
+Provider presets include recommended API URLs and model mappings for each provider. For DeepSeek, the preset maps:
+
+- `deepseek-chat` → `claude-sonnet-4` (standard)
+- `deepseek-reasoner` → `claude-sonnet-4-5` (extended thinking)
+- `deepseek-v4-pro` → `claude-sonnet-4-7` (advanced)
+
+You can adjust these mappings or add custom routes for any Anthropic-compatible endpoint. The gateway stores the full mapping config in `~/.cc-desktop-switch/config.json`.
+
+### Health checks and monitoring
+
+The UI includes connectivity checks that verify:
+
+- The local gateway is reachable
+- The upstream API endpoint responds
+- SSE streaming works (for providers that support it)
+- Model availability for the configured mapping
+
+Failed checks show the specific error — useful for debugging API key issues or network problems.
+
+### Browser fallback UI
+
+If the desktop window fails to open (e.g., due to display or rendering issues), the full admin UI is accessible at `http://127.0.0.1:18081`. This includes provider management, model mapping configuration, and health check results — everything available in the desktop window, in a browser tab.
+
+## Practical Evaluation Checklist
+
+- [ ] Download and install CC Desktop Switch
+- [ ] Add a DeepSeek provider with your API key
+- [ ] Click `Apply to Claude Desktop`
+- [ ] Fully restart Claude Desktop and verify the provider appears in the model menu
+- [ ] Test connectivity check from the CC Desktop Switch UI
+- [ ] Add a Kimi or Zhipu provider
+- [ ] Add a custom Anthropic-compatible endpoint
+- [ ] Verify mapped routes appear and unmapped routes are hidden
+- [ ] Test health checks and SSE streaming
+- [ ] Verify the browser fallback UI at `http://127.0.0.1:18081`
+
+## Security Notes
+
+- **API keys stored locally** — upstream API keys are stored in `~/.cc-desktop-switch/config.json`. Don't share or commit this file.
+- **Local gateway isolation** — the gateway runs on `localhost`. Keep it running when using third-party providers, but don't expose the ports to untrusted networks.
+- **No affiliation with Anthropic** — CC Desktop Switch is not affiliated with Anthropic, Claude, or any third-party model provider. Use at your own risk.
+- **Integrity verification** — Windows releases include `.sha256`, `.sig`, and public key for integrity checks. Verify downloads if security is a concern.
+
+## FAQ
+
+**Q: Why isn't my provider working after I applied it?**
+**A:** Claude Desktop reads third-party inference configuration during startup. Fully quit Claude Desktop and reopen it. Also make sure CC Desktop Switch is still running in the background — the local gateway must be active.
+
+**Q: Can I use CC Desktop Switch with Claude Code?**
+**A:** CC Desktop Switch focuses on the Claude Desktop app, not CLI tools. Claude Code uses its own configuration. For Claude Code, use `farion1231/cc-switch` or configure the `ANTHROPIC_BASE_URL` environment variable directly.
+
+**Q: What does `CLAUDE_CODE_ATTRIBUTION_HEADER=0` do?**
+**A:** It's a Claude Code prompt-cache compatibility option, not a Claude Desktop 3P setting. It doesn't replace the local gateway and doesn't affect third-party provider routing.
+
+**Q: Does CC Desktop Switch support GitHub Copilot as a provider?**
+**A:** GitHub Copilot subscriptions are not directly supported as a provider API. If you have an OpenAI Chat or Anthropic-compatible endpoint that proxies Copilot, you can try it as a custom third-party provider at your own risk. Verify the endpoint's terms, account risk, API format, base URL, streaming behavior, and tool-call compatibility.
+
+**Q: How do I update a provider's API key?**
+**A:** Open CC Desktop Switch, select the provider, update the API key field, and click `Apply to Claude Desktop` again. Fully restart Claude Desktop to pick up the change.
+
+## Conclusion
+
+CC Desktop Switch bridges the gap between third-party model providers and Claude Desktop's native interface. For users who want to use DeepSeek, Kimi, Zhipu, or other Anthropic-compatible models without configuring raw JSON endpoints, it provides a clean UI with provider presets, model mapping, and health checks.
+
+The local gateway design keeps API keys and model mapping under local control. For developers testing multiple providers or wanting to experiment with non-Anthropic models through Claude Desktop's interface, CC Desktop Switch is a practical tool.

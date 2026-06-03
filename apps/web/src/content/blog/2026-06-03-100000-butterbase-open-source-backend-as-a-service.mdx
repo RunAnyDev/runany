@@ -1,0 +1,192 @@
+---
+title: "Butterbase: Open-Source BaaS with Built-In MCP"
+description: "Butterbase is an AI-native, open-source BaaS offering Postgres, auth, storage, serverless functions, an AI gateway, and a native MCP server — all self-hostable via Docker."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "typescript", "baas", "backend-as-a-service", "mcp"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/butterbase.webp"
+  alt: "Butterbase GitHub tool guide thumbnail"
+draft: false
+---
+
+![Butterbase GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/butterbase.webp)
+
+## TL;DR
+
+> **TL;DR:** Butterbase gives AI coding agents a production-ready backend — Postgres, auth, storage, functions, AI gateway, and a native MCP server — all in one self-hostable stack with zero vendor lock-in.
+
+## Source and Accuracy Notes
+
+This post is based on the official [Butterbase GitHub repository](https://github.com/butterbase-ai/butterbase) (Apache-2.0), its [SETUP.md](https://github.com/butterbase-ai/butterbase/blob/main/SETUP.md), [docs](https://github.com/butterbase-ai/butterbase/tree/main/docs), and public roadmap. Latest release is v0.2.0 (2026-05-25). A managed cloud offering is available at [butterbase.ai](https://butterbase.ai) with Discord community support.
+
+## What Is Butterbase?
+
+Butterbase is an AI-native, open-source backend-as-a-service built around PostgreSQL. Where Supabase pioneered the open-source BaaS model, Butterbase takes it further by baking an MCP server directly into the control plane — every capability (database, auth, storage, functions, AI gateway, RAG) is exposed as an MCP tool that coding agents can invoke without writing glue code.
+
+The stack covers the full application lifecycle:
+
+- **Data plane** — per-app Postgres databases with declarative schema, automatic REST endpoints via `/auto-api`, and migrations. Row-Level Security is first-class with user-isolation helpers.
+- **Key-Value store** — regional, quota-protected KV with TTL and audit trail (added in v0.2.0).
+- **File storage** — S3/R2-backed object storage with presigned URLs and async indexing.
+- **Compute** — TypeScript serverless functions on the Deno runtime; durable per-key actors for chat rooms, multiplayer, and long-running agents; WebSocket realtime subscriptions.
+- **AI** — Pluggable LLM gateway (single endpoint for chat, embeddings, model listing); managed RAG collections; Composio third-party integrations.
+- **Identity** — Email + OAuth (Google, GitHub, Apple, X, and more), JWT tuning, post-login hooks, and service keys.
+- **Agent surface** — Built-in MCP server at `/mcp` (HTTP) or via `@butterbase/mcp` stdio binary. A Claude Code plugin ships 30+ guided skills through the butterbase-skills submodule.
+
+The architecture separates three Postgres planes: `control-plane` for platform metadata (users, apps, billing), `runtime-plane` for hot-path runtime tables (KV expose rules, realtime channels, sessions), and `data-plane` for per-app user data with RLS isolation.
+
+## Repo-Specific Setup Workflow
+
+Butterbase supports two deployment paths: self-host (OSS) and managed cloud.
+
+### Self-Host via Docker
+
+#### Step 1: Clone and configure
+
+```bash
+git clone https://github.com/butterbase-ai/butterbase.git
+cd butterbase
+cp .env.example .env
+```
+
+Fill in the `.env` with your region, database connection, S3/R2 credentials, and at least one LLM provider key (`DS_KEY`, `ALI_API_KEYS`, `GPT_API_KEY`, or `GLM_API_KEY`).
+
+#### Step 2: Start infrastructure
+
+```bash
+docker compose up -d
+```
+
+This brings up Postgres, Redis, Traefik, and pgbouncer. The docs site (Astro) runs locally at `http://localhost:4321` after compose.
+
+#### Step 3: Provision your app
+
+```bash
+npx @butterbase/cli@latest app create my-app
+```
+
+The CLI scaffolds a project, creates a Postgres schema, and gives you a subdomain (`my-app.YOUR_DOMAIN`).
+
+#### Step 4: Deploy a serverless function
+
+```bash
+npx @butterbase/cli@latest function deploy ./functions/hello.ts
+```
+
+Functions run on the Deno runtime. The agent-runtime (Python/uv) handles long-running `manage_ai` tasks separately.
+
+#### Step 5: Connect an AI coding agent via MCP
+
+The MCP server is embedded in the control-api. For Claude Code, install the plugin:
+
+```bash
+npx skills add butterbase-ai/butterbase-skills --skill butterbase
+```
+
+Or add the stdio MCP server directly:
+
+```bash
+claude mcp add --scope project butterbase -- npx -y @butterbase/mcp@latest
+```
+
+The MCP tools cover the full surface: `/schema`, `/auto-api`, `/auth`, `/storage`, `/functions`, `/gateway`, `/rag`, `/kv`, `/realtime`, and `/audit-logs`.
+
+### Managed Cloud Setup
+
+Sign up at [butterbase.ai](https://butterbase.ai), create an app through the dashboard, and use the SDK:
+
+```bash
+npm install @butterbase/sdk
+```
+
+```typescript
+import { createClient } from '@butterbase/sdk';
+
+const bb = createClient({ app: 'my-app', apiKey: process.env.BUTTERBASE_KEY });
+
+// Auto-generated REST API
+await bb.autoApi.list('tasks');
+await bb.autoApi.create('tasks', { title: 'Deploy Butterbase post' });
+
+// Auth
+await bb.auth.signInWithOAuth({ provider: 'github' });
+
+// File upload
+const presigned = await bb.storage.createPresignedUrl('uploads/screenshot.png', 'PUT');
+await fetch(presigned.url, { method: 'PUT', body: fileData });
+
+// RAG
+await bb.rag.ingest('docs', { text: 'How to set up Butterbase MCP' });
+const answer = await bb.rag.query('docs', { question: 'How do I connect Claude Code?' });
+```
+
+## Deeper Analysis
+
+### Why Butterbase fits AI coding agents
+
+The MCP server is the key differentiator. Most BaaS platforms expose REST APIs, requiring agents to construct HTTP calls, handle authentication, and parse responses manually. Butterbase cuts that overhead — an agent sees tools like `butterbase_schema`, `butterbase_auto_api_create`, and `butterbase_kv_get` directly in its tool list, structured and typed.
+
+The 30+ guided skills in the Claude Code plugin go further. They don't just expose tools — they encode best practices. "Create a new data model" walks through schema design, RLS policy setup, and auto-API verification. This turns Butterbase from a backend into a pair-programming partner for backend architecture.
+
+### Durable Objects vs. traditional serverless
+
+Butterbase's durable per-key actors fill a gap that Postgres row-level locks don't cover well: stateful long-running operations within a single entity. Think multiplayer cursors, chat room state, or agent executor sessions. The pattern is familiar to Cloudflare Workers users, but here it runs alongside a Postgres-backed data plane, making it natural to compose durable state with persistent relational data.
+
+### The OSS/managed boundary
+
+Butterbase is transparent about what stays private. Multi-region orchestration, billing logic, lease-based quota math, and upstream AI router adapters (OpenAI/Anthropic/Bedrock) are managed-only. For self-host, you get the full data plane and compute plane, but you bring your own database, object storage, and LLM provider keys. This boundary is intentional — PRs touching billing or upstream adapters won't be accepted.
+
+### Docker compose vs. production deployment
+
+The self-host setup uses `docker compose` for local development. For production, the `infra/` directory contains `pgbouncer` and `traefik` configs, but multi-region failover and cross-region scheduling remain managed-only features. Self-host operators should expect to run a single-region stack with manual failover.
+
+## Practical Evaluation Checklist
+
+- [ ] Postgres schema design via `/schema` CLI tool
+- [ ] Auto-generated REST endpoints for CRUD operations
+- [ ] Row-Level Security policies with user isolation
+- [ ] KV store with TTL and audit trail (v0.2.0+)
+- [ ] File upload via presigned URLs with ACLs
+- [ ] Serverless function deployment with Deno runtime
+- [ ] Durable Object pattern for stateful per-key actors
+- [ ] WebSocket realtime subscriptions on table changes
+- [ ] OAuth flow (Google, GitHub, Apple, X)
+- [ ] AI gateway single endpoint with pluggable router
+- [ ] RAG collection creation and semantic search
+- [ ] MCP server connection from Claude Code or Codex
+- [ ] Claude Code plugin guided skills
+- [ ] Audit log trail on KV and storage operations
+
+## Security Notes
+
+- **Credentials** — never hardcode API keys, database URLs, or S3 credentials in code. Use environment variables via `.env` files and never commit `.env` to version control.
+- **RLS** — the data plane enforces row-level security per app. Verify that new tables get RLS policies before exposing them via auto-api.
+- **Service keys** — Butterbase supports service keys for machine-to-machine auth (bypassing user OAuth). Treat these like database passwords — rotate regularly and scope to least privilege.
+- **Storage ACLs** — presigned URLs have expiration windows. Don't set excessive TTLs on public read URLs.
+- **LLM provider keys** — if running agent-runtime with `DS_KEY` (DeepSeek) or similar, these credentials travel to the upstream provider. Self-host operators should treat these as sensitive secrets.
+
+## FAQ
+
+**Q: How does Butterbase compare to Supabase?**
+**A:** Both are Postgres-backed BaaS platforms. Butterbase adds a first-class MCP server, durable per-key actors, and a built-in AI gateway with RAG. Supabase has a larger ecosystem and longer track record. Butterbase is younger (v0.2.0 as of 2026-05-25) but explicitly designed for AI agent integration from the ground up.
+
+**Q: Can I self-host Butterbase on a single VPS?**
+**A:** Yes, for single-region workloads. The `docker compose` stack runs on a single host. Multi-region orchestration (managed-only) is not available in OSS, so you'll handle failover manually.
+
+**Q: What LLM providers work with the AI gateway?**
+**A:** The gateway interface is pluggable. By default it works with any provider that matches the router adapter interface (OpenAI-format endpoints). For production upstream adapters (OpenAI, Anthropic, Bedrock), those are managed-only — self-host uses the gateway interface to add custom providers.
+
+**Q: How do MCP tools handle auth?**
+**A:** The MCP server authenticates via service keys or user JWTs. Agents connect using a service key scoped to the app's data plane. Row-Level Security policies filter results based on the authenticated user context.
+
+**Q: Is v0.2.0 production-ready?**
+**A:** The data plane is production-tested by the managed offering. The OSS distribution is young — the team asks for self-host issues to tighten docs and defaults. Review the [CHANGELOG](https://github.com/butterbase-ai/butterbase/blob/main/CHANGELOG.md) before running in a high-stakes environment.
+
+## Conclusion
+
+Butterbase solves the backend integration problem for AI coding agents by making every capability an MCP tool. Whether you self-host for full control or use the managed cloud for a faster start, the experience for an agent is the same: structured tools, typed responses, and guided skills that encode best practices.
+
+For self-host, the Docker compose path gets you a working stack in under 10 minutes. For teams wanting zero ops, the managed cloud at butterbase.ai handles provisioning, billing, and multi-region routing. Either way, the MCP server ensures your AI coding agent isn't fighting with raw REST calls — it speaks Butterbase's tool language natively.

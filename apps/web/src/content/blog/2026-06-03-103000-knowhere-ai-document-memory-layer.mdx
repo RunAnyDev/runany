@@ -1,0 +1,205 @@
+---
+title: "Knowhere: AI Document Memory for Agents"
+description: "Ingest documents into persistent navigable memory — tree-like hierarchy reconstruction, multi-modal parsing, and agentic RAG with evidence-based citations."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "python", "ai-agents", "rag", "document-ingestion"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/knowhere.webp"
+  alt: "Knowhere GitHub tool guide thumbnail"
+draft: false
+---
+
+![Knowhere GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/knowhere.webp)
+
+## TL;DR
+
+> **TL;DR:** Knowhere transforms complex, dirty documents into persistent navigable memory for AI agents — using tree-like hierarchy reconstruction instead of flat chunks, multi-modal parsing for text/tables/images, and agentic retrieval that walks section trees and cross-document graphs.
+
+## Source and Accuracy Notes
+
+This post is based on the official [Knowhere repository](https://github.com/Ontos-AI/knowhere) (Apache-2.0, Python 3.11+), its [documentation](https://docs.knowhereto.ai/), and self-hosted guide at [knowhere-self-hosted](https://github.com/Ontos-AI/knowhere-self-hosted). Knowhere was open-sourced on May 7, 2026. A managed cloud is available at [knowhereto.ai](https://knowhereto.ai) with $5 in free credits. The default parser is MinerU.
+
+## What Is Knowhere?
+
+Knowhere sits between raw, unstructured documents and AI agents that need to reason about their content. The core problem it solves: flat chunking destroys document hierarchy, scattering semantically related content and making retrieval feel like reading random sentences from a book.
+
+Knowhere's answer is a two-step pipeline. First, it parses documents and builds memory — preserving heading structure, section relationships, table hierarchies, and cross-document links. Second, agents retrieve from that memory through agentic navigation, walking the section tree and graph rather than doing a flat vector lookup.
+
+### How the memory building works
+
+**Parse** — Documents route to specialized parsers. PDF and Office files go through MinerU (the default), which extracts text, tables, and images with structural metadata. Markdown and plain text are parsed directly. The parser preserves heading levels, list nesting, table cell positions, and image captions.
+
+**Structure** — Knowhere's proprietary tree-like algorithm reconstructs the full document hierarchy instead of flattening it into a sequence. A section heading becomes a tree node with children for its paragraphs, subsections, tables, and images. Tables get a separate hierarchy: caption → header row → data rows, with cell-level position tracking.
+
+**Build Memory** — Nodes store chunks with full semantic context — which section they belong to, what their parent heading is, what sibling content surrounds them. Navigation trees link sections. Summaries annotate key nodes. Cross-document graph links connect related concepts across documents.
+
+### How agentic retrieval works
+
+Traditional RAG does a flat vector search and returns isolated snippets. Knowhere's agent retrieves differently:
+
+**Discover** — Fuse keyword, path, content, and semantic signals for broad first-pass coverage. A query about "Q3 revenue by region" starts by finding the "Financial Reports" section across all uploaded documents.
+
+**Navigate** — Walk the section tree. If the agent finds a "Quarterly Reports" node, it drills into "2026" → "Q3" → "Revenue Breakdown". Cross-document graph links jump to related analyst notes or board presentations that reference the same revenue figures.
+
+**Cite Evidence** — Every result includes source document, section path, chunk position, and linked assets. The agent can show exactly where the answer came from, with a traceable breadcrumb trail.
+
+### Model-agnostic design
+
+Knowhere defaults to DeepSeek (`deepseek-chat`) for text and table summarization, and Qwen-VL (`qwen3.5-flash`) for image OCR and descriptions. But it's model-agnostic — swap providers via environment variables: `OPENAI_API_KEY`, `ALI_API_KEYS`, `GPT_API_KEY`, or `GLM_API_KEY`. Vision-capable models only need to be configured if you use image summaries, OCR, atlas classification, or image-aware retrieval.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Python 3.11+
+- `uv` (Python package manager)
+- Docker with `docker compose`
+
+### Step 1: Sync workspace dependencies
+
+```bash
+git clone https://github.com/Ontos-AI/knowhere.git
+cd knowhere
+uv sync --all-packages
+```
+
+### Step 2: Configure environment
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/worker/.env.example apps/worker/.env
+
+Fill in the required fields in both `.env` files:
+
+- **Database and Redis** — connection settings for Postgres and Redis
+- **S3-compatible storage** — credentials for MinIO or another S3-compatible service
+- **LLM provider** — at least one of: `DS_KEY` (DeepSeek), `ALI_API_KEYS` (Alibaba), `GPT_API_KEY` (OpenAI), or `GLM_API_KEY` (Zhipu)
+- **MinerU** — `MINERU_API_KEYS` if you need PDF parsing
+- **Vision model** — a vision-capable model provider key if you use image summaries, OCR, atlas classification, or image-aware retrieval
+
+### Step 3: Start local infrastructure
+
+```bash
+./deploy/local-dev/start-dev.sh
+
+This starts PostgreSQL, Redis, and LocalStack (S3 emulation) via Docker.
+
+### Step 4: Start API and worker
+
+In two separate terminals:
+
+```bash
+# Terminal 1: API server
+cd apps/api && uv run main.py
+
+# Terminal 2: Worker (for background ingestion jobs)
+cd apps/worker && uv run worker.py
+
+The API runs database migrations on startup. Access the API at `http://localhost:5005` and the OpenAPI docs at `http://localhost:5005/docs`.
+
+### Step 5: Create an API user (optional)
+
+For API-only development without the dashboard:
+
+```bash
+cd apps/api
+uv run scripts/init_user.py --email you@example.com
+
+### Step 6: (Optional) Run the dashboard
+
+To use the full product with a UI, run [knowhere-dashboard](https://github.com/Ontos-AI/knowhere-dashboard) alongside the API. It connects to `http://localhost:5005` by default.
+
+### Self-hosted production deployment
+
+For production self-hosting, use the [knowhere-self-hosted](https://github.com/Ontos-AI/knowhere-self-hosted) repository, which packages the full stack with proper Docker Compose configuration for a production-ready deployment.
+
+### Quick health checks
+
+```bash
+# Lint
+make lint
+
+# Safe Ruff fixes
+make lint-fix
+
+# Type checking
+make typecheck
+
+# Both lint and typecheck
+make check
+```
+
+## Deeper Analysis
+
+### Tree-like hierarchy vs. flat chunking
+
+The fundamental difference between Knowhere and conventional RAG tools is how they handle document structure. Flat chunkers split text at fixed token boundaries — a table gets split mid-row, a section loses its heading context, and related information ends up in disconnected chunks.
+
+Knowhere's tree algorithm keeps the document's structural integrity. A section node contains its heading, child paragraphs, nested subsections, and embedded tables. When a chunk is retrieved, it carries its position in the tree — which means the agent knows not just what the chunk says, but where it fits in the document and what surrounds it.
+
+This matters especially for complex documents: legal contracts, financial reports, technical specifications. Chunking these with a flat splitter loses the hierarchical context that lets a human reader quickly navigate to the relevant section.
+
+### Agentic retrieval vs. semantic search
+
+Traditional RAG retrieval is a vector similarity search. You embed a query, find the nearest chunks, return them. The results are independent — there's no concept of document structure or cross-chunk relationships.
+
+Knowhere's agentic retrieval adds a planning layer. The agent sees the navigation tree and cross-document graph, can browse relevant sections, and can decide to dig deeper or widen the search. Think of it as giving the agent a table of contents and a "see also" reference system, rather than just a pile of text.
+
+The citation system is the payoff. Every result is traceable to a specific document, section, chunk, and linked asset. For applications where the agent's answer needs to be verifiable — legal research, financial analysis, compliance checking — evidence-based citations are essential.
+
+### MinerU as the default parser
+
+Knowhere uses MinerU as its default parser because it performs best in internal tests. But MinerU only gets you raw Markdown output. Knowhere's value is what happens next: hierarchy reconstruction using the Markdown's structural markers, multi-modal normalization for embedded tables and images, and cross-document graph construction.
+
+The parser is swappable. Any tool that outputs Markdown can feed into Knowhere — the hierarchy reconstruction, graph building, and agentic retrieval are parser-agnostic.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone and sync the workspace with `uv sync --all-packages`
+- [ ] Start infrastructure via `start-dev.sh` (Postgres, Redis, LocalStack)
+- [ ] Start API and verify OpenAPI docs at `http://localhost:5005/docs`
+- [ ] Create an API user via `init_user.py`
+- [ ] Upload a PDF document — verify parsing completes
+- [ ] Check that hierarchy reconstruction preserved section headings
+- [ ] Run a semantic query — verify results include section path and citation
+- [ ] Upload a document with tables — verify table structure is preserved
+- [ ] Upload a document with images — verify image OCR and captions
+- [ ] Query across multiple documents — verify cross-document graph navigation
+- [ ] Swap LLM provider via environment variables — verify summarization works
+- [ ] Test self-hosted deployment via knowhere-self-hosted
+
+## Security Notes
+
+- **LLM provider credentials** — `DS_KEY`, `ALI_API_KEYS`, `GPT_API_KEY`, `GLM_API_KEY` are sensitive. Never commit `.env` files. Use a secrets manager or environment variable injection in production.
+- **S3 storage credentials** — if using MinIO or a cloud S3 bucket, the access keys travel to the storage layer. Restrict bucket access to the specific application IAM role.
+- **Document content in LLM calls** — ingested document content is sent to the configured LLM provider for summarization and embedding. If documents contain sensitive information, ensure your LLM provider's data handling policy matches your requirements.
+- **LocalStack for development** — LocalStack emulates S3 locally. Don't use LocalStack credentials in production; they are development-only defaults.
+
+## FAQ
+
+**Q: How is Knowhere different from MinerU alone?**
+**A:** MinerU is a parser — it converts documents to Markdown. Knowhere adds the memory layer: hierarchy reconstruction (tree-like, not flat chunks), multi-modal structuring (tables, images), cross-document graph construction, and agentic retrieval. You could use MinerU output in any RAG system; Knowhere is designed specifically for the document → agent memory pipeline.
+
+**Q: What LLM providers can I use with Knowhere?**
+**A:** By default, DeepSeek (`deepseek-chat`) for text/table summarization and Qwen-VL (`qwen3.5-flash`) for image OCR. You can swap in OpenAI, Alibaba (DashScope), Zhipu (GLM), or Volcengine via environment variables. Vision-capable models are only needed if you use image summaries, OCR, atlas classification, or image-aware retrieval.
+
+**Q: Does Knowhere support languages other than English?**
+**A:** The parser and LLM summarization are language-agnostic. MinerU handles multilingual documents. The tree reconstruction and graph building work on any document structure. If you configure a multilingual LLM provider, summaries and retrieval work across languages.
+
+**Q: What document formats are supported?**
+**A:** Currently supported: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.csv`, `.jpg`, `.png`, `.md`, `.txt`, `.json`. Coming soon: `.epub`, `.html`, `.xml`, `.mp4`, `.mp3`, `.skills.md`.
+
+**Q: How does agentic retrieval differ from traditional RAG?**
+**A:** Traditional RAG does a flat vector lookup and returns isolated snippets. Knowhere's agent navigates the document's section tree and cross-document graph, drilling into the most relevant regions the way a human reader would. Results are traceable — every answer includes source document, section, chunk, and linked asset citations.
+
+**Q: Can I self-host Knowhere in production?**
+**A:** Yes, via the [knowhere-self-hosted](https://github.com/Ontos-AI/knowhere-self-hosted) repository. The managed cloud at [knowhereto.ai](https://knowhereto.ai) is also available if you prefer a hosted solution with $5 in free credits.
+
+## Conclusion
+
+Knowhere solves the document-memory problem for AI agents by preserving the structural information that flat chunkers destroy. The tree-like hierarchy reconstruction, multi-modal parsing, and agentic retrieval pipeline give agents a navigable, traceable knowledge base instead of a pile of disconnected snippets.
+
+For developers building agentic RAG systems — legal research tools, financial analysis platforms, technical documentation systems — Knowhere provides the memory layer that makes long-document reasoning practical. The self-host option via `knowhere-self-hosted` keeps data on your infrastructure, and the managed cloud at `knowhereto.ai` offers a faster start with $5 in free credits.

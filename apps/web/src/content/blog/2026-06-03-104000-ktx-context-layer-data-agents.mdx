@@ -1,0 +1,216 @@
+---
+title: "ktx: Context Layer for Data Agents"
+description: "Self-improving context layer for data agents — ingests databases, BI tools, and wiki content; builds semantic layer with automatic fan/chasm trap resolution."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "typescript", "ai-agents", "data", "semantic-layer", "mcp"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ktx.webp"
+  alt: "ktx GitHub tool guide thumbnail"
+draft: false
+---
+
+![ktx GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/ktx.webp)
+
+## TL;DR
+
+> **TL;DR:** ktx solves the data agent problem — agents that query your warehouse with approved metric definitions instead of inventing SQL on every prompt. It ingests databases, BI tools, and wiki content, builds a semantic layer with automatic fan/chasm trap resolution, and serves everything through CLI and MCP tools.
+
+## Source and Accuracy Notes
+
+This post is based on the official [ktx GitHub repository](https://github.com/Kaelio/ktx) (Apache-2.0, TypeScript/Python/pnpm workspace). ktx is a Y Combinator P25 company. Docs at [docs.kaelio.com](https://docs.kaelio.com/ktx/docs/). Run with your own LLM API keys or local agent sign-in — Claude Pro/Max through Claude Code, or local Codex authentication. No extra usage billing from ktx.
+
+## What Is ktx?
+
+General-purpose AI coding agents are bad at data tasks. They re-explore your warehouse on every question, invent their own metric logic, and return numbers that don't match the definitions your data team spent months establishing. Traditional semantic layers help but demand constant manual upkeep and don't absorb the rest of your company's knowledge.
+
+ktx does both. It automatically learns from your data stack, builds a semantic layer that understands join paths and metric definitions, and exposes everything as CLI and MCP tools that agents can search at runtime.
+
+### What ktx builds
+
+**Context engine** — ktx samples tables, captures metadata and usage patterns, detects joinable columns, and annotates sources so agents write better queries from the start. It also ingests wiki content, Notion pages, and team docs, organizes them, removes duplicates, and flags contradictions for human review.
+
+**Semantic layer** — ktx combines raw tables and high-level metrics through a join graph. The join graph automatically resolves chasm traps (one-to-many that inflate counts) and fan traps (many-to-one that collapse granularity), so agents fetch metrics declaratively instead of rewriting canonical SQL each time.
+
+**Agent surface** — CLI tools for local use and MCP tools for agent integration. Both expose combined full-text and semantic search across wiki content and semantic-layer entities.
+
+### Comparison
+
+|  | General-purpose agent | Traditional semantic layer | **ktx** |
+| --- | :---: | :---: | :---: |
+| Builds warehouse context automatically | — | — | ✓ |
+| Detects joinable columns + resolves fan/chasm traps | — | Manual | ✓ |
+| Approved, reusable metric definitions | — | ✓ | ✓ |
+| Absorbs wiki / Notion / team knowledge | — | — | ✓ |
+| Flags contradictions across sources | — | — | ✓ |
+| Ships CLI + MCP for agent execution | Partial | — | ✓ |
+| Read-only by design | n/a | n/a | ✓ |
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm 11+
+- npm or yarn for global install
+- Docker (for local infrastructure)
+
+### Step 1: Install and setup
+
+```bash
+npm install -g @kaelio/ktx
+ktx setup
+```
+
+`ktx setup` creates or resumes a local ktx project, configures LLM providers and database connections, builds context, and installs agent integration. It asks about:
+
+- **LLM provider** — Anthropic API, Google Vertex AI, AI Gateway, or local Claude Code / Codex session
+- **Embedding model** — configured separately from the reasoning model
+- **Data connections** — database credentials, BI tool access, dbt manifest paths, Notion tokens
+
+### Step 2: Configure databases
+
+ktx supports BigQuery, Snowflake, Databricks, PostgreSQL, DuckDB, ClickHouse, MySQL, SQL Server, and SQLite. It also integrates with dbt, MetricFlow, LookML, Looker, and Metabase.
+
+For a simple local setup:
+
+```bash
+ktx connect add --type postgres --name my-warehouse --connection-string "postgresql://user:pass@localhost:5432/analytics"
+```
+
+### Step 3: Ingest context
+
+```bash
+ktx ingest
+
+This builds context for every configured connection — sampling tables, building the join graph, ingesting wiki content, and organizing everything into searchable wiki pages and semantic-layer entities.
+
+### Step 4: Verify readiness
+
+```bash
+ktx status
+
+Example output after setup:
+
+```text
+ktx project: /home/user/analytics
+Project ready: yes
+LLM ready: yes (claude-sonnet-4-6)
+Embeddings ready: yes (text-embedding-3-small)
+Databases configured: yes (warehouse)
+Context sources configured: yes (dbt_main)
+ktx context built: yes
+Agent integration ready: yes (codex:project)
+```
+
+### Step 5: Start MCP server for agents
+
+```bash
+ktx mcp start --project-dir /home/user/analytics
+
+If `ktx status` prints `ktx mcp start --project-dir ...`, run it before opening your agent client.
+
+### Step 6: Connect Claude Code
+
+From any project directory, ask the agent to install ktx:
+
+```
+Run npx skills add Kaelio/ktx --skill ktx and use the ktx skill to install and configure ktx in this project.
+
+Or add MCP manually:
+
+```bash
+claude mcp add --scope user ktx -- npx -y @kaelio/ktx-mcp@latest
+```
+
+## CLI Commands Reference
+
+| Command | Purpose |
+| --- | --- |
+| `ktx setup` | Create, resume, or update a ktx project |
+| `ktx status` | Check project readiness |
+| `ktx ingest` | Build context for every configured connection |
+| `ktx sl "revenue"` | Search semantic sources |
+| `ktx wiki "refund policy"` | Search local wiki pages |
+| `ktx mcp start` | Start the MCP server for agent clients |
+| `ktx connect add` | Add a new database connection |
+| `ktx connect list` | List configured connections |
+| `ktx context build` | Rebuild context from scratch |
+| `ktx context validate` | Check for contradictions across sources |
+
+## Deeper Analysis
+
+### Join graph and trap resolution
+
+Data warehouses have two classic join problems. A **chasm trap** happens when you join through a one-to-many relationship — say, orders to line items — and count distinct customers. Each customer appears in multiple rows, inflating the count. A **fan trap** is the inverse: joining through many-to-one collapses granularity, so a summary rollup looks wrong.
+
+Traditional semantic layers require analysts to write explicit measure definitions that handle these cases. ktx's join graph automatically detects joinable columns and flags potential traps, then resolves them with proper aggregation logic. When an agent asks for "monthly revenue by customer," ktx doesn't just generate SQL — it applies the correct aggregation strategy based on the detected join path.
+
+### Read-only by design
+
+ktx never writes to your database. Connections are configured as read-only, and every generated query is vetted before execution. This is essential for agent workflows — you want the agent to explore and aggregate, not mutate source data.
+
+### Telemetry
+
+ktx collects anonymous usage telemetry from interactive CLI runs. It sends nothing to a hosted service — the only external traffic is what you send to the LLM provider you configured. See the [telemetry docs](https://docs.kaelio.com/ktx/docs/) for the full breakdown.
+
+### LLM provider options
+
+ktx runs with your own LLM API keys:
+
+- **Anthropic API** — direct API key for Claude models
+- **Google Vertex AI** — for enterprise deployments
+- **AI Gateway** — for multi-provider routing
+- **Claude Code session** — uses your active Claude Code auth without additional cost
+- **Codex SDK** — uses local Codex authentication
+
+## Practical Evaluation Checklist
+
+- [ ] Install ktx via npm (`npm install -g @kaelio/ktx`)
+- [ ] Run `ktx setup` and configure at least one database connection
+- [ ] Verify `ktx status` shows all systems ready
+- [ ] Run `ktx ingest` and verify wiki and semantic layer are populated
+- [ ] Query `ktx sl "revenue"` — verify approved metric definitions appear
+- [ ] Query `ktx wiki "refund policy"` — verify wiki content is searchable
+- [ ] Start `ktx mcp start` and connect Claude Code via MCP
+- [ ] Ask Claude Code a data question — verify it uses ktx metric definitions
+- [ ] Test with a dbt project — verify manifest ingestion picks up metrics
+- [ ] Verify no write operations occur against the warehouse
+- [ ] Test contradiction detection — ingest conflicting definitions and verify ktx flags them
+
+## Security Notes
+
+- **Read-only connections** — ktx never writes to your database. Verify your connection strings are read-only or scoped to the appropriate IAM role.
+- **LLM provider credentials** — API keys for Anthropic, Vertex AI, or other providers are stored in the local project config (`.ktx/`). Don't commit this directory to version control.
+- **No hosted service** — ktx runs locally. The only data leaving your machine is what you send to your configured LLM provider.
+- **Wiki content** — ingested wiki and Notion content is embedded and stored locally. Sensitive internal docs should be reviewed before ingestion.
+
+## FAQ
+
+**Q: Does ktx send my schema or query results to a hosted service?**
+**A:** No. ktx runs locally. The only data leaving your machine is what you send to the LLM provider you configured. No telemetry sends query results or schema data anywhere.
+
+**Q: Which LLM backends are supported?**
+**A:** Anthropic API, Google Vertex AI, AI Gateway, Claude Code session through the Claude Agent SDK, and Codex SDK for local Codex auth. See the [LLM configuration docs](https://docs.kaelio.com/ktx/docs/guides/llm-configuration).
+
+**Q: How is ktx different from a dbt semantic layer?**
+**A:** ktx *ingests* dbt and MetricFlow semantic layers and combines them with raw-table introspection and wiki content. Agents get one searchable surface instead of three disconnected ones — and ktx flags contradictions across sources.
+
+**Q: Does ktx need a running server?**
+**A:** No hosted service. The local MCP daemon runs on demand via `ktx mcp start` when an agent client needs it. The CLI works offline once context is built.
+
+**Q: How does ktx handle fan and chasm traps?**
+**A:** The join graph automatically detects joinable columns and identifies potential traps. When generating SQL for a metric, ktx applies the correct aggregation strategy — distinct count for chasm traps, proper grouping for fan traps — based on the detected join path.
+
+**Q: Can I use ktx without connecting a database?**
+**A:** Yes. You can ingest wiki content, Notion pages, and documentation without a database connection. The semantic layer and wiki search work on pure text content. Database connections add warehouse context for SQL generation.
+
+## Conclusion
+
+ktx solves the data agent problem by giving agents the same context your data team has — approved metric definitions, join graph awareness, and wiki-backed business knowledge — without manual semantic layer maintenance.
+
+For teams running Claude Code, Codex, Cursor, or OpenCode against a data warehouse, ktx turns vague data questions into accurate, approved SQL. The join graph handles the tricky cases (chasm traps, fan traps) that cause general-purpose agents to return wrong numbers, and the contradiction detection flags when metric definitions drift across sources.
+
+The local-only design means no data leaves your infrastructure except what you explicitly send to your LLM provider. For security-conscious teams, that's a meaningful guarantee.

@@ -1,0 +1,250 @@
+---
+title: "wanman: Multi-Agent Matrix for Claude Code and Codex"
+description: "Local-mode multi-agent matrix framework that runs supervised Claude Code or Codex agents — coordinated through JSON-RPC, per-agent worktree isolation, and async message bus."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "typescript", "ai-agents", "multi-agent", "claude-code"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wanman.webp"
+  alt: "wanman GitHub tool guide thumbnail"
+draft: false
+---
+
+![wanman GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/wanman.webp)
+
+## TL;DR
+
+> **TL;DR:** wanman runs a supervised network of Claude Code or Codex agents on your machine, coordinated through JSON-RPC with an async message bus, steer/follow-up priorities, and per-agent worktree isolation. The human steps back into an observer role while the agent matrix runs automatically.
+
+## Source and Accuracy Notes
+
+This post is based on the official [wanman repository](https://github.com/chekusu/wanman) (Apache-2.0, TypeScript/pnpm workspace). Prerequisites: Node 20+, pnpm 9+, git, a logged-in Claude Code or Codex CLI. Documents in English, Chinese, and Japanese. A hosted 24/7 sandbox edition is available at [wanman.ai](https://wanman.ai/).
+
+## What Is wanman?
+
+wanman is an agent matrix framework. The name comes from the Japanese ワンマン電車 (one-man train) — a train operated by one driver without a conductor. The design goal mirrors that: the human user steps back into an observer role while local agent runtimes coordinate autonomous multi-agent workflows, task execution, and artifacts.
+
+### What it coordinates
+
+- **Multiple agents** — CEO, dev, devops, marketing, feedback, and custom roles, each with its own system prompt and lifecycle
+- **Async message bus** — agents communicate through steer (interrupt) and follow-up (queue) message priorities
+- **Per-agent isolation** — each agent runs in its own worktree and per-agent `$HOME`, preventing cross-contamination of workspaces
+- **CLI-first** — scriptable and observable through `wanman` commands and a JSON-RPC supervisor
+
+### Architecture
+
+```text
++----------------+          +--------------------+          +-----------------+
+|  wanman CLI    |  JSON    |  Supervisor        |  spawn   |  Agent process  |
+|  (host shell)  | ---RPC-->|  (local process)   | -------> |  (Claude/Codex) |
+|                |  /rpc    |  message/context/  |          |  per-agent $HOME|
+|                |          |  task/artifact     |          |  per-agent wt   |
++----------------+          +--------------------+          +-----------------+
+```
+
+- `wanman <subcommand>` speaks JSON-RPC 2.0 to a Supervisor process
+- The Supervisor owns the message store, context store, task pool, artifact store, and spawns one child process per agent
+- Each agent child is a local Claude Code or Codex subprocess bound to a per-agent worktree and isolated `$HOME`
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- git
+- A logged-in Claude Code or Codex CLI
+
+### Step 1: Clone and build
+
+```bash
+git clone git@github.com:chekusu/wanman.git wanman.dev
+cd wanman.dev
+pnpm install
+pnpm build
+```
+
+### Step 2: Take over a repository
+
+```bash
+pnpm --filter @wanman/cli exec wanman takeover /path/to/any/git/repo
+
+Or, if `wanman` is on your `PATH`:
+
+```bash
+cd /path/to/your/repo
+wanman takeover .
+
+For a standalone CLI bundle:
+
+```bash
+pnpm --filter @wanman/cli standalone
+node packages/cli/dist/wanman.mjs takeover /path/to/any/git/repo
+```
+
+### Step 3: Watch agent activity
+
+```bash
+wanman watch
+
+Live-streams supervisor and agent activity — see what each agent is doing in real time.
+
+### Step 4: Manage the task pool
+
+```bash
+# Create a task
+wanman task create "Implement user authentication" --priority high --after <dep-task-id>
+
+# List tasks
+wanman task list
+
+# Mark done
+wanman task done <task-id>
+
+Tasks support `--after` dependencies for sequencing.
+
+### Step 5: Send messages to agents
+
+```bash
+# Send to a specific agent
+wanman send dev "Check the error logs and report back"
+
+# Interrupt the CEO with new direction
+wanman send ceo "Change approach — use pnpm instead of npm" --steer
+
+# Receive pending messages
+wanman recv --agent feedback
+
+# Escalate to CEO
+wanman escalate "The dev agent is stuck on dependency conflicts"
+```
+
+## CLI Commands Reference
+
+| Command | Purpose |
+| --- | --- |
+| `wanman send <agent> <msg>` | Send a message to an agent (`--steer` interrupts) |
+| `wanman recv [--agent <name>]` | Receive and mark pending messages as delivered |
+| `wanman agents` | List registered agents and their current states |
+| `wanman context get / set` | Read or write shared key/value context |
+| `wanman escalate <msg>` | Escalate to the CEO agent |
+| `wanman task create / list / get / update / done` | Task pool management with `--after` dependencies |
+| `wanman initiative create / list / get / update` | Long-lived initiative tracking |
+| `wanman capsule create / list / mine / get / update` | Change capsule management |
+| `wanman artifact put / list / get` | Store and retrieve structured artifacts |
+| `wanman hypothesis create / list / update` | Hypothesis tracking with status transitions |
+| `wanman watch` | Live-stream supervisor and agent activity |
+| `wanman run <goal>` | Start a matrix against a one-shot goal |
+| `wanman takeover <path>` | Take over an existing git repo with the full agent matrix |
+| `wanman skill:check [path]` | Validate skill docs reference only real CLI commands |
+
+## Agent Configuration
+
+Agent definitions live in a single JSON file:
+
+```json
+{
+  "agents": [
+    { "name": "ceo", "lifecycle": "24/7", "model": "high", "systemPrompt": "..." },
+    { "name": "dev", "lifecycle": "idle_cached", "model": "standard", "systemPrompt": "..." }
+  ],
+  "dbPath": ".wanman/wanman.db",
+  "port": 3120,
+  "workspaceRoot": ".wanman/agents"
+}
+```
+
+**Lifecycle options:**
+- `24/7` — continuous respawn loop
+- `on-demand` — idle until triggered
+- `idle_cached` — idle until triggered, Claude session preserved via `claude --resume` (Claude-only; incompatible with `runtime: codex`)
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WANMAN_URL` | `http://localhost:3120` | Supervisor HTTP URL |
+| `WANMAN_AGENT_NAME` | (none) | Identifies current agent on the message bus |
+| `WANMAN_RUNTIME` | `claude` | `claude` or `codex` — selects the per-agent CLI adapter |
+| `WANMAN_MODEL`, `WANMAN_CODEX_MODEL`, `WANMAN_CODEX_REASONING_EFFORT` | (none) | Per-runtime model overrides |
+| `WANMAN_SKILL_SNAPSHOTS_DIR` | `$TMPDIR/wanman-skill-snapshots` | Override skill materialization directory |
+
+## Deeper Analysis
+
+### Per-agent worktree isolation
+
+Each agent subprocess runs in its own worktree under `.wanman/agents/` and has an isolated `$HOME`. This means agents never mutate your dirty checkout or shell profile — they work in a clean sandbox.
+
+The isolation means you can run multiple agents with conflicting tool preferences without side effects. One agent can use `npm` while another uses `pnpm`, and neither affects the other's environment.
+
+### Lifecycle modes and session caching
+
+The three lifecycle modes handle different use cases:
+
+- **`24/7`** — continuous respawn loop. The supervisor keeps restarting the agent subprocess whenever it exits. Use for background monitoring, scheduled tasks, or always-on services.
+- **`on-demand`** — idle until triggered by a message or task. Lighter weight than 24/7 but doesn't preserve context.
+- **`idle_cached`** — idle until triggered, but preserves the Claude session via `claude --resume`. This means the agent has full conversation history from the previous run. Claude-only; not compatible with `WANMAN_RUNTIME=codex`.
+
+For long-running projects where you want the agent to remember what it was doing across idle periods, `idle_cached` is the right choice.
+
+### Message bus and steer priority
+
+The message bus supports two priority levels:
+
+- **Normal** — messages queue behind current work. The agent finishes its current task before processing queued messages.
+- **`--steer`** — interrupts the target agent's current work and delivers the message immediately. Use for corrections, direction changes, or urgent tasks.
+
+The steer mechanism is key to human-in-the-loop control. You can let the agent work autonomously, then steer it when it goes off-track or when requirements change.
+
+### Agent skill snapshots
+
+wanman materializes skill activation snapshots from `~/.claude/skills/` into a per-agent worktree. The `@wanman/finops` toolkit is an example — it requires API credential inventory, provider cost sync, Stripe revenue sync, and product/company ROI summaries.
+
+Skill snapshots ensure agents have consistent, versioned skill context even when the shared skills directory changes. Override the snapshot directory with `WANMAN_SKILL_SNAPSHOTS_DIR`.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone, install, and build wanman
+- [ ] Verify `wanman --help` works
+- [ ] Run `wanman takeover` in a git repository
+- [ ] Start `wanman watch` and observe agent activity
+- [ ] Send a message to an agent with `wanman send`
+- [ ] Create and list tasks with `wanman task`
+- [ ] Set shared context with `wanman context set`
+- [ ] Verify per-agent worktree isolation
+- [ ] Test `--steer` (interrupt) vs. normal message priority
+- [ ] Configure non-default agent roles in the JSON config
+- [ ] Test `idle_cached` lifecycle — verify session resumes
+- [ ] Run `wanman skill:check` to validate skill references
+
+## Security Notes
+
+- **Per-agent $HOME isolation** — each agent has its own `$HOME`, preventing shell profile contamination across agents.
+- **Per-agent worktree** — agents don't mutate the user's dirty checkout. The matrix operates in `.wanman/agents/`.
+- **No external network by default** — the Supervisor runs locally. External network access depends on what the agent subprocesses do.
+- **JSON-RPC over HTTP** — the supervisor listens on `localhost:3120` by default. Don't expose it to untrusted networks without adding authentication.
+
+## FAQ
+
+**Q: What's the difference between `wanman run` and `wanman takeover`?**
+**A:** `wanman run` starts a matrix against a one-shot goal and exits when complete. `wanman takeover` attaches to a repository and keeps the matrix running continuously until you stop it. Takeover is for ongoing development; run is for discrete tasks.
+
+**Q: How does `idle_cached` lifecycle work with Claude Code?**
+**A:** When triggered, the agent uses `claude --resume` to restore the prior session context. This means the agent doesn't start from scratch — it has the conversation history from the previous run. This is Claude-specific; Codex has no equivalent resume mechanism and `idle_cached` is rejected if `WANMAN_RUNTIME=codex`.
+
+**Q: Can I run wanman without Claude Code or Codex installed?**
+**A:** The Supervisor and CLI work without a runtime, but agents won't spawn without the CLI binary. You can set `WANMAN_RUNTIME=claude` or `codex` and the Supervisor will attempt to spawn the subprocess; it fails if the binary isn't found.
+
+**Q: How does the FinOps toolkit work?**
+**A:** `pnpm --filter @wanman/finops dev -- --host 127.0.0.1 --port 4173` starts a local review app for API credential inventory, provider cost sync, Stripe revenue sync, and product/company ROI summaries. It requires the FinOps package to be built and configured with credentials.
+
+**Q: What does `--steer` do?**
+**A:** It interrupts the target agent's current work and delivers the message with higher priority. Normal messages go to the back of the queue; steer messages interrupt immediately. Useful for redirecting an agent that's gone off-track.
+
+## Conclusion
+
+wanman turns Claude Code and Codex into a coordinated team rather than a single assistant. The matrix architecture — CEO, specialist agents, async message bus, per-agent isolation — mirrors how human engineering teams work: specialized roles, structured communication, shared context.
+
+For complex projects that need multiple concerns addressed simultaneously — backend, frontend, DevOps, research — wanman provides the orchestration layer that a single agent can't offer. The human steps back into observer and director, letting the matrix handle execution.

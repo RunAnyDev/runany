@@ -1,0 +1,205 @@
+---
+title: "Image Extender: AI Outpainting and 2D Game Art Studio"
+description: "AI outpainting with five integrated 2D game art studios — Poisson-blended seams, parallax backgrounds, autotile sets, character sprites, and decoration props."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "typescript", "ai-image", "game-dev", "2d", "gemini"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/image-extender.webp"
+  alt: "Image Extender GitHub tool guide thumbnail"
+draft: false
+---
+
+![Image Extender GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/image-extender.webp)
+
+## TL;DR
+
+> **TL;DR:** Image Extender combines AI outpainting with five integrated studios for 2D game art — Extender (directional outpainting), Parallax Studio (multi-layer backgrounds), Tile Studio (autotile sets), Sprite Studio (character animations), and Props Studio (decoration sprites) — all powered by Gemini via OpenRouter with no server-side key storage.
+
+## Source and Accuracy Notes
+
+This post is based on the official [Image Extender repository](https://github.com/boona13/image-extender) (MIT, TypeScript). Runs entirely in the browser with BYOK (Bring Your Own Key) — the OpenRouter API key is stored only in `localStorage`, never sent to the server. Server proxies requests to OpenRouter without logging the key. Supports Gemini 3 Pro Image, Gemini 3 Flash Image, and Gemini 2.5 Flash Image.
+
+## What Is Image Extender?
+
+Image Extender is a browser-based creative tool that combines AI outpainting with specialized studios for 2D game art. The core Extender workspace lets you extend any image in any direction using directional arrow controls, with a best-of-3 seam-quality variant picker and Poisson-blended seams that make the AI-original boundary mathematically invisible.
+
+Four additional studios layer on top of the same outpainting engine:
+
+- **Parallax Studio** — multi-layer sidescroller backgrounds with Sky/Far/Mid/Near depth layers, live scrolling preview, auto-extend to target width, and one-click ZIP export with JSON manifest.
+- **Tile Studio** — 13-tile autotile sets (body + 4 edges + 4 outer corners + 4 inner corners) generated in a single AI call as a 4×4 sprite sheet, with deterministic corner reconciliation.
+- **Sprite Studio** — character and creature animations as single AI-call keyframe sheets, with a two-pass anchor→sheet workflow for cross-frame identity preservation.
+- **Props Studio** — decoration sprites generated 8 at a time via a two-call art director → painter pipeline that keeps sets varied and non-repetitive.
+
+### Five modes in one app
+
+Switch between studios via the pill in the top bar. Each studio shares the same AI outpainting engine but has its own workflow, prompt strategy, and export format.
+
+### Core Extender workflow
+
+Click any edge of the image to extend in that direction. Every extension generates up to 3 candidates, sorted by seam quality. Cycle through variants with arrow keys (`←`/`→`) and accept with `Enter`. Use `R` to regenerate.
+
+**Poisson blending** uses gradient-domain image editing (Pérez et al. 2003) with mask-grow and replicate-padded Gauss-Seidel iterations. **Pre-correction for low-frequency color drift** bulk-shifts the AI output toward the original's color at the seam before blending — fixing the "the sky got slightly bluer" failure mode.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Node.js (latest stable)
+- pnpm
+- An OpenRouter API key with access to Gemini image models
+
+### Step 1: Install and configure
+
+```bash
+git clone https://github.com/boona13/image-extender.git
+cd image-extender
+pnpm install
+cp .env.example .env
+
+Add your OpenRouter API key to `.env`:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+
+### Step 2: Run the app
+
+```bash
+pnpm dev
+
+Open [http://localhost:3000](http://localhost:3000) (or the port shown in the terminal). The app starts without credentials — if no provider is configured, you see the credential-aware homepage. Generation requests return `missing_provider` until you add a key.
+
+### Step 3: Configure the provider (if not using .env)
+
+Open the top-right provider dialog and save a local OpenAI-compatible provider. Local keys are stored in SQLite under `DATA_DIR`, returned only as masked values, and preserved until you enter a replacement.
+
+### Step 4: Generate an extension
+
+1. Open the Extender tab (default)
+2. Click the left, right, top, or bottom edge of your image
+3. Wait for AI generation (3 variants)
+4. Cycle variants with `←`/`→`, accept with `Enter`
+5. Repeat from any edge until the image reaches target dimensions
+
+### Step 5: Use a specialized studio
+
+**Parallax Studio:**
+1. Switch to Parallax tab
+2. Pick a target width preset (3840 / 5120 / 7680 / 10240 / 15360 px)
+3. Configure Sky, Far, Mid, Near layers individually
+4. Use Auto-extend to grow the active layer to target width
+5. Click Tileable to make the result seamless for game engine use
+6. Optionally run Harmonize to fix vertical panel banding
+7. Export ZIP with JSON manifest for Unity / Godot / Phaser
+
+**Tile Studio:**
+1. Switch to Tile tab
+2. Pick a material preset (lush meadow, mossy stone, red brick, etc.)
+3. Click Generate — one AI call produces a 4×4 sheet with all 13 tiles
+4. Review in the platform preview
+5. Re-roll individual tiles or the whole set
+6. Export the padded atlas with extrude borders for Unity / Godot / Tiled
+
+**Sprite Studio:**
+1. Switch to Sprite tab
+2. Pick a body plan (humanoid, quadruped, serpent/fish, flyer/bird, blob)
+3. Pick an animation (idle, walk, run, jump, attack)
+4. Describe the creature in the prompt
+5. First pass generates a lock anchor (standing reference on magenta key)
+6. Second pass generates the keyframe sheet with anchor attached
+7. Use the live animation player to review
+8. Export the sheet with per-frame PNGs and a manifest
+
+**Props Studio:**
+1. Switch to Props tab
+2. Enter a prompt for the decoration sprite set
+3. First pass: art director generates the scene brief
+4. Second pass: painter generates 8 sprites based on the brief
+5. Re-roll or extend the set as needed
+6. Export as individual PNGs with alpha
+
+## Deeper Analysis
+
+### Poisson blending technical details
+
+The gradient-domain image blending technique (Pérez et al. 2003) computes a seamless transition by solving a Poisson equation over the seam region. The key parameters:
+
+- **Mask grow** — the seam region grows outward from the boundary, not just the pixel-width edge
+- **Replicate padding** — padding at boundaries prevents edge artifacts in the solver
+- **Gauss-Seidel iterations** — convergence is fast; 20–30 iterations are usually enough
+
+The pre-correction pass addresses a specific failure mode: when extending a photo or painting, the AI tends to drift color temperature and brightness in the extended region. Bulk-shifting toward the original's color statistics at the seam before blending eliminates this drift without affecting the interior of the extended region.
+
+### Autotile generation methodology
+
+The 13-tile autotile set uses a template-guided image-to-image approach. A structural reference (rounded rectangle with rectangular hole on flat magenta) has each of the 13 tiles at a known cell position. The AI restyles the template in one call, locking palette, texture scale, and lighting across the entire set.
+
+After generation:
+1. Re-fit the output to the template silhouette
+2. Chroma-key the magenta to alpha with tile-tuned parameters
+3. Make edge tiles tileable along their loop axis
+4. Reconcile corners via stitching rather than raw AI cells
+
+The AI Art Director QA loop adds a vision critic that judges the composited set — checking chroma key quality, edge-cap consistency, palette cohesion, body seamlessness, fringe, and blur. If it fails, it returns a concise fix report and drives a repaint. The loop keeps the best candidate seen, never regressing from a clean first generation.
+
+### Sprite identity preservation
+
+Naive single-call multi-panel sprite generation fails because the character drifts between cells, frames come at different scales, and palettes shift. The two-pass anchor → sheet workflow solves this:
+
+- **Pass 1** — Generate a single neutral standing reference image on flat magenta key. This is the canonical character.
+- **Pass 2** — Generate the keyframe sheet with the anchor attached as reference. The prompt explicitly instructs: "the attached image is the canonical character — every cell must match it exactly."
+
+The anchor persists across animation switches, so the same character can be reused for idle → walk → run → jump → attack without re-rolling identity. A `Re-roll character` button discards the anchor for a fresh start.
+
+## Practical Evaluation Checklist
+
+- [ ] Install and start the app
+- [ ] Configure OpenRouter API key (via .env or in-app dialog)
+- [ ] Upload or generate a base image in Extender
+- [ ] Extend the image in one direction — verify Poisson seam
+- [ ] Cycle through 3 variants and pick the best
+- [ ] Extend in multiple directions to reach a target width
+- [ ] Test pre-correction for color drift on a photo
+- [ ] Use Parallax Studio to build a 4-layer background
+- [ ] Run Auto-extend to grow a layer to target width (e.g. 7680px)
+- [ ] Test Tileable and Harmonize buttons
+- [ ] Export a parallax ZIP and verify the JSON manifest
+- [ ] Generate an autotile set in Tile Studio
+- [ ] Review the set in the platform preview
+- [ ] Re-roll a single tile and verify corner reconciliation
+- [ ] Generate a character sprite sheet with a body plan
+- [ ] Use the animation player to preview the sprite
+- [ ] Generate a props set in Props Studio
+- [ ] Test art director → painter two-call pipeline
+
+## Security Notes
+
+- **BYOK — key stays in browser** — the OpenRouter API key is stored only in `localStorage`. The server proxies requests to OpenRouter but never logs or persists the key. Clear localStorage to revoke access.
+- **Server proxy** — the server receives the API request and forwards it to OpenRouter. If you don't trust the server operator, don't use the proxy. Run the app locally and point the proxy at `localhost`.
+- **Image content** — generated images are stored locally by default. Optional cloud backup to Tencent Cloud COS or Cloudflare R2/S3-compatible storage is available. Cloud upload failures don't fail image generation.
+- **Prompt privacy** — prompts are sent to OpenRouter through the server proxy. Avoid including sensitive information in generation prompts.
+
+## FAQ
+
+**Q: Does Image Extender work offline?**
+**A:** The app runs locally in the browser. AI generation requires an OpenRouter API call, so internet is needed for image generation. Local image processing, canvas manipulation, and export work offline.
+
+**Q: What's the difference between Gemini 3 Pro Image, Gemini 3 Flash Image, and Gemini 2.5 Flash Image?**
+**A:** Each has tuned best-of-N and timing parameters in the app. Generally, Pro produces higher quality with longer generation time, Flash is faster with slightly lower quality, and 2.5 Flash balances speed and quality. The model picker in Settings lets you switch.
+
+**Q: How does the Parallax Studio's auto-extend work?**
+**A:** Auto-extend repeatedly extends the active layer to the right, auto-accepts the best variant, re-applies chroma-keying, and stops when the target width is reached. Click `Stop` to interrupt early. The Tileable pass runs automatically at the end so the exported result loops cleanly.
+
+**Q: What does Harmonize do?**
+**A:** Each AI extension introduces a tiny color/brightness shift. Over many extensions, these shifts accumulate into vertical "panel banding." Harmonize runs a column-mean smoothing pass that kills the banding while preserving fine detail.
+
+**Q: Can I use Image Extender without generating game art?**
+**A:** Yes. The core Extender workspace works for any outpainting task — photos, illustrations, concept art. The specialized studios are optional layers on top of the same engine.
+
+## Conclusion
+
+Image Extender provides a complete outpainting workflow for 2D game developers — from extending a concept art piece to generating full parallax backgrounds, autotile sets, character sprites, and decoration props. The Poisson blending, pre-correction, and best-of-3 variant system ensure professional-quality seams without manual editing.
+
+The BYOK design means your OpenRouter key stays in your browser, and the server proxy approach keeps things simple without building a full backend. For indie game developers and solo artists who need professional game art without external tool dependencies, Image Extender is a practical addition to the workflow.

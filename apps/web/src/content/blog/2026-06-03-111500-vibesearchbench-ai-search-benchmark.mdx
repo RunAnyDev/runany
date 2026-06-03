@@ -1,0 +1,217 @@
+---
+title: "VibeSearchBench: The Hardest Real-World AI Search Benchmark"
+description: "A benchmark with 200 vague, multi-turn, proactive search tasks scored by triplet F1. No vibes, just measurable AI search quality."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "python", "agentic-ai", "benchmark", "research"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vibesearchbench.webp"
+  alt: "VibeSearchBench GitHub tool guide thumbnail"
+draft: false
+---
+
+![VibeSearchBench GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/vibesearchbench.webp)
+
+## TL;DR
+
+> **TL;DR:** VibeSearchBench evaluates AI search agents on 200 hard tasks — vague initial queries, persona-driven progressive disclosure, and multi-turn web research scored by triplet F1 against ground-truth knowledge graphs. Current best: 30.3 F1 with Claude Opus 4.6 via OpenClaw.
+
+## Source and Accuracy Notes
+
+This post is based on the official [VibeSearchBench repository](https://github.com/VibeBench/VibeSearchBench) (MIT, Python). Tasks and dataset available on [Hugging Face](https://huggingface.co/datasets/VibeSearchBench/VibeSearchBench). Paper at [huggingface.co/papers/2605.27882](https://huggingface.co/papers/2605.27882). Leaderboard at [vibebench.github.io](https://vibebench.github.io/VibeSearchBench.github.io/).
+
+## What Is VibeSearchBench?
+
+VibeSearchBench tests AI search agents on the hardest real-world search scenarios: vague initial queries, progressive disclosure where users reveal intent over multiple turns, and long-horizon research that requires visiting pages, running code, and synthesizing across sources.
+
+The benchmark has three distinguishing characteristics:
+
+**Hardest** — tasks are deliberately vague. Real users don't specify full intent upfront. The benchmark captures the bidirectional convergence where agents interleave partial results with follow-up questions while users progressively disclose needs.
+
+**Verifiable** — evaluation uses triplet F1 against ground-truth knowledge graphs. Predicted knowledge graphs are matched via LLM-as-judge node alignment and triplet semantic equivalence. No vibes, just measurable triplet-level accuracy.
+
+**Long-horizon** — agents may search, visit pages, and run code across many turns. A single task can involve dozens of interactions before the final answer is produced.
+
+### Task structure
+
+200 tasks across 2 splits and 20 domains:
+
+| Split | Count | Description |
+|-------|-------|-------------|
+| `pro` | 100 | Professional research — literature reviews, market analysis, technical due diligence |
+| `daily` | 100 | Daily-life search — shopping, travel, lifestyle with evolving preferences |
+
+Each task pairs:
+- A vague initial query with constraints
+- A persona for the progressive-disclosure simulator
+- Ground-truth nodes and triples (knowledge graph)
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Python with environment for inference (vLLM or OpenAI-compatible API)
+- Serper API key for web search tool
+- Optional: Gemini API key for grader
+
+### Run the full pipeline (GeneralAgent)
+
+```bash
+# Inference + evaluation
+MODEL_NAME=glm-5.1 VLLM_URL=http://host/v1 bash scripts/run_all.sh
+
+# Inference only
+MODEL_NAME=kimi-k2.5 VLLM_URL=http://host/v1 bash scripts/run_inference.sh
+
+# With model config profile
+MODEL_CONFIG=model_config.yaml MODEL_PROFILE=seed2_0_pro bash scripts/run_all.sh
+```
+
+### Run OpenClaw agent evaluation
+
+Requires a running OpenClaw gateway:
+
+```bash
+# Default (simulated mode with user persona)
+bash scripts/run_openclaw.sh
+
+# Direct mode (no user simulation)
+MODE=direct bash scripts/run_openclaw.sh
+
+# Custom data and model
+DATA_PATH=tasks/my_tasks MODE=simulated OPENCLAW_MODEL=my-model bash scripts/run_openclaw.sh
+
+Environment variables for OpenClaw: `GATEWAY_PORT` (default 18789), `SOURCE_DIR`, `IDLE_THRESHOLD`, `MAX_NUDGE`, `OPENCLAW_MODEL`.
+
+### Evaluation only
+
+```bash
+TRAJS_DIR=results/trajs/glm-5.1_custom_serper bash scripts/run_eval.sh
+
+### Direct Python usage
+
+**GeneralAgent — full pipeline:**
+
+```bash
+python run.py \
+  --agent-type general \
+  --model glm-5.1 \
+  --vllm-server-url http://host/v1 \
+  --tool-set custom \
+  --num-samples 4 \
+  --grader-type gemini \
+  --grader-api-url https://... \
+  --grader-api-key YOUR_KEY
+
+**GeneralAgent — inference only:**
+
+```bash
+python run.py \
+  --agent-type general \
+  --model glm-5.1 \
+  --vllm-server-url http://host/v1 \
+  --skip-eval
+
+**OpenClaw agent:**
+
+```bash
+python run.py \
+  --agent-type openclaw \
+  --gateway-port 18789 \
+  --mode simulated \
+  --user-model doubao-seed-2-0-pro \
+  --user-model-url http://host/v1 \
+  --user-model-api-key YOUR_KEY \
+  --num-samples 4
+
+**Eval only:**
+
+```bash
+python run.py \
+  --eval-only \
+  --trajs-dir results/trajs/glm-5.1_custom_serper \
+  --grader-type gemini \
+  --grader-api-url https://...
+```
+
+## Tool Sets
+
+### custom (default)
+
+search (Serper) + visit (Serper scrape + LLM summarize) + python (HTTP sandbox). Requires `SERPER_API_KEY`.
+
+### builtin
+
+search + open + find — requires `gpt_oss` package.
+
+## Evaluation Metrics
+
+**Primary metric: Triplet F1.** Predicted knowledge graphs are matched against ground truth via:
+1. **Node alignment** — LLM-as-judge maps predicted nodes to ground-truth nodes
+2. **Triplet semantic equivalence** — each (subject, predicate, object) triple is evaluated for semantic match
+
+**Multi-turn interaction** — each task uses a persona-driven user simulator with progressive disclosure. Agents may search, visit pages, and run code across many turns.
+
+**Output format** — trajectories stored in `results/trajs/{experiment}/{task_id}.jsonl`, one line per sample with `qid`, `sample_idx`, `question`, `messages`, `response`, and `termination`.
+
+## Deeper Analysis
+
+### Why vague queries matter
+
+Most search benchmarks give agents well-formed queries. VibeSearchBench intentionally gives agents vague queries because that's what real users do. The benchmark measures how well agents handle the gap between initial vague intent and the information they need to find a precise answer.
+
+Progressive disclosure simulates this by having a user simulator reveal information over multiple turns, as a real user would when an initial answer is incomplete or misleading. The agent must adapt its search strategy based on new information, not just execute a static plan.
+
+### Triplet F1 vs. traditional metrics
+
+Accuracy, ROUGE, and BLEU are poor proxies for search quality in multi-turn research scenarios. Triplet F1 directly measures whether the agent extracted the right facts with the right relationships from the right sources.
+
+A knowledge graph is a natural representation for multi-source research: nodes are entities, edges are relationships, and the graph structure captures how facts relate to each other. Comparing predicted vs. ground-truth graphs at the triplet level gives a precise measure of research quality.
+
+### The leaderboard approach
+
+The live leaderboard at [vibebench.github.io](https://vibebench.github.io/VibeSearchBench.github.io/) tracks model performance over time. The best reported score is **30.3 triplet F1** with Claude Opus 4.6 via OpenClaw. This score is notably higher than other models, indicating that model choice significantly impacts performance on hard search tasks.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone and install dependencies
+- [ ] Configure vLLM URL or OpenAI-compatible API
+- [ ] Set `SERPER_API_KEY` for web search
+- [ ] Run `scripts/run_all.sh` with a model
+- [ ] Review trajectory JSONL in `results/trajs/`
+- [ ] Run `scripts/run_eval.sh` on saved trajectories
+- [ ] Compare triplet F1 against leaderboard
+- [ ] Test OpenClaw agent mode (`scripts/run_openclaw.sh`)
+- [ ] Try `MODE=direct` for no-simulator evaluation
+- [ ] Load the HuggingFace dataset and inspect task structure
+
+## Security Notes
+
+- **API keys** — `SERPER_API_KEY`, `GEMINI_API_KEY`, and model API keys are sensitive. Store in environment variables, never in code or committed files.
+- **Serper scraping** — the `visit` tool fetches pages via Serper. Rate limits and terms of service apply. Don't use for scraping-protected content.
+- **Python sandbox** — the `python` tool runs code in a sandboxed HTTP environment. Resource limits apply; don't use for CPU-intensive or network-heavy tasks.
+
+## FAQ
+
+**Q: What does "vague, multi-turn, proactive" mean?**
+**A:** Vague — the initial query doesn't fully specify intent (e.g., "what about that company we discussed" without naming it). Multi-turn — the agent and user exchange multiple messages, with the user progressively revealing more context. Proactive — the agent initiates follow-up questions rather than just executing a static plan.
+
+**Q: How is the user simulator different from direct evaluation?**
+**A:** The simulated mode uses a persona-driven user that progressively discloses information based on the agent's responses. The direct mode skips the simulator and evaluates the agent's answer against the ground-truth graph without the back-and-forth.
+
+**Q: What models perform best on this benchmark?**
+**A:** The leaderboard shows Claude Opus 4.6 via OpenClaw at 30.3 F1. Larger reasoning models outperform smaller ones on vague multi-turn tasks. The benchmark is designed to reward models that can handle ambiguity.
+
+**Q: Can I use this benchmark for my own agent?**
+**A:** Yes. Clone the repo, configure your agent, and run `scripts/run_all.sh` with your model. Submit results to the leaderboard or just use it for internal evaluation.
+
+**Q: What does the dataset look like?**
+**A:** Each task in the HuggingFace dataset has `qid`, `question` (full research query with constraints), `user_persona`, and `nodes`/`triples` (ground-truth knowledge graph). Browse at [huggingface.co/datasets/VibeSearchBench/VibeSearchBench](https://huggingface.co/datasets/VibeSearchBench/VibeSearchBench).
+
+## Conclusion
+
+VibeSearchBench provides a rigorous, measurable way to evaluate AI search agents on hard real-world scenarios. The combination of vague queries, progressive disclosure, and triplet F1 evaluation gives a clear signal of search quality that simpler metrics miss.
+
+For developers building research agents or information extraction systems, VibeSearchBench is a practical evaluation framework — downloadable, reproducible, and with a live leaderboard that shows where different models stand.

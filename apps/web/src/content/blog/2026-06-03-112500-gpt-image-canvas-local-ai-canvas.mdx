@@ -1,0 +1,226 @@
+---
+title: "GPT Image Canvas: Local AI Creative Workspace with tldraw"
+description: "Local-first AI canvas with tldraw, Hono, SQLite, and GPT Image 2. Generate from text or reference images, plan multi-image DAG workflows, back up to Cloudflare R2."
+pubDate: "2026-06-03"
+tags: ["github-trending", "dev-tools", "typescript", "ai-image", "canvas", "local-first"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gpt-image-canvas.webp"
+  alt: "GPT Image Canvas GitHub tool guide thumbnail"
+draft: false
+---
+
+![GPT Image Canvas GitHub tool guide thumbnail](https://cdn.runany.dev/blog/thumbnails/gpt-image-canvas.webp)
+
+## TL;DR
+
+> **TL;DR:** GPT Image Canvas is a local-first creative workspace — arrange AI-generated images on a tldraw canvas, generate from text or reference, plan multi-image DAG workflows in the Agent tab, and optionally back up to Cloudflare R2 or Tencent COS.
+
+## Source and Accuracy Notes
+
+This post is based on the official [GPT Image Canvas repository](https://github.com/mrslimslim/gpt-image-canvas) (MIT, TypeScript/pnpm workspace). Requires Node.js 24.15.0, pnpm 9.14.2. Supports OpenAI API with `gpt-image-2`, OpenAI-compatible endpoints, or Codex login. Docker available for containerized deployment.
+
+## What Is GPT Image Canvas?
+
+GPT Image Canvas is a browser-based creative tool that combines AI image generation with a visual canvas workspace. Images are arranged, resized, and connected on a tldraw canvas, making it easy to plan and iterate on visual concepts before generating final assets.
+
+The app has four main routes:
+- **`/`** — credential-aware homepage (prompts for setup when no provider is configured)
+- **`/canvas`** — the working canvas for generation and arrangement
+- **`/pool`** — bundled Prompt Pool for browsing, searching, favoriting, and reusing curated prompts
+- **`/gallery`** — local output browser with rerun, locate, download, and upload status
+
+### Provider configuration
+
+The default provider priority is:
+
+1. Environment config from `.env` or runtime variables
+2. Local OpenAI-compatible config saved in the app
+3. Codex login fallback
+
+Simplest setup via `.env`:
+
+```text
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=           # leave empty for official OpenAI API
+OPENAI_IMAGE_MODEL=gpt-image-2
+OPENAI_IMAGE_TIMEOUT_MS=1200000
+CODEX_RESPONSES_MODEL=gpt-5.5
+
+Or configure via the in-app provider dialog. Local keys are stored in SQLite under `DATA_DIR`, returned only as masked values, and preserved until you enter a replacement.
+
+## Repo-Specific Setup Workflow
+
+### Prerequisites
+
+- Node.js `24.15.0` (repo includes `.nvmrc` and `.node-version`)
+- pnpm `9.14.2` (pinned in `package.json`)
+- An OpenAI API key with `gpt-image-2` access, an OpenAI-compatible endpoint, or a Codex login
+
+Activate the pinned package manager:
+
+```bash
+corepack prepare pnpm@9.14.2 --activate
+
+### Install and start
+
+```bash
+pnpm install
+cp .env.example .env
+# Edit .env with your API key and model
+pnpm dev
+
+Opens at [http://localhost:5173](http://localhost:5173). The API runs at `http://127.0.0.1:8787`, with the web app proxying `/api` to the API service.
+
+The app works without credentials — without a usable provider, `/canvas` redirects back to `/` until you configure one.
+
+### Docker deployment
+
+```bash
+cp .env.example .env
+docker compose config --quiet --no-env-resolution
+docker compose up --build
+
+Open [http://localhost:8787](http://localhost:8787). Set `PORT` in `.env` to change the localhost port.
+
+SQLite data and generated assets persist in host `./data`. `SQLITE_JOURNAL_MODE=DELETE` and `SQLITE_LOCKING_MODE=EXCLUSIVE` avoid SQLite shared-memory errors on Docker Desktop bind mounts.
+
+Prebuilt GHCR images are published on release — pull instead of rebuilding:
+
+```bash
+docker pull ghcr.io/mrslimslim/gpt-image-canvas:latest
+
+### Using the canvas
+
+**Manual generation:**
+1. Open `/canvas`
+2. Enter a prompt, choose size/quality/format
+3. Generate — the image appears on the canvas
+4. Select one image shape to switch into reference-image generation (the selected image becomes the reference)
+
+**Agent planning:**
+1. Open `/canvas` and switch to Agent tab
+2. Describe a multi-image task, optionally select up to 3 canvas images
+3. Review the generated plan node on the canvas
+4. Execute — the DAG runs with dependency management
+
+The Agent tab uses a separate OpenAI-compatible chat config for planning. Save it in Agent LLM settings with API key, Base URL, model, timeout, and `supportsVision`. When enabled, selected images are attached to the planning request as multimodal inputs. Plan execution is DAG-based:
+
+- Independent jobs run in parallel
+- Jobs that reference generated outputs wait for their dependencies
+- `Retry failed` reruns failed or blocked jobs while keeping successful upstream outputs
+- A single plan is capped at 16 generated images (including intermediate anchors)
+
+## Cloud Backup
+
+Generated images are saved locally first. Optional cloud backup to Tencent Cloud COS or Cloudflare R2 / S3-compatible storage:
+
+```text
+# COS fields
+COS_DEFAULT_BUCKET=
+COS_DEFAULT_REGION=
+COS_DEFAULT_KEY_PREFIX=
+
+# S3/R2 fields
+S3_DEFAULT_BUCKET=
+S3_DEFAULT_REGION=
+S3_DEFAULT_KEY_PREFIX=
+R2_DEFAULT_ACCOUNT_ID=
+S3_DEFAULT_ENDPOINT=
+
+Saving cloud settings performs a test upload and delete before persisting. Cloud upload failures don't fail image generation — the image remains available locally and the history item shows the upload failure.
+
+## Project Layout
+
+```text
+apps/api         Hono API, SQLite storage, provider selection, Agent planning/execution
+apps/web         Vite + React + tldraw web app
+packages/shared  Shared contracts and constants
+docs             Project docs and preview assets
+data             Local runtime data, ignored by Git
+```
+
+## Deeper Analysis
+
+### DAG-based image generation
+
+The Agent tab converts a natural-language description into a directed acyclic graph of image generation jobs. Each node represents a generation task — either a standalone prompt or a reference-based extension of a previous output.
+
+The DAG enforces dependencies: if Node C depends on Node B, it waits for Node B to complete before starting. Independent nodes (A, B without mutual dependencies) run in parallel. The planner infers dependencies from the natural language description — "first generate a landscape, then add a character in the foreground" creates an implicit ordering.
+
+Failed nodes can be retried individually via "Retry failed," which re-runs only the failed job while keeping all successful upstream outputs. This means you can iterate on a specific part of a multi-image workflow without regenerating the whole sequence.
+
+The 16-image cap per plan prevents runaway generation from consuming excessive API quota. It's a hard limit enforced by the execution engine.
+
+### Provider priority and fallback
+
+The three-level provider priority (environment config → local SQLite config → Codex login) means the app works in multiple scenarios:
+
+- **Environment config** — for automated deployments, CI/CD, or server-side usage where the API key is injected via environment variables
+- **Local SQLite config** — for human users who prefer the in-app dialog and don't want to manage .env files
+- **Codex login** — for users without an API key who have Codex authentication available
+
+Each level is tried in order until a usable provider is found. The credential-aware homepage shows which providers are available and prompts for configuration when none is found.
+
+### Cloud backup design
+
+Generated images are always written locally first — the cloud backup is additive, not mandatory. This design ensures that generation never fails due to a cloud upload problem.
+
+The backup path uses per-date subdirectories (`<key-prefix>/YYYY/MM/<assetId>.<ext>`) to keep the storage organized. The test-upload-then-delete verification before persisting cloud config means misconfigured buckets are caught immediately rather than silently failing on every upload.
+
+### Project layout and extensibility
+
+The three-package workspace (API, web, shared) separates concerns cleanly:
+- **apps/api** — Hono server with SQLite storage, provider selection, and Agent execution engine
+- **apps/web** — Vite + React + tldraw client UI
+- **packages/shared** — TypeScript contracts shared between API and web
+
+Adding a new image provider requires only implementing the provider interface in the API and wiring it up in the provider selection logic. The web UI doesn't need changes for new providers.
+
+## Practical Evaluation Checklist
+
+- [ ] Install and start with `pnpm dev`
+- [ ] Configure provider (via .env or in-app dialog)
+- [ ] Generate an image via Manual tab
+- [ ] Arrange multiple images on the canvas
+- [ ] Use reference generation (select an image shape)
+- [ ] Test Agent tab — plan a multi-image task
+- [ ] Execute the plan and verify DAG execution
+- [ ] Retry failed nodes while keeping successful outputs
+- [ ] Browse the gallery and verify local outputs
+- [ ] Configure cloud backup to R2 or COS
+- [ ] Verify test upload succeeds before saving cloud config
+- [ ] Build and typecheck (`pnpm build && pnpm typecheck`)
+- [ ] Run Docker deployment and verify containerized setup
+
+## Security Notes
+
+- **API keys in .env** — never commit `.env`. Keys in SQLite are masked and stored under `DATA_DIR`, not in the repository.
+- **Server proxy** — the API proxies image requests to OpenAI or compatible endpoints. The server doesn't log or persist API keys.
+- **Local storage** — all images and project state are saved locally in `./data`. Cloud backup is optional.
+- **Docker secrets** — use `docker compose config --quiet --no-env-resolution` when real credentials exist in `.env`. Plain `docker compose config` expands env files and can print secrets.
+
+## FAQ
+
+**Q: Can I use this without an OpenAI API key?**
+**A:** Yes. Use a Codex login (configured in the provider dialog) or any OpenAI-compatible endpoint. Without any provider, the app shows the credential-aware homepage and generation requests return `missing_provider`.
+
+**Q: How does the Agent tab's DAG execution work?**
+**A:** The planner generates a node graph on the canvas. Independent nodes run in parallel. Nodes that depend on other generated outputs wait until those outputs complete. Failed nodes can be retried individually. The cap is 16 generated images per plan.
+
+**Q: What's the difference between Manual and Agent tabs?**
+**A:** Manual is single-image generation with optional reference. Agent is for planning multi-image workflows — you describe the whole project, review the plan, then execute it as a coordinated DAG.
+
+**Q: Can I use my own OpenAI-compatible image endpoint?**
+**A:** Yes. Set `OPENAI_BASE_URL` to your endpoint's `/v1` base URL and `OPENAI_IMAGE_MODEL` to your image model name. Local provider config in the app works the same way.
+
+**Q: What happens if cloud backup fails?**
+**A:** The image is still saved locally and the generation is considered successful. The history item shows the upload failure. No retry is automatic — the image remains available in the gallery.
+
+## Conclusion
+
+GPT Image Canvas brings the visual planning of a design tool to AI image generation. The tldraw canvas makes it natural to iterate on compositions before committing to generation, and the Agent tab's DAG planner handles multi-image workflows that would otherwise require manual coordination.
+
+The local-first design means no cloud dependency for core functionality, and the optional R2/COS backup keeps generated assets accessible across machines. For creators who want to plan visual projects visually before generating, it's a practical workspace.
