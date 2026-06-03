@@ -1,0 +1,159 @@
+---
+title: "Lume - Open-Source macOS VMs for AI Agents"
+description: "Lume is an open-source CLI that spins up macOS and Linux VMs on Apple Silicon with unattended setup and MCP integration — built for AI agents that need isolated sandboxes."
+pubDate: "2026-06-03"
+tags: ["open-source", "macos", "virtualization", "ai-agents", "apple-silicon"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lume-open-source-virtualization-cli.webp"
+  alt: "Lume open-source macOS virtualization CLI thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Lume is an open-source CLI that creates macOS and Linux VMs on Apple Silicon with zero-touch setup, built specifically for AI agents that need isolated, reproducible environments to run macOS workloads.
+
+## Source and Accuracy Notes
+
+- [GitHub: trycua/cua](https://github.com/trycua/cua) — 17,511 stars, MIT licensed
+- [Lume Docs](https://cua.ai/docs/lume) — official documentation
+- [HN Launch Thread](https://news.ycombinator.com/item?id=42908061) — original launch (v0.1)
+
+## What Is Lume?
+
+Lume is an open-source CLI tool from [Cua](https://cua.ai) that brings native macOS and Linux virtualization to Apple Silicon. It uses Apple's Virtualization Framework directly — no emulation, no nested virtualization — giving AI agents a clean sandbox to run macOS workloads.
+
+The tool has two parts: `lume` for VM lifecycle management, and `cua` as the broader Computer Use Agent SDK that provides benchmarks, sandboxes, and infrastructure for training agents that control full desktops.
+
+With v0.2, Lume ships unattended setup via a VNC-plus-OCR system that automates the macOS Setup Assistant. You hand it an IPSW file and a configuration, and it returns a fully-provisioned VM — no keyboard required.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install Lume
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/lume/scripts/install.sh)"
+```
+
+Requires macOS on Apple Silicon (M1 through M4). Linux also supported.
+
+### Step 2: Create a VM with Unattended Setup
+
+```bash
+lume create sandbox --os macos --ipsw latest --unattended tahoe
+```
+
+The `--unattended tahoe` flag tells Lume to run the Setup Assistant automatically via VNC + OCR. No manual clicking.
+
+### Step 3: Configure Shared Directory
+
+```bash
+lume run sandbox --shared-dir ~/my-project
+```
+
+Your project directory is visible inside the VM at `/lume/shared/`.
+
+### Step 4: Start the HTTP Daemon
+
+```bash
+curl -X POST localhost:7777/lume/vms/sandbox/run -d '{"noDisplay": true}'
+```
+
+The daemon runs on port 7777 and persists VMs across terminal sessions.
+
+### Step 5: Connect Claude Desktop via MCP
+
+```bash
+# Add to your Claude Desktop config:
+"lume": {
+  "command": "lume",
+  "args": ["serve", "--mcp"]
+}
+```
+
+Then ask Claude: "Create a sandbox VM and run my tests" — it handles the rest.
+
+## Deeper Analysis
+
+### How the Unattended Setup Works
+
+macOS Setup Assistant blocks automated VM provisioning because it requires human interaction. Lume solves this with a VNC server running inside the VM that captures the screen, plus an OCR pipeline that reads current UI state and sends synthetic clicks to advance the wizard.
+
+This is non-trivial because macOS Setup Assistant has no API — the automation must adapt to different macOS versions and screen configurations. The `tahoe` preset in the CLI is a pre-tested profile for modern macOS versions.
+
+### MCP Server Integration
+
+The MCP server exposes VM lifecycle as tools: `lume_create_vm`, `lume_run_vm`, `lume_execute_command`. This maps naturally onto how coding agents like Claude Code think about tasks — "run this in a clean macOS environment" becomes a single tool call.
+
+For teams running multiple agents, the MCP approach means each agent gets its own VM without host pollution. When an agent makes a mistake, you clone a fresh VM from a golden image instead of re-imaging the entire host.
+
+### Multi-Location Storage
+
+Disk space on Apple Silicon Macs is finite and expensive. Lume lets you add external drives as named storage locations and move VMs between them:
+
+```bash
+lume config storage add external-ssd /Volumes/ExternalSSD/lume
+lume clone my-vm backup --source-storage default --dest-storage external-ssd
+```
+
+### Registry Support
+
+VM images push and pull from GHCR (GitHub Container Registry) or GCS (Google Cloud Storage). Create a golden image once, distribute it to the team, and every developer or CI runner gets an identical environment.
+
+## Practical Evaluation Checklist
+
+- [ ] Install Lume on an Apple Silicon Mac
+- [ ] Create a VM with `--unattended tahoe` and verify no Setup Assistant appears
+- [ ] Share a local directory with `--shared-dir` and confirm files are accessible inside the VM
+- [ ] Start the HTTP daemon and manage the VM via curl
+- [ ] Connect Claude Desktop with MCP config and ask it to create a VM
+- [ ] Push a VM image to GHCR and pull it on a different machine
+- [ ] Add an external drive and migrate a VM to it
+
+## Security Notes
+
+- Lume VMs run at the hypervisor level using Apple's Virtualization Framework — no user-space emulation
+- The `--unattended` automation sends synthetic input only to the Setup Assistant, not to arbitrary apps
+- Self-custody of VM images: you control where they are stored; no mandatory cloud dependency
+- Lume does notcurrently support T2 chip Macs (only Apple Silicon)
+
+## FAQ
+
+**Q:** Does Lume work on Intel Macs or Windows?
+
+**A:** No. Lume uses Apple's Virtualization Framework which is Apple Silicon only (M1, M2, M3, M4). Windows and Linux VMs work on macOS hosts; macOS VMs require Apple Silicon. Intel Macs are not supported.
+
+---
+
+**Q:** How is this different from Docker on macOS?
+
+**A:** Docker on macOS actually runs a Linux VM under the hood and shares the kernel. Lume runs native macOS or Linux VMs with their own kernels, which matters for macOS-specific workloads like testing Apple platform apps, UI testing, or agent behaviors specific to macOS internals.
+
+---
+
+**Q:** Can I run Lume on cloud Mac instances?
+
+**A:** Yes. Lume runs on EC2 Mac instances (via AWS) and Scaleway. The unattended setup is especially useful on cloud instances where you have no physical display to complete the Setup Assistant.
+
+---
+
+**Q:** What is the difference between Lume and the broader Cua project?
+
+**A:** Lume is the VM CLI and runtime. Cua is the full Computer Use Agent SDK that includes Lume for sandboxing, benchmarks for evaluating agent performance on desktop tasks, and the broader framework for building agents that control full desktops. Lume can be used standalone or as part of Cua.
+
+---
+
+**Q:** Is the MCP server stable for production use?
+
+**A:** The MCP server shipped in v0.2 and is actively developed. For production use, test thoroughly in your specific environment. The underlying VM runtime is based on Apple's mature Virtualization Framework.
+
+## Conclusion
+
+Lume fills a specific gap: AI agents and developers who need real macOS or Linux environments on Apple Silicon without manual provisioning. The unattended setup and MCP integration are the key differentiators — what used to require a team to manually configure a VM now happens in a single command.
+
+For coding agents that need to test macOS-specific behavior, run UI tests across macOS versions, or simply work in a clean isolated environment, Lume replaces the bespoke VM setups that teams build and abandon. The registry support and multi-location storage make it team-friendly.
+
+If you're running AI agents on Apple Silicon and need reproducible VM environments, Lume is worth evaluating. The MIT license and active development (17K GitHub stars and counting) suggest it will be around for a while.
