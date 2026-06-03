@@ -40,8 +40,3 @@ export interface PublishPayload {
   content: string;
   frontmatter?: Partial<PostFrontmatter>;
 }
-
-export interface TriggerResponse {
-  triggered: boolean;
-  message: string;
-}

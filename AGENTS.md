@@ -304,7 +304,7 @@ cd ~/personal/runany
 git add apps/web/src/content/blog/[slug].mdx
 git commit -m "feat: add [slug] - [title]"
 
-# 4. Push (triggers Vercel auto-deploy)
+# 4. Push (triggers Cloudflare Pages auto-deploy)
 git push
 ```
 
@@ -390,21 +390,14 @@ runany/
 
 **runany.pages.dev → runany.dev**
 
-Configure in `vercel.json` at project root:
+Configured at the Cloudflare Pages level: attach the custom domain `runany.dev` to the `runany` Pages project. The `runany.pages.dev` host is kept as the default fallback, and the custom domain serves all traffic permanently.
 
-```json
-{
-  "redirects": [
-    {
-      "source": "/(.*)",
-      "destination": "https://runany.dev/$1",
-      "permanent": true
-    }
-  ]
-}
-```
+If you need to force `runany.pages.dev` → `runany.dev` (e.g. for canonical links), add a `functions/_middleware.ts` redirect, or configure Bulk Redirects in the Cloudflare dashboard (Rules → Redirect Rules). Example Bulk Redirect rule:
 
-All paths redirect permanently (301) to main domain.
+- **Expression:** `http.host eq "runany.pages.dev"`
+- **Action:** Static redirect to `https://runany.dev${uri}` with status `301`.
+
+All paths redirect permanently (301) to the main domain.
 
 ---
 

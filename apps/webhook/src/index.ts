@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Fastify from 'fastify';
-import { triggerRebuild } from './trigger.js';
 import type { PublishPayload } from '@runany/shared';
 
 const BLOG_DIR = '/Users/friday/personal/runany/content/blog';
@@ -55,11 +54,6 @@ fastify.post('/webhook/publish', async (req, reply) => {
       error: `Failed to write file: ${err}` 
     });
   }
-});
-
-fastify.post('/webhook/trigger-rebuild', async (_req, reply) => {
-  const result = await triggerRebuild();
-  return reply.send({ success: result.triggered, data: result });
 });
 
 const start = async () => {
