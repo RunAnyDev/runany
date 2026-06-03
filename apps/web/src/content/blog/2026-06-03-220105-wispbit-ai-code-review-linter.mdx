@@ -1,0 +1,107 @@
+---
+title: "Wispbit - Linter That Auto-Generates Rules for AI Code"
+description: "Wispbit scans your codebase to build living review rules, then enforces them locally via CLI and in code review. Built for the AI coding agent era."
+pubDate: "2026-06-03"
+tags: ["code-review", "ai-coding", "linting", "developer-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wispbit-ai-code-review-linter.webp"
+  alt: "Wispbit AI code review linter product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Wispbit reads your repo, infers the standards your team already uses, and turns them into enforceable review rules. The CLI runs locally; a hosted service runs in pull request review. Early users are seeing 80%+ comment resolution rates.
+
+## Source and Accuracy Notes
+
+- Official site: [wispbit.com](https://wispbit.com)
+- Show HN (31 points): [Wispbit - Linter for AI coding agents](https://news.ycombinator.com/item?id=45584017)
+- All technical details in this post come from the founders' HN post and the public marketing site as of June 2026.
+
+## What Is Wispbit?
+
+Wispbit is a code review tool that builds its own rule set from your codebase. Instead of asking you to author a `eslintrc` or `.rubocop.yml` from scratch, it crawls your modules, dispatches subagents to surface common patterns, and synthesizes a portable rules file you can commit, run locally, or enforce during pull request review.
+
+The pitch is direct: AI coding agents write more code than humans used to, and the human-side tooling has not kept up. Background agents still produce slop, IDEs still write code without the right context, and review queues are full of comments that contradict what the codebase already does. Wispbit tries to fix the standards half of that loop, automatically.
+
+## How Wispbit Builds Rules
+
+The rule generation runs as a multi-agent system, similar in shape to Anthropic's research agent.
+
+### Repository scanning
+
+A main agent dispatches subagents that walk modules and directories. Each subagent reports back patterns: how errors are handled, how configuration is loaded, how public APIs are typed. The main agent synthesizes these reports into a rule set.
+
+### Historical pull request analysis
+
+Wispbit also reads your past pull request comments. It filters out comments that would not translate well into a rule (nitpicks, debates, one-off style remarks) and keeps the ones that have a clear "do this, not that" shape. Rules get updated whenever the model finds a comment pattern that isn't already covered.
+
+### Subagent dispatch over monolithic prompts
+
+The team says they put real effort into making the subagent dispatch produce good rules and avoid slop. A single prompt that asks an LLM to "read the repo and write the linter config" tends to either overfit on a few files or hallucinate patterns. The fan-out architecture is meant to give the system more coverage and more resistance to drift.
+
+## What You Get Out of the Box
+
+- **Local CLI** - run `wispbit review` against your changes; the same rules the hosted service uses apply.
+- **Pull request review** - the hosted bot posts comments on PRs that violate a rule. Comments are tied to the specific rule that fired, so a developer can see why.
+- **Portable rules file** - rules are kept in version control, so they travel with the repo. You can fork a repo, port the rules to a new codebase, or hand them to a new agent.
+- **Editable rules** - any rule can be edited inline. The system records which rules were touched so it can be careful about overwriting human edits on the next run.
+
+The reported early metric: 80%+ of Wispbit's review comments get resolved before merge, meaning they catch issues that engineers actually fix rather than nitpicks that get dismissed.
+
+## Why It Matters for the AI Coding Era
+
+Three forces collide in 2026.
+
+1. AI coding agents ship more code per developer per day.
+2. Code review has not scaled to match the throughput.
+3. Most linters and formatters are static - they encode a small fixed rule set that has to be hand-tuned for each codebase.
+
+Wispbit is one of the first tools to explicitly target the third force. The argument is that the rules themselves are the bottleneck: a 200-engineer monorepo and a 4-engineer startup have completely different standards, and both teams end up shipping roughly the same out-of-the-box `eslint-config-airbnb`. Wispbit's bet is that inferred rules beat hand-authored ones for any codebase that already has a year or two of history.
+
+This is also why the tool is framed as "for AI coding agents" rather than just "for developers." The CLI is meant to be invoked by an agent before it raises a pull request, the same way `tsc --noEmit` or `cargo test` would be. The rules file is the contract between an agent and the codebase's house style.
+
+## Practical Evaluation Checklist
+
+If you are considering Wispbit for your team, the questions worth asking are:
+
+- How much of the rule set is editable versus inferred? - some teams will want the model to stay out of the way once it has bootstrapped.
+- Where does the hosted service store source code? - the founders do not publish a SOC 2 report on the marketing site as of writing; ask before connecting a private repo.
+- Does the CLI work offline? - the marketing site emphasizes local-first behavior, but confirm whether rule regeneration requires a network call.
+- How are conflicts resolved when a human-edited rule drifts from what the model would re-infer? - the system needs an explicit "trust human override" path or you will fight the bot.
+
+## Security Notes
+
+- The hosted service reads your repository to generate rules. Confirm data retention and subprocessor policy before connecting a private repo.
+- The CLI runs entirely on your machine; the only network call is for rule updates from the hosted service.
+- Rules live in version control, which means a malicious rule injection by a compromised developer is reviewable like any other code change - treat the rules file as code, not configuration.
+
+## FAQ
+
+**Q: Does Wispbit replace ESLint, RuboCop, or Biome?**
+
+**A:** No. Wispbit generates review rules that are specific to your codebase. It is meant to sit alongside a general-purpose linter and catch the things your team actually cares about that the linter's defaults miss.
+
+**Q: Is the rule file portable across repos?**
+
+**A:** Yes - the founders describe it as a "portable rules file that you can bring anywhere." You can copy it to a new repo or share it across services in a monorepo. The CLI will run against any repo that has a rules file at the root.
+
+**Q: How does Wispbit compare to a hosted AI code reviewer like Greptile or CodeRabbit?**
+
+**A:** Wispbit's framing is rules-first rather than review-first. Greptile and CodeRabbit are conversational - they read the diff and decide what to say. Wispbit's contract is the rules file; the model is used to build the rules, not to author comments.
+
+**Q: Does the local CLI need an API key?**
+
+**A:** The marketing site implies local-first, but for full rule regeneration the system needs access to the inference backend. Ask the team for the offline behavior of the CLI before adopting for air-gapped environments.
+
+**Q: How much does it cost?**
+
+**A:** Pricing is not published on the public site as of June 2026. Contact the team at the address on the marketing site for current rates.
+
+## Conclusion
+
+Wispbit is a thoughtful entry into a category that did not really exist two years ago: rule inference for AI-generated code. The pitch is sharp - the standards half of the code review loop has not kept up with the agent half - and the implementation (subagent dispatch, historical PR scan, portable rules file) is concrete enough to evaluate. For teams that already feel review queues overflowing, it is worth a closer look.
