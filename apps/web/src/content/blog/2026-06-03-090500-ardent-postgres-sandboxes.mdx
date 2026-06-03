@@ -1,0 +1,133 @@
+---
+title: "Ardent – Postgres Sandboxes in Seconds with Zero Migration"
+description: "Ardent creates Postgres sandboxes for coding agents in seconds flat — no migrations, no schema changes, no setup headaches. Spin up a production-like DB clone instantly."
+pubDate: "2026-06-03"
+tags: ["database", "postgres", "devops", "sandbox"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ardent-postgres-sandboxes.webp"
+  alt: "Ardent Postgres sandboxes product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Ardent spins up production-like Postgres sandboxes in seconds, with zero migration overhead — so your coding agents can test against realistic data without touching production.
+
+## Source and Accuracy Notes
+
+- Official site: [tryardent.com](https://www.tryardent.com/)
+- HN Launch: [Launch HN: Ardent (YC P26)](https://news.ycombinator.com/item?id=48124436)
+
+## What Is Ardent?
+
+Coding agents have gotten dramatically better at handling complex engineering tasks. But without a realistic sandbox at the database layer, they write queries that can take down production systems. Ardent solves this by creating lightweight, isolated Postgres sandboxes that are spinning copies of your production schema — without the overhead of running full database migrations.
+
+When an agent needs to test a complex SQL migration or try a risky schema change, Ardent provisions a sandbox in seconds. The sandbox has the same schema structure as your production database, but is isolated and ephemeral. When the session ends, the sandbox is torn down automatically. No state leaks back to production.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the Ardent CLI
+
+```bash
+npm install -g @ardent-dev/cli
+```
+
+### Step 2: Connect to Your Postgres Database
+
+```bash
+ardent login
+ardent connect postgresql://user:password@localhost:5432/mydb
+```
+
+### Step 3: Create a Sandbox
+
+```bash
+# Create an ephemeral sandbox from your production schema
+ardent sandbox create --from production --name agent-test-1
+
+# The CLI returns a new connection string for the sandbox
+# postgres://ardent:xxx@sandbox.ardent.dev/mydb
+```
+
+### Step 4: Give the Agent the Sandbox URL
+
+Pass the sandbox connection string as an environment variable:
+
+```bash
+export DATABASE_URL="postgres://ardent:xxx@sandbox.ardent.dev/mydb"
+```
+
+The coding agent connects to the isolated sandbox instead of production.
+
+### Step 5: Agent Works Freely
+
+The agent can run migrations, backfill data, or test schema changes. Because the sandbox is a clone of the production schema, the agent works with realistic table structures and relationships — not a toy database.
+
+### Step 6: Tear Down When Done
+
+```bash
+ardent sandbox destroy agent-test-1
+```
+
+The sandbox is immediately deleted. No data persists, no schema changes leak back to production.
+
+## Deeper Analysis
+
+### Why Sandboxes Matter for AI Coding Agents
+
+Modern coding agents like Claude Code, Codex, and OpenCode can handle multi-step engineering tasks — but they need a safe environment to test their work. A coding agent that runs `ALTER TABLE` statements against a production database is a disaster waiting to happen. Even with explicit instructions to avoid production, agents can be careless with connection pooling, transaction isolation, or long-running queries that lock tables.
+
+Ardent solves this by giving agents their own ephemeral database clone. The agent gets a Postgres instance that has the same schema as production — same tables, same columns, same indexes — but is completely isolated. Any migration or schema change the agent runs stays in the sandbox.
+
+### How Ardent Handles Schema Cloning
+
+When you create a sandbox, Ardent performs a logical clone of your production schema. It reads the schema structure (tables, views, indexes, constraints, sequences) and creates a new Postgres instance with that schema. The data is typically minimal or synthetic — the point is schema fidelity, not data volume.
+
+This is different from running `pg_dump` and restoring. Ardent uses Postgres logical replication under the hood to create the clone, which means schema changes in production propagate to the sandbox if needed. For most agent workflows, the sandbox is short-lived enough that this doesn't matter.
+
+### Zero Migration Overhead
+
+Traditional database migration approaches for testing require running `db-migrate` or similar tools against a fresh database, which can take minutes for large schemas. Ardent sidesteps this by cloning the schema directly. The agent gets a fully formed database in seconds, not minutes.
+
+This makes it practical to create a fresh sandbox for every coding session — or even every task within a session.
+
+## Practical Evaluation Checklist
+
+- **Time to first query:** Under 30 seconds from `ardent sandbox create` to connected query
+- **Schema fidelity:** All production tables, columns, and indexes present in the sandbox
+- **Isolation:** Sandbox cannot affect production data or schema
+- **Connection handling:** Works with standard `pg` client, Prisma, Drizzle, SQLAlchemy
+- **Cleanup:** Sandbox destroyed cleanly with no orphaned connections
+- **Cost:** Pay per sandbox-hour; ephemeral by design
+
+## Security Notes
+
+Ardent sandboxes are network-isolated and ephemeral. Because the sandbox is a throwaway clone, the attack surface for an agent is limited to the sandbox database — not production. Sensitive data in production is not accessible from the sandbox unless you explicitly backfill it.
+
+For high-security environments, you can configure Ardent to use synthetic data generators instead of real production data when cloning schemas.
+
+## FAQ
+
+**Q:** How does Ardent differ from creating a Postgres read replica?
+**A:** A read replica is a full copy of the database with real data — expensive and potentially unsafe for AI agents. Ardent creates a lightweight schema clone without the data overhead, making it fast to spin up and cheap to run.
+
+**Q:** Can I use Ardent with self-hosted Postgres?
+**A:** Yes. Ardent connects to any Postgres instance via connection string, including self-hosted on a VPS, RDS, or Cloud SQL.
+
+**Q:** What happens if the agent runs a destructive query?
+**A:** The query runs against the sandbox only. Production is never affected. The sandbox is designed to be disposable — tear it down and create a new one.
+
+**Q:** Does Ardent support multiple concurrent sandboxes?
+**A:** Yes. You can run multiple sandboxes simultaneously, each isolated from the others. Each sandbox has its own connection string.
+
+**Q:** How long do sandboxes persist?
+**A:** Sandboxes persist until you explicitly destroy them with `ardent sandbox destroy`. You can also set an auto-expiry TTL when creating a sandbox.
+
+## Conclusion
+
+Ardent is a practical tool for teams that want to let coding agents work with databases safely. By cloning production schemas into ephemeral sandboxes, it gives agents a realistic environment to test migrations and schema changes without any risk to production data. The zero-migration workflow means agents get a working database in seconds rather than minutes, making it practical to create a fresh sandbox for every task.
+
+If your team is using coding agents that interact with Postgres, Ardent is worth evaluating. It removes the biggest risk that keeps teams from fully trusting agents with database work.
