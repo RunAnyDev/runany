@@ -5,7 +5,17 @@ import { getCollection } from 'astro:content';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
-  const tags = [...new Set(posts.flatMap(p => p.data.tags))];
+  const tagCounts = new Map();
+
+  for (const post of posts) {
+    for (const tag of post.data.tags) {
+      const normalizedTag = tag.toLowerCase();
+      tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) ?? 0) + 1);
+    }
+  }
+
+  const tags = [...new Set(posts.flatMap((post) => post.data.tags))]
+    .filter((tag) => (tagCounts.get(tag.toLowerCase()) ?? 0) >= 2);
   
   return tags.map(tag => ({
     params: { tag: tag.toLowerCase() },
@@ -51,32 +61,10 @@ const structuredData = [
       { '@type': 'ListItem', position: 3, name: tagTitle, item: tagUrl },
     ],
   },
-  {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: [
-      {
-        '@type': 'Question',
-        name: `What is #${tag}?`,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: `#${tag} is a tag on runany.dev used to categorize posts about ${tagDisplay.toLowerCase()}. Browse ${sortedPosts.length} posts tagged with #${tag} for setup guides, tool reviews, and tutorials.`,
-        },
-      },
-      {
-        '@type': 'Question',
-        name: `How do I find more posts about ${tagDisplay.toLowerCase()}?`,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: `Filter by #${tag} on the blog index to see all ${sortedPosts.length} posts. You can also browse related tags or categories for broader topics.`,
-        },
-      },
-    ],
-  },
 ];
 ---
 
-<BaseLayout title={tagTitle} description={tagDescription} structuredData={structuredData}>
+<BaseLayout title={tagTitle} description={tagDescription} canonicalURL={tagUrl} structuredData={structuredData}>
   <section class="mx-auto max-w-5xl px-4 py-12 md:py-16">
     <nav aria-label="Breadcrumb" class="mb-6 text-sm">
       <ol class="flex flex-wrap items-center gap-2 text-slate-500">
