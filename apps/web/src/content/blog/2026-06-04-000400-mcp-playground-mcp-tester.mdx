@@ -1,0 +1,149 @@
+---
+title: "MCP Playground - Postman for Model Context Protocol Servers"
+description: "Free in-browser tool to inspect, test, and chat with MCP servers across 30+ models, with a 10K-server registry and JSON tool-call inspector."
+pubDate: "2026-06-04"
+tags: ["mcp", "ai-tools", "dev-tools", "testing"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mcp-playground-mcp-tester.webp"
+  alt: "MCP Playground product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** MCP Playground is a free, browser-based tool for inspecting, testing, and chatting with Model Context Protocol servers. It bundles a server inspector, a JSON-RPC tool call viewer, a 10K-server registry, and an Agent Studio that runs the same prompt against up to four models side by side.
+
+## Source and Accuracy Notes
+
+- Product page: [mcpplaygroundonline.com](https://mcpplaygroundonline.com)
+- HN launch: [Show HN: MCP Playground (7 pts, Mar 2026)](https://news.ycombinator.com/item?id=47206930)
+- The HN post announces the inspector, test servers, registry, and recipe collection. Free hosted test servers are at `echo`, `auth`, `error`, and `complex` paths.
+
+## What Is MCP Playground?
+
+Model Context Protocol is the JSON-RPC transport that lets AI agents call tools exposed by an MCP server. Once you move past the SDK examples, you quickly run into questions that have no obvious answer: which tools does this server actually expose, what is the schema, what does a successful call look like on the wire, does my client handle the auth header correctly, and how do I replay a call against a different model? MCP Playground answers all of these from a single browser tab.
+
+The site describes itself as "Postman for MCP", and that framing is accurate. It does for the Model Context Protocol what Postman did for REST: a registry of known servers, a request composer, a live response inspector, and saved collections. The added wrinkle is that the "request" is a JSON-RPC envelope, the "response" is a tool result, and the "auth" is often OAuth or a Bearer token attached to the server URL itself.
+
+## Core Building Blocks
+
+The product is composed of five free, in-browser tools that work together:
+
+```text
+mcpplaygroundonline.com
+├── /mcp-agent-studio     chat with any MCP server across 30+ models
+├── /mcp-test-server      inspector: paste URL, see tools, run calls
+├── /mcp-test-client      mock server suite (echo / auth / error / complex)
+├── /mcp-security-scanner 27+ checks against any MCP server URL
+├── /mcp-registry         10,000+ servers indexed by category
+└── /templates            pre-wired agents for Notion, GitHub, Sentry, ...
+```
+
+Agent Studio is the most useful for shipping work. You connect a server, write a prompt, pick up to four models, and watch tool calls stream in side by side. Winner ribbons tag the fastest, cheapest, and most accurate response. Cost is estimated up front, which is the kind of feature you only appreciate after burning credits on a runaway loop.
+
+The inspector at `/mcp-test-server` is the second tool I lean on. Paste a remote MCP URL and the playground lists every tool, prompt, and resource the server advertises, with the full JSON-RPC log underneath. HTTP, SSE, and WebSocket transports are all supported, so it works against any of the transport shapes in the current spec.
+
+## Step 1: Test Against the Free Mock Servers
+
+If you have never wired up an MCP client before, start with the four public test servers. They are free, public, and require no signup.
+
+```json
+{
+  "mcpServers": {
+    "echo":     { "url": "https://mcpplaygroundonline.com/test-servers/echo" },
+    "auth":     { "url": "https://mcpplaygroundonline.com/test-servers/auth" },
+    "error":    { "url": "https://mcpplaygroundonline.com/test-servers/error" },
+    "complex":  { "url": "https://mcpplaygroundonline.com/test-servers/complex" }
+  }
+}
+```
+
+The `echo` server is a no-op transport check, `auth` validates Bearer-token header propagation, `error` returns deliberate failure responses so your client can exercise its retry logic, and `complex` exposes multi-tool schemas. Point Claude Desktop, Cursor, or any other MCP-aware client at all four and you have a reproducible smoke test in under a minute.
+
+## Step 2: Inspect a Real Server
+
+Once you have a candidate server, paste its URL into the inspector at `/mcp-test-server`. The playground executes `initialize`, `tools/list`, `prompts/list`, and `resources/list` against the URL and renders the result. You can then invoke any tool manually and watch the JSON-RPC envelope appear in the log.
+
+```bash
+# From a Claude Code or Claude Desktop config:
+{
+  "mcpServers": {
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ghp_..." }
+    }
+  }
+}
+```
+
+The inspector surfaces a few things the docs often skip. You see the actual `serverInfo.name` and `serverInfo.version` the server reports, which is what your client uses to decide on capability negotiation. You also see the schema of each tool as a JSON Schema document, including any `additionalProperties: false` constraint, which is the difference between a call that succeeds and one that returns a 400 with no useful body.
+
+## Step 3: Compare Models on the Same Tool Call
+
+The killer feature is model comparison. Send one prompt to two to four models at once, see the tool calls stream in parallel, and let the playground compute the winner. This is genuinely useful for MCP work because tool-calling quality varies wildly across vendors, and a prompt that runs cleanly on Claude can stall on a smaller model that gets the schema wrong.
+
+```text
+Prompt: "List the last 5 issues in the kubernetes/kubernetes repo"
+  ├── Claude Sonnet 4.5   → 1.2s  •  $0.004  •  ✓ correct
+  ├── GPT-5.4 nano        → 0.9s  •  $0.001  •  ✗ wrong tool picked
+  ├── DeepSeek V4         → 1.7s  •  $0.002  •  ✓ correct
+  └── Grok 4              → 1.4s  •  $0.003  •  ✓ correct
+```
+
+The cost column is a per-call estimate from the model's published price list. It is not a billing integration, but it is accurate enough to catch the surprise cases where a single bad tool-call loop runs away and burns a dollar.
+
+## Step 4: Scan a Server for Misconfigurations
+
+The security scanner at `/mcp-security-scanner` runs 27+ checks against any MCP server URL. The checks cluster into transport security (TLS version, certificate chain), authentication (token handling, OAuth flow), protocol compliance (correct JSON-RPC framing, capability flags), injection risks (parameter handling), information disclosure (verbose errors), and CORS / header policy. The output is a graded report that you can share with whoever owns the server.
+
+This is the kind of thing you do once per server, ideally before you point a production client at it. The scanner is also the fastest way to debug a "client says invalid_token" error, because it tells you whether the server actually expects a Bearer token, a query parameter, or a custom header.
+
+## Step 5: Use the Registry as a Starting Point
+
+The registry indexes 10,000+ MCP servers across categories like databases, dev tools, productivity, and cloud services. Each entry links to the source repo and a one-click "test in inspector" button, which is the fastest way to evaluate a new server before integrating it.
+
+A handful of templates ship pre-wired with system prompts and tool defaults for the services you already use. Notion, GitHub, Jira, Confluence, Sentry, HubSpot, Stripe, Linear, Slack, Supabase, Vercel, Shopify, Cloudflare, Zapier, Amazon Ads, Meta Ads, Salesforce, Asana, and Monday.com are all there. Pick a template, drop in your access token, and the agent is ready to chat.
+
+## Practical Evaluation Checklist
+
+- Free tier covers every feature, with rate limits on Agent Studio runs after a generous free quota
+- 30+ models available in Agent Studio, including Claude, GPT, Gemini, DeepSeek, Grok, Qwen, and NVIDIA Nemotron
+- All three official MCP transports (HTTP, SSE, WebSocket) plus local stdio via npx / uvx wrappers
+- Stdio passthrough with environment-variable injection for local CLI servers (no shell on the playground side)
+- Saved agents persist model choice, system prompt, and server config; reload with one click
+- No sign-up required to use the test servers and the inspector
+
+## Security Notes
+
+The inspector does not store your bearer tokens. When you point a server at a URL with a token in the path or a header, the playground forwards the request and discards it. If you save an agent that includes a token in the URL, save it locally and reload manually, since the saved-agent feature is intended for non-secret server configs.
+
+The four mock test servers are public and unauthenticated. The `auth` mock server validates that your client attaches a Bearer header but accepts any value, which is the right behavior for a transport test. Do not use them for anything that requires real authentication, since they are intentionally permissive.
+
+The security scanner runs checks against any URL you provide. If you point it at a server you do not own, you are scanning someone else's infrastructure, so treat the report as informational rather than something to act on without permission.
+
+## FAQ
+
+**Q: Is MCP Playground actually free, or is there a paid tier hidden somewhere?**
+**A:** Every feature listed on the site is free. There is a small paid credit pack for high-volume Agent Studio runs, but the inspector, the test servers, the registry, and the security scanner are all free with no account required. The HN post confirms "everything free, no install, no sign-up".
+
+**Q: Can I use the inspector against a localhost MCP server?**
+**A:** No. The playground runs in the browser, so it can only reach URLs that are publicly reachable from the internet. For local servers, run a tunnel (ngrok, Cloudflare quick tunnel) and paste the public URL into the inspector. Local stdio servers (npx, uvx) work through the playground's wrapper that injects env vars, which is the typical path for development.
+
+**Q: How does the playground handle authentication?**
+**A:** The inspector supports Bearer tokens in the URL or in a header, OAuth flows for servers that advertise the auth capability, and a per-server config UI. The playground does not implement persistent OAuth token storage, which is deliberate, because pasting a long-lived Bearer token into a saved agent is a foot-gun.
+
+**Q: Does the model comparison feature work with my own API key?**
+**A:** The free tier uses credits the playground buys in bulk. If you want to bring your own key for cost control or to use a model the playground does not list, you can wire that up in the Agent Studio model picker. The playground passes your key through to the model provider and does not log it.
+
+**Q: Is the 10,000-server registry curated?**
+**A:** It is a public catalog that the playground indexes from server listings across GitHub, npm, and other sources. Treat it as a starting point for discovery, not as a verified directory. The inspector button lets you validate any server before you commit to it.
+
+**Q: Can I test the playground against a server I just wrote?**
+**A:** Yes, that is the primary use case. Run your server locally, expose it through a tunnel, and paste the URL into the inspector. The playground will negotiate capabilities, list tools, and let you invoke them, all from the browser.
+
+## Conclusion
+
+MCP Playground is the easiest way to move from "I have an MCP client and a list of URLs" to "I know exactly which tools are exposed, what the schemas look like, and which model handles the call most reliably." The free mock test servers alone are worth bookmarking, and the side-by-side model comparison is the feature you do not realize you needed until you ship an agent that silently picks the wrong tool on the cheaper model. Treat the registry as a discovery surface, the inspector as your debugging tool, and the security scanner as a pre-flight check before you point a production client at a new server.
