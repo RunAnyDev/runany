@@ -1,0 +1,197 @@
+---
+title: "JungleGym - OSS Playground and Datasets for Web Agents"
+description: "JungleGym is an a16z open-source playground with three web-agent datasets and TreeVoyager DOM parser for benchmarking and training autonomous agents."
+pubDate: "2026-06-04"
+tags: ["ai-agents", "open-source", "dev-tools", "web-agents", "playground"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/junglegym-autonomous-web-agents-playground.webp"
+  alt: "JungleGym autonomous web agents playground thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** JungleGym from a16z-infra bundles three production web-agent datasets (Mind2Web, WebArena, AgentInstruct) behind a single API, plus a Tree-of-Thoughts-inspired LLM DOM parser called TreeVoyager, so you can benchmark, fine-tune, and stress-test autonomous agents without wiring up your own eval harness.
+
+## Source and Accuracy Notes
+
+- Live playground: [https://junglegym.ai](https://junglegym.ai)
+- GitHub repo: [a16z-infra/JungleGym](https://github.com/a16z-infra/JungleGym) (207 stars, last updated May 2026)
+- API docs: [docs.junglegym.ai](https://docs.junglegym.ai/junglegym/)
+- HN launch thread: [Show HN: JungleGym and TreeVoyager](https://news.ycombinator.com/item?id=38448995) (15 points, Nov 2023)
+- Authors: Marco Mascorro (a16z) and Matt Bornstein (a16z)
+- Status: v0.9.0 experimental, Apache 2.0 license
+
+## What Is JungleGym?
+
+JungleGym is an open-source playground for testing and developing autonomous web agents. It is not an agent itself; it is the missing eval layer that most agent developers have to assemble by hand. The project ships three well-known web-agent datasets behind a unified API and bundles a tool called TreeVoyager that handles the DOM-parsing portion of an agent pipeline using an LLM guided by Tree-of-Thoughts and Minecraft Voyager principles.
+
+The repo is maintained under the `a16z-infra` GitHub org, the same a16z infrastructure team that published the original LLM-training infrastructure tooling. The two authors have been active in the agents space since 2023, and the project is still receiving commits in 2026 (last push May 2026), making it one of the longer-lived open-source agent eval kits.
+
+## What You Get
+
+### 1. Three Datasets, One API
+
+| Dataset | Tasks | Format | Use Case |
+|---|---|---|---|
+| Mind2Web | ~2,000 across 137 sites | Full HTML + screenshots + step-by-step actions | Broad cross-site training and eval |
+| WebArena | Hundreds of tasks on 6 sandboxed sites | Final ground-truth answer per task | Deep single-site stress testing |
+| AgentInstruct | ~1,800 chat-style trajectories | Conversational (gpt/human turns) | LLM fine-tuning for agent behavior |
+
+All three are queryable through the same REST API at `api.junglegym.ai`, which is convenient when you want to mix datasets in a single training pipeline or compare your agent's performance across them.
+
+### 2. Sandbox Endpoints
+
+WebArena tasks run against six fully functional, sandboxed websites (including a shopping site at `shop.junglegym.ai`) that the project hosts for free. This is significant because running WebArena locally requires a heavy Docker stack; JungleGym gives you the same ground-truth results over HTTP without any local setup.
+
+### 3. TreeVoyager DOM Parser
+
+TreeVoyager is an LLM-based DOM parser (powered by GPT-4 Turbo) that takes a task ("buy coffee") and a URL, then returns:
+
+- The HTML/DOM element the agent should interact with
+- A suggested curriculum (ordered plan of steps)
+- Suggested code for each step
+
+It is positioned as a tool, not a full agent, designed to slot into an existing agent loop where DOM parsing is a known pain point.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Clone and inspect
+
+```bash
+git clone https://github.com/a16z-infra/JungleGym.git
+cd JungleGym
+ls
+```
+
+The repo has three top-level folders: the playground app (Streamlit), the TreeVoyager tool, and dataset utilities. The README points you at the playground and docs as the starting point.
+
+### Step 2: Pull a ground-truth answer from WebArena
+
+The simplest workflow is to call the public API from any Python script:
+
+```python
+import requests
+
+WebArena_task = "What is the price range for products from ugreen?"
+
+url = f"http://api.junglegym.ai/get_webarena_by_task?task={WebArena_task}"
+response = requests.get(url)
+data = response.json()
+
+print(
+    data['data'][0]['eval']['reference_answers']['must_include']
+)
+# -> ['6.99', '38.99']
+```
+
+This gives you the canonical answer to compare your agent's response against. The same endpoint works for any task in the WebArena subset.
+
+### Step 3: Walk a Mind2Web trajectory
+
+Mind2Web is more useful for step-by-step eval because it includes the full DOM and screenshots at each step:
+
+```python
+import requests
+
+task_annotation_id = "4bc70fa1-e817-405f-b113-0919e8e94205"
+# Task: "Add the cheapest Women's Sweaters to my shopping cart." on kohls.com
+
+url = f"http://api.junglegym.ai/get_list_of_actions?annotation_id={task_annotation_id}"
+response = requests.get(url)
+data = response.json()
+
+print("Steps:", len(data['action_reprs']))
+print("First action:", data['action_reprs'][0])
+print("DOM candidates:", data['actions'][0]['pos_candidates'])
+```
+
+This is the right endpoint for any agent that emits per-step actions and needs the ground-truth action sequence plus the underlying DOM elements to score against.
+
+### Step 4: Load AgentInstruct for fine-tuning
+
+```python
+import requests
+
+url = "http://api.junglegym.ai/load_agent_instruct"
+data = requests.get(url).json()
+
+print("Conversations:", len(data['data']))
+# Each conversation has 'from' (gpt/human) and 'value' fields
+print(data['data'][1000]['conversations'])
+print("Category:", data['data'][1000]['id'])
+```
+
+AgentInstruct is the right pick when you want to fine-tune a base model (Llama 2 was the original target) on agent behavior. The trajectories cover six categories: `os`, `webshop`, `mind2web`, `kg`, `db`, and `alfworld`.
+
+## Deeper Analysis
+
+### Why a unified API matters
+
+The agent ecosystem is fragmented. Mind2Web is great for cross-site generalization, WebArena is great for reproducible end-to-end scoring on sandboxed sites, and AgentInstruct is the right shape for SFT. Each of them ships with its own loader, schema, and quirks. JungleGym's main contribution is the API layer that normalizes the three into a single `requests.get()` call pattern. That alone saves an afternoon of plumbing per dataset.
+
+The trade-off is that you cannot introspect the underlying data structures as deeply as you can with the original dataset loaders. For most use cases (eval harness, fine-tuning prep, dataset mixing) the API is sufficient; for research that needs the raw annotations, you will still want to pull the original Mind2Web and WebArena releases.
+
+### TreeVoyager's place in the agent stack
+
+DOM parsing is one of the most failure-prone steps in a web agent. Plain HTML is huge (a single e-commerce page can be 5 MB+), full of noise (scripts, hidden elements, repeated patterns), and the action you want to take is often one element deep inside a deeply nested tree. TreeVoyager's bet is that an LLM guided by Tree-of-Thoughts planning will pick the right element faster than a hand-rolled XPath query or a smaller model fine-tuned on click prediction.
+
+In practice, TreeVoyager is best treated as a "first pass" parser: run it to get a candidate element, then have a cheaper model verify the suggestion. The README is upfront that this is a v0 tool meant for agent developers, not end users.
+
+### Dataset licensing and provenance
+
+Each underlying dataset has its own license and citation requirements. Mind2Web and WebArena both have academic licenses with non-redistribution clauses; JungleGym does not redistribute the raw data, it just hosts the API for ground-truth lookups. AgentInstruct is fine for fine-tuning. Before shipping a commercial product that uses these endpoints, double-check the original dataset licenses and citation requirements (the README links to each).
+
+## Practical Evaluation Checklist
+
+Use this when you decide whether JungleGym fits your project:
+
+- [ ] You are building an autonomous web agent and need a reproducible eval harness
+- [ ] You want to fine-tune an LLM on agent behavior without writing your own trajectory loader
+- [ ] You need to mix multiple datasets (Mind2Web + WebArena + AgentInstruct) in one training run
+- [ ] You want to compare your agent against canonical ground truth without spinning up WebArena's Docker stack
+- [ ] You need a TreeVoyager-style DOM parser that is willing to use GPT-4 Turbo under the hood
+
+Skip JungleGym if any of the following apply:
+
+- You need raw access to the original dataset annotations (use Mind2Web / WebArena directly)
+- You want a fully local, offline eval harness (the API requires network access)
+- You need CAPTCHA bypass (explicitly disallowed in the README disclaimer)
+- You are not building web agents (the datasets and tools are web-specific)
+
+## Security Notes
+
+- The README is explicit: JungleGym is for educational and research use, and the authors hold no liability for losses arising from use.
+- It is not designed to bypass CAPTCHAs. Always consult a target site's Terms of Service before running agents against it.
+- The hosted WebArena sandboxes (`shop.junglegym.ai` and friends) are isolated from real e-commerce sites, so test traffic does not hit production infrastructure.
+- The API is HTTP (not HTTPS) on the examples in the README. The community has been pushing for TLS; check the current docs to confirm the URL scheme before scripting against it.
+- TreeVoyager sends DOM to GPT-4 Turbo. If your target site contains sensitive data, sanitize before sending.
+
+## FAQ
+
+**Q: Does JungleGym ship the raw Mind2Web and WebArena data, or only an API?**
+**A:** API only. The repo's `data/` directory is empty by design; ground truth is queried over HTTP. Pull the original dataset releases if you need raw annotations.
+
+**Q: Can I use JungleGym to benchmark a non-web agent (e.g., a coding agent)?**
+**A:** Not really. All three datasets are web-specific (Mind2Web covers 137 websites, WebArena runs on sandboxed sites, AgentInstruct includes web trajectories but also OS / DB / KG categories). For coding-agent eval, look at SWE-bench or HumanEval-derived harnesses instead.
+
+**Q: Is TreeVoyager a complete agent?**
+**A:** No. The README is explicit: it is a DOM parser that returns a candidate element, a curriculum, and suggested code. You supply the agent loop around it.
+
+**Q: What model does TreeVoyager use?**
+**A:** GPT-4 Turbo at the time of writing. The TreeVoyager folder in the repo contains the source so you can swap in a different model or run it locally.
+
+**Q: Is there a hosted eval service, or do I run everything myself?**
+**A:** Hosted. The API at `api.junglegym.ai` and the playground at `junglegym.ai` are public. The repo is open source (Apache 2.0) so you can also self-host if the public endpoints do not fit your needs.
+
+**Q: How does JungleGym compare to the original WebArena repo?**
+**A:** WebArena's repo is the canonical eval framework and includes the Docker stack for the six sandboxed sites. JungleGym is a thinner layer that exposes the same ground-truth answers over HTTP, plus the two extra datasets. Use both: WebArena for the local Docker harness when you need full reproducibility, JungleGym for the quick API calls when you just need the answer.
+
+## Conclusion
+
+JungleGym is a quiet workhorse in the agent ecosystem. It does not have the marketing reach of the latest YC agent startup, but it solves a real problem: getting ground-truth eval data into your agent pipeline without reinventing the loader every time. The TreeVoyager parser is a useful side tool, especially for teams that already use GPT-4 Turbo and want a quick way to reduce DOM parsing to "give me the element." Watch this repo if you are building anything that needs to be measured against a real web benchmark.
+
+For more agent-eval tools, see our coverage of [Airtop cloud browser](/blog/airtop-cloud-browser-ai-agents/) and [Lume VMs for coding agents](/blog/lume-open-source-virtualization-cli/).
