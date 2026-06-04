@@ -1,0 +1,248 @@
+---
+title: "Superlog - Self-Installing Observability That Opens Fix PRs"
+description: "Superlog is a YC P26 MCP-native observability agent that auto-instruments your repo with OpenTelemetry and opens tested PRs to fix incidents in Slack."
+pubDate: "2026-06-04"
+tags: ["observability", "ai-sre", "incident-response", "dev-tools", "mcp"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/superlog-observability-installs-fixes-bugs.webp"
+  alt: "Superlog MCP-native observability that auto-installs and ships fix PRs thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Superlog is a YC P26 observability agent that scans your repo, instruments it with OpenTelemetry on its own, and opens tested pull requests from Slack to fix production incidents. Its daily wizard keeps telemetry from decaying as your codebase grows, and a custom eval suite targets the alert-fatigue problem every team hits with Sentry and Datadog.
+
+## Source and Accuracy Notes
+
+- Official site: [superlog.sh](https://superlog.sh/)
+- Show HN launch: [HN #48195021](https://news.ycombinator.com/item?id=48195021)
+- Founders: Nico and Arseniy (Arseniy ex-Datadog)
+- YC launch page: [YC P26 launch](https://www.ycombinator.com/launches/P26-superlog-observability-that-installs-itself-and-fixes-bugs)
+- Install command: `npx superlog install`
+
+## What Is Superlog?
+
+Superlog is positioned as observability "meant not to be opened" — the marketing line is that the best observability tool is one you never have to log into. The product is a small TypeScript wizard plus a background agent that:
+
+- Scans your repo on day one and instruments every service with OpenTelemetry SDKs
+- Highlights the main failure modes, endpoint performance, per-tenant usage, and LLM cost broken down by callsite, tenant, and model
+- Fingerprints errors and groups them into incidents so you see one issue, not a thousand duplicates
+- Investigates each incident with an agent and ships a tested PR to your repo
+- Runs the wizard daily so new code gets instrumented as it lands
+
+The output is intentionally simple: one Slack notification per incident, with a clean PR you can merge, ignore, or open in a Claude Code session and modify.
+
+The team is explicit about who this is for. The pitch is integration-heavy products, teams that have rolled their own observability, and anyone who has tried the Sentry or Datadog MCPs and given up.
+
+## Why This Category Matters
+
+Observability is one of the most painful categories in modern infrastructure. The standard workflow for a new engineer joining a team is:
+
+```text
+1. Get paged at 2am for an alert they do not understand
+2. Open Datadog, Sentry, and Grafana in three tabs
+3. Try to correlate logs across services
+4. Discover half the graphs are empty because nobody instrumented the new code
+5. Read tribal knowledge in old Slack threads
+6. Eventually find the bug after 90 minutes
+```
+
+Three things make this worse in 2026 than it was in 2020:
+
+- **Codebases move faster.** AI-generated code lands faster than humans can instrument it.
+- **LLM costs are a new failure surface.** A runaway prompt loop or a buggy model deployment can spike costs in minutes.
+- **The bill is climbing.** Datadog and Dash0 pricing scales with volume, not with how much telemetry you actually use.
+
+Superlog is targeting all three. The wizard keeps new code instrumented, the per-callsite LLM cost tracking catches runaway spend, and the agent-first design is meant to keep the cost-per-incident flat as volume grows.
+
+## Setup Workflow
+
+### Step 1: Install the Wizard
+
+Superlog ships as an `npx` command. The wizard reads your repo, detects services, and decides what to instrument based on the language and framework it finds.
+
+```bash
+# Run the install wizard
+npx superlog install
+
+# Output is roughly:
+# > Scanning repo...
+# > Detected: 4 services (Node API, Python worker, Next.js frontend, Python batch)
+# > Instrumenting with OTel SDKs...
+# > Setting up environment tagging...
+# > Superlog installed successfully!
+# > Ready to log smarter.
+```
+
+The wizard respects OpenTelemetry semantic conventions and tags every service with environment metadata automatically.
+
+### Step 2: Connect Slack
+
+The agent surfaces incidents directly in Slack. There is no separate dashboard to learn — you get a notification, click through to the PR, and decide.
+
+```bash
+# Slack install is a click-through in the Superlog dashboard
+# After install, the bot joins #ops and #incidents by default
+```
+
+The first time you run the wizard, you also get the eval suite seeded with your service map. From that point on, every new PR that lands triggers a re-instrumentation pass.
+
+### Step 3: Wait for the First Incident
+
+The interesting part is what happens when something breaks. Rather than a wall of stack traces, you get a single Slack message:
+
+```text
+[Superlog] High p99 latency on /v1/generate
+Severity: medium  |  Impact: 12% of API calls
+Summary: 3 related errors grouped into INC-2841
+Suspected cause: cache invalidation race in cache_warm.py
+
+[Open PR]  [Open in Claude Code]  [Ignore]
+```
+
+The PR is tested in CI before it hits you, so you are not getting untested code dropped into your repo.
+
+### Step 4: Refine With Feedback
+
+The eval suite is where the alert-fatigue work happens. Every summary gets a confidence score, and you can mark any notification as low-signal. That feedback flows back into the next incident, so the summaries get denser and more accurate over time.
+
+```text
+Eval inputs you control:
+  - Mark "not useful" on bad summaries
+  - Mark "correct" on accurate root causes
+  - Add context the agent missed (it learns from this)
+  - Pin certain services as "always page" or "never page"
+```
+
+The team is explicit that the eval suite is custom-built — not a generic LLM judge. They use it to keep severity scoring and impact estimation honest, and to flag the cases where the agent is guessing rather than knowing.
+
+## Deeper Analysis
+
+### The "One PR Per Incident" Model
+
+The most opinionated part of Superlog is the output format. Instead of dashboards, runbooks, or alert chains, the deliverable is a pull request. The argument is that a PR is the only artifact that combines:
+
+- A clear description of what the agent found
+- The proposed code change
+- The tests that prove the change works
+- A natural place to leave a review (which becomes training signal for the agent)
+
+For teams already living in GitHub, this is a meaningful shift. The alternative — handing engineers a dashboard and a Slack thread — relies on humans to do the synthesis step. Superlog skips it.
+
+### MCP-Native, Not Just Agent-Attached
+
+Superlog is built around MCP from the ground up rather than bolting an MCP server onto a legacy SaaS product. The practical difference is that the agent is the primary interface, not a wrapper around a UI. The Show HN thread explicitly contrasts this with the Sentry and Datadog MCPs, which are read-only and require humans to drive the investigation.
+
+The team mentions three things they think are different from other observability vendors:
+
+```text
+1. Setup pain
+   - Wizard instruments everything with native OTel SDKs
+   - Semantic conventions, proper service and environment tagging
+   - Working on native automatic dashboards and alerts
+
+2. Telemetry does not decay
+   - Wizard runs daily
+   - New features get instrumented automatically
+   - You never have to remember to add the missing log line
+
+3. Alert fatigue
+   - Agents merge similar errors
+   - Custom eval suite keeps summaries dense and correct
+   - Confidence scores on every LLM-enhanced metric
+```
+
+The third point is the one most likely to separate Superlog from incumbents. The team has built a custom eval pipeline specifically for severity and impact estimation, and they are willing to ship confidence scores rather than fake-certain numbers. That is rare in the LLM product space.
+
+### Pricing Model
+
+Pricing is on the site, but the structure is volume-based — you pay for the incidents the agent investigates, not for the amount of telemetry ingested. The team is explicit that Superlog telemetry is vendor-neutral, so you keep all the logs, metrics, and traces even if you stop using the product.
+
+For teams that have been burned by per-host or per-GB Datadog pricing, the volume-based model is attractive. The risk is that the "incident" definition drifts over time, but the eval suite is designed to catch that.
+
+### Comparison With Adjacent Tools
+
+Superlog sits in a category with several other YC-backed entries:
+
+```text
+- Wild Moose (AI SRE)         | diagnoses incidents, returns root cause
+- Sonarly (YC W26)            | diagnoses AND ships the fix
+- Relvy                       | executes runbooks, does not diagnose
+- Chamber (YC W26)            | GPU infrastructure specifically
+- LogClaw                     | open-source SRE that runs in your VPC
+```
+
+The rough positioning: Wild Moose diagnoses, Relvy executes, Sonarly both diagnoses and ships, and Superlog is closest to Sonarly but with a stronger emphasis on keeping the telemetry itself healthy. The "self-installing" angle is the unique wedge.
+
+## Practical Evaluation Checklist
+
+If you are evaluating Superlog for your team, here is the framework that emerged from the launch discussion and the product page:
+
+```text
+Observability maturity:
+  [ ] You have a centralized logs/metrics/traces store
+  [ ] On-call rotations exist
+  [ ] Engineers actually look at alerts
+  
+Telemetry decay:
+  [ ] New services get added faster than they get instrumented
+  [ ] Dashboards are stale or empty for recent code
+  [ ] You are paying for telemetry you are not using
+  
+LLM cost surface:
+  [ ] You are running LLM-backed features
+  [ ] You track per-tenant LLM cost
+  [ ] You have a runaway-loop alarm
+
+Alert fatigue:
+  [ ] Slack #ops is the worst part of your Saturday
+  [ ] Sentry/Datadog alerts have a high duplicate rate
+  [ ] Engineers silence alerts rather than triage them
+
+Vendor lock-in tolerance:
+  [ ] You are comfortable with OTel-native data formats
+  [ ] You would switch observability backends if cost dropped
+  [ ] You do not depend on vendor-specific query languages
+```
+
+## Security Notes
+
+- **Read-only by default.** The agent does not push to production directly — every change is a PR that goes through your normal review process.
+- **Vendor-neutral telemetry.** Superlog uses OpenTelemetry SDKs natively, so the data is not trapped in a proprietary format. You can point any OTel-compatible backend at it.
+- **No training on customer data.** Standard enterprise commitment, worth validating in the contract.
+- **Confidence scores.** Every LLM-enhanced signal (severity, impact, root cause) ships with a confidence score. This is rare in the category and worth using as a forcing function to triage which notifications to look at.
+
+## FAQ
+
+**Q: Does Superlog replace Datadog or Sentry?
+A:** No. Superlog generates OpenTelemetry data that any compatible backend can consume. You can keep Datadog, Sentry, or Grafana as the storage layer and use Superlog as the instrumentation and incident-response layer on top.
+
+**Q: How is it different from the Sentry or Datadog MCPs?
+A:** The Sentry and Datadog MCPs are read-only and require a human to drive the investigation. Superlog is agent-first — the agent investigates, opens a PR, and posts the result to Slack. The team explicitly calls this out as the most common failure mode for teams that have tried the incumbent MCPs.
+
+**Q: What languages and frameworks are supported?
+A:** The wizard auto-detects services based on repo contents. The launch demo shows Node APIs, Python workers, Next.js frontends, and Python batch jobs. Anything with an OpenTelemetry SDK should work.
+
+**Q: How long until the agent is useful in a new environment?
+A:** The team did not publish a specific number. The eval suite seeds with your service map on first install, so the first incident is usually well-grouped. Severity and impact accuracy improves as you mark summaries correct or incorrect.
+
+**Q: Can the agent actually push to production?
+A:** No. Every change ships as a pull request. You can choose to auto-merge certain PRs if you want, but the default is human review.
+
+**Q: What does it cost?
+A:** Pricing is volume-based and listed on the site. The team is explicit that it is not priced per-host or per-GB of telemetry.
+
+**Q: Does it work for non-production environments?
+A:** Yes — staging and pre-production instrumentation is supported. The PRs will be against the relevant branch, so you can use it to validate changes before they hit production.
+
+## Conclusion
+
+Superlog is a strong entry in the "self-driving observability" category. The combination of automated instrumentation that does not decay, MCP-native agent design, and a one-PR-per-incident output format is more opinionated than most incumbents, and the eval suite is a real differentiator for teams that have given up on Datadog's built-in AI features.
+
+The "meant not to be opened" pitch is a bet that the right UI is no UI at all. For teams whose biggest observability pain is dashboard sprawl and alert fatigue, that bet is worth a pilot.
+
+For related coverage, see our posts on [Wild Moose](/blog/wildmoose-ai-sre-debugging-agent/) (AI SRE for production incidents), [Sonarly](/blog/sonarly-ai-production-engineer/) (AI engineer that ships fixes), and [LogClaw](/blog/logclaw-ai-sre-vpc/) (open-source SRE that runs in your VPC).
