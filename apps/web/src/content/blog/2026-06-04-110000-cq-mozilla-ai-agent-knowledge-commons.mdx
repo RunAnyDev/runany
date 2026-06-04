@@ -1,0 +1,213 @@
+---
+title: "Cq by Mozilla.ai: Stack Overflow for AI Coding Agents"
+description: "Cq is an open standard for shared agent learning from Mozilla.ai. Local-first knowledge units, FastMCP integration, and team commons for AI coding agents."
+pubDate: "2026-06-04"
+tags: ["agents", "mcp", "knowledge-management", "ai-coding", "mozilla"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cq-mozilla-ai-agent-knowledge-commons.webp"
+  alt: "Cq by Mozilla.ai - Stack Overflow for AI coding agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cq is Mozilla.ai's open standard for shared agent learning. Local-first knowledge units (KUs) live in a SQLite store, get exposed to coding agents over MCP, and can graduate to a team or global commons. Install as a Claude Code, OpenCode, Cursor, or Windsurf plugin; self-host the FastAPI server or use the hosted `cq.exchange` service.
+
+Cq is an open standard and a working toolchain that turns the institutional knowledge your AI coding agent picks up into a queryable, confidence-scored, opt-in knowledge base. Agents query the store before re-deriving something another agent already learned, then propose new learnings back. The local tier runs entirely in your machine's SQLite. The remote tier (hosted or self-hosted) gives you a private namespace and (optionally) read access to a global commons of Mozilla.ai-seeded KUs.
+
+The interesting part is not the storage; it is the *workflow* baked into the SKILL.md and the five MCP tools (`query`, `propose`, `confirm`, `flag`, `status`). Confidence is earned through cross-agent confirmation, not assigned by a single authority, and that maps to how engineering knowledge actually accumulates inside a team.
+
+## Source and Accuracy Notes
+
+- Launch post: [blog.mozilla.ai/cq-stack-overflow-for-agents](https://blog.mozilla.ai/cq-stack-overflow-for-agents/) (Peter Wilson, March 23 2026, 225 points on Show HN)
+- Repo: [github.com/mozilla-ai/cq](https://github.com/mozilla-ai/cq) (Apache 2.0, 1,161 stars at time of writing)
+- Hosted service: [cq.exchange](https://cq.exchange)
+- Follow-up: [cq exchange: Agents without Borders](https://blog.mozilla.ai/cq-exchange-agents-without-borders/) (May 21 2026) introduces the private namespace + global commons split
+
+Cq is still labeled `0.x` in the README. Expect breaking changes; see `DEVELOPMENT.md` for migration notes.
+
+## What Is Cq?
+
+Cq (from *colloquy* + the radio call sign **CQ**, "any station, respond") is a structured exchange where AI coding agents persist, share, and query *knowledge units* (KUs) — short, schema-validated records describing a specific gotcha and a recommended action. Each KU carries:
+
+- A short summary and a longer detail
+- A recommended action
+- Domain tags inferred by the proposing agent (e.g., `api`, `error-handling`, `github`, `graphql`)
+- A confidence score that starts at 0.5 and rises as other agents confirm the KU through use
+
+The premise is that every agent that hits the same wall independently is a waste of tokens, compute, and engineering patience. Cq's design says: if another agent has already paid that price, your agent should know about it *before* writing code.
+
+The launch blog frames it as a deliberate answer to the question Andrew Ng also raised around the same time: should there be a Stack Overflow for AI coding agents? Mozilla.ai's answer is yes, and they ship a working PoC under Apache 2.0 rather than a whitepaper.
+
+## Why Cq, Why Now
+
+Three pressures converge to make this a real moment for shared-agent knowledge:
+
+1. **Stale training data is the default.** The launch post's worked example is GitHub Actions: Claude Code regularly wrote YAML using actions that were multiple major versions out of date, because the model had no way to learn that the action was renamed. Cq's `query` step gives the agent a way to surface "check the latest major version of `actions/checkout` before recommending it" *before* it starts writing.
+2. **`.md` files do not scale across agents.** The README explicitly calls this out: stuffing `AGENTS.md` / `CLAUDE.md` with rules gives you "unpredictable behaviour" and locks you to a single agent. CUs in Cq are targeted, schema-validated, and confirmed in practice.
+3. **Token economics.** When a model has to re-derive the same workaround every session, the cost is not just dollars — it is latency, and the failure modes of long retry loops in CI. A confidence-scored confirmation across multiple repos is cheaper than re-running the agent's debug loop.
+
+This is the same problem Stack Overflow solved for humans in 2008, but the trust and reputation layer is now driven by agent confirmations rather than upvotes.
+
+## Repo Architecture
+
+Cq spans three runtime boundaries:
+
+```bash
+Agent process (Claude Code / OpenCode / Cursor / Windsurf)
+   |
+   | stdio MCP
+   v
+Local MCP server (Go CLI, mcp-go)
+   |
+   | owns ~/.local/share/cq/local.db (SQLite)
+   |
+   | drains to remote when CQ_ADDR + CQ_API_KEY are set
+   v
+Remote API (FastAPI in Docker)
+   - private namespace per user / org
+   - read access to global commons
+   - HITL review UI for graduating KUs to the public pool
+```
+
+The plugin loads a `SKILL.md` that drives the workflow: query first, propose if novel, confirm or flag if a peer KU was useful or stale. The local SQLite store is the source of truth for the local tier, and `drain` semantics push new KUs to the remote tier asynchronously.
+
+## Local-Only Setup
+
+### Step 1: Install the plugin for Claude Code
+
+Cq ships as a Claude Code marketplace plugin. The `uv` Python package manager and Python 3.11+ are required.
+
+```bash
+claude plugin marketplace add mozilla-ai/cq
+claude plugin install cq
+```
+
+For other agents:
+
+```bash
+git clone https://github.com/mozilla-ai/cq.git
+cd cq
+make setup-plugin
+
+make install-opencode   # or install-cursor / install-windsurf
+```
+
+The Go-based CLI requires Go 1.26.1+ on the local machine.
+
+### Step 2: Verify the install
+
+In a coding-agent session, run the `cq:status` slash command:
+
+```bash
+/cq:status
+```
+
+You should see:
+
+```text
+The cq store is empty. Knowledge units are added via propose or the /cq:reflect command.
+```
+
+On the first run, the agent will prompt you to approve the MCP tool call. Choose "Yes, and don't ask again" so the skill can run without re-asking every turn.
+
+### Step 3: Propose your first KU
+
+Ask the agent to verify and propose a known pitfall. For example:
+
+```text
+I just learned that GitHub's GraphQL API always returns HTTP 200,
+even for errors. You have to check the `errors` field in the response
+body. Verify this and propose this as a cq knowledge unit.
+```
+
+The agent calls `cq:propose` with a structured payload (summary, detail, recommended action, domain tags) and returns something like:
+
+```text
+Stored: ku_7c67fc4bb4db46698eb2d85ed92b43a7 — "GitHub's GraphQL API
+always returns HTTP 200, even for errors — check the errors field
+in the response body to detect failures."
+```
+
+Re-running `/cq:status` now shows the new KU, the inferred domain tag, and the confidence bucket (0.5–0.7 on a fresh unit).
+
+## Remote Sync with the Hosted Service
+
+If you want your KUs visible across machines, sign in to [cq.exchange](https://cq.exchange) with GitHub or Google and grab an API key. Set two env vars in your shell or agent config:
+
+```bash
+export CQ_ADDR=https://cq.exchange
+export CQ_API_KEY=<your-key>
+```
+
+`query` and `stats` are read-only and do not need the key. `propose`, `confirm`, and `flag` do. When the plugin starts, it drains any locally-proposed KUs to your private namespace, and any peer KUs you have read access to become available through the same `query` call.
+
+## Self-Hosting for a Team
+
+For a team- or org-level store, run the server container yourself:
+
+```bash
+git clone https://github.com/mozilla-ai/cq.git
+cd cq
+make compose-up
+make seed-users USER=demo PASS=demo123
+```
+
+The server image is published as both `ghcr.io/mozilla-ai/cq/server` and `mzdotai/cq-server`, tagged `server/vX.Y.Z`. Run it on a VM, in a container, or on Kubernetes. You control auth, tenancy, and access. The HITL review UI is the same one the hosted service uses for graduating KUs to the public commons.
+
+For an org deployment, point each team member's agent at the same `CQ_ADDR` with their own `CQ_API_KEY`. KUs that get confirmed across multiple team members' agents automatically climb in confidence, and the org's curated KUs become the de-facto institutional memory the next time a new hire onboards.
+
+## The Five MCP Tools
+
+| Tool | What it does |
+|---|---|
+| `query` | Search the knowledge store before acting |
+| `propose` | Submit a new knowledge unit |
+| `confirm` | Endorse an existing KU that proved correct |
+| `flag` | Mark a KU as wrong or stale |
+| `status` | Show store statistics (tier counts, domain breakdown, confidence distribution) |
+
+The skill layer is what makes these tools useful: the SKILL.md tells the agent *when* to call each one. Without it, the agent would treat Cq as a passive search box. With it, the agent gets a routine — query, attempt, propose or confirm, reflect at the end of a session.
+
+## Practical Evaluation Checklist
+
+- [ ] **Local tier works without an account.** The hosted service is optional; the local SQLite store is the default. You can evaluate the full propose/confirm/flag workflow with no network call.
+- [ ] **Knowledge units are versioned and schema-validated.** The `cq-schema` package is published separately on PyPI and Go modules, so any client implementing KUs is talking to the same shape.
+- [ ] **Confidence is earned, not assigned.** A fresh KU starts at 0.5. Confirmations from peer agents move it up; `flag` events move it down. Stale KUs do not pollute results silently.
+- [ ] **Tier graduation is explicit.** Local KUs do not leak to the global commons automatically. The HITL review UI gates the public tier.
+- [ ] **Cross-agent portability.** The plugin is on the Claude Code marketplace today and has Makefile install targets for OpenCode, Cursor, and Windsurf. A KU captured by Claude Code can be queried by OpenCode using an OpenAI model — that is the demo Mozilla.ai leads with in the launch post.
+
+## Security Notes
+
+- A KU is a recommendation, not a verified fact. The launch post's comment thread flags the obvious risk: a malicious agent could "confirm" a KU that points a future agent at an `evil.dyndns.org` tarball. The current design leans on HITL review and the fact that KUs are scoped to your namespace; public-commons graduation is gated, not free. If you operate a team server, you should still apply the same code-review hygiene you would to any shared knowledge base.
+- Local KUs are stored at `~/.local/share/cq/local.db`. If you are running Cq in a CI environment or on a shared host, that path is still per-user. Use the remote tier if you need cross-machine consistency.
+- `CQ_API_KEY` is a write-scoped credential. Generate per-agent, rotate when an agent is decommissioned, and never commit it to a repo.
+
+## FAQ
+
+**Q:** Is Cq just a vector store for "AGENTS.md rules"?
+**A:** No. KUs are schema-validated records with a fixed shape (summary, detail, recommended action, domain tags, confidence). They are queryable by domain, by similarity, and by confidence bucket, and they graduate through tiers only after human review. The launch post explicitly contrasts this with the "stuff everything into a markdown file" approach.
+
+**Q:** Can I use Cq with agents that are not Claude Code?
+**A:** Yes. There are Makefile install targets for OpenCode, Cursor, and Windsurf, and the SKILL.md is portable. Any MCP-capable agent can talk to the local server. The Python and Go SDKs let you embed the workflow into custom agents.
+
+**Q:** Does Cq replace the existing `AGENTS.md` / `CLAUDE.md` pattern?
+**A:** Mozilla.ai's framing is that Cq complements it. Static instruction files still have a place for project-wide rules; Cq is for dynamic, agent-discovered, cross-project knowledge with confidence scoring.
+
+**Q:** What is the relationship between cq, cq.exchange, and the global commons?
+**A:** `cq` is the open-source standard and toolchain. `cq.exchange` is the hosted service Mozilla.ai runs. The global commons is a Mozilla.ai-seeded public pool of KUs that anyone with a `cq.exchange` account can read from. You can also self-host and skip the commons entirely.
+
+**Q:** Is Cq production-ready?
+**A:** The README labels the project as `0.x` and warns that breaking changes are expected. That said, the toolchain works end-to-end today and the 1,161-star repo is being actively pushed (last commit June 3 2026 at time of writing). Treat it as "useful now, schema may evolve".
+
+**Q:** How does Cq handle privacy for proprietary codebases?
+**A:** Local KUs stay in your machine's SQLite by default. The remote tier is opt-in. Even when you use the remote tier, KUs are scoped to your private namespace unless you graduate them to the public commons via the HITL UI. A KU in your private namespace is only visible to agents that present your `CQ_API_KEY`.
+
+## Conclusion
+
+Cq is one of the most thoughtful attempts to give AI coding agents a memory that survives across sessions, machines, and even different agent runtimes. The Apache 2.0 license, the local-first default, and the confidence-scored peer-confirmation loop are the right primitives for a world where agents are doing more of the actual code work. The hosted `cq.exchange` plus the self-host path mean you can adopt it for a single developer today and roll it out to a team without changing the workflow.
+
+If you have ever watched a coding agent rediscover the same workaround three times in a week, install the Claude Code plugin, propose your first KU, and see what happens to your next session.
