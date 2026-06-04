@@ -225,6 +225,52 @@ const orgSchema = {
         anonymize_ip: true,
         page_path: window.location.pathname,
       });
+
+      const normalizeLabel = (value) => (value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      const findTrackedLink = (target) => target instanceof Element ? target.closest('a[href]') : null;
+      const findTrackedCta = (target) => target instanceof Element ? target.closest('[data-cta]') : null;
+      const isOutboundLink = (link) => {
+        const href = link.getAttribute('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('/') || href.startsWith('mailto:') || href.startsWith('tel:')) return false;
+
+        try {
+          const url = new URL(href, window.location.origin);
+          return url.origin !== window.location.origin;
+        } catch {
+          return false;
+        }
+      };
+
+      document.addEventListener('click', (event) => {
+        const cta = findTrackedCta(event.target);
+        if (cta) {
+          const ctaName = normalizeLabel(cta.getAttribute('data-cta') || cta.textContent || cta.getAttribute('aria-label'));
+          const ctaLocation = normalizeLabel(cta.getAttribute('data-cta-location') || cta.closest('[data-cta-section]')?.getAttribute('data-cta-section') || 'unknown');
+
+          gtag('event', 'cta_click', {
+            event_category: 'engagement',
+            event_label: ctaName,
+            cta_name: ctaName,
+            cta_location: ctaLocation,
+            page_path: window.location.pathname,
+          });
+        }
+
+        const link = findTrackedLink(event.target);
+        if (!link || !isOutboundLink(link)) return;
+
+        const url = new URL(link.href, window.location.origin);
+        const linkText = normalizeLabel(link.getAttribute('data-outbound-label') || link.textContent || link.getAttribute('aria-label') || url.hostname);
+
+        gtag('event', 'click', {
+          event_category: 'outbound',
+          event_label: linkText,
+          link_url: url.toString(),
+          link_domain: url.hostname,
+          outbound: true,
+          page_path: window.location.pathname,
+        });
+      }, { capture: true });
     </script>
   )}
 </head>
