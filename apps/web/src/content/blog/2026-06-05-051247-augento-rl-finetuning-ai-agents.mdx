@@ -1,0 +1,192 @@
+---
+title: "Augento - Reinforcement Learning Fine-Tuning for AI Agents"
+description: "Augento fine-tunes open-source LLMs for AI agents using reinforcement learning. Drop in a reward function, no dataset required. YC W25, 101pts on Launch HN."
+pubDate: "2026-06-05"
+tags: ["ai-agent", "fine-tuning", "reinforcement-learning", "dev-tools", "yc-w25"]
+category: "ai-setup"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/augento-rl-finetuning-agents.webp"
+  alt: "Augento RL fine-tuning platform for AI agents thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Augento is a YC W25 platform that fine-tunes open-source LLMs for your AI agents using reinforcement learning — you point your agent's traffic at it, supply a reward function, and ship a smaller, task-specific model. No dataset collection, no SFT pipelines.
+
+## Source and Accuracy Notes
+
+- **Product:** [https://augento.ai/](https://augento.ai/)
+- **Docs:** [https://docs.augento.ai/](https://docs.augento.ai/)
+- **HN Launch:** [https://news.ycombinator.com/item?id=43537505](https://news.ycombinator.com/item?id=43537505) — 101 points, YC W25 (Launch HN)
+- **Demo video:** [https://www.youtube.com/watch?v=j5RQaTdRrKE](https://www.youtube.com/watch?v=j5RQaTdRrKE)
+- Augento's own OG image is a centered wordmark on a flat background. The thumbnail in this post was generated with MiniMax and stylizes a training-loop browser frame — used as a contextual stand-in.
+
+## What Is Augento?
+
+Augento is a continuous fine-tuning service that turns your agent's failure log into a smaller, better model — without you ever collecting an explicit dataset. The founders took the DeepSeek R1 post-training approach and productized it as a hosted platform.
+
+The pitch is direct: every agent team has a model that mostly works but breaks on specific tasks. The standard answers — better prompting, supervised fine-tuning — both have real costs. Prompting plateaus. SFT requires thousands of curated examples that nobody wants to label.
+
+Augento's answer is to put the model in a training loop, judge its outputs with a reward function you provide, and ship back an open-source model (Qwen, Llama, DeepSeek) that's been RL-tuned for your exact use case. The reward function is the only thing you write.
+
+This is "DeepSeek R1-style fine-tuning as a service," aimed squarely at agent teams.
+
+## Why This Matters
+
+Three reasons Augento hits a real pain point:
+
+**1. Agents fail in boring, repeating ways.** A coding agent that forgets semicolons. A browser agent that misclicks on a button. A MCP client that hallucinates tool names. These aren't reasoning failures — they're behavioral patterns the base model hasn't internalized. Prompting is brittle against them; SFT requires data you don't have.
+
+**2. RL post-training is what works, but the loop is hard to build.** DeepSeek R1 showed that even small open-source models get dramatically better with RL when you have a clean reward signal. But standing up a GRPO/PPO loop, reward function plumbing, eval harness, model versioning, and serving — that's a quarter of work for any team that isn't a frontier lab.
+
+**3. Open-source base models are catching up fast.** A fine-tuned 32B Qwen can now match much larger proprietary models on narrow tasks. The bottleneck is the post-training step, which is exactly what Augento sells.
+
+## What You Actually Build
+
+A reward function. That's the whole authoring surface.
+
+The interface is a POST endpoint that takes a model completion and returns a scalar reward. Python or TypeScript templates ship in the docs:
+
+```python
+from pl import compiler
+from openai.types.chat import ChatCompletion
+
+async def reward(completion: ChatCompletion) -> float:
+    try:
+        compiler.compile(completion.choices[0].message.content)
+        return 1.0
+    except SyntaxError:
+        return 0.0
+```
+
+For a coding agent, that's literally it. For a tool-using agent, the reward function might check whether the agent's chosen tool was correct. For a navigation agent, it could verify the page state. The Augento platform handles the rest: training data sampling, model rollout, GRPO updates, evaluation, and serving the new model back behind an OpenAI-compatible API.
+
+The reward is a `float`, not a label. That's the whole point of RL over SFT — you don't need ground truth, you need a verdict.
+
+## Setup Workflow
+
+### Step 1: Connect Your Model Provider
+
+Augento proxies your agent's traffic so it can intercept the runs. Add your provider API key in the dashboard:
+
+1. Go to **Providers** in the sidebar
+2. Click **Import Provider** and pick your provider (OpenAI, Anthropic, etc.)
+3. Paste your API key
+
+Augento doesn't store your prompts or responses long-term — it samples failed runs to feed into the training set.
+
+### Step 2: Wire Your Agent to Augento's API
+
+Create a new model in Augento and get an API key tied to it. Then point your agent at `https://api.augento.ai/v1` instead of your provider:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="sk-au-...",
+    base_url="https://api.augento.ai/v1"
+)
+```
+
+LangChain and JS/TS variants are documented at [docs.augento.ai/workflow/setup](https://docs.augento.ai/workflow/setup). Until you ship your first fine-tuned model, all calls pass through to the underlying provider unchanged — drop-in compatible.
+
+### Step 3: Mark Failed Runs
+
+Augento watches your traffic automatically. After a run completes, you can mark it as good or bad from the dashboard. The bad ones become training candidates.
+
+The platform's **Recent Runs** view shows every intercepted completion with the model output, the prompt, and a "Use for training" button. You don't need to write eval harnesses — you curate from real production traffic.
+
+### Step 4: Deploy a Reward Function
+
+Host the reward function anywhere (the docs recommend fly.io for low-latency):
+
+```bash
+# Your reward server URL is what Augento calls during training
+# Augento POSTs completion objects to it, gets back a float
+```
+
+The interface contract is one POST route:
+
+```bash
+# Request
+{
+  "prompt_messages": [...],
+  "completion": "...",
+  "extra_data": {"prompt_id": "..."}
+}
+
+# Response
+{"reward": 0.87}
+```
+
+You can keep the reward server on your own infrastructure if it needs to talk to private systems (a build server, a test harness, an internal API).
+
+### Step 5: Start Training
+
+In the dashboard, go to **Training → Start Training**, pick a base model and the training queries, paste the reward function URL, and click **Start Training**. The platform shows the submitted job in **Training Runs** with progress and metrics.
+
+Default hyperparameters work for most use cases. The number of epochs is the main cost driver — Augento charges per epoch.
+
+### Step 6: Switch Your Agent to the New Model
+
+Once training finishes, your fine-tuned model is available behind the same `https://api.augento.ai/v1` endpoint. Switch the model name in your agent's API call and you're done. Roll back at any time by switching back to the base model — no re-deploy needed.
+
+## Models and Pricing
+
+Augento supports a tiered catalog of open-source base models:
+
+- **Pay As You Go:** Qwen 2.5 32B Instruct
+- **Pro:** All Pay-As-You-Go models, plus Mistral Small 24B, Qwen 2.5 72B, Llama 3.3 70B, DeepSeek R1 distilled Llama 8B and 70B
+- **Enterprise:** Adds DeepSeek R1, DeepSeek V3, Llama 3.1 405B
+
+Pricing is per-epoch of training plus inference, with the Pro tier as the typical entry point. Enterprise plans let you bring your own base model.
+
+## Practical Evaluation Checklist
+
+- [ ] Do you have a measurable signal for "good vs. bad agent output" (compiles, lints, passes test, hits target page)? If yes, RL is a fit. If no, you need a labeled dataset first.
+- [ ] Are you routing through an OpenAI-compatible API? Augento's swap-in pattern assumes yes. Custom transport adapters need a small wrapper.
+- [ ] Is the failure mode pattern-stable (the same class of mistake repeats)? RL is great here. One-off reasoning errors benefit more from prompt iteration.
+- [ ] Are you okay with a non-frontier open-source base model? If you need a specific closed model, Augento's catalog won't fit.
+- [ ] Can you host a reward function server (or use fly.io)? You need somewhere for the POST endpoint to live.
+
+## Security Notes
+
+- Augento sees all completions routed through its proxy. Review your data handling policy before sending sensitive prompts.
+- The reward function URL is called with full prompt context. Don't return rewards based on privileged info you wouldn't share with the model provider.
+- API keys are tied to a specific model in the Augento dashboard — they can't be replayed across models. This is a good isolation property.
+- Roll back to the base model by changing the model name in the API call — no re-deploy, no migration. A/B test by splitting traffic between two model names.
+
+## FAQ
+
+**Q: Do I need to collect a training dataset?**
+
+**A:** No. The reward function replaces explicit labels. You mark failed runs in the dashboard, and Augento samples them for the training set. You only need to provide prompts and a verdict function.
+
+**Q: How is this different from supervised fine-tuning?**
+
+**A:** SFT needs (input, ideal_output) pairs. RL post-training only needs (input, reward_score). For agents, the reward is often easier to write than the ideal output — "did the code compile?" beats "what is the correct code?" every time.
+
+**Q: Which base model should I start with?**
+
+**A:** Qwen 2.5 32B on the Pay-As-You-Go tier is a good first experiment. Move to DeepSeek R1 distilled variants or 70B models on Pro for harder tasks. The dashboard shows which base model works best for your eval set.
+
+**Q: Can I use Augento with Claude or Gemini?**
+
+**A:** Augento is model-agnostic on the serving side — it proxies through your existing provider. The fine-tuned output, however, has to be one of the open-source models in the catalog. If you need a specific closed model, you'd need the Enterprise plan with a custom base.
+
+**Q: How long does training take?**
+
+**A:** It depends on the number of training queries and epochs. A small run with a few hundred queries and 3 epochs is a few hours. Larger runs (thousands of queries, 10+ epochs) run overnight. The dashboard shows live progress.
+
+**Q: What if my reward function is wrong?**
+
+**A:** The model will optimize for the wrong thing. Garbage in, garbage out. Start with a simple reward (binary pass/fail) and inspect training metrics before scaling up. Augento's evaluation tab shows reward curves per training run.
+
+## Conclusion
+
+Augento is the closest thing to "fine-tuning as infrastructure" for agent teams. If you have a clear reward signal and a failing agent, it's the shortest path to a smaller, faster, more reliable model. The DeepSeek R1 playbook is real, and Augento is the easiest way to apply it without standing up your own RL pipeline.
+
+Try it at [augento.ai](https://augento.ai/) — the platform is open for anyone, and the docs at [docs.augento.ai](https://docs.augento.ai/) walk through the full loop.
