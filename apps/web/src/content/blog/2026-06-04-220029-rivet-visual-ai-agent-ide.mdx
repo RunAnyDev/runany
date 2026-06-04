@@ -1,0 +1,272 @@
+---
+title: "Rivet - Visual AI Agent IDE for Complex LLM Apps"
+description: "Rivet is an open-source desktop IDE from Ironclad for building, debugging, and deploying LLM prompt graphs. Ships with a TypeScript runtime library."
+pubDate: "2026-06-04"
+tags: ["rivet", "ai-agents", "llm", "dev-tools", "open-source"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rivet-visual-ai-agent-ide.webp"
+  alt: "Rivet visual AI agent IDE thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rivet is an open-source visual IDE and TypeScript library for building complex LLM prompt chains as node graphs. It includes a remote debugger, YAML-based version control, and an embeddable runtime so you can run your graphs in production from your own application.
+
+## Source and Accuracy Notes
+
+- Official site: [rivet.ironcladapp.com](https://rivet.ironcladapp.com/)
+- GitHub repo: [Ironclad/rivet](https://github.com/Ironclad/rivet) (4,599 stars, MIT, TypeScript, last updated June 2026)
+- Show HN launch: [Show HN: Rivet – open-source AI Agent dev env with real-world applications](https://news.ycombinator.com/item?id=37433218) (176 points, Sep 2023)
+- Documentation: [rivet.ironcladapp.com/docs](https://rivet.ironcladapp.com/docs)
+- The Ironclad team behind Rivet uses it internally for their legal contract review AI agents at [ironcladapp.com](https://ironcladapp.com).
+
+## What Is Rivet?
+
+Rivet is a desktop application plus a TypeScript library for building AI agents and prompt chains as **visual node graphs**. You compose prompts, model calls, branching logic, and tool invocations by connecting boxes in a canvas, then attach the resulting graph to your own application through the `@ironclad/rivet-core` runtime.
+
+It was created by Cai GoGwilt and the team at [Ironclad](https://ironcladapp.com) — the digital contracting platform — because they kept running into the same wall building their own contract-review agent. As GoGwilt wrote in the original Show HN post:
+
+> The agent became too complex. We had debugger breakpoints on almost every line of code, but we still had no idea where the agent was breaking. Every change we made destabilized something else. After two weeks of fumbling, I decided to end the project.
+>
+> But one of my teammates, Andy, didn't give up. The following week, he showed me v0 of Rivet. He'd used it to refactor and improve our existing agent. I was skeptical... it just seemed like a visual programming environment, and I was not a fan. But I gave it a shot, and suddenly found myself able to add new skills to the agent, debug brittle areas with ease, and update prompts with confidence.
+
+The bet was that **visual programming is a much better interface for prompting LLMs** than raw code, because prompts, branches, and tool calls naturally form graphs. Five years later, with 4,599 stars and an active TypeScript ecosystem, that bet has clearly held up.
+
+## Why Visual Graphs for LLM Apps?
+
+Three concrete problems Rivet solves that pure code usually doesn't:
+
+### 1. Debugging is first-class
+
+Rivet's debugger is the headline feature. You update a graph and immediately run it, watching execution flow through nodes with live token streams, intermediate state, and error markers. You can also attach Rivet as a **remote debugger** to a running production app and watch your prompt graphs execute there in real time.
+
+```bash
+# Inside your own Node.js app — wire Rivet graphs into production
+import { runGraph, loadProjectFromString } from "@ironclad/rivet-core";
+
+const project = await loadProjectFromString(yamlGraph);
+const result = await runGraph(project, {
+  inputs: { userQuery: "Summarize this contract" },
+  remoteDebugger: { host: "localhost", port: 21888 },
+  openAiKey: process.env.OPENAI_API_KEY,
+});
+```
+
+That last line is the trick — when something goes wrong in production, a developer can open the Rivet desktop app, attach to the running process, and step through the exact graph that handled the failing request.
+
+### 2. Graphs are plain YAML, so they version and review
+
+A Rivet graph serializes to a YAML file you can commit, diff, and review in pull requests. This is the killer feature for teams: prompt changes become a real code review, with diffs, comments, and a linear history. Compare that to a `system_prompt = "..."` string in a Python file that everyone silently edits.
+
+```yaml
+# A simplified Rivet graph for a contract summarizer
+name: Contract Summarizer
+nodes:
+  - id: input
+    type: textInput
+    data:
+      id: contract-text
+      useDefault: false
+  - id: classifier
+    type: prompt
+    data:
+      prompt: |
+        Classify this contract as NDA, MSA, SOW, or OTHER.
+        Output a single word on the first line, then a one-sentence rationale.
+        {{contract-text}}
+      model: gpt-4o-mini
+  - id: extract
+    type: prompt
+    data:
+      prompt: |
+        Extract the parties, effective date, and term length.
+        Format as JSON. {{contract-text}}
+      model: gpt-4o
+  - id: join
+    type: object
+    data:
+      properties:
+        classification: "{{classifier.output}}"
+        metadata: "{{extract.output}}"
+```
+
+### 3. Scoped tool access, not a free API key
+
+LLM agents usually get handed a raw OpenAI key and unfettered access to an API. Rivet takes the opposite stance: you define **external functions** in your application code and expose only those to the graph. The LLM never sees a credential — it can only call the tools you registered, with the scoping you set.
+
+```typescript
+// Application side: only these functions are visible to the LLM
+import { registerExternalFunction } from "@ironclad/rivet-core";
+
+registerExternalFunction({
+  id: "search-contracts",
+  description: "Search the contract index",
+  parameters: { query: "string", limit: "number" },
+  run: async ({ query, limit }) => {
+    return await db.search(query, limit);
+  },
+});
+```
+
+That third property is the security story — it makes Rivet usable inside real products where you can't hand a model a raw key.
+
+## Setup Workflow
+
+### Step 1: Install the desktop app
+
+Rivet ships as a prebuilt binary for macOS, Linux, and Windows. Download from the GitHub releases page:
+
+```bash
+# macOS
+curl -L -o Rivet.dmg https://github.com/Ironclad/rivet/releases/latest/download/Rivet.dmg
+open Rivet.dmg
+
+# Linux AppImage
+curl -L -o Rivet.AppImage https://github.com/Ironclad/rivet/releases/latest/download/Rivet.AppImage
+chmod +x Rivet.AppImage
+./Rivet.AppImage
+```
+
+The app is built on Electron and signs in to OpenAI, Anthropic, or AssemblyAI with your own API key. Keys are stored locally, never sent to Ironclad.
+
+### Step 2: Install the runtime library
+
+For embedding graphs in your own TypeScript application:
+
+```bash
+npm install @ironclad/rivet-core
+```
+
+For the bundled Node.js loader that handles project files and remote debugging:
+
+```bash
+npm install @ironclad/rivet-node
+```
+
+### Step 3: Build your first graph
+
+Open the desktop app, click **New Project**, and you'll see an empty canvas. Drag a `Prompt` node, connect it to a `Text Input` and a `Text Output`, and you've built your first chain. Hit **Run** — you'll see the prompt execute, the model call appear in the debug panel, and the output stream back live.
+
+For the canonical "hello world", the README walks you through a contract classifier with three nodes (input → classifier prompt → output), then shows you how to attach it to a Node script via the runtime.
+
+### Step 4: Embed it in production
+
+Once your graph does what you want, export it as YAML and load it in your own server:
+
+```typescript
+import { loadProjectFromFile, runGraph } from "@ironclad/rivet-core";
+
+const project = await loadProjectFromFile("./graphs/summarizer.rive-project");
+const result = await runGraph(project, {
+  inputs: { contractText: "..." },
+  openAiKey: process.env.OPENAI_API_KEY,
+});
+```
+
+You can wrap that in an Express route, a queue worker, or a Cloudflare Worker. The graph is the source of truth; your code is just the transport.
+
+### Step 5: Wire up remote debugging
+
+Add the remote debugger to your production run and developers can attach from the desktop app:
+
+```typescript
+import { runGraph } from "@ironclad/rivet-core";
+
+const result = await runGraph(project, {
+  inputs: { contractText: req.body.text },
+  remoteDebugger: { host: "0.0.0.0", port: 21888 },
+});
+```
+
+This is the workflow that makes Rivet different from a one-off prototype tool — you can attach the visual debugger to a live production process.
+
+## Deeper Analysis
+
+### What Rivet is good for
+
+- **Prompt chains with branching logic** — when a single linear prompt is too rigid but full autonomous-agent control flow is overkill
+- **Teams that need reviewable prompt changes** — the YAML format integrates with PR-based workflows naturally
+- **Production agents where you need scoped tool access** — the external-function pattern is a real security primitive, not a toy
+- **Debugging LLM calls against real user traffic** — the remote debugger is uniquely useful for incident response
+
+### What Rivet is less good for
+
+- **Autonomous loops and planning** — Rivet is a graph editor, not a planning framework; if you want ReAct/Planner-Executor patterns, you'll need to compose them yourself
+- **RAG at scale** — Rivet has vector store support (Pinecone, OpenAI embeddings) but it's a node, not a platform; serious retrieval pipelines usually want a dedicated framework
+- **Multi-model routing** — the model picker is per-node, but conditional routing across providers is awkward
+- **Browser-only deployment** — the desktop app is Electron, which works for development but not for embedding a UI directly into a customer's web app
+
+### The architecture in one diagram
+
+```bash
+User App (TypeScript)
+   |
+   v
++------------------+         +----------------------+
+|  @ironclad/      |  YAML   |   Rivet Desktop App  |
+|  rivet-core      |<------->|   (Electron)         |
+|  (Node runtime)  |         |   - Visual canvas    |
++------------------+         |   - Debugger         |
+        |                   |   - Model clients    |
+        |                   +----------------------+
+        v                              ^
+   LLM Provider                        |
+   (OpenAI / Anthropic /              Remote debugger
+    AssemblyAI)                        (attach to prod)
+```
+
+The runtime library is a headless graph executor. The desktop app is a visual front end for designing, debugging, and (optionally) attaching to running executions of those graphs. The two pieces communicate over a small TCP protocol on port 21888.
+
+## Practical Evaluation Checklist
+
+- [ ] **Desktop app works on your platform** — Electron, so macOS / Linux / Windows are all supported but the experience varies
+- [ ] **Your prompt logic is graph-shaped** — if it's just one big system prompt, Rivet is overkill
+- [ ] **You have an LLM provider account** — OpenAI, Anthropic, or AssemblyAI
+- [ ] **Your team can review prompt changes** — if you don't use PRs for prompts, you lose half of Rivet's value
+- [ ] **You need scoped tool access** — if you don't, a simpler in-code approach might be enough
+- [ ] **You can deploy TypeScript** — the runtime is TS-only; Python embedding is possible but undocumented
+- [ ] **You're okay with a desktop dependency** — the visual editor is desktop-only; you can run graphs without it, but the value is in the editor
+
+## Security Notes
+
+Rivet's external-function pattern is the main security primitive. A few things to keep in mind:
+
+- **Keys stay client-side** — Rivet stores your OpenAI / Anthropic keys locally in the desktop app and never sends them to Ironclad's servers. The same applies to the embedded runtime; you supply the key, the library calls the API.
+- **Scope your tools tightly** — when you register an external function, the LLM gets the function description and parameters. Don't register `db.executeRawSQL`; register `db.searchContracts(query)`.
+- **Graph YAML is code** — treat it with the same review rigor as application code. A malicious YAML could chain together model calls and external functions in ways you didn't intend.
+- **The remote debugger is a TCP listener** — when you enable it in production, bind it to localhost or a private interface. Don't expose port 21888 to the public internet.
+
+## FAQ
+
+**Q: Is Rivet still maintained?**
+**A:** Yes. The GitHub repo was last updated in June 2026, the project is MIT-licensed, and it has 4,599 stars with 378 forks. Cai GoGwilt and Andy Brenneke (both from Ironclad) are still active contributors, and the Discord has ongoing community discussion.
+
+**Q: Can I use Rivet with local / open-source LLMs?**
+**A:** The model picker supports any OpenAI-compatible endpoint, so you can point it at LocalAI, vLLM, or Ollama's OpenAI-compatible mode. There's no first-class Anthropic-API local model support, but the OpenAI path covers most open-source inference servers.
+
+**Q: How does Rivet compare to LangChain or LlamaIndex?**
+**A:** LangChain and LlamaIndex are code-first libraries; Rivet is a visual-first IDE with a code runtime. If your team is comfortable in Python and prefers version-controlled code, LangChain/LlamaIndex is a more natural fit. If your prompts are complex enough that you're losing track of which branch goes where, the visual graph approach can be a real productivity win.
+
+**Q: Can I run Rivet graphs in a serverless function?**
+**A:** Yes, with caveats. The `@ironclad/rivet-core` package is pure TypeScript and runs anywhere Node does. For Cloudflare Workers or Deno, you may need to bundle carefully because of Node built-ins. The remote debugger doesn't work in serverless (no long-lived TCP listener), but the graph execution itself is fine.
+
+**Q: Is there a hosted version of Rivet?**
+**A:** No. The desktop app and the runtime are the only offerings. There's no Rivet Cloud. If you want a hosted prompt-graph IDE, [VectorShift](https://vectorshift.ai) and [Langflow](https://www.langflow.org) are similar concepts with hosted options.
+
+**Q: What license is Rivet released under?**
+**A:** MIT. You can use it commercially, modify it, and self-host the runtime without restrictions.
+
+**Q: Does Rivet support Claude 3.5 / GPT-4o / other recent models?**
+**A:** The model picker is provider-and-model-name based, so any model exposed by OpenAI, Anthropic, or AssemblyAI is selectable. New models from those providers typically work the day they're released, since the integration is just a thin API wrapper.
+
+## Conclusion
+
+Rivet is one of the more mature open-source tools for building LLM applications as visual graphs. The combination of a desktop IDE, a TypeScript runtime, YAML-based version control, and a remote debugger is unusual — most prompt-chain tools are either pure code (LangChain) or pure visual (Flowise) without bridging the two.
+
+It's not for everyone: if your prompts are simple linear chains, or if your team is allergic to Electron, the value over a hand-rolled TypeScript prompt runner is marginal. But for teams building production LLM features where prompt changes need to be reviewable, agents need scoped tool access, and developers need to debug live traffic, Rivet's design hits a sweet spot that few other tools do.
+
+Worth a serious look if you're building anything beyond a one-shot prompt wrapper — and a clear case for keeping the `rivet.ironcladapp.com` bookmark in your AI tools folder.
