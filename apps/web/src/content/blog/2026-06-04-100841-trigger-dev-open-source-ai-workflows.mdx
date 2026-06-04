@@ -1,0 +1,205 @@
+---
+title: "Trigger.dev – Open-source AI agent workflow platform"
+description: "Trigger.dev builds and runs reliable AI agents and long-running workflows in TypeScript. Apache 2.0, no timeouts, 15K stars, MCP server, self-host or cloud."
+pubDate: "2026-06-04"
+tags: ["ai-agent", "dev-tools", "workflow", "typescript", "yc-w23"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/trigger-dev-ai-agents-workflows.webp"
+  alt: "Trigger.dev AI agent workflow platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Trigger.dev is an open-source (Apache 2.0) platform for building and running reliable AI agents and long-running workflows in TypeScript. No serverless timeouts, automatic retries, durable checkpointing, MCP server for AI coding tools, and you can self-host or use their managed cloud.
+
+## Source and Accuracy Notes
+
+- **Product:** [https://trigger.dev](https://trigger.dev)
+- **GitHub:** [https://github.com/triggerdotdev/trigger.dev](https://github.com/triggerdotdev/trigger.dev) — 15,211 stars, Apache 2.0
+- **Launch HN:** [Show HN: Trigger.dev – Open-source platform to build reliable AI apps](https://news.ycombinator.com/item?id=45250720) (Sep 2025, 162 points, YC W23)
+- **Quickstart docs:** [https://trigger.dev/docs/quick-start](https://trigger.dev/docs/quick-start)
+- **llms.txt:** [https://trigger.dev/llms.txt](https://trigger.dev/llms.txt)
+- Note: Trigger.dev was originally launched on HN in 2023 as a background-jobs framework, then re-launched at v3 in Sep 2025 with the AI-agent focus.
+
+## What Is Trigger.dev?
+
+Trigger.dev is a developer platform for building **AI agents and long-running workflows** in TypeScript. You write the same async code you would write anywhere else, then deploy it to a runtime that handles the hard parts that usually make background work painful:
+
+- **No timeouts** — tasks can run for hours without hitting serverless limits
+- **Durable checkpointing** — interrupted tasks resume exactly where they left off; during waits the task is frozen and uses zero compute
+- **Automatic retries** with backoff and idempotency
+- **Built-in queues and concurrency** controls (no extra Redis to manage)
+- **OpenTelemetry traces** on every run with real-time alerts
+- **Elastic scaling** from zero to thousands of concurrent tasks without configuration
+- **MCP server** for AI coding tools (Claude Code, Cursor, Windsurf) to trigger tasks, check status, and read logs
+
+The platform is fully open source under Apache 2.0, so you can self-host it on your own infrastructure (Docker Compose or Kubernetes/Helm), or use the managed cloud with a free tier and pay-as-you-go pricing.
+
+## Why Trigger.dev?
+
+If you have ever tried to build a production-grade AI agent in TypeScript, you have hit the same wall: serverless functions time out after 15 minutes, retries need to be re-implemented per call site, state is lost on cold starts, and observability is a separate bill from a separate vendor. Trigger.dev gives you one runtime that handles all of this and exposes a clean TypeScript SDK for defining tasks.
+
+Common use cases that fit naturally:
+
+- AI agents and autonomous workflows with human-in-the-loop checkpoints
+- Long-running LLM chains that exceed serverless timeouts
+- Video, audio, and document processing pipelines
+- Scheduled tasks and cron-style jobs that need real reliability
+- Multi-tenant SaaS background jobs with per-tenant concurrency limits
+
+The project hit 15K GitHub stars, has a healthy release cadence, and was part of YC W23.
+
+## Prerequisites
+
+- **Node.js 18+** (Node 20 LTS recommended)
+- A TypeScript project (Next.js, Remix, SvelteKit, Express, Bun, or a plain Node project all work)
+- A free [Trigger.dev account](https://trigger.dev) if you want to use the managed cloud, or Docker if you want to self-host
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+From inside an existing TypeScript project, install the SDK and dev CLI:
+
+```bash
+npm install @trigger.dev/sdk
+npx trigger.dev@latest init
+```
+
+The `init` command authenticates with Trigger.dev, creates a `trigger.config.ts` file in your project root, and adds a `dev` script to your `package.json`.
+
+### Step 2: Define Your First Task
+
+A task is just a TypeScript file that exports a `task` definition. Create `src/trigger/example.ts`:
+
+```typescript
+import { task, logger } from "@trigger.dev/sdk/v3";
+
+export const helloWorld = task({
+  id: "hello-world",
+  run: async (payload: { message: string }) => {
+    logger.info("Task started", { payload });
+    // Long-running work goes here
+    await new Promise((r) => setTimeout(r, 2000));
+    return { echo: payload.message, completedAt: new Date().toISOString() };
+  },
+});
+```
+
+The `id` is a stable identifier Trigger.dev uses to track runs across deploys. Avoid renaming it after you ship — that creates a new task in the dashboard.
+
+### Step 3: Run the Dev Server
+
+In one terminal, start the Trigger.dev dev runner that watches your tasks:
+
+```bash
+npx trigger.dev@latest dev
+```
+
+In another terminal, trigger the task from your code:
+
+```typescript
+import { helloWorld } from "./trigger/example";
+
+const handle = await helloWorld.trigger({ message: "hello from my app" });
+console.log(`Run started: ${handle.id}`);
+```
+
+You can also trigger tasks from the Trigger.dev dashboard, via HTTP webhook, or from another task with `myTask.trigger()`.
+
+### Step 4: Deploy
+
+When you are ready to run tasks in production:
+
+```bash
+npx trigger.dev@latest deploy
+```
+
+This builds a versioned deployment, registers your tasks with the cloud runtime, and prints a deploy URL. Every deploy gets a unique version, so you can roll back instantly or run multiple versions in parallel for canary releases.
+
+## Deeper Analysis
+
+### Build Extensions
+
+Trigger.dev includes a system of build extensions that let your tasks install arbitrary system packages, run subprocesses, or pull in additional runtimes at build time:
+
+- **Python** — execute Python scripts with automatic `requirements.txt` resolution
+- **FFmpeg** — video and audio processing
+- **Puppeteer** — headless browser automation
+- **aptGet** — install any Debian package (LibreOffice, ImageMagick, etc.)
+- **esbuild plugins** — custom build pipeline modifications
+
+This matters because most serverless platforms lock you out of running anything but JavaScript. With Trigger.dev you can write a TypeScript orchestrator that calls into a Python ML model, processes a video with FFmpeg, generates a PDF with LibreOffice, and ships a result to S3 — all from one task file.
+
+### AI Agent Patterns
+
+The SDK is explicitly designed for the canonical agent patterns. From the docs, Trigger.dev supports:
+
+- **Autonomous agent** — AI operates independently, making decisions and taking actions
+- **Prompt chaining** — sequential LLM calls building complex reasoning
+- **Routing** — direct requests to specialized models based on task type
+- **Parallelization** — run multiple AI operations simultaneously
+- **Orchestrator** — central coordinator managing multiple sub-agents
+- **Evaluator-optimizer** — assess and iteratively improve outputs
+
+Two specific features that are non-trivial elsewhere:
+
+1. **Human-in-the-loop with waitpoints** — your task can pause and wait for a human to approve, reject, or modify a result. The task is frozen (no compute cost) until a webhook resumes it. This is the pattern behind "let me see the draft before you ship it" flows.
+2. **Realtime streaming** — task progress and LLM tokens can stream to your frontend using the Realtime API (built on Electric SQL syncing to Postgres). No polling, no websockets to wire up.
+
+### MCP Server
+
+Trigger.dev ships a Model Context Protocol server. If you use Claude Code, Cursor, or Windsurf, you can install the Trigger.dev MCP and have the AI assistant:
+
+- Trigger tasks on your behalf
+- Check the status of running or failed runs
+- Pull logs and trace spans
+- Read task metadata
+
+This is one of the most useful MCP integrations for AI-coding workflows: the assistant that writes your code can also dispatch and observe the workflows that code produces.
+
+## Practical Evaluation Checklist
+
+Use this when deciding if Trigger.dev fits your use case:
+
+- **Do your tasks need to run longer than 15 minutes?** Serverless timeouts are the single biggest reason teams end up on Trigger.dev.
+- **Do you need durable retries with idempotency?** Built-in; you do not need to write retry logic.
+- **Do you need per-tenant concurrency limits?** First-class queue and concurrency primitives.
+- **Do you want to self-host?** Apache 2.0 license, Docker Compose and Helm charts included.
+- **Do you need to call Python or FFmpeg from a TS workflow?** Build extensions cover this directly.
+- **Are you building an AI agent that needs human approval mid-flow?** Waitpoints are a clean primitive.
+- **Do you want AI coding tools to dispatch and observe your workflows?** MCP server is built in.
+
+## Security Notes
+
+- All task runs are traced with OpenTelemetry. Logs and trace data live in your Trigger.dev project (or your self-hosted deployment); make sure retention settings match your compliance posture.
+- The MCP server exposes task triggering and run inspection to any AI assistant that authenticates with your Trigger.dev project. Treat the MCP token like any other deploy credential.
+- If you self-host, the Helm chart runs the web app, the runner, the database (Postgres), and a Redis-compatible queue. Default config is reasonable but you should review network policies before exposing the dashboard.
+- Build extensions can install arbitrary system packages via `aptGet`. Treat your `trigger.config.ts` like any other build config — review it in PRs.
+
+## FAQ
+
+**Q: Is Trigger.dev the same as Inngest or Temporal?**
+**A:** It overlaps with both. Compared to Inngest, Trigger.dev leans more toward long-running AI workflows with a stronger TypeScript SDK and a built-in MCP server. Compared to Temporal, Trigger.dev is opinionated about the runtime (you do not write workflow code that runs on a Temporal worker cluster you manage) and trades some of Temporal's generality for simpler deployment.
+
+**Q: Can I self-host it?**
+**A:** Yes. Apache 2.0 license, Docker Compose for small deployments, Helm chart for production Kubernetes. The self-host docs are at `trigger.dev/docs/open-source-self-hosting`.
+
+**Q: Does it work with Next.js / Remix / SvelteKit / Bun?**
+**A:** Yes. There are official setup guides for Next.js, Remix, SvelteKit, Express, and Bun, plus a generic Node.js guide and a manual setup path.
+
+**Q: How does the AI agent focus differ from the original v1/v2 background-jobs product?**
+**A:** v3 (Sep 2025 re-launch) added first-class primitives for AI agents — waitpoints, MCP server, Realtime streaming of LLM tokens, structured inputs/outputs with Zod, and integrations with Mastra, LangChain, and Vercel AI SDK. The background-jobs core (queues, retries, observability) is the same.
+
+**Q: What is the pricing on the managed cloud?**
+**A:** Free tier available, then pay-as-you-go based on compute. The open-source version has no compute cost beyond your own infrastructure.
+
+## Conclusion
+
+Trigger.dev is the closest thing to a batteries-included runtime for production AI agents in TypeScript. The combination of no-timeout tasks, durable checkpointing, MCP server, build extensions, and Apache 2.0 self-hosting makes it a strong default for any team that has already decided the agent logic belongs in TS but does not want to wire up Temporal + Redis + a queue library + an observability vendor just to ship it.
+
+Start with the [Quick start guide](https://trigger.dev/docs/quick-start) — you can have a task running locally in under three minutes.
