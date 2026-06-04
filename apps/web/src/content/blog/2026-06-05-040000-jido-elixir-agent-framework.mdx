@@ -1,0 +1,248 @@
+---
+title: "Jido – Elixir Agent Framework Built on the BEAM"
+description: "Jido is a 1.7K-star Elixir agent framework on the BEAM. Pure-functional agents, GenServer supervision, MCP, durable workflows, and 1,722 GitHub stars."
+pubDate: "2026-06-05"
+tags: ["elixir", "ai-agent", "beam", "open-source", "agent-framework"]
+category: "dev-tools"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/jido-elixir-agent-framework.webp"
+  alt: "Jido Elixir agent framework thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Jido is an open-source agent framework for Elixir that turns agents into pure-functional data, wraps them in supervised GenServers, and adds ReAct/CoT reasoning, MCP, and durable workflows. Built natively on the BEAM for reliability that Python and TypeScript agent frameworks struggle to match.
+
+## Source and Accuracy Notes
+
+- **Product:** [https://jido.run/](https://jido.run/)
+- **2.0 announcement:** [https://jido.run/blog/jido-2-0-is-here](https://jido.run/blog/jido-2-0-is-here)
+- **Docs:** [https://jido.run/docs](https://jido.run/docs)
+- **HN launch:** [Show HN: Jido 2.0, Elixir Agent Framework](https://news.ycombinator.com/item?id=47263036) — 323 points
+- **Hex package:** [https://hex.pm/packages/jido](https://hex.pm/packages/jido)
+- **Main repo:** [https://github.com/agentjido/jido](https://github.com/agentjido/jido) — 1,722 stars
+- Note: Jido 2.0 launched 5 March 2026. The project evolved out of an earlier Elixir bot platform called BotHive in 2024. The framework is BEAM-first by design — every agent is data, every side effect is a typed directive.
+
+## What Is Jido?
+
+Jido is an Elixir-native agent framework that bets on a simple thesis: **the BEAM is the best runtime for agent systems**. After 18 months of building, Jido 2.0 ships a production-hardened agent core with tool calling, multi-agent supervision, MCP integration, and pluggable reasoning strategies.
+
+The author Mike Hostetler started Jido as a bot platform in 2024. After the AI wave hit, the project pivoted entirely toward agentic workloads. The bet: TypeScript agent frameworks "felt like toys" (single-threaded event loops juggling concurrent agents), Python agents "couldn't stay up" under sustained load, and the BEAM's process isolation + supervision trees were built for exactly this kind of work.
+
+Jido 2.0 ships with:
+
+- **Pure-functional agent core** — agents are data, side effects are typed directives
+- **Multi-agent coordination** — parent-child agent hierarchies across distributed BEAM processes with supervision
+- **Pluggable strategies** — Direct (sequential), FSM (state machines), ReAct, Chain-of-Thought, Tree-of-Thought
+- **Tool calling + agent skills** — every capability is a `Jido.Action`
+- **MCP + sensors** — interface with external services through Model Context Protocol
+- **Durable workflows** — storage and persistence layer for long-running agent tasks
+- **Agentic memory** — short- and long-term state management
+- **OpenTelemetry observability** — full stack traces for every directive
+
+The ecosystem is split into focused Hex packages: `jido` (core), `jido_action` (universal action contract), `jido_signal` (agent communication envelope), `jido_behaviortree` (behavior tree execution), and `req_llm` (the LLM client baked into Jido).
+
+## Setup Workflow
+
+### Step 1: Install Elixir and Create a Project
+
+Jido requires Elixir 1.18+ and OTP 27+:
+
+```bash
+# Install Elixir 1.18+ (macOS)
+brew install elixir
+
+# Verify versions
+elixir --version
+# Elixir 1.18.x (compiled with Erlang/OTP 27+)
+
+# Create a new Mix project
+mix new my_agent_app
+cd my_agent_app
+```
+
+Phoenix is not required. Jido works in any Elixir project — including plain `iex` sessions for experimentation.
+
+### Step 2: Add Jido to Your Dependencies
+
+Edit `mix.exs`:
+
+```elixir
+defp deps do
+  [
+    {:jido, "~> 2.0"},
+    {:jido_action, "~> 2.0"},
+    {:jido_signal, "~> 2.0"}
+  ]
+end
+```
+
+Then fetch and compile:
+
+```bash
+mix deps.get
+mix compile
+```
+
+### Step 3: Define Your First Agent
+
+The core abstraction is `Jido.Agent` — a struct with state, actions, and tools that runs inside a `GenServer`. Here is the minimal example from the Jido 2.0 announcement:
+
+```elixir
+defmodule MyAgent do
+  use Jido.Agent,
+    name: "my_agent",
+    description: "A simple agent",
+    strategy: Jido.Agent.Strategy.Direct,
+    actions: [MyApp.Actions.ProcessOrder],
+    schema: [
+      order_count: [type: :integer, default: 0]
+    ]
+end
+```
+
+The strategy controls how `cmd/2` processes actions. `Direct` is sequential — actions execute one at a time. `FSM` is a state machine with transition guards. AI reasoning strategies (ReAct, Chain-of-Thought, Tree-of-Thought) are just strategy implementations that add LLM calls to the loop.
+
+### Step 4: Execute Commands Purely
+
+`Jido.Agent.cmd/2` is the single entry point. Actions go in, an updated agent and a list of directives come out. No side effects in the function body:
+
+```elixir
+# Pure function — no processes, no side effects, fully testable
+{:ok, updated_agent, directives} = Jido.Agent.cmd(agent, {ProcessOrder, order_id: "123"})
+```
+
+You can unit test every decision an agent makes without touching a network, a database, or an LLM. This is the core insight that makes Jido different from Python frameworks: pure functions over agents-as-data are inherently testable.
+
+### Step 5: Wrap in an AgentServer for Production
+
+`Jido.AgentServer` wraps any agent in a supervised `GenServer` with signal routing, directive execution, and parent-child hierarchies:
+
+```elixir
+# In your application supervision tree
+children = [
+  {Jido.AgentServer, agent: MyAgent, name: :order_agent}
+]
+
+Supervisor.start_link(children, strategy: :one_for_one)
+```
+
+The supervisor handles crashes, restarts, and back-pressure — all of which the BEAM was already optimized for.
+
+### Step 6: Add an LLM Strategy
+
+Wire up an LLM strategy to give your agent reasoning:
+
+```elixir
+defmodule MyLLMAgent do
+  use Jido.Agent,
+    name: "my_llm_agent",
+    strategy: Jido.Agent.Strategy.ReAct,
+    actions: [MyApp.Actions.SearchWeb, MyApp.Actions.SendEmail],
+    llm: Jido.LLM.OpenAI,
+    schema: [
+      user_query: [type: :string]
+    ]
+end
+```
+
+`req_llm` (the embedded LLM client) handles provider calls, retries, and streaming. Add your API key to your environment:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+## Deeper Analysis
+
+### Why BEAM Beats Single-Threaded Runtimes for Agents
+
+The fundamental problem with TypeScript and Python agent frameworks is process isolation. A single Node.js event loop tries to juggle concurrent agents, long-running LLM streams, tool executions, and state updates through promises. When one agent blocks on an LLM call, the entire process waits. When one crashes, the whole framework can come down.
+
+The BEAM was designed for exactly this. Every agent becomes a lightweight process (costing ~0.5KB of memory) with its own mailbox, its own garbage collector, and full isolation. Millions of agents can run concurrently on a single node. When one crashes, only that process dies — the supervisor restarts it according to its child spec.
+
+`Jido.AgentServer` formalizes this pattern: an agent is a `GenServer` with typed state, message routing, and directive execution. The supervision tree handles lifecycle. Hot code reload comes for free from OTP. The whole thing compiles to a single binary that you can ship as a BEAM release.
+
+### Pure-Functional Agents vs Stateful Callbacks
+
+Most agent frameworks mix validation, persistence, and side effects inside a single callback. Jido separates these concerns cleanly: the agent is data, and the action returns updated state plus a list of directives describing what the runtime should do.
+
+This separation means you can:
+
+- Unit test every decision without mocking a network, database, or LLM
+- Replay an agent's exact state by re-running its action history
+- Debug crashes by inspecting the directive log instead of stepping through async callbacks
+- Swap out the strategy (Direct → FSM → ReAct) without changing the agent definition
+
+The reference doc at `/docs/reference/why-not-just-a-genserver` walks through the GenServer case study in detail. The short version: a `GenServer` callback that mixes validation, persistence, notification, and state transition creates partial-failure scenarios where the state update happens in memory but the side effect raises. Jido's directive model makes those scenarios impossible by construction.
+
+### The Ecosystem Splits
+
+Jido 2.0 deliberately split the framework into focused packages:
+
+- **`jido_action`** — universal action contract. Every capability an agent has is a `Jido.Action`, a composable Elixir module.
+- **`jido_signal`** — agent communication envelope. Signals are typed messages that flow between agents and the runtime.
+- **`jido_behaviortree`** — behavior tree execution, no LLM required. Same strategy interface, completely different execution model.
+- **`req_llm`** — the LLM client. Built as a Req plugin, supports OpenAI, Anthropic, and any other provider with an HTTP interface.
+
+This split mirrors the Unix philosophy: each package does one thing well, and they compose cleanly.
+
+## Practical Evaluation Checklist
+
+| Criterion | Jido 2.0 | Typical Python framework |
+|---|---|---|
+| Concurrency model | BEAM processes (millions per node) | asyncio / threads (limited) |
+| Process isolation | Per-agent GenServer | Single event loop |
+| Crash recovery | OTP supervision trees | Manual restart logic |
+| State model | Pure data + typed directives | Stateful callbacks |
+| Testability | Pure functions, no mocks needed | Heavy mocking required |
+| Hot code reload | Built into BEAM | Requires process restart |
+| LLM client | `req_llm` (Req plugin) | Provider-specific SDKs |
+| MCP support | First-class | Varies by framework |
+| Observability | Native OpenTelemetry | Plugin ecosystem |
+| Language | Elixir | Python / TypeScript |
+| Stars (main repo) | 1,722 | varies |
+
+## Security Notes
+
+- **Supply chain:** Jido's Hex packages are signed by the maintainer. Pin versions in `mix.exs` to avoid upstream drift.
+- **LLM API keys:** Store keys in environment variables or a secrets manager (e.g., `castore` for encrypted `runtime.exs` values). Never commit keys to source control.
+- **MCP servers:** Jido's MCP integration inherits the trust model of the connected server. Validate and sandbox any third-party MCP server before letting it execute actions in your agent.
+- **Directives:** The directive system executes side effects — network calls, database writes, file operations. Treat agent actions with the same care as any code that touches production systems.
+- **Supervision tree:** Configure child specs with appropriate restart strategies (`:permanent`, `:transient`, `:temporary`) based on how your agent should recover from crashes.
+
+## FAQ
+
+**Q: Is Jido production-ready?**
+
+**A:** Yes. The 2.0 release specifically targets production hardening. The reference docs at `/docs/operations` cover deployment, monitoring, scaling, and reliability. The framework has been in development for 18 months and ships with comprehensive OpenTelemetry support.
+
+**Q: Do I need to know Elixir to use Jido?**
+
+**A:** The framework provides a "new to Elixir" onboarding path at `/docs/getting-started/new-to-elixir` that covers the essentials — GenServer, supervision trees, and Mix. If you know Python or TypeScript, you can pick up enough Elixir in a weekend to be productive. The core agent APIs are simple structs and pure functions.
+
+**Q: How does Jido compare to LangChain?**
+
+**A:** The author originally used Elixir LangChain for LLM calls but found it wasn't a fit. The team built `req_llm` as a replacement and embedded it deeply into Jido. Jido focuses on agent lifecycle, supervision, and state management — areas where the BEAM has clear architectural advantages. The two are complementary in theory, but in practice you can do everything in Jido 2.0.
+
+**Q: What LLM providers does Jido support?**
+
+**A:** Any provider with an HTTP interface, via the `req_llm` package. OpenAI, Anthropic, and local models work out of the box. The plugin system is extensible — you can add custom providers by implementing the `Jido.LLM` behaviour.
+
+**Q: Can I run Jido agents across multiple nodes?**
+
+**A:** Yes. The BEAM's distributed process model means you can run agents across a cluster of BEAM nodes. The `Jido.AgentServer` supports distributed supervision, and the directive system is designed to work over `:rpc` and Phoenix PubSub.
+
+**Q: Does Jido support MCP?**
+
+**A:** Yes. MCP support is first-class in 2.0. You can connect to MCP servers, expose agent capabilities as MCP tools, and chain MCP servers into agent workflows.
+
+## Conclusion
+
+Jido 2.0 is the most serious bet on BEAM-native agent infrastructure in 2026. If you've been frustrated by Python agent frameworks that crash under load, or TypeScript frameworks that feel like toys, Jido offers a genuinely different approach: a runtime designed for millions of concurrent, supervised, fault-tolerant processes, plus a pure-functional agent model that makes testing and debugging tractable.
+
+The 1,722-star main repo, active ecosystem (jido_action, jido_signal, jido_behaviortree, req_llm), and 323-point HN reception suggest the bet is resonating with the Elixir community. The next test is whether it can attract Python and TypeScript developers willing to learn the BEAM — and the "new to Elixir" onboarding path suggests the team is betting on that migration.
+
+For teams running production agent workloads on Elixir/Phoenix stacks, Jido 2.0 is the natural next step. For everyone else, it's a glimpse of what a runtime built for concurrency can do for agentic AI.
