@@ -1,0 +1,151 @@
+---
+title: "Traceformer - LLM Schematic Review for KiCad and Altium"
+description: "Traceformer is an AI-powered schematic checker that reviews KiCad and Altium designs against component datasheets, catching application-level mistakes traditional ERC misses."
+pubDate: "2026-06-05"
+tags: ["traceformer", "pcb", "kicad", "altium", "ai-tools", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/traceformer-ai-pcb-schematic-checker.webp"
+  alt: "Traceformer AI PCB schematic checker thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Traceformer is a web app that ingests KiCad projects or Altium netlists, pulls in component datasheets automatically, and uses a frontier LLM (GPT 5.x, Claude Opus 4.x) to flag datasheet-driven schematic mistakes ERC/DRC cannot detect. Every finding cites the specific datasheet page that backs it, so reviewers can verify the reasoning before sending the design to fab.
+
+## Source and Accuracy Notes
+
+- Official site: [traceformer.io](https://traceformer.io/)
+- Show HN launch: [Show HN: An LLM-Powered PCB Schematic Checker (Major Update)](https://news.ycombinator.com/item?id=46492601) (55 points, May 2026)
+- KiCad export plugin: [github.com/lflanagan/kicad-traceformer](https://github.com/lflanagan/kicad-traceformer) (MIT, Python)
+- Altium export script: [github.com/lflanagan/altium-traceformer](https://github.com/lflanagan/altium-traceformer) (MIT, Pascal)
+- Pricing: [traceformer.io/pricing](https://traceformer.io/pricing) — Free / Starter $20 / Team $50 per seat / Enterprise custom
+- Changelog with monthly model and pipeline updates: [traceformer.io/changelog](https://traceformer.io/changelog)
+
+## What Is Traceformer?
+
+Traceformer is an AI-assisted review pass that runs on top of your existing KiCad or Altium project. You upload a ZIP of the design, the service parses the schematic and project tree, retrieves the datasheet for every active component, and runs a frontier LLM through a structured review checklist. The model emits a list of findings — each tied to a specific datasheet page — and you step through them in a chat-style review UI before sign-off.
+
+The team positions it as a **companion to ERC and DRC, not a replacement**. Traditional electrical rule checkers are excellent at catching connection errors, unconnected pins, and clearance violations. They have no idea whether a 10k pull-up on an I2C line is appropriate, whether your buck converter's inductor rating is sufficient for the chosen switching frequency, or whether your MCU's decoupling network matches the vendor's reference design. Those are application-level mistakes, and they are the ones that cost you a fab spin.
+
+> We built Traceformer to focus on datasheet and application-level issues, not electrical rule checking or functional simulation. ERC/DRC and simulation are still required.
+>
+> — Traceformer FAQ
+
+## How It Works
+
+The review pipeline has four explicit stages that the UI walks you through. From the May 17, 2026 changelog and the product page:
+
+### 1. Upload Your Design
+
+A small open-source plugin packages your project into a clean ZIP. The KiCad plugin collects the project file, schematic, hierarchical subsheets, and any external symbol libraries referenced outside the project folder:
+
+```bash
+# KiCad 8/9/10
+# Install from File via Plugin and Content Manager, then click
+# the Traceformer button in the PCB Editor toolbar
+# Result: a ZIP ready for upload
+```
+
+The Altium script project is a `.PRJSCR` plus a Pascal export script that runs inside Altium Designer 19 and later. It bundles the project file, source documents, sidecar files like `.OutJob` and `.Rul`, and a generated EDIF netlist.
+
+### 2. Select Model and Subsystems
+
+You choose which frontier model runs the review (GPT 5.x, Claude Opus 4.x, and others as they qualify), and you scope the run to the subsystems you care about — power, analog, digital, RF. The model and scope drive a **cost preview** shown before launch, so you never get surprised by the bill. Pricing is credit-based: a $20 monthly plan covers most hobbyist designs, and the Team tier at $50 per seat adds pooled credits and shared workspaces.
+
+### 3. Automatic Datasheet Retrieval
+
+Traceformer pulls the PDF for every active component. This is the step that turns a generic LLM call into a grounded review. As of the April 21, 2026 release, datasheet extraction covers tables, figures, and graphs, and citations now include the specific page and quoted text the model is relying on. If a component is missing a datasheet, the tool warns you before the review runs, so a single bad input does not silently degrade the result.
+
+### 4. Run and Review
+
+The review chat is the interactive surface. Findings land in a list; each one points at a datasheet page and quotes the supporting passage. If the model cannot find evidence for a concern, it goes into a **Missing Info** bucket rather than being reported as a verified issue. The chat lets you ask follow-up questions — "what would happen if I swapped this N-channel for a P-channel?" — and the answer comes back grounded in the same datasheets the review used.
+
+## Why a Separate Tool for Application-Level Review
+
+Three reasons standalone ERC cannot close this gap, and why the LLM approach is the right shape for it.
+
+### 1. ERC has no knowledge of vendor recommendations
+
+ERC operates on a fixed set of rules tied to your schematic capture tool. It can tell you that a net is floating, but it cannot read the LM2596 datasheet and tell you that the catch diode you chose is undersized for your switching current. Traceformer reads the datasheet the same way you would, then enforces the vendor's specific guidance.
+
+### 2. Hallucination is the obvious risk — and it is mitigated explicitly
+
+A bare LLM call on a schematic will invent plausible-sounding recommendations. Traceformer forces every finding to cite a specific datasheet page, and the UI surfaces that citation alongside the finding. If you cannot find the page, the finding is wrong. The Missing Info bucket is the second safeguard: silence on a topic is preferred to a confident guess.
+
+### 3. Pre-fab is the only sensible checkpoint
+
+Once a board is fabbed and assembled, the cost of catching a wrong pull-up resistor goes from one minute of editing to a $200 board respin. The whole point of an LLM review is to push that catch upstream, when the schematic is still a soft file and the design intent is fresh in your head.
+
+## Datasheet Evidence in Practice
+
+The May 2026 release added a new design net viewer for inspecting ground nets and connection counts before the review runs. Combined with the review chat, this gives you a fast loop for the kind of question a senior EE would normally catch on a whiteboard:
+
+- "Is the decoupling network on this MCU matching the reference design's count and placement?"
+- "Is the inductor rating on this buck converter sized for the saturation current at my switching frequency?"
+- "Does this op-amp's input common-mode range cover my signal swing, including temperature derating?"
+
+The model walks the datasheet, quotes the relevant section, and tells you whether the design complies. The reviewer is still you — the model surfaces the question and the evidence, and you decide.
+
+## Practical Evaluation Checklist
+
+Before adopting Traceformer for a real project, run this short list:
+
+- **Project scope.** Up to 200 components on Starter, up to 1,000 on Team, custom on Enterprise. Most hobbyist and small-team designs fit comfortably inside Starter.
+- **Tool support.** Full KiCad 8/9/10 project parsing via the open plugin. Full Altium project parsing via the open script project. No Eagle, no KiCad 7, no DipTrace.
+- **Datasheet availability.** Components without a public datasheet will not be reviewed at the same depth. Active BOMs that already use named vendor parts are the sweet spot.
+- **Review model.** Pick the model whose context window and tool use best match the depth of review you need. Opus-class models are stronger on edge cases; GPT-class models are usually faster and cheaper.
+- **Workspace structure.** Team tier adds shared workspaces with pooled credits. If multiple engineers will run reviews, this avoids per-seat credit splits.
+- **Compliance posture.** Enterprise adds SAML SSO, audit logs, and custom RBAC. The product page does not mention any specific certifications (no SOC 2 badge), so plan your own vendor review if your data has compliance requirements.
+
+## Security and Data Handling
+
+The product page is unusually direct about this, and it is worth quoting in full:
+
+> We use your designs to run analysis and essential operations (diagnostics, support, compliance). We don't train AI models on your content, and all IP remains yours. For improvement, we only use anonymous aggregate metrics — never your actual designs.
+
+This is the right default for a design review tool. Designs uploaded to a model provider that is later acquired or whose weights are later retrained would be a serious concern. Anonymous aggregate metrics only is a meaningful, auditable commitment.
+
+That said, if you are working on a board for a defense, medical, or other high-stakes customer, the default data flow is still "your design hits a third-party LLM provider." Plan to negotiate an enterprise agreement that pins down data residency and access controls before you ship a sensitive design through the standard pipeline.
+
+## What It Does Not Do
+
+The FAQ is explicit, and it is worth being just as explicit here:
+
+- **Not an ERC replacement.** Traceformer does not run electrical rule checks, clearance checks, or design rule checks. KiCad and Altium still own that job.
+- **Not a simulator.** SPICE-level functional behavior, signal integrity, and power integrity all live outside the tool.
+- **Not a layout review.** It reads the schematic and netlist, not the PCB. A short on the board between two nets that ERC missed will not be caught here either.
+- **Not a substitute for a senior review.** The output is a list of evidence-backed concerns. The engineer still owns the decision.
+
+## FAQ
+
+**Q: Does Traceformer replace ERC and DRC in KiCad or Altium?**
+
+**A:** No. It is a companion that runs in addition to ERC/DRC. ERC/DRC remain the right tools for netlist connectivity, unconnected pins, and clearance violations. Traceformer focuses on application-level mistakes that ERC cannot read from the schematic alone — datasheet violations, component mis-selection, missing or undersized passives.
+
+**Q: Which schematic tools are supported?**
+
+**A:** KiCad 8, 9, and 10 via the open-source [kicad-traceformer](https://github.com/lflanagan/kicad-traceformer) Python plugin, and Altium Designer 19 and later via the open-source [altium-traceformer](https://github.com/lflanagan/altium-traceformer) Pascal script. Eagle and DipTrace are not supported.
+
+**Q: What models power the review?**
+
+**A:** Frontier models from OpenAI and Anthropic, currently GPT 5.x and Claude Opus 4.x. The model selector is exposed in the UI so you can pick per run. Pricing is credit-based, and the cost preview before launch tells you the exact bill.
+
+**Q: What happens if a component has no public datasheet?**
+
+**A:** The tool warns you before the review runs and limits the depth of review on that component. Findings that cannot cite a datasheet page go into a "Missing Info" bucket instead of being reported as verified issues.
+
+**Q: Can I run this on a closed-source or classified design?**
+
+**A:** Standard plans run through third-party LLM providers. Enterprise plans add SAML SSO, audit logs, and custom RBAC, but the underlying model calls still hit a third party. For classified work, treat the public service as untrusted and ask about an air-gapped deployment on the enterprise tier.
+
+**Q: How is this different from asking ChatGPT to review my schematic?**
+
+**A:** Three differences. First, Traceformer parses the actual project — netlist, subsheets, hierarchical references — and reads every active component's datasheet. Second, every finding is forced to cite a specific datasheet page, which a chat session does not enforce. Third, the review chat keeps context attached to the design across multiple turns, so follow-up questions reuse the same parsed state.
+
+## Conclusion
+
+Traceformer slots into a real gap in the PCB design toolchain. ERC catches what ERC catches, and the rest — application-level mistakes, datasheet violations, vendor reference-design deviations — has always been a senior engineer with a quiet afternoon. An LLM with the right scaffolding (parsed project, automatic datasheet retrieval, evidence-cited findings) can compress that afternoon into a few minutes, with the engineer still in the loop on the final call. For teams doing more than a few boards a year, the $20 to $50 per seat is a reasonable bet on a faster pre-fab review.
