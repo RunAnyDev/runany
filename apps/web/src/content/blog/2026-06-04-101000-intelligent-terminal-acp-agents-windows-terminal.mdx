@@ -1,0 +1,219 @@
+---
+title: "Intelligent Terminal - ACP Agents in Windows Terminal"
+description: "Microsoft Intelligent Terminal adds ACP-native agent panes, error-aware fixes, session tracking, and prompt delegation to a Windows Terminal fork for Copilot, Codex, Claude, and Gemini."
+pubDate: "2026-06-04"
+tags: ["github-trending", "dev-tools", "windows", "terminal", "codex"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/intelligent-terminal.webp"
+  alt: "intelligent-terminal GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Microsoft Intelligent Terminal is an experimental Windows Terminal fork with built-in agent support. It auto-detects ACP-compatible CLIs, opens a docked agent pane with shell context, catches command failures, and can hand work to Copilot, Codex, Claude, Gemini, or custom ACP agents without leaving terminal workflow.
+
+## Source and Accuracy Notes
+
+- Official repo: [microsoft/intelligent-terminal](https://github.com/microsoft/intelligent-terminal)
+- Announcement: [Intelligent Terminal version 0.1](https://devblogs.microsoft.com/commandline/announcing-intelligent-terminal-version-0-1/)
+- Install docs: [installing-dependencies.md](https://github.com/microsoft/intelligent-terminal/blob/main/doc/installing-dependencies.md)
+- FAQ: [doc/faq.md](https://github.com/microsoft/intelligent-terminal/blob/main/doc/faq.md)
+- This article uses the public README, dependency guide, and FAQ from the official repo as of June 4, 2026.
+
+## What Is Intelligent Terminal?
+
+Intelligent Terminal is Microsoft experimenting on top of a familiar base instead of building a greenfield shell. The project is an explicit fork of Windows Terminal, but with agent integration treated as first-class UI rather than an external plugin.
+
+The repo promises that terminal basics still behave as expected: tabs, profiles, themes, keyboard shortcuts, settings, and shells. The new layer is agent-native workflow:
+
+- a docked agent pane with shell-output context
+- an agent status bar
+- error detection that can preload failures into the agent
+- session management for active and past agent tasks
+- command-palette prompting using `?`
+
+The protocol choice is also important. Intelligent Terminal is built around ACP, the Agent Client Protocol. That means it does not only target one vendor. The repo calls out GitHub Copilot as default, but the supported built-in set also includes Claude Code, OpenAI Codex, and Gemini, with custom ACP agents available through settings.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Confirm Windows version
+
+The README is strict here: Intelligent Terminal requires Windows 11 22H2 or later, specifically build `22621.6060+`.
+
+If you are on Windows 10, current MSIX install is blocked.
+
+### Step 2: Install from Store or WinGet
+
+The repo recommends Microsoft Store first, but WinGet is also documented.
+
+```powershell
+winget install --id Microsoft.IntelligentTerminal -e
+```
+
+That gives you the latest release build and lines up with the rest of the dependency story, because WinGet is also used for Copilot CLI and Node.js in the first-run experience.
+
+### Step 3: Let first-run experience handle default path
+
+On first launch, Intelligent Terminal can auto-detect several agent CLIs. If none are found, it defaults to GitHub Copilot CLI and installs that path via WinGet.
+
+Documented first-run behavior:
+
+```text
+1. Launch app
+2. Pick your agent
+3. If no supported agent exists, default to Copilot CLI install
+4. Complete sign-in flow
+5. Start using agent pane with shell context already attached
+```
+
+This is cleanest for users who want Copilot and do not care about managing CLIs manually.
+
+### Step 4: Bring your own Codex or Claude setup
+
+For Codex, Claude, and Gemini, the dependency guide is explicit: first-run experience does not install those CLIs for you. You must bring them yourself.
+
+Shared prerequisite:
+
+```powershell
+node --version
+npm --version
+```
+
+If Node is missing, repo recommends:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS --exact --silent `
+  --source winget `
+  --accept-source-agreements --accept-package-agreements `
+  --disable-interactivity
+```
+
+Then install your preferred CLI. The dependency guide documents Claude Code directly:
+
+```powershell
+npm install -g @anthropic-ai/claude-code
+claude --version
+```
+
+For Codex, the same guide states that Intelligent Terminal launches it through the `@zed-industries/codex-acp` wrapper fetched via `npx`, with Node.js as the main prerequisite. In practice, this repo is optimized for users who already know how to provision their CLI, then want shell-native ACP integration on top.
+
+### Step 5: Fix PowerShell policy if shell integration fails
+
+The README calls out one concrete Windows failure mode: blocked PowerShell execution policy.
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+Without that, shell integration may fail and agent features cannot initialize correctly.
+
+### Step 6: Install hooks if you add agents later
+
+The FAQ documents an easy-to-miss behavior: if you install a new agent after first-run, session tracking may not work until you explicitly install hooks from Settings.
+
+That is worth knowing early. Otherwise users may think Codex or Claude integration is broken when only the session-management layer is missing its wiring.
+
+## Deeper Analysis
+
+### Smartest decision: keep terminal in center
+
+A lot of agent tooling tries to replace terminal. Intelligent Terminal takes opposite approach. It keeps shell as primary interface and adds an agent pane beside it. That is much more realistic for advanced users.
+
+The repo's best feature descriptions all reinforce this:
+
+- context comes from active shell output
+- failed commands can be handed to agent with one shortcut
+- command palette can inject prompt plus pane context
+- long-running agent jobs can move to background tabs
+
+This is not an IDE trying to own everything. It is terminal becoming context-aware.
+
+### ACP gives it broader future than vendor-specific shells
+
+Because project targets ACP, Microsoft avoids hard-locking interface to one commercial agent. Out of box, built-in setup flow focuses on Copilot, Claude, Codex, and Gemini. But FAQ also documents custom ACP agents such as Qwen Code and other compatible CLIs.
+
+That matters strategically. If agent market keeps fragmenting, protocol-level compatibility ages better than vendor-specific deep integration.
+
+### Error detection is practical, not flashy
+
+The most useful feature in day-to-day work may be the simplest one: command failure detection. When a shell command fails, Intelligent Terminal can light up status bar and preload context into the agent pane.
+
+That removes ugly copy-paste loop every terminal user knows:
+
+```text
+1. Run command
+2. Get cryptic stack trace
+3. Copy error into browser or chat window
+4. Lose surrounding shell context
+5. Re-explain what command you tried
+```
+
+Intelligent Terminal's design cuts through that by treating shell output as native input stream for agent.
+
+### Known rough edges are documented honestly
+
+Repo FAQ is refreshingly direct about current issues:
+
+- first-run setup can take 10+ minutes on bad networks
+- Windows 10 is not supported yet
+- session management has limits for custom agents and delegate agents
+- some COM/WinRT activation failures depend on Windows patch level
+
+That honesty is useful. This is clearly an early, experimental product, not a polished enterprise shell yet.
+
+## Practical Evaluation Checklist
+
+```text
+Environment fit:
+  [ ] You are on Windows 11 22H2 or newer
+  [ ] WinGet is available on machine
+
+Agent fit:
+  [ ] You use Copilot, Codex, Claude, Gemini, or another ACP CLI
+  [ ] You want shell-native agent context instead of separate chat app
+
+Workflow fit:
+  [ ] You often debug failed commands
+  [ ] You like terminal, but want session management and context-aware help
+  [ ] Background agent tabs would save time
+
+Team constraints:
+  [ ] PowerShell policy changes are allowed on workstation
+  [ ] Experimental Microsoft fork is acceptable in your stack
+```
+
+## Security Notes
+
+- The README describes Intelligent Terminal as a local transport layer that passes prompts and shell context to your chosen agent CLI rather than hosting an agent service itself.
+- That means your security posture depends partly on chosen CLI, not only terminal app.
+- Shell output can contain secrets, tokens, hostnames, and internal paths. Before enabling error suggestions or agent delegation broadly, review what context your selected CLI transmits upstream.
+- If you use custom ACP agents, remember that session-management support is weaker than for built-in paths, so operational visibility may differ.
+
+## FAQ
+
+**Q: Does Intelligent Terminal install Codex for me?**  
+**A:** No. Repo docs say first-run experience installs GitHub Copilot CLI by default. Codex, Claude, and Gemini are bring-your-own agent setups.
+
+**Q: Why use this instead of plain Windows Terminal plus a separate chat app?**  
+**A:** The value is shared shell context, docked pane workflow, failure detection, and background agent tabs. It saves context-switching, not only keystrokes.
+
+**Q: Can I use another ACP-compatible agent?**  
+**A:** Yes. The FAQ explicitly documents custom ACP agents via Settings, though session management is currently better for the four built-in agents.
+
+**Q: Does it support Windows 10?**  
+**A:** Not in current release. Repo FAQ says Windows 10 support is planned later.
+
+**Q: What if first-run setup stalls?**  
+**A:** Follow the official dependency guide and install missing pieces manually, especially WinGet, Node.js, and the CLI you want to use.
+
+## Conclusion
+
+Intelligent Terminal feels less like "AI in terminal" marketing and more like a concrete attempt to redesign terminal workflow around protocol-aware agents. The biggest win is not fancy prompt UX. It is shell-context continuity: your output, errors, sessions, and delegated tasks stay inside one terminal-centered experience.
+
+For Windows developers already living in terminal and curious about Codex, Claude, or ACP-native workflows, this is one of the most credible experiments on GitHub right now.
+
+Related reading: [WeSight](/blog/wesight-desktop-workspace-coding-agents/), [Devv](/blog/devv-ai-coding-agent/), and [MCP Playground](/blog/mcp-playground-mcp-tester/).

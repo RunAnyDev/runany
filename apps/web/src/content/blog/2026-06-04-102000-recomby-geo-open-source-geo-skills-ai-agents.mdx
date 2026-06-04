@@ -1,0 +1,221 @@
+---
+title: "Recomby GEO - Open-Source GEO Skills for AI Agents"
+description: "Recomby GEO packages GEO skills, schemas, and a 7-stage workflow for Claude Code and Codex, giving agents a local-first, human-in-the-loop operating model for AI search visibility work."
+pubDate: "2026-06-04"
+tags: ["github-trending", "dev-tools", "geo", "mcp", "claude-code"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/recomby-geo.webp"
+  alt: "recomby-geo GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** `recomby-geo` is an open-source GEO workflow package for AI agents. It bundles domain-specific skills, schemas, and an orchestrated 7-stage pipeline for Claude Code and Codex, but it draws a hard line around human expertise: business experts must fill the brief, and production cannot proceed until that human-in-the-loop step is complete.
+
+## Source and Accuracy Notes
+
+- Official repo: [recomby-ai/recomby-geo](https://github.com/recomby-ai/recomby-geo)
+- Install and usage guide: [INSTALL.md](https://github.com/recomby-ai/recomby-geo/blob/main/INSTALL.md)
+- English README: [README.en.md](https://github.com/recomby-ai/recomby-geo/blob/main/README.en.md)
+- Orchestrator spec: [plugins/recomby-geo/orchestrator/run.md](https://github.com/recomby-ai/recomby-geo/blob/main/plugins/recomby-geo/orchestrator/run.md)
+- This article is based on the official English README, install instructions, orchestrator spec, and packaged command/schema structure as of June 4, 2026.
+
+## What Is recomby-geo?
+
+`recomby-geo` is not a general SEO toolkit and not a hosted SaaS. It is better understood as a domain package for agentic GEO work.
+
+The repo's thesis is very specific: if you want an "AI employee" in the GEO layer, you do not get there by throwing a foundation model at content production. You need four parts working together:
+
+- business expert
+- agent runtime
+- office/data CLI layer
+- GEO skills
+
+This repository focuses on the fourth part while documenting the surrounding stack. The main asset is the plugin package under `plugins/recomby-geo/`, which includes commands, schemas, orchestrator docs, and six vendored GEO-oriented skills.
+
+The repo is also unusually explicit that GEO should remain collaborative. In its own framing, GEO is a strong testbed for human-plus-agent work because search engines punish low-value AI content and reward actual business insight. That leads directly to the project's hardest rule: required expert input cannot be auto-filled by agent.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Choose runtime path
+
+The repo supports two agent environments from the same source tree:
+
+- Claude Code via `plugins/recomby-geo/plugin.json`
+- OpenAI Codex CLI via `plugins/recomby-geo/.codex-plugin/plugin.json`
+
+That dual-manifest arrangement is one of the more useful details in the repo. Skills are shared, orchestration logic is shared, but each runtime gets the loading model it expects.
+
+### Step 2: Install into Claude Code
+
+Official plugin install path for Claude Code is:
+
+```bash
+/plugin marketplace add recomby-ai/recomby-geo
+/plugin install recomby-geo
+```
+
+In that runtime, the primary interface is a set of seven slash commands.
+
+### Step 3: Install into Codex CLI
+
+For Codex CLI, the repo documents marketplace installation as:
+
+```bash
+codex plugin marketplace add ./
+# or
+codex plugin marketplace add recomby-ai/recomby-geo
+```
+
+Codex path does not use raw slash commands in same way. Instead, the `geo-pipeline` skill acts as entry point and routes work to the stage procedures.
+
+### Step 4: Prepare client workspace
+
+The orchestrator document defines a strict per-client directory convention:
+
+```bash
+mkdir -p clients/<your-project>/inputs
+```
+
+Then place source material into `inputs/`, such as PDFs, URLs, notes, decks, or raw client documents.
+
+That directory convention is not cosmetic. The whole pipeline depends on a file-based state model across stages.
+
+### Step 5: Run stages in order
+
+The repo is very strict about sequence. The official flow is:
+
+```text
+/01-intake
+/02-audit
+/03-gap
+/04-content-brief
+[business expert fills required slots]
+/05-production
+/06-distribution
+/07-reaudit
+```
+
+In Claude Code, those are literal slash commands. In Codex, natural-language triggers invoke the `geo-pipeline` skill which then routes to the same procedures.
+
+### Step 6: Respect hard human gate
+
+This is most important design detail in repository.
+
+The install guide and orchestrator both state that `/05-production` must refuse to run unless brief status is `ready-for-production`. That state is only reached after expert-required slots are substantively filled.
+
+This is not a minor validation check. It is the core product philosophy:
+
+```text
+agent prepares structure
+expert supplies real business insight
+production is blocked until that happens
+```
+
+### Step 7: Validate schemas throughout
+
+Repo documents four JSON Schemas under `plugins/recomby-geo/schemas/` and says every stage validates output before next stage proceeds.
+
+The documented dependency is:
+
+```bash
+python3
+pip install jsonschema
+```
+
+That matters because without schema contracts, multi-stage content pipelines degrade into prompt chains with weak guarantees. `recomby-geo` is trying to be stricter than that.
+
+## Deeper Analysis
+
+### Strongest part is orchestration discipline
+
+Many "agent workflow" repos are mostly prompt assets plus vague diagrams. `recomby-geo` is stronger because it defines:
+
+- explicit stage order
+- exact files read and written by each stage
+- JSON schema contracts
+- append-only publish logging
+- a monthly re-audit cycle
+
+That gives operators something reproducible, not only a set of content ideas.
+
+### Local-first angle is practical
+
+The repo repeatedly emphasizes local-first deployment. For GEO work, that can matter more than usual because inputs may include client strategy docs, internal notes, unpublished data, and sensitive commercial positioning.
+
+The project argues this is better suited than cloud SaaS GEO tools when:
+
+- data cannot leave local environment
+- local models are preferred
+- compliance posture is strict
+- teams want auditable open-source building blocks
+
+Whether every team needs that is debatable. But for agencies and consultants handling sensitive client material, it is a credible differentiator.
+
+### The repo is more about operating model than raw skill count
+
+Yes, it ships six GEO-oriented skills and seven commands. But the more interesting part is the operating model it enforces. The project is not pretending agent can replace subject-matter expert. It is codifying where expert knowledge must enter pipeline and refusing to continue without it.
+
+That is a healthier design than most AI-content tooling, which often treats human review as optional afterthought.
+
+### Limits are visible too
+
+This repo is alpha. The workflow is document-heavy, file-structure-heavy, and best suited to users already comfortable with Claude Code or Codex plugin ecosystems. It is not beginner SEO software.
+
+Also, because skills are partly vendored from upstream open-source work, long-term maintenance quality will depend on how actively Recomby keeps those pieces coherent.
+
+## Practical Evaluation Checklist
+
+```text
+Workflow fit:
+  [ ] You already use Claude Code or Codex for structured workflows
+  [ ] You want a repeatable GEO process, not a one-shot prompt pack
+
+Human process fit:
+  [ ] A business expert is available to fill brief slots
+  [ ] Your team accepts hard pauses when required human input is missing
+
+Data fit:
+  [ ] Client material should stay local-first
+  [ ] File-based per-client workspaces are acceptable
+
+Operational fit:
+  [ ] You are comfortable with plugin installation and schema validation
+  [ ] You want explicit stage artifacts and audit trail
+```
+
+## Security Notes
+
+- The repo's local-first posture reduces need to ship raw client materials into third-party GEO SaaS platforms.
+- Per-client folders help isolate artifacts, but they also mean local filesystem hygiene matters. The orchestrator explicitly says client data should not be version-controlled.
+- Because workflow depends on external skills and agent runtimes, you should review what each runtime transmits if hosted models are enabled.
+- Hard human gate before production is not only quality control. It is a safety feature against generating authoritative-looking GEO content with missing domain truth.
+
+## FAQ
+
+**Q: Is recomby-geo a hosted GEO platform?**  
+**A:** No. It is an open-source plugin and workflow package for Claude Code and Codex environments.
+
+**Q: Can the agent finish everything automatically?**  
+**A:** By design, no. The repo enforces a business-expert checkpoint before production can continue.
+
+**Q: What is the main deliverable in repo?**  
+**A:** The core deliverable is `plugins/recomby-geo/` with commands, schemas, orchestrator rules, and GEO skills, plus architecture docs for compatible agents and office CLIs.
+
+**Q: Why does schema validation matter here?**  
+**A:** Because this is a multi-stage pipeline with handoffs. Schemas keep artifacts machine-checkable instead of relying on loose prompt outputs.
+
+**Q: Is this useful outside GEO?**  
+**A:** Some orchestration ideas are reusable, but the content, commands, and skills are intentionally specialized around GEO workflows.
+
+## Conclusion
+
+`recomby-geo` is interesting less because it promises magic and more because it rejects magic in a few key places. It uses agents for structure, repetition, and orchestration, but it refuses to fake domain expertise where domain expertise is the whole point.
+
+If you want a local-first, human-in-the-loop GEO operating model inside Claude Code or Codex, this repo is one of the clearer open-source examples available now.
+
+Related reading: [AgentMBox](/blog/agentmbox-ai-email-agent/), [MCP Playground](/blog/mcp-playground-mcp-tester/), and [WeSight](/blog/wesight-desktop-workspace-coding-agents/).

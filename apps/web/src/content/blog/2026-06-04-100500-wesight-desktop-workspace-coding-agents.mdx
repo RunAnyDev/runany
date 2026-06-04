@@ -1,0 +1,218 @@
+---
+title: "WeSight - Desktop Workspace for Coding Agents"
+description: "WeSight turns Claude Code, Codex, OpenClaw, and other local agent CLIs into one macOS desktop workspace with visual chat, live diffs, model routing, skills, and runtime metrics."
+pubDate: "2026-06-04"
+tags: ["github-trending", "dev-tools", "typescript", "codex", "claude-code"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wesight.webp"
+  alt: "WeSight GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** WeSight is an open-source macOS desktop shell for local coding agents. Instead of living in separate terminals, Claude Code, Codex, OpenClaw, Hermes Agent, OpenCode, Qwen Code, and DeepSeek-TUI can share one visual workspace with chat, permissions, file diffs, model routing, scheduled tasks, and runtime telemetry.
+
+## Source and Accuracy Notes
+
+- Official repo: [freestylefly/wesight](https://github.com/freestylefly/wesight)
+- Official site: [wesight.ai](https://wesight.ai/)
+- Release channel: [GitHub Releases](https://github.com/freestylefly/wesight/releases/latest)
+- This article is based on the public README, install notes, architecture section, and release distribution guidance in the official repository as of June 4, 2026.
+
+## What Is WeSight?
+
+WeSight is trying to solve one very real problem in the local-agent stack: every coding agent is powerful, but day-to-day use is fragmented. You might have Claude Code in one terminal tab, Codex in another, OpenCode in a third, plus provider keys, model routing, runtime logs, chat transcripts, and file diffs scattered across the machine.
+
+WeSight pulls those pieces into one Electron desktop workspace. The product pitch is not "another agent". It is a control console for agents you already use.
+
+From the repo, the current supported engine list includes:
+
+- Claude Code
+- Codex
+- OpenClaw
+- Hermes Agent
+- OpenCode
+- Qwen Code
+- DeepSeek-TUI
+- A built-in runtime
+
+That matters because many desktop wrappers only support one vendor path. WeSight is opinionated in a different direction: keep agent choice open, centralize setup, and give the user one place to manage permissions, tools, files, IM entry points, memory, scheduled jobs, and model providers.
+
+The project is also explicit about current platform scope. Public builds ship macOS Apple Silicon first, with DMG releases distributed through GitHub Releases.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Download release build
+
+The official end-user install path is the release DMG, not a source checkout.
+
+```bash
+# Open latest release page
+open "https://github.com/freestylefly/wesight/releases/latest"
+```
+
+Download the `WeSight-*-arm64.dmg` asset, open it, and drag `WeSight.app` into `Applications`.
+
+### Step 2: Clear Gatekeeper quarantine if macOS blocks launch
+
+The README calls out unsigned preview builds. If macOS reports that the app is damaged, the documented fix is to remove the quarantine attribute.
+
+```bash
+xattr -cr /Applications/WeSight.app
+```
+
+If you installed the app elsewhere, replace the path accordingly.
+
+### Step 3: Point WeSight at your existing local agent CLIs
+
+WeSight can install supported CLIs on macOS or detect existing ones. That is important for experienced users who already have working Claude Code or Codex setups and do not want a wrapper to own their auth state.
+
+Practical first-pass flow from the repo:
+
+```text
+1. Open Settings
+2. Detect supported local agent CLIs
+3. Reuse existing Claude Code / Codex / OpenClaw / OpenCode config
+4. Add model providers if you want WeSight-managed routing
+5. Start a workspace session and watch tools, files, and permission prompts in UI
+```
+
+### Step 4: Add provider routing only if needed
+
+WeSight can manage providers itself or reuse local CLI configuration. The supported provider list in the README includes official OpenAI, Anthropic Claude, Google Gemini, plus OpenAI-compatible endpoints for DeepSeek, Qwen, Moonshot, Ollama, OpenRouter, GitHub Copilot, and private gateways.
+
+That split is useful. If your local CLI auth is already clean, you can keep it. If you want one central model-routing layer for multiple engines, WeSight can become that control plane.
+
+### Step 5: Run from source for development
+
+If you want to inspect or contribute to the app, the official dev path is:
+
+```bash
+git clone https://github.com/freestylefly/wesight.git
+cd wesight
+npm install
+npm run electron:dev
+```
+
+The README lists `Node.js >=24 <25` and `npm` as requirements, with the Vite dev server running at `http://localhost:5175`.
+
+For runtime-specific local work, the repo also documents:
+
+```bash
+npm run electron:dev:openclaw
+npm run electron:dev:hermes
+```
+
+And OpenClaw-focused env overrides:
+
+```bash
+OPENCLAW_SRC=/path/to/openclaw npm run electron:dev:openclaw
+OPENCLAW_FORCE_BUILD=1 npm run electron:dev:openclaw
+OPENCLAW_SKIP_ENSURE=1 npm run electron:dev:openclaw
+```
+
+## Deeper Analysis
+
+### Best read as an agent operations layer
+
+Most AI desktop apps pick one of two directions:
+
+- become a polished UI around one hosted model
+- become a launcher for one CLI
+
+WeSight is aiming higher than both. It is trying to be a local agent operations layer. The evidence for that is spread across the repo's feature list:
+
+- engine switching
+- model-provider mapping
+- graphical tool execution
+- IM agent hub
+- live workspace with diffs and artifacts
+- runtime dashboard with tokens, TTFT, TPS, latency, and step counts
+- scheduled tasks
+- memory and personalization
+- skill marketplace
+
+That combination is more ambitious than a simple chat wrapper. It suggests a desktop control plane for long-lived local agent workflows.
+
+### Why metrics matter here
+
+The runtime dashboard is easy to overlook, but it is one of the more differentiated pieces. Most local-agent wrappers tell you that an agent is running. WeSight wants to show engine, model, token usage, completion time, estimated throughput, tool latency, and status.
+
+That is useful for three reasons:
+
+- comparing Codex vs Claude Code on identical work
+- spotting provider bottlenecks or tool-call drag
+- keeping cost and performance visible when multiple providers are in play
+
+If you manage a lot of local AI workflows, telemetry is not decoration. It becomes operational hygiene.
+
+### Architecture is cautious in right places
+
+The repo's architecture section states that WeSight uses Electron process isolation, disables Node integration in the renderer, and routes privileged work through preload and IPC bridges. That is exactly what you want from an Electron app that can touch files, run tools, and mediate multiple agent runtimes.
+
+The main process also owns SQLite persistence for sessions, messages, runtime calls, skills, and auth tokens. That matches the product's local-first position: the app wants to be stateful on your machine, not a thin cloud shell.
+
+### Limits worth keeping in mind
+
+WeSight is still early. Public releases are macOS Apple Silicon first. Unsigned preview builds mean some install friction. And when a desktop shell sits between you and several fast-moving CLIs, maintenance pressure is real.
+
+This kind of product wins only if detection, auth reuse, and engine compatibility stay stable as upstream tools change.
+
+## Practical Evaluation Checklist
+
+Use this before moving your daily coding-agent workflow into WeSight:
+
+```text
+Platform fit:
+  [ ] You are on macOS Apple Silicon
+  [ ] You want a desktop shell, not terminal-only flow
+
+Agent mix:
+  [ ] You actively switch between Claude Code, Codex, or other local CLIs
+  [ ] You want one place to compare engines and models
+
+Operations:
+  [ ] Runtime telemetry matters to you
+  [ ] You want visual permissions, file diffs, and tool activity
+  [ ] Scheduled tasks or memory reuse would save time
+
+Team workflow:
+  [ ] IM routing matters for your setup
+  [ ] You want a skill marketplace rather than hand-copying prompt assets
+```
+
+## Security Notes
+
+- The repo states that context isolation is enabled and Node integration is disabled in the renderer.
+- Privileged operations are pushed into typed preload and IPC layers rather than direct renderer access.
+- SQLite-based local persistence means chat logs, runtime data, and settings live on-device. That is useful for local-first control, but it also means workstation security matters.
+- If you connect external provider APIs through WeSight-managed routing, review what credentials are stored locally and how your machine backup strategy handles app data.
+
+## FAQ
+
+**Q: Is WeSight its own coding model or agent runtime?**  
+**A:** No. The repo positions it as a desktop control console for local agents you already use, plus a built-in runtime for general sessions.
+
+**Q: Can I use my existing Codex or Claude Code setup?**  
+**A:** Yes. One of the documented features is local CLI configuration reuse, so you can keep an existing terminal-based setup and surface it in the UI.
+
+**Q: Does WeSight only work with cloud models?**  
+**A:** No. The provider section explicitly includes Ollama and custom OpenAI-compatible endpoints, so local or private model backends fit the design.
+
+**Q: Is Linux or Windows supported today?**  
+**A:** The repo includes packaging commands for Windows and Linux, but the public release guidance says early public builds ship macOS Apple Silicon first.
+
+**Q: Why would I use this instead of plain terminal tabs?**  
+**A:** If you only run one CLI, terminal may be enough. WeSight becomes more compelling when you juggle multiple engines, provider routing, permissions, skills, metrics, and long-running tasks.
+
+## Conclusion
+
+WeSight is one of the more interesting open-source attempts at turning local coding agents into a coherent desktop environment rather than a bag of separate CLIs. The strongest parts of the repo are not the chat UI alone, but the operational layer around it: agent reuse, provider routing, telemetry, skills, scheduling, and file-aware live workspace tools.
+
+If your current setup is already terminal-native and disciplined, WeSight may feel optional. If your setup has become a sprawl of CLIs, model endpoints, shell history, and ad hoc scripts, WeSight is a credible way to consolidate it.
+
+Related reading: [Mastra](/blog/mastra-typescript-ai-agent-framework/), [Terax](/blog/terax-ai/), and [Devv](/blog/devv-ai-coding-agent/).
