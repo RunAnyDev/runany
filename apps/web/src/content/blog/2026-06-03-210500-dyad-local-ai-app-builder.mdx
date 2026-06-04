@@ -1,0 +1,173 @@
+---
+title: "Dyad - Local Open-Source AI App Builder That Beats Lock-In"
+description: "Dyad is a free, open-source Electron-based AI app builder that runs locally, supports any model, and exports clean code. Here's how it compares to Lovable, v0, and Bolt."
+pubDate: "2026-06-03"
+tags: ["ai-coding", "dev-tools", "open-source", "electron", "lovable-alternative"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dyad-local-ai-app-builder.webp"
+  alt: "Dyad local open-source AI app builder product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Dyad is a free, open-source Electron desktop app that builds full-stack apps from prompts on your own machine. It supports any model (OpenAI, Anthropic, Gemini, Ollama, LM Studio), exports clean runnable code, and has hit 20K+ GitHub stars since launching in April 2025.
+
+## Source and Accuracy Notes
+
+- Official site: [dyad.sh](https://www.dyad.sh/)
+- GitHub repo: [github.com/dyad-sh/dyad](https://github.com/dyad-sh/dyad) (20,509 stars, 2,427 forks, TypeScript, Apache 2.0 + FSL 1.1 for `src/pro`)
+- Architecture doc: [github.com/dyad-sh/dyad/blob/main/docs/architecture.md](https://github.com/dyad-sh/dyad/blob/main/docs/architecture.md)
+- System prompt: [src/prompts/system_prompt.ts](https://github.com/dyad-sh/dyad/blob/main/src/prompts/system_prompt.ts)
+- HN launch: [Show HN: Dyad, local, open-source Lovable alternative](https://news.ycombinator.com/item?id=45296227) (Sep 18 2025, 28 points, 11 comments)
+- Founder: Will Chen, ex-Google. Built it solo after the launch and now has a small team.
+
+## What Is Dyad?
+
+Dyad is an AI app builder in the same category as Lovable, v0, Bolt, and Replit Agent - except it runs as a local Electron desktop app on your machine. You describe what you want in chat, the LLM writes the code, and you watch a live preview update in real time. Generated code lives as ordinary files in a directory you control; the app doesn't have its own proprietary database or runtime that holds your work hostage.
+
+The product positioning on the homepage says it bluntly: "Flexible, local, and open-source AI app builder. Use your favorite AI models and tools with zero lock-in."
+
+Three things differentiate Dyad from the cloud-based incumbents:
+
+1. **Local-first execution.** The app, the code, and the model calls all run on your machine. You bring your own API keys (BYOK) for OpenAI, Anthropic, Gemini, or any OpenAI-compatible endpoint. Ollama and LM Studio work out of the box for fully offline use.
+2. **Real, exportable code.** Output is a normal project directory - not a serialized blob in a vendor cloud. You can open it in Cursor, VS Code, or Claude Code and continue working. The HN poster mentions that cloud tools often fail when you try to "pull down the app to run locally and debug in Cursor" - that's the specific problem Dyad was built to solve.
+3. **Open source with a fair-source Pro tier.** The core app is Apache 2.0. A `src/pro` directory contains commercial features under Functional Source License 1.1 (becomes Apache 2.0 after two years). You can fork, audit, and self-host.
+
+## Setup Workflow
+
+Dyad has no sign-up, no email, and no account creation. You download the installer and it runs.
+
+### Step 1: Download the desktop app
+
+```bash
+# macOS Apple Silicon
+curl -L -o dyad.dmg "https://dyad.sh/download/mac-arm"
+
+# macOS Intel
+curl -L -o dyad.dmg "https://dyad.sh/download/mac-intel"
+
+# Windows
+curl -L -o dyad-setup.exe "https://dyad.sh/download/win"
+```
+
+Or grab the latest release from the GitHub releases page if you prefer a direct link.
+
+### Step 2: Add your AI provider
+
+Open the app, go to Settings, and paste an API key for at least one provider. Supported providers include:
+
+```bash
+# Example: configure OpenAI in dyad config
+# Settings -> AI Models -> Add Provider -> OpenAI
+# Paste: sk-proj-...
+# Default model: gpt-4o (configurable)
+```
+
+You can also add OpenAI-compatible endpoints (so any local server exposing `/v1/chat/completions` works), and Ollama or LM Studio URLs for fully local inference.
+
+### Step 3: Create your first app
+
+Click "New App", pick a framework (Next.js, Vite, etc.), and start chatting. Dyad ships with a 627-line system prompt that instructs the model to respond with `<dyad-*>` XML-like tags (e.g. `<dyad-write path="app/page.tsx">...</dyad-write>`) that the renderer parses and the main process executes.
+
+```bash
+# Example: prompt flow inside Dyad
+# User: "Build a todo app with auth and Supabase backend"
+# Dyad: streams response, writes app/page.tsx, app/api/todos/route.ts, etc.
+#       renders preview iframe at localhost:3000
+```
+
+### Step 4: Connect Supabase, GitHub, and Vercel (optional)
+
+The Integrations panel lets you paste Supabase project credentials to get instant database, auth, and server-function support. Connect GitHub to commit changes automatically, and Vercel for one-click deploys. None of this is required - you can also BYO everything and deploy with the CLI of your choice.
+
+## Deeper Analysis
+
+### The XML-tag approach vs tool calling
+
+Most modern AI editors (Cursor, Claude Code, Cline) lean on the model's native function-calling interface. Dyad does the opposite: it asks the model to emit pseudo-XML tags inside a streaming Markdown response. The architecture doc explains why:
+
+- **Parallel actions in a single response.** Many models don't support parallel tool calls. XML tags let Dyad bundle `<dyad-write>`, `<dyad-delete>`, `<dyad-add-package>`, and `<dyad-run-command>` into one round-trip.
+- **Quality argument from Aider.** The architecture doc cites [aider.chat's evidence](https://aider.chat/2024/08/14/code-in-json.html) that forcing LLMs to return code in JSON (which is essentially what tool calling requires) can degrade output quality compared to letting the model emit raw text with embedded code.
+
+The custom Markdown parser in `src/components/chat/DyadMarkdownParser.tsx` strips these tags for the user-facing chat view but keeps the original stream intact so the response processor can apply changes once the user approves.
+
+### Why not be more agentic?
+
+Cursor and Claude Code run multi-step loops: search the codebase, run the linter, run the tests, fix the failures, repeat. Dyad deliberately stays simpler. From the FAQ in the architecture doc:
+
+> The biggest issue with complex agentic workflows is that they can get very expensive very quickly! It's not uncommon to see users report spending a few dollars with a single request because under the hood, that single user requests turns into dozens of LLM requests. To keep Dyad as cost-efficient as possible, we've avoided complex agentic workflows at least until the cost of LLMs is more affordable.
+
+For Auto-fix TypeScript errors the agentic loop kicks in once. Otherwise, one user prompt = one model request. This is a real cost-control choice, not laziness. You can pay less per request even when using GPT-4o or Claude Opus.
+
+### Why send the whole codebase?
+
+Dyad's default behavior is to attach the entire project to every LLM call. The team calls this the simplest possible context strategy and notes that for small codebases (a few thousand lines) it works well. For larger apps they have:
+
+- **Smart Context** - a smaller model ranks files in the chat and trims the rest.
+- **Manual Context** - you explicitly select which files to attach.
+- **Select Component** - point at a UI element to scope the request to its surrounding code.
+
+A fully agentic retrieval-style approach (Claude Code's iterative search) is on the roadmap but is gated on cheaper inference.
+
+### Security review built in
+
+The chat panel ships with a Security Review mode that scans the generated code for common issues (SQL injection, XSS, auth misconfiguration) and reports findings inline. Findings are explanations, not auto-fixes - you decide what to apply. This is genuinely useful for a category of tool (AI app builders) where the most common failure mode is "it works but ships a SQL injection".
+
+## Practical Evaluation Checklist
+
+| Capability | How to verify | Pass signal |
+|---|---|---|
+| Code export | Create an app, close Dyad, run `npm install && npm run dev` from the generated directory | App boots without Dyad installed |
+| Model swap | Settings -> AI Models, change to Ollama running `llama3.1:8b` | App still builds with local model |
+| Supabase integration | Click Connect, paste service-role key, run a prompt that uses the DB | Real rows appear in your Supabase project |
+| Vercel deploy | Click Publish, select Vercel, complete OAuth | App deploys to `your-app.vercel.app` |
+| GitHub commit | Connect repo, generate changes, click Commit | Commits land in your GitHub repo with sensible messages |
+| MCP server | Settings -> Add MCP server, paste Brave Search config | Tool appears in chat and gets called by the model |
+| Cost ceiling | Use GPT-4o on a 10-message session, check provider dashboard | Stays under 10 cents for a small app generation |
+| License | Open the repo, inspect `LICENSE` and `src/pro/LICENSE` | Apache 2.0 outside `src/pro`, FSL 1.1 inside |
+
+## Security Notes
+
+A few things to be aware of before you run Dyad in anger:
+
+- **API keys are stored locally** but not encrypted at rest in the open-source build. Pro features add encrypted secret storage. If you sync your dotfiles across machines, exclude Dyad's config directory.
+- **Auto-fix is opt-in.** Dyad can run `tsc --noEmit` and apply fixes automatically. This is off by default. Leave it off for production work.
+- **Generated code can include vulnerable patterns.** The security review catches common issues, but it doesn't replace a human review. SQL injection and XSS are flagged, but business-logic flaws are not.
+- **`src/pro` is functional-source licensed.** The non-Apache portion becomes Apache after two years. Forking and shipping a competing commercial product from the Pro code is not allowed under FSL 1.1.
+- **Electron sandboxing is enabled by default** in the renderer, but the main process has full filesystem access. Treat Dyad like any other Electron app that can write to your disk.
+
+## FAQ
+
+**Q: How is Dyad different from Cursor or Claude Code if both are local AI editors?**
+A: Cursor and Claude Code are general-purpose code editors with AI features. Dyad is purpose-built for the "describe an app, watch it appear" workflow with a live preview, Supabase/Vercel integrations, and one-click publishing. Cursor is what you use to edit an existing codebase; Dyad is what you use to start a new one and ship it to a URL.
+
+**Q: Can I bring my own model?**
+A: Yes. Dyad supports OpenAI, Anthropic, Google Gemini, and any OpenAI-compatible endpoint. Ollama and LM Studio work locally. The exact model list lives in Settings -> AI Models and you can add custom ones.
+
+**Q: Does Dyad work offline?**
+A: Only with a local model (Ollama or LM Studio). Cloud providers require internet access. The Electron app itself runs fully offline; only the inference calls need connectivity.
+
+**Q: What happens to my code if Dyad shuts down?**
+A: Nothing. Your code lives in a regular directory on your disk. The next day, next year, or five years from now, you can `cd` into the directory and run it. There's no proprietary runtime to maintain.
+
+**Q: Is the Pro tier worth it?**
+A: Pro adds Smart Context (smaller-model ranking for big codebases), Pro modes (more agentic), and encrypted API key storage. For one-off prototypes the open-source build is plenty. For larger apps where context quality matters, Pro is a reasonable upgrade at the listed price.
+
+**Q: Why not just use Lovable or v0?**
+A: If you're fine with your app living in a vendor cloud, paying per-prompt, and not being able to run the code locally without copying it out, those tools work fine. Dyad is for users who want local execution, BYOK, and full code export without paying subscription fees per generation.
+
+**Q: Does it support MCP?**
+A: Yes. MCP server support is in the current release (the maintainer has been actively adding it). Add any MCP server from the Settings panel and its tools become available to the model inside Dyad chat.
+
+**Q: Is it production-ready?**
+A: For prototypes and small apps, yes. For enterprise production, treat the output like output from any junior engineer: review it, test it, refactor it before shipping. The 20K stars and active release cadence (v1.2.0 dropped a day before this post) suggest a healthy project, but it's a single maintainer's focus area, not a Fortune 500 vendor.
+
+## Conclusion
+
+Dyad is the strongest open-source answer to Lovable/v0/Bolt right now. The local-first execution, BYOK model support, and clean code export solve the most common complaint about cloud AI app builders: lock-in. With 20K stars, weekly releases, and a maintainer actively shipping MCP and Pro features, it's a credible option for developers who want to build apps with AI but keep control of their code and their costs.
+
+The trade-off is the agentic loop. If you need Cursor-style multi-step reasoning across a large codebase, Dyad's cost-conscious design feels limiting. For greenfield apps under a few thousand lines, it's hard to beat a free, local, open-source tool that gets out of your way.
