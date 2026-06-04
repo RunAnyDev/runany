@@ -1,0 +1,169 @@
+---
+title: "Haystack - AI Triage Queue for Agent Pull Requests"
+description: "Haystack replaces GitHub PR review with an AI triage queue that sorts agent-generated PRs into safe, fixable, or human-review buckets before a human reads a diff."
+pubDate: "2026-06-04"
+tags: ["ai", "code-review", "dev-tools", "pull-requests", "coding-agents"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/haystack-ai-pr-review-triage.webp"
+  alt: "Haystack AI pull request triage thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Haystack is an AI code review tool from Akshay and Jake that triages GitHub pull requests before a human ever opens a diff. It reads the diff, the surrounding code, and the coding-agent conversation, then routes the PR into one of three queues: safe to merge, needs fixes, or needs human review.
+
+## What Is Haystack?
+
+Haystack is the second product from the team behind the Haystack Editor canvas-IDE. The original Show HN (2024) was an infinite-canvas IDE that visualized a codebase as a directed graph of functions and classes. Useful, but the founders kept hearing the same feedback from engineers: the bigger pain was not finding code, it was reviewing the flood of pull requests that started arriving once AI coding agents entered the workflow.
+
+The Opus 4.5 release in late 2025 was the breaking point. Internal teams at Haystack saw PR volume multiply faster than reviewer headcount, and the bottleneck shifted from "writing code" to "deciding which code is safe to merge." The pivot was clean: keep the codebase-graph expertise, point it at PR review, drop the editor surface area.
+
+The result, launched in May 2026, is a GitHub App that sits between your default branch and your review queue. When a PR opens, Haystack reads three things in parallel: the diff, the relevant slices of the surrounding codebase, and the full conversation transcript from the coding agent that authored the change. It then produces a triage decision and a short narrative explaining the reasoning.
+
+## How the Triage Queue Works
+
+Every PR lands in one of three buckets. The classification is opinionated, but the rules are configurable per repository.
+
+### 1. Safe to merge
+
+PRs in this bucket carry enough evidence that the team can merge without another human's review. Concrete examples from the Haystack docs:
+
+- A small UI copy change that includes a screenshot showing the final rendered state.
+- A backend change where the author clearly tested the important paths and ran the changes in a real environment.
+- A dependency bump with green CI and no behavior-affecting files modified.
+
+The "safe to merge" decision is not just "tests pass." It is a holistic judgement that includes whether the author verified the change end-to-end. A PR with passing tests but no manual verification of a user-facing flow will not land here.
+
+### 2. Needs fixes
+
+PRs in this bucket have bugs or violate a stated rule in the repository. Examples:
+
+- The agent was asked to make loading a large table faster by adding pagination, but the PR still loads every result at once and "implements" pagination only in the UI layer.
+- The PR silently catches an error instead of logging, surfacing, or handling it, violating a "no silent error swallowing" rule defined in the team's coding guidelines.
+
+The "needs fixes" classification cites the specific rule that was violated, so the author can address it without reverse-engineering the agent's reasoning.
+
+### 3. Needs human review
+
+PRs land here when Haystack cannot sufficiently verify them, or when they touch sensitive areas defined in the user-input guidelines. Examples:
+
+- The PR changes a significant amount of logic in billing.
+- The PR changes an important user flow like onboarding, but the author only ran unit tests and never opened the app to check the flow end-to-end.
+
+The classification includes a short explanation of why the change warrants human attention, so the reviewer does not have to start from scratch.
+
+## The Reviewer Experience
+
+Instead of starting with line-by-line diffs, the reviewer opens the Haystack view and sees:
+
+1. The goal behind the PR, in plain language.
+2. The design decisions the author made, informed by the coding-agent conversation.
+3. How much the author did to verify that the pull request works (which scripts they ran, whether they checked the frontend, whether they ran the change in a real environment).
+
+This shifts the review from "what changed?" to "is this the right behavior and is there evidence that it works?" The diff is still available, but it is no longer the entry point.
+
+For the "safe to merge" bucket, the reviewer can approve with one click. For the "needs fixes" bucket, Haystack has already drafted the fix instructions, so the round trip with the author is shorter. For the "needs human review" bucket, the reviewer has a curated starting point rather than a wall of green and red lines.
+
+## Step 1: Install the GitHub App
+
+Haystack is a GitHub App. Installation is the standard flow:
+
+1. Visit `https://haystackeditor.com` and click **Install**.
+2. Select the organization or personal account that owns the repositories you want Haystack to monitor.
+3. Grant the requested permissions: read access to code, pull requests, and issues; write access to pull request comments and check runs.
+
+Haystack does not require write access to your default branch. It only writes PR comments and check statuses.
+
+## Step 2: Configure Repository Guidelines
+
+Out of the box, Haystack uses a small set of default rules (no silent error swallowing, manual verification for user-facing flows, dependency review). To customize, drop a `HAYSTACK.md` file in the repository root:
+
+```markdown
+# Haystack configuration
+
+## Sensitive areas
+- /billing/**
+- /onboarding/**
+- /payments/**
+
+## Verification rules
+- All changes to user-facing flows must include a screenshot or a manual-test note.
+- All changes to authentication must be tested in a staging environment.
+- Database migrations must be reviewed by a human, no exceptions.
+
+## Auto-merge conditions
+- Pull requests that touch only documentation files can be auto-merged.
+- Pull requests that only modify test files can be auto-merged.
+```
+
+The `HAYSTACK.md` is read on every PR, so you can iterate on the rules without reinstalling the app.
+
+## Step 3: Watch the Queue Fill
+
+Open a PR from any source (human, Claude Code, Codex, Cursor background agent, a shell script). Within a few seconds, Haystack posts a check run and a comment that places the PR in one of the three buckets, with the reasoning.
+
+The Haystack dashboard at `https://haystackeditor.com/review` shows the queue state across all repositories. Reviewers triage from the dashboard, not from their GitHub notifications inbox.
+
+## Practical Evaluation Checklist
+
+Before adopting Haystack on a production codebase, run through the following:
+
+- **Rule coverage.** List the three to five rules that, if violated, would cause the most pain in your codebase (silent error handling, missing verification, billing changes, security-sensitive code, migration safety). Verify that `HAYSTACK.md` expresses them precisely.
+- **False negative cost.** A PR that Haystack marks "safe to merge" but should not be is the worst-case outcome. Run a one-week shadow period where Haystack triages but humans still review every PR. Compare Haystack's recommendations against the actual review decisions.
+- **False positive cost.** A PR that Haystack flags as "needs fixes" or "needs human review" when it does not will erode reviewer trust. Track the override rate per bucket. If the "needs human review" bucket has a 40 percent override rate, the rules need tightening.
+- **Agent conversation access.** Haystack reads the conversation transcript from the coding agent. Verify that your agents are configured to write the transcript somewhere Haystack can read it. If you use a custom internal agent, you may need a small adapter to expose the conversation.
+- **Sensitive-area coverage.** Anything in `HAYSTACK.md` under "sensitive areas" must be enforced as a hard rule, not a soft suggestion. Run a synthetic PR that touches billing and confirm it lands in "needs human review."
+
+## Security and Privacy Notes
+
+- Haystack is a GitHub App, not a CLI that runs in your CI. It does not have access to your build environment, secrets, or deployment keys.
+- The codebase is read on demand for the PR under review. Haystack does not index your entire repository.
+- The coding-agent conversation is read from the location the agent writes it to. If you keep agent conversations in a private system, point Haystack at that system or stub the field.
+- All data transfer uses TLS. Haystack stores the diff, the relevant code slices, and the agent conversation for 30 days, then deletes them. You can request earlier deletion from the dashboard.
+- Haystack has read access to your pull request comments and check runs. It does not have write access to your default branch or your repository settings.
+
+## Comparison With Other PR Triage Tools
+
+Haystack is not the first tool to put AI between a PR and a human reviewer. The distinguishing design choice is that it routes the PR into one of three queues with explicit reasoning, rather than posting inline suggestions on every diff. A few practical differences:
+
+- **Cubic (formerly Mrge).** Inline review comments on every file. More detailed feedback, but the reviewer still has to read the whole diff. Haystack collapses the triage decision to the PR level.
+- **Sweep.** Writes PR descriptions and answers review questions, but does not produce a queue classification. Haystack is a triage tool; Sweep is a writing assistant.
+- **Bito, Codereviewer, etc.** Inline suggestions, similar to Cubic. No queue concept.
+- **Greptile, Graphite Reviewer.** Inline review plus PR summaries. Closer to Sweep than to Haystack.
+
+The three-bucket queue is the core abstraction. If your team agrees with the bucket model, Haystack will fit. If your team prefers inline review comments, it will feel like a downgrade.
+
+## Source and Accuracy Notes
+
+- Haystack product page: `https://haystackeditor.com`
+- May 2026 Show HN: `https://news.ycombinator.com/item?id=48182856` (45 points at time of writing)
+- Earlier Show HN on the canvas IDE: `https://news.ycombinator.com/item?id=41068719` (546 points)
+- YC Launch HN on the editor: `https://news.ycombinator.com/item?id=41648564` (328 points)
+- GitHub repository for the source-available editor: `https://github.com/haystackeditor/haystack-editor` (note: the editor is source-available, the PR review product is a separate hosted service)
+
+The triage queue product is hosted only. There is no self-hosted option yet. The team has stated self-hosting is on the roadmap but has not given a date.
+
+## FAQ
+
+**Q: Does Haystack work with self-hosted GitHub Enterprise?**
+**A:** Yes. The GitHub App installs on any GitHub instance that supports GitHub Apps, including GitHub Enterprise Server with the appropriate network configuration.
+
+**Q: Can Haystack auto-merge "safe to merge" PRs?**
+**A:** It can post a check run and a comment. It does not have merge access by default. You can grant merge access in the GitHub App settings if you want full automation, but the team recommends keeping a human in the loop for the actual merge click.
+
+**Q: What coding agents does Haystack read conversations from?**
+**A:** Out of the box, Claude Code, Codex, and Cursor background agents. Custom agents can be supported by writing the conversation transcript to a path Haystack can read (typically `.haystack/conversation.json` in the repository).
+
+**Q: How long does triage take?**
+**A:** Most PRs are triaged in under 30 seconds. Large PRs (over 1,000 changed lines) can take two to three minutes because Haystack reads more of the surrounding code.
+
+**Q: Is the Haystack Editor still maintained?**
+**A:** Yes, but the focus is on the PR review product. The editor receives bug fixes and platform compatibility updates (Linux, Windows), not new features.
+
+## Conclusion
+
+Haystack solves a specific, well-defined problem: the flood of agent-generated pull requests exceeds human review capacity, and the existing inline-review AI tools do not change that. The three-bucket triage queue is a concrete, configurable model that maps directly to how engineering teams already think about PRs. If your team is drowning in PR notifications, Haystack is worth a one-week shadow trial.
