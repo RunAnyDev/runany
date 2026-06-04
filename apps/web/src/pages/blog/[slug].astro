@@ -16,6 +16,67 @@ const { post } = Astro.props;
 const { Content, headings } = await render(post);
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
 
+const extractFaqItems = (body: string) => {
+  const faqSectionMatch = body.match(/## FAQ([\s\S]*?)(?:\n##\s|$)/);
+  if (!faqSectionMatch) return [];
+
+  const faqSection = faqSectionMatch[1];
+  const lines = faqSection
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const items: { question: string; answer: string }[] = [];
+  let currentQuestion = '';
+  let currentAnswer = '';
+
+  const pushCurrent = () => {
+    if (currentQuestion && currentAnswer) {
+      items.push({ question: currentQuestion, answer: currentAnswer.trim() });
+    }
+    currentQuestion = '';
+    currentAnswer = '';
+  };
+
+  for (const line of lines) {
+    const questionMatch = line.match(/^\*\*Q:\*\*\s*(.+)$/) ?? line.match(/^\*\*Q:\s*(.+?)\*\*$/);
+    if (questionMatch) {
+      pushCurrent();
+      currentQuestion = questionMatch[1].trim();
+      continue;
+    }
+
+    const answerMatch = line.match(/^\*\*A:\*\*\s*(.+)$/) ?? line.match(/^\*\*A:\s*(.+?)\*\*$/);
+    if (answerMatch) {
+      currentAnswer = answerMatch[1].trim();
+      continue;
+    }
+
+    if (currentAnswer) {
+      currentAnswer = `${currentAnswer} ${line}`.trim();
+    }
+  }
+
+  pushCurrent();
+  return items;
+};
+
+const faqItems = extractFaqItems(post.body);
+const faqStructuredData = faqItems.length > 0
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: faqItems.map((item) => ({
+        '@type': 'Question',
+        name: item.question,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: item.answer,
+        },
+      })),
+    }
+  : undefined;
+
 // Calculate reading time
 const wordCount = post.body.split(/\s+/).length;
 const readingTime = Math.ceil(wordCount / 200);
@@ -52,6 +113,7 @@ const normalizeDate = (d: any): Date => {
   readingTime={readingTime}
   headings={headings}
   slug={getSlug(post.id)}
+  structuredData={faqStructuredData}
 >
   <Content />
   
