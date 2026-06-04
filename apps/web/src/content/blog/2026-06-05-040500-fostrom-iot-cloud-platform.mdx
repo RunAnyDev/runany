@@ -1,0 +1,253 @@
+---
+title: "Fostrom - IoT Cloud Platform with Type-Safe Schemas"
+description: "Fostrom is a developer-first IoT cloud platform with typed packet schemas, programmable Actions, and per-device mailboxes. Built for fleets that need real semantics, not just plumbing."
+pubDate: "2026-06-05"
+tags: ["iot", "developer-tools", "self-hosted", "mqtt", "cloud-platform"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/fostrom-iot-cloud-platform.webp"
+  alt: "Fostrom IoT cloud platform product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Fostrom is a developer-first IoT cloud platform that gives you typed Packet Schemas, programmable Actions in sandboxed JavaScript, and per-device sequential mailboxes. Built by two founders who got tired of fighting their own indoor-farm IoT stack.
+
+## Source and Accuracy Notes
+
+- Official site: [fostrom.io](https://fostrom.io/)
+- Launch blog post: [Introducing Fostrom](https://fostrom.io/blog/introducing-fostrom)
+- Quickstart: [fostrom.io/docs/quickstart](https://fostrom.io/docs/quickstart.md)
+- LLM-ready index: [fostrom.io/llms.txt](https://fostrom.io/llms.txt) — full docs map, including Python/JS/Elixir SDKs, MQTT/HTTP protocols, and Actions reference
+- HN launch thread (13 pts, 8 comments): [Show HN: Fostrom](https://news.ycombinator.com/item?id=47084431)
+- Status: Technical Preview, free to use. Region selection is permanent (US West, US East, Europe, Singapore)
+
+## What Is Fostrom?
+
+Fostrom is an IoT cloud platform built for developers, not for dashboards. The two-person team behind it (Arjun and Sid) spent years building an automated indoor vertical farm in their previous startup, and discovered they were spending more time on plumbing than on the automation logic itself. Fostrom is the platform they wished existed back then.
+
+The platform's core primitives are:
+
+- **Fleets** — top-level containers that isolate devices, schemas, actions, and data. A fleet is region-pinned (US West, US East, Europe, or Singapore) at creation time and cannot be moved later.
+- **Devices** — virtual representations of your physical hardware. They can connect via the Python, JavaScript, or Elixir SDKs, or directly over MQTT or HTTP.
+- **Packet Schemas** — typed schemas for datapoints and messages. Fostrom validates payloads against the schema at the edge and drops packets with bad fields before they enter the stream.
+- **Actions** — JavaScript functions that fire on incoming messages. They run in a sandboxed, Javy-based WebAssembly runtime with a 500ms timeout and no network access (effects go through Fostrom's provided APIs).
+- **Webhooks** — outbound HTTP triggers called from Actions. Fostrom retries on non-2xx and even special-cases Discord's `?wait=true` parameter for you.
+- **Per-device mailboxes** — each device has a sequential mailbox. Outbound messages from Actions are queued per-device and processed in order, which prevents a slow device from drowning under bursts.
+
+The technical bits that stood out to me: the team wrote a Go-to-Elixir bridge to execute JavaScript inside Actions via Javy (a WebAssembly-based JS engine), built a DuckDB-backed replicated multi-tenant data layer for fleet data, and the device-side `Device Agent` is written in Rust and runs in the background after your Python/JS program starts. The Device SDK is a thin client that downloads and supervises the Rust agent.
+
+## Why Fostrom?
+
+Most IoT platforms treat device data as a firehose: stuff it into a time-series database, slap Grafana on it, call it done. That works for monitoring, but it falls apart the moment you want to do anything stateful, like "when sensor X reads above threshold, turn device Y on and notify Slack." That logic ends up scattered between cloud functions, webhook handlers, and device firmware.
+
+Fostrom's design assumes the interesting logic is the actions, not the data:
+
+1. **Schemas are first-class.** You define them up front, and the platform guarantees bad data never enters your pipeline. No more runtime exceptions from a field that drifted from `int` to `string`.
+2. **Actions are sandboxed JavaScript.** You write one, you test it in the in-app editor with a real payload, you deploy it. No separate cloud function deployment, no API gateway to configure.
+3. **Per-device mailboxes give you ordering.** A device that just came back online won't get a flood of stale mail. Messages queue up and drain in order, at the device's own pace.
+4. **Four regions for low latency.** US West, US East, Europe, and Singapore are pickable at fleet creation. The team is working on edge nodes to push more routing off the origin.
+
+If you've ever had to debug a fleet because someone's sensor started emitting `null` instead of `0` and your analytics pipeline crashed, the schema-first design is genuinely attractive.
+
+## Prerequisites
+
+- A Fostrom account (email or GitHub login at [fostrom.io](https://fostrom.io/))
+- Python 3.10+ for the Python SDK, or Node.js 22.12+ / Bun 1.2+ for the JavaScript SDK
+- `curl` or `wget` on the device (the SDK downloads the Rust Device Agent on first run)
+- Pick a region up front — you cannot change it later
+
+## Step 1: Create a Fleet and Define Schemas
+
+Log in and create an organization, then a fleet. The quickstart walks you through a small weather station: a fleet called `clean-climate` with three packet schemas.
+
+```text
+fleet: clean-climate (region: us-west)
+  schemas:
+    air_quality      (datapoint)  -> { pm25, temperature, humidity }
+    air_alert        (message, in) -> { pm25, severity }
+    purifier_command (message, out) -> { power: "on" | "off" }
+```
+
+Once you save a schema, the name is locked. Devices send the schema name as a string identifier, so renaming would break every device in the field. This is intentional — schemas are part of the contract.
+
+## Step 2: Add Devices
+
+Each device gets a name, optional tags, an optional description, and a configurable `Offline Threshold` (default 3 minutes). When you click `Connection` on a device, Fostrom gives you the credentials: a Fleet ID, a Device ID, and a Device Secret starting with `FOS-` (36 characters total).
+
+The dashboard shows each device with a colored indicator:
+
+- **Green** — currently connected with an open socket (MQTT keep-alive)
+- **Blue** — active but no persistent socket (HTTP or MQTT without keep-alive)
+- **Red** — offline, no heartbeats within the threshold
+- **Grey** — state still loading
+
+For the Python SDK, you initialize a project with `uv` and add `fostrom`:
+
+```bash
+uv init weather-station
+cd weather-station
+uv add fostrom
+```
+
+The minimum version is Python 3.10. On first import, the SDK downloads the matching Device Agent binary (Linux/macOS on all architectures Fostrom supports) and starts it in the background.
+
+## Step 3: Send Datapoints and Messages
+
+A typical sensor loop looks like this:
+
+```python
+import logging
+import time
+from fostrom import Fostrom
+
+logging.basicConfig(level=logging.INFO)
+
+fostrom = Fostrom(
+    fleet_id="<your-fleet-id>",
+    device_id="<your-device-id>",
+    device_secret="<your-device-secret>",
+)
+
+@fostrom.on_start
+def start():
+    while True:
+        reading = read_air_quality_sensor()
+        fostrom.send_datapoint("air_quality", {
+            "pm25": reading.pm25,
+            "temperature": reading.temperature,
+            "humidity": reading.humidity,
+        })
+        if reading.pm25 > 50:
+            fostrom.send_message("air_alert", {"pm25": reading.pm25, "severity": "high"})
+        time.sleep(60)
+```
+
+The `@fostrom.on_start` handler runs after the agent connects. The Python process keeps running so the device can also pull incoming mail from its mailbox; if you exit, the Rust agent stays alive to keep the MQTT socket open.
+
+If you can't run the SDK (microcontroller, existing C firmware), the HTTP API at `device.fostrom.dev` is JSON-only and takes the same Fleet ID + Device ID + Device Secret in headers. Every request also gets response headers for request IDs and rate limits. The `Idempotency-Key` header is supported on datapoint and message endpoints, which is great for battery-powered devices that retry aggressively on flaky LTE.
+
+## Step 4: Write an Action
+
+Actions are the interesting part. They are JavaScript files that live in your fleet, run in a Javy-WASM sandbox with a 500ms cap, and have no network access. All effects go through the `fostrom.` namespace: `sendMail(device, schema, payload)`, `broadcastMail(tag, schema, payload)`, and `triggerWebhook(name, body)`.
+
+The classic weather-station action: when a device reports `pm25 > 50`, send a `purifier_command` to the air purifier.
+
+```javascript
+console.log(`PM2.5 reading: ${payload.pm25}, severity: ${payload.severity}`);
+
+if (payload.pm25 > 50) {
+  fostrom.sendMail(air_purifier_1, purifier_command, { power: "on" });
+} else if (payload.pm25 < 10) {
+  fostrom.sendMail(air_purifier_1, purifier_command, { power: "off" });
+}
+```
+
+The in-app editor has autocomplete (`Ctrl+Space`) for devices, tags, schemas, and webhooks. Free-typed values that don't match a known resource will lint-fail and the action test will refuse to run. You can't deploy an Action until a test run returns `Successful`, which catches a class of typo bugs.
+
+A few restrictions to keep in mind:
+
+- 500ms execution time, hard kill on overrun
+- No `setTimeout`, no `setInterval`, no Node.js or npm modules
+- No network access from the runtime — everything goes through `fostrom.*`
+- Webhook payloads must match the configured `Content-Type` (JSON object/array, or a string for Discord)
+
+## Step 5: Connect Webhooks
+
+Webhooks live inside Fleet Settings, not as a top-level tab. Each one has a name, URL, HTTP method (default POST), and a `Content-Type` of either `application/json` or `text/plain`. Fostrom retries on non-2xx and adds Discord's `?wait=true` automatically because Discord's webhook endpoint won't return 200 OK without it.
+
+```javascript
+fostrom.triggerWebhook(discord_alerts, "Air purifier turned on due to high PM2.5");
+```
+
+For Slack and other services that aren't yet handled specially, you just need to make sure your endpoint returns 200 OK or Fostrom will keep retrying.
+
+## Deeper Analysis
+
+The architectural choices are worth a closer look. Most IoT platforms are built on a hot-path event bus (Kafka, Kinesis, Pub/Sub) plus a cold-path data lake (S3 + Athena, BigQuery). That's a lot of moving parts for a 50-device home project, and a lot of cost surprises for a 5,000-device production fleet.
+
+Fostrom's bet is that a SQL database for fleet data is the right primitive, and that orchestration logic should live in a serverless-style runtime adjacent to that data. The team built a DuckDB-based replicated multi-tenant data layer to make this work. DuckDB's columnar engine gives them fast analytical queries on packet streams without spinning up a separate OLAP stack, and replication handles durability.
+
+The JavaScript Actions runtime is a smart choice. Javy compiles JS to WebAssembly, which gives Fostrom a fast, deterministic, sandboxed environment with low cold-start times. The 500ms cap is aggressive but reasonable for the kind of conditional-routing logic Actions are designed for. If you need to do real ML inference, this is the wrong tool. If you need to look at a packet, decide which device gets a message, and fire a webhook, it's a clean fit.
+
+The per-device sequential mailbox is the unsung hero. Most IoT platforms let you publish to a topic and hope the device is up. With Fostrom, every device has a queue that drains in order. A device that just reconnected after a week offline will process its backlog one at a time, preserving causal ordering and avoiding the thundering-herd problem. There's also a Mailbox TTL setting in the latest changelog (February 2026) so undelivered mail can expire or be disabled per device.
+
+The trade-offs are real, though. Fostrom is in Technical Preview, so there are no published SLAs, no compliance certifications, and no pricing page yet. The team is responsive on Discord and email, and the platform is free while in preview, but you're betting on a small two-person team. The region lock is permanent — if you outgrow the US West region or want to move closer to new devices in Asia, you'd have to spin up a new fleet and migrate.
+
+The Action runtime's restrictions also matter. No timers, no network, no Node modules. If you want to do something stateful across multiple message arrivals (windowing, debouncing, sessionization), you're out of luck. The team is working on aggregated datapoint triggers, which would let you write Actions that fire on a rolling average crossing a threshold, but that's not in production yet.
+
+## Practical Evaluation Checklist
+
+When evaluating Fostrom for your project, work through these:
+
+- **Pick the right region.** Region is set at fleet creation and cannot be changed. If you have devices in Asia and a fleet in US West, you're paying latency you don't need.
+- **Design schemas up front.** Schema names are locked once saved. If you have a habit of renaming fields during iteration, design a migration plan.
+- **Use the SDK over raw HTTP/MQTT unless you have to.** The Rust Device Agent handles reconnection, offline buffering, and mailbox polling for you. Rolling your own over HTTP is supported but you're reinventing the wheel.
+- **Tag your devices.** Tags let you `broadcastMail` to a logical group (all air purifiers, all outdoor sensors) without enumerating device IDs.
+- **Test Actions before deploying.** The platform requires a successful test run. Treat that gate as a feature, not friction.
+- **Plan for Action limits.** 500ms is enough for routing, not for ML. If you need inference, do it on the device and send the result as a message.
+- **Use the Idempotency-Key header on HTTP datapoints.** Battery-powered devices on flaky LTE will retry. The header prevents duplicate processing.
+- **Watch the changelog.** The team ships meaningful updates monthly. February 2026 added Mailbox TTL and FreeBSD AMD64 device agent binaries.
+
+## Security Notes
+
+Authentication is per-device with the `FOS-` prefixed Device Secret. MQTT connections are TLS-only (port 8883); the platform explicitly rejects unencrypted connections. WebSocket connections are also TLS-only. HTTP uses the same Device Secret as a header.
+
+Actions run in a sandboxed WASM environment with no network access, no timers, and a 500ms kill timeout. The only way to trigger external effects is through the `fostrom.*` APIs, which validate the target resource against your fleet's known devices, tags, schemas, and webhooks. Free-typed resource names are lint-rejected.
+
+There are no compliance certifications published yet (SOC 2, ISO 27001, HIPAA). For regulated workloads, that's a blocker until the platform moves out of Technical Preview. The team is small (two founders) and the platform has been public since February 2026, so the security posture is "newer startup, two-person team, fast iteration." Discord and email are the support channels.
+
+The launch blog mentions a vertical-farm origin story, which is interesting context: the founders were the first customers, and they were running real production workloads on the platform during development. That's a positive signal for the data-layer and reliability primitives, though it doesn't substitute for an external audit.
+
+## FAQ
+
+**Q: Is Fostrom free to use?**
+
+**A:** Yes, while in Technical Preview. The platform is currently free and the team has stated it will stay free for existing users for three months after paid plans launch. There is no published pricing page yet.
+
+**Q: Can I self-host Fostrom?**
+
+**A:** No. Fostrom is a managed cloud platform only. The open-source component is the Device Agent (Rust), which lives in the [fostrom/devicekit](https://github.com/fostrom/devicekit) repository. The control plane, runtime, and data layer are not self-hostable.
+
+**Q: What protocols does Fostrom support for device connectivity?**
+
+**A:** MQTT 3.1.1 over TCP/TLS and Secure WebSockets, and JSON-over-HTTPS. MQTT supports both JSON and MsgPack payload serialization (selected by the `client_id` field in the CONNECT packet: `JSON` or `MSGPACK`).
+
+**Q: How long can an Action run?**
+
+**A:** 500ms, hard limit. Overruns are terminated. There are no timers (`setTimeout`/`setInterval`), no Node.js modules, and no network access from the runtime. All effects go through the `fostrom.*` namespace.
+
+**Q: Can I change the region of a fleet after creating it?**
+
+**A:** No. Region is set at fleet creation and is permanent. You would need to create a new fleet in the desired region and migrate devices, schemas, and actions.
+
+**Q: How are messages ordered between devices and Actions?**
+
+**A:** Each device has a sequential mailbox. Outbound messages from Actions are queued per-device and processed in order, at the device's own pace. This preserves causal ordering and prevents a slow device from being overwhelmed by a burst.
+
+**Q: What happens if a device goes offline for a long time?**
+
+**A:** Mail accumulates in the device's mailbox. In the February 2026 update, Fostrom added a Mailbox TTL setting so undelivered mail can expire automatically, or the mailbox can be disabled entirely for a specific device.
+
+**Q: Can Actions call external APIs directly?**
+
+**A:** No, Actions have no network access. To call an external service, define a Webhook in fleet settings and call `fostrom.triggerWebhook(name, body)` from the Action. Fostrom handles the HTTP call, retries, and Discord-specific quirks.
+
+**Q: Is there a CLI yet?**
+
+**A:** The CLI and a public API are listed in the docs as upcoming. The CLI will be the first consumer of the new API; the public API access for users comes after that.
+
+**Q: What's the difference between a Datapoint and a Message?**
+
+**A:** Datapoints are telemetry-style data (sensor readings, status updates) sent from devices to Fostrom. Messages are bidirectional events (alerts, commands) that can be sent from devices to Fostrom or from Fostrom to devices. Messages trigger Actions; datapoints do not (yet — aggregated triggers are coming).
+
+## Conclusion
+
+Fostrom is the rare IoT platform that treats developer experience as a primary feature, not a checkbox. The schema-first data model, the sandboxed JavaScript Actions runtime, and the per-device mailbox model are all deliberate choices that map to real problems teams hit when building connected systems in production. The trade-offs — small team, Technical Preview status, no self-hosting, no compliance certifications — are real but well-documented.
+
+If you're starting a new IoT project, especially one where the value is in the orchestration logic rather than the raw telemetry, Fostrom is worth evaluating. The free Technical Preview pricing makes the cost of trying it essentially zero, and the docs (including the [llms.txt index](https://fostrom.io/llms.txt)) are well-structured enough that you can get a fleet running in an afternoon.
+
+For production fleets that need SOC 2, ISO 27001, or other certifications, wait until Fostrom moves out of Technical Preview and publishes its security posture. For hobby projects and small-to-medium production workloads where the team's responsiveness on Discord offsets the lack of formal support, Fostrom is a clean fit.
