@@ -1,0 +1,283 @@
+---
+title: "Home Maker - Declare Your Dev Tools in a Makefile"
+description: "A plain old Makefile that installs, upgrades, and bootstraps every CLI utility, language toolchain, and desktop app on a Linux dev machine, with an fzf-powered interactive installer."
+pubDate: "2026-06-04"
+tags: ["developer-tools", "linux", "makefile", "dotfiles", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/home-maker-makefile-dev-tools.webp"
+  alt: "Home Maker Makefile-based dev tool installer thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Home Maker is a single Makefile that declares every tool on your dev machine (CLI utilities, language toolchains, desktop apps), grouped by purpose and manager, with an `fzf`-powered interactive installer that discovers every target live from the Makefile. No Nix, no Ansible, no DSL — just `make` and `bash` you already know.
+
+## Source and Accuracy Notes
+
+Home Maker was posted on Show HN on March 29, 2026 by Santhosh Thottingal and reached 91 points. The full design write-up lives on the author's blog: [thottingal.in/blog/2026/03/29/home-maker/](https://thottingal.in/blog/2026/03/29/home-maker/). The implementation is in the GitHub repository [santhoshtr/hm](https://github.com/santhoshtr/hm) (41 stars, MIT, Makefile). All commands, target names, and directory layouts below are taken from the README and the blog post; the underlying mechanism is small enough to verify in one sitting.
+
+## What Is Home Maker?
+
+Home Maker is a plain GNU Makefile that turns your dev tool list into a typed, version-pinnable, group-able, interactive install system. The repository ships a `Makefile`, a `dev/*.mk` tree for CLI, Python, Node, Go, Rust, and LSP packages, a `desktop/apps.mk` for hand-written install scripts, and a 30-line `hm.sh` wrapper that exposes every target inside `fzf`.
+
+The mental model is simple: every tool you care about becomes a `make` target. The Makefile uses `foreach` and `eval` to expand five package-manager lists (`APT`, `CARGO`, `UV`, `GO`, `NPM`) into individual `.PHONY` targets. The system never invents new state — it just generates targets from lists you append to.
+
+```bash
+# This Makefile line creates a working `make ripgrep` target
+APT += ripgrep jq bat fzf htop tmux
+
+$(foreach p,$(APT),$(eval $(call gen-apt,$(p))))
+```
+
+Each `gen-<manager>` macro emits the same shape: a `.PHONY` target whose recipe is the package manager's install command. `make ripgrep` runs `sudo apt-get install -y ripgrep`. `make ruff` runs `uv tool install ruff`. Targets appear because the lists grew — nothing more.
+
+The author's stated motivation: a personal dev machine accumulates tools from five or more package managers, each with its own install incantation. Six months later you do not remember what you installed, how, or which version. Home Maker turns "I have a list of tools I want" into a file you can grep, version, and clone onto the next laptop.
+
+## Setup Workflow
+
+### Step 1: Clone the Repository
+
+The repository is a working starter. Clone it into `~/hm` and start editing:
+
+```bash
+git clone https://github.com/santhoshtr/hm.git ~/hm
+cd ~/hm
+ls -la
+```
+
+The shipped layout:
+
+```bash
+hm/
+├── Makefile
+├── hm.sh
+├── dev/
+│   ├── cli.mk
+│   ├── python.mk
+│   ├── node.mk
+│   ├── go.mk
+│   ├── rust.mk
+│   └── lsp.mk
+└── desktop/
+    └── apps.mk
+```
+
+Each `*.mk` file is a thin wrapper around a `+=` append. `dev/python.mk` is just `UV += ruff black isort pyright`. The Makefile `include`s them all and expands the five lists into targets.
+
+### Step 2: Install One Tool
+
+Pick a tool name from the comments in the relevant `*.mk` file and run it directly. You do not need a "build" step:
+
+```bash
+make ripgrep
+make bat
+make fzf
+```
+
+Each command calls the appropriate package manager without checking whether the tool is already installed. That is intentional — `apt-get` skips if present, `cargo install` upgrades if a newer version exists, `uv tool install` re-installs. The Makefile is a declaration; the package manager decides what to do.
+
+You will see output like:
+
+```bash
+installing/upgrading ripgrep ...
+sudo apt-get install -y ripgrep
+```
+
+If the command does not need `sudo` on your system, edit `APT_INSTALL` in the root `Makefile` to drop it. The README and `Makefile` are written for Debian/Ubuntu first; for other distros, change `APT_INSTALL` to your package manager (for example, `pacman -S --noconfirm` for Arch, `dnf install -y` for Fedora).
+
+### Step 3: Add a New Tool
+
+Three patterns, in order of frequency:
+
+**Pattern 1 — package manager has it, name matches.** Append to the list:
+
+```bash
+# dev/cli.mk
+APT += htop
+```
+
+**Pattern 2 — pin a version.** Use `name@version`:
+
+```bash
+# dev/python.mk
+UV += [email protected]
+
+# dev/go.mk
+GO += golangci-lint@v1.55.0
+```
+
+**Pattern 3 — target name differs from package name.** Use a `PKG_` override:
+
+```bash
+# dev/cli.mk
+CARGO += fd
+PKG_fd := fd-find
+```
+
+`make fd` now runs `cargo install fd-find`. The target name is what you type; the `PKG_` value is what the manager sees.
+
+Custom install scripts for tools that are not in any manager (curl scripts, GitHub release tarballs, local builds) are written by hand as a normal `.PHONY` target. The example `desktop/apps.mk` shows the pattern:
+
+```makefile
+.PHONY: alacritty
+alacritty:
+	@echo "installing/upgrading $@..."
+	@curl -fsSL https://example.com/alacritty -o /usr/local/bin/alacritty
+	@chmod +x /usr/local/bin/alacritty
+```
+
+The target appears in `make` tab-completion and in the interactive `fzf` browser — there is no second place to update.
+
+### Step 4: Run the Interactive Installer
+
+`hm.sh` is a 30-line wrapper that reads every target from the Makefile database and feeds them to `fzf`:
+
+```bash
+ln -s "$(pwd)/hm.sh" ~/bin/hm
+hm
+```
+
+The critical line is `make -pn -C "$SCRIPT_DIR"` — Make's dry-run database dump. The script parses it, filters out group and meta targets, and hands the rest to `fzf`:
+
+```bash
+selected=$( packages | fzf \
+  --multi \
+  --prompt "install > " \
+  --preview "make -n -C '$SCRIPT_DIR' {} 2>/dev/null" \
+  --preview-window "right:50%:wrap" )
+```
+
+The preview pane runs `make -n <target>` (dry run) so you see the exact install command before you commit. Tab selects multiple targets. Enter runs them. The list is derived live — add a package to any `.mk` file and it appears in `fzf` the next time you run `hm`. Nothing to keep in sync.
+
+### Step 5: Bootstrap a Fresh Machine
+
+The migration story is the whole point. On a new laptop:
+
+```bash
+git clone https://github.com/santhoshtr/hm.git ~/hm
+cd ~/hm
+make all
+```
+
+`make all` runs every meta-target (`dev`, `desktop`), which run every group target (`cli`, `python`, `node`, `go`, `rust`, `lsp`), which run every leaf target. Three levels of granularity, one system. The author has used this approach with `clause code` to bootstrap a fresh laptop in a single afternoon.
+
+## Deeper Analysis
+
+### The Trick Is `eval $(call gen-X, ...)`
+
+The mechanical core is one macro per manager. `gen-apt` looks like:
+
+```makefile
+define gen-apt
+.PHONY: $(call pkg-name,$(1))
+$(call pkg-name,$(1)) :
+	@echo "installing/upgrading $$@..."
+	@$(APT_INSTALL) $(call pkg-pkgname,$(1))
+endef
+```
+
+`pkg-name` splits `name@version` on `@` and takes the first word. `pkg-pkgname` returns the `PKG_<name>` override if defined, else the bare name. The `$$@` is escaped for `eval`-time expansion. The same pattern repeats for `gen-cargo`, `gen-uv`, `gen-go`, `gen-npm` — only the install command differs.
+
+The `$(foreach p,$(APT),$(eval $(call gen-apt,$(p))))` line is what does the actual generation. `foreach` iterates the list; `eval` materializes each entry into a real Make target. This is a well-known Make idiom, but Home Maker uses it cleanly: five lines, five managers, no other machinery.
+
+### Why Not Nix, Ansible, or a Container?
+
+The author addresses this directly. Nix solves a real problem — reproducible, hermetic environments with atomic rollbacks — but the learning curve is weeks. For a personal dev machine, that is a lot of machinery for "install ripgrep." Ansible is designed for fleet management and wants an inventory, YAML playbooks, a Python runtime, and SSH connections to remote hosts — overkill for a single laptop. Docker solves isolation, not tool installation; you do not want to run your editor and terminal inside containers.
+
+The stated tradeoffs are honest. Installs are not hermetic, there is no rollback, and reproducibility depends on upstream package managers staying stable. For a personal dev machine, those are acceptable costs in exchange for zero new abstractions.
+
+The HN comment thread reflected this. One commenter called it "reinventing the wheel" and pointed to `nix-community/home-manager`. Other commenters pushed back: Nix on macOS still feels un-native, requires `sudo` constantly, and has a learning curve measured in days. Home Maker sits in the gap where Make and bash are already part of the workflow and a "real" system is overkill.
+
+### Group and Meta Targets
+
+Individual packages roll up into group targets:
+
+```makefile
+.PHONY: cli
+cli : ripgrep jq bat fzf htop tmux eza zoxide fd
+
+.PHONY: python
+python : uv ruff black isort pyright
+```
+
+Group targets roll up into meta targets:
+
+```makefile
+.PHONY: dev
+dev : cli python node go rust lsp
+
+.PHONY: all
+all : dev desktop
+```
+
+`make all` installs everything. `make dev` installs all developer tools. `make cli` installs just CLI utilities. `make ripgrep` installs one tool. The same Makefile syntax works at every level of granularity.
+
+The `hm` fzf browser reads from `make -pn`, so group targets (`cli`, `python`) and meta targets (`dev`, `all`) appear in the list. The `exclude_patterns` helper in `hm.sh` strips them from the selection so the user only ever picks individual packages. The exclusion list lives in the script and can be extended.
+
+### The `clean` Target
+
+One command purges every package manager cache:
+
+```makefile
+.PHONY: clean
+clean :
+	@cargo cache -a 2>/dev/null || true
+	@sudo apt-get clean && sudo apt-get autoremove -y
+	@uv cache clean 2>/dev/null || true
+	@npm cache clean --force 2>/dev/null || true
+	@go clean -cache 2>/dev/null || true
+```
+
+The `|| true` guards ensure it does not abort if a manager is not installed. `make clean` is a power-user command — useful before a fresh round of `make all`, or before reclaiming disk space.
+
+## Practical Evaluation Checklist
+
+- **Works on:** Linux (Debian/Ubuntu tested). Adapt `APT_INSTALL` in the root `Makefile` for Arch, Fedora, or other distros.
+- **Requires:** `make`, `bash`, `fzf`. The package managers themselves (`apt`, `cargo`, `uv`, `go`, `npm`) are only needed if you use that `.mk` file.
+- **What it does not do:** hermetic installs, atomic rollbacks, cross-machine reproducibility guarantees, secret management, dotfile syncing. It is a Makefile, not a config language.
+- **What it does well:** zero new abstractions, fully text-based, lives in a single repo, supports group/meta targets out of the box, integrates with `fzf` for browse-and-install UX, accepts version pins without ceremony.
+- **Good fit for:** Linux users who already know `make` and `bash`, want a single source of truth for their dev tool list, and prefer to clone-and-edit over learning a new tool.
+- **Bad fit for:** anyone on macOS who depends on Homebrew Cask and App Store apps, anyone who needs Nix-style reproducibility, anyone who would rather use a tool like `devbox` or `devenv` that does the same job with more machinery.
+
+## Security Notes
+
+Home Maker delegates every install to the underlying package manager. The trust model is the same as `apt install` or `cargo install`: you trust the upstream package, you trust your `apt` sources, and you trust your `~/.cargo` registry. There is no signature verification at the Home Maker layer.
+
+Two practical hardening steps:
+
+- **Run the dry-run preview first.** `hm`'s preview pane runs `make -n <target>` and shows the exact command. Read it before pressing Enter. This catches typos in `PKG_` overrides and catches any hand-written target that pipes a curl script to `sh` (like the shipped `uv` example).
+- **Pin versions for security-sensitive tools.** A version pin like `UV += [email protected]` freezes the install to a specific release. Without a pin, `make uv` always installs the latest. Pin the tools where "latest" matters (TLS-related CLIs, anything that touches the network) and leave the rest unpinned.
+
+Hand-written `.PHONY` targets in `desktop/apps.mk` are the most likely place for an unsafe pattern. Treat any `curl | sh` line the same way you would treat it from a random website — verify the source, verify the checksum, and prefer HTTPS URLs from the tool's official domain.
+
+## FAQ
+
+**Q: Does Home Maker replace Homebrew on macOS?**
+**A:** No. The shipped `Makefile` and `APT_INSTALL` macro are Debian/Ubuntu-first. For macOS, you would swap `APT_INSTALL := sudo apt-get install -y` for `BREW_INSTALL := brew install` and add a `HOMEBREW` list with its own `gen-brew` macro. The pattern generalizes; the shipped defaults do not.
+
+**Q: Can I use it without `fzf`?**
+**A:** Yes. `fzf` is only used by `hm.sh`. The Makefile itself works without it — `make ripgrep`, `make cli`, `make all` all work in a plain terminal. If you want a fuzzy interface without `fzf`, replace `hm.sh` with a `select` loop or call `make -pn | grep` directly.
+
+**Q: How is this different from `devbox`, `devenv`, or `vagrant`?**
+**A:** Those tools are full project-level environment managers with their own config languages, lockfiles, and shells. Home Maker is a personal-machine tool installer that uses only Make and bash. The trade is in opposite directions: `devbox` gives you reproducibility and isolation; Home Maker gives you transparency and zero new dependencies. Pick by use case — fleet and team environments favor `devbox`/`devenv`; personal dev machines favor Home Maker.
+
+**Q: Can I share my `hm` config with a team?**
+**A:** Technically yes — the repo is just text. Practically, the package list is opinionated (which formatter, which LSP, which terminal) and individual preferences vary. For a team, fork the repo per developer or treat it as a starting point rather than a shared config.
+
+**Q: How do I add a new package manager?**
+**A:** Define a `MANAGER_INSTALL` variable in the root `Makefile`, write a `gen-manager` macro that emits the right `.PHONY` target shape, and add a `$(foreach p,$(MANAGER),$(eval $(call gen-manager,$(p))))` line. The README and `Makefile` make the existing five managers easy to copy from.
+
+**Q: Does it handle dotfile symlinking?**
+**A:** Not by default. The repo is a tool installer, not a dotfile manager. You can add a `dotfiles` group with hand-written targets that `ln -sf` files from the repo into `$HOME`, but that is outside the package-manager abstraction. Tools like `chezmoi` or `yadm` are better suited if dotfile management is the primary goal.
+
+## Conclusion
+
+Home Maker is a small, honest system. It does not introduce a new language, a new daemon, or a new abstraction. It uses `make` and `bash` you already know, exploits `eval $(call ...)` to generate targets from five lists, and ships a 30-line `fzf` wrapper for browse-and-install UX. The result is a single repo you can clone, edit, and use to bootstrap a fresh laptop in a single `make all`.
+
+The right audience is Linux users who are tired of remembering which package manager installed which tool six months ago, and who do not need Nix-style hermeticity for a personal dev machine. The wrong audience is anyone who needs reproducible shared environments, atomic rollbacks, or first-class macOS support out of the box.
+
+For everyone else, it is a useful pattern: declarative tool lists in plain text, generated targets in plain Make, interactive install in plain `fzf`. Clone the repo, append to the right list, and `make` your way to a reproducible dev machine.
