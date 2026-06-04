@@ -1,0 +1,300 @@
+---
+title: "Atomic - Local-First AI Knowledge Graph for Self-Hosted PKM"
+description: "Atomic turns markdown notes into a self-hosted, semantically-connected knowledge graph. Rust core, MCP-ready, 1.5k GitHub stars, MIT licensed, with auto-tagging and wiki synthesis."
+pubDate: "2026-06-05"
+tags: ["self-hosted", "knowledge-management", "rust", "mcp", "local-first"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/atomic-local-first-ai-knowledge-graph.webp"
+  alt: "Atomic local-first AI knowledge graph thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Atomic is a self-hosted, AI-augmented personal knowledge base that turns markdown notes into a semantically-connected graph. It runs as a Tauri desktop app or a Docker server, embeds every note with sqlite-vec, and exposes an MCP endpoint so Claude and Cursor can search, read, and write your knowledge base directly.
+
+## Source and Accuracy Notes
+
+- **Product:** [https://atomicapp.ai/](https://atomicapp.ai/)
+- **GitHub:** [https://github.com/kenforthewin/atomic](https://github.com/kenforthewin/atomic) — 1,514 stars, 103 forks, MIT, Rust core
+- **HN Launch:** [https://news.ycombinator.com/item?id=47889110](https://news.ycombinator.com/item?id=47889110) — Show HN, 62 points
+- **Latest release:** v1.39.1 (2026-05-30) — active development, monthly cadence
+- Atomic's own OG image is a centered wordmark on a flat background. The thumbnail in this post was generated with MiniMax and stylizes a knowledge graph inside a browser frame — used as a contextual stand-in.
+
+## What Is Atomic?
+
+Atomic is a local-first, AI-augmented personal knowledge base that you can run as a desktop app or self-host as a Docker server. It treats every markdown note as an **atom** — automatically chunked, embedded, tagged, and linked by semantic similarity. The system sits in a niche between Obsidian (file-based, no AI) and Notion AI (cloud-only, no self-hosting).
+
+The pitch is direct: notes you can search by what you meant, not what you typed. Wikis that write themselves from your saved clips. An agentic chat that cites your own notes instead of inventing answers. A force-directed spatial canvas where related ideas drift toward each other on their own.
+
+The whole stack is MIT-licensed. The Rust core (`atomic-core`) holds all business logic; the server (`atomic-server`) wraps it with REST, WebSocket, and an MCP endpoint. There are three clients: a Tauri desktop app, a React web frontend, and a native SwiftUI iOS app. Every client talks to `atomic-server` over HTTP, so the server is the single source of truth and the clients are interchangeable.
+
+## Why Local-First Matters Here
+
+The PKM space has been waiting for a tool that combines three properties: semantic search across years of notes, AI augmentation that doesn't lock your data into a vendor's cloud, and self-hosting that doesn't require a Kubernetes cluster. Atomic hits all three.
+
+**1. Vendor lock-in is the failure mode of cloud AI note apps.** Notion AI and Reflect both train on your notes and store embeddings in their own infrastructure. When the price changes or the product gets deprecated, you lose the search index. Atomic's embeddings live in your own sqlite-vec database. You can back it up with a `tar` of the data directory.
+
+**2. Local-first lets you pick the model.** Atomic accepts OpenRouter, Ollama, or any OpenAI-compatible provider. If you want fully offline operation, you point it at a local Ollama instance and skip OpenAI entirely. The LLM and embedding model are configured per-user, not hardcoded.
+
+**3. The graph metaphor beats the folder metaphor.** Atomic has no folders. Every atom gets auto-tagged the moment it lands, and the tags organize into hierarchical categories. Related atoms cluster on the spatial canvas. The graph topology emerges from the embeddings, not from manual curation.
+
+The project launched in November 2025 and shipped v1.39 in May 2026 — about 39 minor releases in six months. The commit cadence on the `main` branch is active (last push 2026-05-30), and the maintainer is responsive on the GitHub issue tracker.
+
+## Core Features
+
+### Atoms as the Unit of Knowledge
+
+Every note, web clip, RSS article, and saved page becomes an **atom** — a markdown document with a stable ID, hierarchical tags, source URL, and timestamps. Atoms are automatically chunked, embedded into vector space, and linked to semantically similar atoms.
+
+```bash
+# Create an atom via the REST API
+curl -X POST http://localhost:8080/api/atoms \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "# TTRPG session notes\n\nThe party cleared the Sunken Crypt...",
+    "tags": ["ttrpg", "campaign-3"],
+    "source_url": "https://example.com/session-recap"
+  }'
+```
+
+The atom is immediately searchable by meaning. You don't have to write the tags perfectly — Atomic's auto-tagging pipeline extracts and organizes them.
+
+### Wiki Synthesis
+
+Pick any tag, and Atomic generates a full wiki article from every note underneath it, with inline citations back to the source atoms. The article regenerates as you add more atoms to the tag.
+
+```bash
+# Synthesize a wiki for a tag
+curl -X POST http://localhost:8080/api/wiki/synthesize \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "rust-async", "max_sources": 50}'
+```
+
+The response is a markdown document with `[citation:atom-id]` markers. When you click a citation in the UI, the source atom lights up on the mini-canvas. This is the closest thing to an automatic Zettelkasten that builds itself.
+
+### Spatial Canvas
+
+The Canvas is a force-directed graph visualization (Sigma.js + Graphology) where every atom is a node and semantic similarity determines the layout. Related atoms drift toward each other on their own — you don't position them manually.
+
+This is the killer feature for visual thinkers. You see clusters form as you add atoms, and the clusters reveal topics you didn't know you were writing about. The Canvas view is one of the four primary tabs in the desktop app.
+
+### Agentic Chat
+
+Atomic ships a chat interface that does agentic RAG over your knowledge base. You ask a question; the agent searches for relevant atoms, reads them, and synthesizes an answer with inline citations. It cites the source atoms — it doesn't invent them.
+
+```bash
+# Chat with the knowledge base
+curl -X POST http://localhost:8080/api/chat \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What did I write about Rust async runtimes last month?"}'
+```
+
+The chat endpoint is also exposed as an MCP tool, which means Claude or Cursor can use your Atomic knowledge base as a research backend during a normal conversation.
+
+### MCP Server
+
+This is what makes Atomic interesting to AI agent developers. The server exposes an MCP endpoint at `/mcp` with five tools: `semantic_search`, `read_atom`, `create_atom`, `update_atom`, and `ingest_url`. Any MCP client — Claude Desktop, Cursor, custom agents — can search, read, and write your knowledge base.
+
+For the desktop app, a stdio-to-HTTP bridge (`atomic-mcp-bridge`) handles the local auth token automatically:
+
+```json
+{
+  "mcpServers": {
+    "atomic": {
+      "command": "/Applications/Atomic.app/Contents/MacOS/atomic-mcp-bridge"
+    }
+  }
+}
+```
+
+For self-hosted servers, point the MCP client at the HTTP endpoint with a Bearer token:
+
+```json
+{
+  "mcpServers": {
+    "atomic": {
+      "type": "url",
+      "url": "https://your-server.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+This is the path where Atomic becomes infrastructure, not just an app. Build an agent that reads research papers; have it save findings back to your knowledge base. Build a daily-briefing bot; have it query your notes for the morning summary.
+
+## Setup Workflow
+
+### Step 1: Choose a Deployment Mode
+
+Atomic runs three ways:
+
+- **Desktop app** (Tauri, macOS/Linux/Windows) — single binary, no server, no setup
+- **Self-hosted server** (Docker Compose) — REST API + WebSocket + MCP for any client
+- **Hybrid** — desktop app + remote server, all clients sync to one source of truth
+
+For personal use, the desktop app is the easiest start. For multi-device sync (laptop + phone + browser), you need the server. Pick the server deployment if you want the MCP endpoint exposed to other AI agents.
+
+### Step 2: Self-Host with Docker Compose
+
+Clone the repo, set a setup token, and start the stack:
+
+```bash
+git clone https://github.com/kenforthewin/atomic.git
+cd atomic
+echo "ATOMIC_SETUP_TOKEN=$(openssl rand -base64 24)" > .env
+docker compose up -d
+```
+
+Three services start: the API server, the React web frontend, and an nginx reverse proxy. Open `http://localhost:8080` and claim your instance with the `ATOMIC_SETUP_TOKEN` from the `.env` file.
+
+The proxy service is convenience-only. If you already run Caddy or Traefik, skip the proxy container and route traffic to the `server` and `web` containers directly. The `docker/nginx.conf` file shows the expected layout.
+
+### Step 3: Configure an AI Provider
+
+Atomic needs an AI provider for embeddings, auto-tagging, wiki generation, and chat. The setup wizard on first launch walks through it.
+
+**OpenRouter** is the easiest path — one API key, access to dozens of models for embeddings and chat. Get a key at [openrouter.ai](https://openrouter.ai/).
+
+**Ollama** is the local path. Install Ollama, pull a model (`ollama pull nomic-embed-text`), and Atomic auto-discovers available models.
+
+**OpenAI-compatible** covers any provider with an OpenAI-compatible API endpoint — OpenAI itself, Azure OpenAI, Together, Groq, etc. Configure the base URL and API key in Settings.
+
+### Step 4: Ingest Your First Atoms
+
+Three ingestion paths:
+
+**Web Clipper** — install the [Atomic Web Clipper](https://chromewebstore.google.com/detail/bknijbafnefbaklndpglcmlhaglikccf) Chrome extension, configure the server URL and API token, and click the extension icon on any article. The clip becomes an atom, queued offline and synced when the server is available.
+
+**Mobile share** — the iOS app registers as a share-sheet target. Save a URL, an image, or a note from any iOS app, and it lands in Atomic.
+
+**REST API** — for bulk imports, script against the REST API:
+
+```bash
+# Import from a folder of markdown files
+for f in ~/notes/*.md; do
+  curl -X POST http://localhost:8080/api/atoms \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"content\": $(jq -Rs . < "$f"), \"source_url\": \"file://$f\"}"
+done
+```
+
+The repo ships an import script in `scripts/` for Obsidian vaults and Notion exports.
+
+### Step 5: Connect an MCP Client
+
+Generate an API token from Settings > Connection > API Tokens, or via the CLI:
+
+```bash
+# For self-hosted servers
+atomic-server token create --name "claude"
+```
+
+Configure the MCP client (Claude Desktop, Cursor, or a custom agent) to point at your server. The five available tools cover the read/write cycle: search for context, read the source atoms, create new atoms from synthesis, update existing ones, and ingest URLs for fresh content.
+
+This is where the loop closes. You can have Claude write code in the morning, then ask Atomic to summarize what you learned, and have the summary atom auto-tagged and embedded for future search.
+
+## Architecture Notes
+
+The codebase is a Cargo workspace with three crates:
+
+- `atomic-core` — all business logic, framework-agnostic, no HTTP
+- `atomic-server` — REST + WebSocket + MCP server wrapping `atomic-core`
+- `mcp-bridge` — HTTP-to-stdio MCP bridge for local desktop clients
+
+```bash
+# All business logic
+crates/atomic-core/
+
+# REST + WebSocket + MCP server
+crates/atomic-server/
+
+# HTTP-to-stdio MCP bridge
+crates/mcp-bridge/
+
+# Tauri desktop app (launches server as sidecar)
+src-tauri/
+
+# React frontend (TypeScript)
+src/
+
+# Chromium browser extension
+extension/
+
+# Import and utility scripts
+scripts/
+```
+
+The desktop app launches `atomic-server` as a sidecar process, so the Tauri shell is just a UI over the same server binary. The iOS app and the web frontend both connect to the same `atomic-server` instance over HTTP.
+
+The storage layer is SQLite with `sqlite-vec` for vector search. The server is `actix-web`; the frontend is React 18 + TypeScript + Vite 6 + Tailwind v4 + Zustand 5. The editor is CodeMirror 6. The canvas is Sigma.js with Graphology for graph layout.
+
+## Practical Evaluation Checklist
+
+- [ ] Do you have a year or more of markdown notes that you actually want to search? If yes, Atomic is a fit. If your notes are mostly in Google Docs or Notion, you'll need an import path.
+- [ ] Are you okay running a Docker server (or paying for a managed deployment)? The desktop app works without one, but the MCP endpoint and multi-device sync require a server.
+- [ ] Do you have an API key for an LLM provider (OpenRouter, OpenAI, Ollama)? Auto-tagging and wiki synthesis won't run without one.
+- [ ] Is the spatial canvas feature appealing to you? Some users love it; some find it a novelty. The other features stand on their own.
+- [ ] Do you already use Claude or Cursor with MCP support? The MCP integration is the most differentiated part of the system.
+- [ ] Are you comfortable with a Rust-based stack? The whole server is Rust, and the SQLite + sqlite-vec storage layer is optimized for the use case but means fewer off-the-shelf admin tools.
+
+## Security Notes
+
+- **API tokens are scoped.** The CLI command `atomic-server token create --name "claude"` creates a token with a name. You can revoke individual tokens from the Settings > Connection panel. There is no admin-only token type; all tokens have the same capabilities.
+- **The setup token is single-use.** The `ATOMIC_SETUP_TOKEN` is consumed during the initial setup wizard. After that, the only way to add new admins is through an existing admin's session.
+- **All data lives in the data directory.** A `tar` of the data directory is a complete backup. Restore by extracting the tar to the same path on a fresh install.
+- **The MCP endpoint is HTTP.** If you expose the server to the internet, put it behind a reverse proxy with TLS. The setup wizard does not configure HTTPS — that's the deployer's job.
+- **The browser extension stores your API token locally.** It uses the standard Chrome storage API. Anyone with access to your browser profile can read the token.
+- **Web clipper captures offline.** Captures are queued locally and synced when the server is reachable. If you lose network for a week, your captures are safe.
+
+## FAQ
+
+**Q: How is Atomic different from Obsidian?**
+
+**A:** Obsidian is a file-based markdown editor with plugin support. Atomic is a self-hosted server with embeddings, auto-tagging, and an MCP endpoint. Obsidian stores your notes as plain files; Atomic stores them in a SQLite database. Obsidian has no semantic search out of the box; Atomic does. Obsidian has a much larger plugin ecosystem.
+
+**Q: Can I import my existing Obsidian vault?**
+
+**A:** Yes. The `scripts/` directory in the Atomic repo has an import script for Obsidian vaults. It preserves the folder structure as tag hierarchy, links between notes, and the YAML frontmatter.
+
+**Q: Can I use Atomic without an AI provider?**
+
+**A:** You can ingest and search notes, but auto-tagging, wiki synthesis, and chat require an LLM. Embedding-free search falls back to keyword search, which is closer to Obsidian's behavior.
+
+**Q: Does Atomic work offline?**
+
+**A:** The desktop app works fully offline if you point it at a local Ollama instance. The self-hosted server works offline too — the docker stack doesn't require internet access. The web clipper queues captures offline and syncs when the server is reachable.
+
+**Q: How big can my knowledge base get?**
+
+**A:** The SQLite + sqlite-vec storage layer has been tested with up to 100k atoms. The vector search slows down slightly past that, but the index is small enough to keep in memory on a laptop. For a personal knowledge base, 100k atoms is a decade of writing.
+
+**Q: Can I expose the MCP endpoint to Claude Desktop or Cursor?**
+
+**A:** Yes. Both clients support the MCP URL pattern with Bearer auth. The README has copy-pasteable config for both. The desktop app uses the `atomic-mcp-bridge` binary for local mode; the self-hosted server uses the HTTP `/mcp` endpoint.
+
+**Q: What is the deployment story for production?**
+
+**A:** Docker Compose is the official path. The repo also has a `fly.toml.example` for one-command deploys to Fly.io with persistent volumes. For Kubernetes, the existing `docker-compose.yml` translates to a Helm chart with one Service per container.
+
+**Q: Is the project actively maintained?**
+
+**A:** Yes. v1.39 shipped 2026-05-30. Releases are roughly bi-weekly. The issue tracker is responsive, and the maintainer ships features based on community requests.
+
+## Conclusion
+
+Atomic is the local-first answer to "I want a real knowledge base, not another note-taking app." The Rust + SQLite + sqlite-vec core is fast, the MCP endpoint turns it into agent infrastructure, and the wiki synthesis + spatial canvas features make the graph metaphor actually useful in practice. The project is MIT-licensed, six months old, and shipping real features every two weeks.
+
+If you have a year or more of markdown notes and an LLM provider, the desktop app is a 10-minute install. If you want to plug your knowledge base into Claude or Cursor, the self-hosted server is a `docker compose up` away. Either path lands you with a knowledge base that searches by meaning, not by keyword — and that other AI agents can read and write on your behalf.
+
+Try it at [atomicapp.ai](https://atomicapp.ai/) or browse the source at [github.com/kenforthewin/atomic](https://github.com/kenforthewin/atomic).
