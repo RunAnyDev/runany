@@ -1,0 +1,168 @@
+---
+title: "BracketMadness.ai - March Madness Bracket for AI Agents"
+description: "BracketMadness.ai is a March Madness bracket challenge designed for AI agents, not humans. Agent-first UX, plain-text API docs, and a real leaderboard ranking models."
+pubDate: "2026-06-04"
+tags: ["ai-agents", "show-hn", "mcp", "dev-tools", "agent-ux"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bracketmadness-ai-agent-bracket-challenge.webp"
+  alt: "BracketMadness.ai - March Madness bracket challenge for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** BracketMadness.ai (Show HN, 67 points, March 2026) is a March Madness bracket challenge where the contestants are AI agents, not humans. The site serves plain-text API instructions to agents and a visual site to humans, runs a real leaderboard across models, and is a fun case study in agent-first UX design.
+
+## Source and Accuracy Notes
+
+All technical claims in this post come from the [Show HN thread (objectID 47412015)](https://news.ycombinator.com/item?id=47412015) and the [BracketMadness.ai homepage](https://www.bracketmadness.ai). The challenge was a one-off event tied to the 2026 NCAA March Madness tournament. Stack details (Next.js 16, TypeScript, Supabase, Tailwind v4, Vercel, Resend) come directly from the founder's post.
+
+## What Is BracketMadness.ai?
+
+BracketMadness.ai is a March Madness bracket challenge where humans do not pick games. The human prompts their AI agent with the site URL, and the agent registers itself, reads the API docs, picks all 63 games, and submits a bracket autonomously. A live leaderboard tracks which AI model assembles the best bracket through the tournament.
+
+The premise is small but the implications for agent-first design are large. Most "AI agent" products today are still human-facing dashboards with an agent bolted on. BracketMadness goes the other direction: the homepage serves two completely different experiences depending on whether the visitor is a browser or a HeadlessChrome instance.
+
+```text
+Visitor type            | What they get
+------------------------|--------------------------------------------
+Real human browser      | Visual site with marketing copy and CTAs
+HeadlessChrome / agent  | Plain-text API instructions for the bracket
+```
+
+The challenge was a one-shot tied to the 2026 March Madness bracket, so the live event has since wrapped, but the project itself is a useful reference for anyone designing a product whose primary user is an LLM.
+
+## The Problem: Most Agent Sites Are Still Human Sites
+
+The founder's original design treated agents like slightly awkward humans. The result, as they describe it, was painful:
+
+> "Early on I found most agents were trying to use Playwright to browse the site instead of just reading the docs. I made some changes to detect HeadlessChrome and serve specific html readable to agents."
+
+That is a familiar pattern. Agents given a normal site will try to click buttons, scroll for hidden content, and screenshot for visual context, all of which is slow, expensive, and brittle. A site that exposes a clean text API cuts all of that out.
+
+BracketMadness took the obvious step that most agent-targeted products are still missing: detect the agent at the edge, then serve it something a model can actually consume. For humans, that's a marketing page. For agents, it's a doc-style instructions block with the registration endpoint, the bracket submission schema, and the authentication flow laid out in plain prose.
+
+## How It Works
+
+The site has two render paths and picks between them on the first request. There is no shared HTML; the two audiences see different things entirely.
+
+```bash
+# Agent path (curl, fetch, or any LLM tool)
+curl https://bracketmadness.ai
+# Returns plain-text registration instructions and the bracket API
+
+# Human path (real browser)
+open https://www.bracketmadness.ai
+# Returns a visual landing page with the leaderboard
+```
+
+The detection is intentionally simple. The server checks for common agent fingerprints (no JavaScript execution, HeadlessChrome in the user agent, missing image requests) and serves the appropriate response. The same URL works for both audiences; the server decides what to show.
+
+Once registered, an agent can submit its full 63-game bracket through the REST API and check its score against the live leaderboard. The leaderboard ranks every registered model — Claude, GPT, Gemini, and any open-source option — by how many of its picks survived each round of the tournament.
+
+## Setup Workflow: Running the Agent Side
+
+If you want to play with the agent path yourself, the bracket submission is a single API call from any LLM that can use tools.
+
+### Step 1: Point your agent at the site
+
+Most agents already know how to fetch a URL. Hand them the homepage and let them follow the API instructions:
+
+```bash
+https://www.bracketmadness.ai
+```
+
+The plain-text response includes the registration endpoint, the API key format, the bracket schema, and the submission deadline.
+
+### Step 2: Register the agent
+
+The agent POSTs to the registration endpoint with a name and model identifier:
+
+```bash
+curl -X POST https://bracketmadness.ai/api/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "claude-opus-4", "model": "anthropic/claude-opus-4-7"}'
+```
+
+The response returns an API key and a `bracket_id` for the current tournament.
+
+### Step 3: Submit the 63-game bracket
+
+The bracket is a single JSON payload of 63 game predictions, each with the round, the two team IDs, and the predicted winner. Submit it in one call:
+
+```bash
+curl -X POST https://bracketmadness.ai/api/bracket \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bracket_id": "2026",
+    "picks": [
+      {"round": 1, "region": "East", "game": 1, "winner": 1104},
+      {"round": 1, "region": "East", "game": 2, "winner": 1102}
+    ]
+  }'
+```
+
+### Step 4: Watch the leaderboard
+
+The leaderboard updates in real time as games finish. The same `GET /leaderboard` endpoint serves both the visual leaderboard and a JSON version for agents that want to track their standing.
+
+## Deeper Analysis: What Agent-First UX Looks Like
+
+The interesting design choices in BracketMadness are not in the bracket mechanics — those are a thin wrapper over the standard March Madness data. The interesting part is the bifurcated site and what it teaches about agent-facing product design.
+
+**Detect the agent early and route the response.** A single user-agent sniff at the edge lets the server serve two completely different experiences from the same URL. Agents get clean docs; humans get the marketing pitch. Both share the same data layer underneath.
+
+**Avoid the "agent screenshots the page" pattern.** When you give an agent a normal web page, it has to fall back on vision models to interpret screenshots, which is slow and unreliable. A plain-text response with the API spec inline is faster, cheaper, and gives the model a much better chance of getting the call right.
+
+**The leaderboard is the product.** The bracket game itself is a thin wrapper, but the leaderboard turns it into a benchmark. Once you have a leaderboard, every major model release becomes a public comparison. The same pattern works for any product whose quality is hard to measure from the outside.
+
+**Use AI to test AI products.** The founder's closing note is the most underrated lesson: they used AI to generate user personas and agent test users to validate the signup and management flow before launch. There was no time for human QA on a bracket that closes the day after it's announced. AI-driven dogfooding is now table stakes for agent-first products.
+
+## Practical Evaluation Checklist
+
+BracketMadness is a one-off event, so most readers are not going to submit a bracket. The value of the project is the design pattern. If you are building something that should be agent-friendly, here is the checklist the founder's writeup implies:
+
+```text
+| Check                                | What to look for                                              |
+|--------------------------------------|---------------------------------------------------------------|
+| Edge detection                       | Does the server route agents and humans differently?          |
+| Plain-text response                  | Do agents get clean prose docs, not just HTML stripped of CSS?|
+| API spec inline                      | Can the agent run a full flow from one page load?             |
+| JSON endpoints                       | Does every visual page have a JSON twin the agent can call?   |
+| Headless tolerance                   | Does it work with curl, no JS, no cookies?                    |
+| Leaderboard or eval hook             | Is there a way to measure model performance over time?        |
+```
+
+## Security Notes
+
+A few things to keep in mind if you adapt this pattern to a production product:
+
+- **Detection is not security.** User-agent sniffing is trivially spoofed. Treat the bifurcated response as a UX optimization, not an access control. If a request should be authenticated, require authentication.
+- **Plain-text responses can leak structure.** If your API docs reveal internal endpoints, throttle them by source IP or require an API key. The agent path on BracketMadness is intentionally public, but most products are not.
+- **Agent impersonation is real.** Bad actors can spin up an agent that registers dozens of fake accounts to game a leaderboard. Add basic rate limiting and require a verified model identifier (Claude, GPT, Gemini) for any score that counts.
+- **CAPTCHAs will block agents.** If you need a CAPTCHA, expose a non-CAPTCHA API path for verified agents. The friction tradeoff is real: a clean agent path improves UX, but a CAPTCHA-gated path is what stops bot farms.
+
+## FAQ
+
+**Q: Is BracketMadness.ai still running?**
+A: The 2026 March Madness event wrapped in early April 2026. The site is still up for browsing, but no new brackets can be submitted. The design pattern and the source stack are the lasting artifacts.
+
+**Q: How does the agent detection work?**
+A: The server checks for common agent fingerprints on the first request — missing JavaScript execution, HeadlessChrome in the user agent, no image requests — and serves the appropriate response. The same URL works for both audiences; the routing is invisible to the visitor.
+
+**Q: Can any model enter?**
+A: Yes. BracketMadness does not restrict by model vendor. Claude, GPT, Gemini, Llama, Mistral, and any open-source option can register and submit a bracket. The leaderboard ranks them all together.
+
+**Q: What stack is it built on?**
+A: Per the founder, the production stack is Next.js 16, TypeScript, Supabase, Tailwind v4, Vercel, Resend, and Claude Code for about 95% of the build. The whole project shipped in the gap between the bracket announcement and the submission deadline.
+
+**Q: Is the source open?**
+A: The site is not published as open source. The author is the only developer and shipped the MVP in a single weekend. The design pattern is freely reusable, but the code itself is not on GitHub.
+
+## Conclusion
+
+BracketMadness.ai is a small, fun product that doubles as a clean case study in agent-first design. The mechanical insight — detect the agent at the edge, serve it plain text, give it a structured API — is the same one that powers every successful agent-facing product. If you are building something that should be both human- and agent-friendly, this is a 30-minute study project worth reading the source on.
