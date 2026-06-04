@@ -1,0 +1,146 @@
+---
+title: "Oblivus - Affordable GPU Cloud With Per-Minute Billing"
+description: "Oblivus Cloud offers 18,000+ NVIDIA GPUs from $0.29/hr with transparent per-minute pricing, no hidden fees, and 30-second VM provisioning for ML workloads."
+pubDate: "2026-06-04"
+tags: ["gpu-cloud", "ai-infrastructure", "mlops", "self-hosted"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/oblivus-gpu-cloud-platform.webp"
+  alt: "Oblivus GPU Cloud product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Oblivus is a GPU cloud platform offering 18,000+ NVIDIA GPUs starting at $0.29/hour, with transparent per-minute billing, 30-second VM provisioning, and no hidden egress fees — a cost-effective alternative to hyperscaler GPU rentals for ML training and inference.
+
+## Source and Accuracy Notes
+
+Official site: [oblivus.com](https://oblivus.com) · Pricing: [oblivus.com/pricing](https://oblivus.com/pricing) · Availability: [oblivus.com/availability](https://oblivus.com/availability) · Launch post: [Show HN on Hacker News](https://news.ycombinator.com/item?id=35958715). Pricing figures and feature claims reflect the platform's own documentation at the time of writing.
+
+## What Is Oblivus?
+
+Oblivus Cloud is a GPU-as-a-service platform built for developers and ML researchers who need affordable, on-demand access to NVIDIA hardware without the surprise bills that come with hyperscaler GPU rentals. The platform exposes 18,000+ GPUs across 10 SKUs — from RTX 4000s at $0.27/hr to A100s and H100s — with a single REST API and a web console.
+
+The pitch is straightforward: pay for what you use, see exactly what you are paying for, and skip the quota gates and hidden egress fees that have made AWS, GCP, and Azure GPU access painful for indie developers and academic researchers. Per-minute billing means you can spin up a V100 for a 90-minute fine-tuning job, shut it down, and only pay for those 90 minutes — storage and IP address fees freeze when the VM is powered off, so you are not burning money on idle infrastructure.
+
+## Setup Workflow
+
+### Step 1: Create an account and verify billing
+
+Head to [oblivus.com](https://oblivus.com) and sign up with an email address or GitHub account. There is no quota approval process — Oblivus explicitly markets this as a feature for individual researchers, students, and small teams who get blocked by enterprise verification flows on the major clouds. Add a payment method (credit card or business invoicing) and you are ready to provision.
+
+### Step 2: Pick a GPU SKU and region
+
+Browse the [availability page](https://oblivus.com/availability) for the current SKU list. The headline SKUs at launch:
+
+```bash
+# Pricing snapshot from oblivus.com/pricing
+NVIDIA Quadro RTX 4000   $0.27/hr
+Tesla V100               $0.51/hr
+NVIDIA A40               $1.41/hr
+NVIDIA RTX A6000         $1.41/hr
+# Plus 6 additional SKUs (A100, H100 variants) listed on the availability page
+```
+
+Per-minute billing is the default — you are not forced into hourly or monthly commitments. Storage is billed separately at $0.00011/GB/hr for NVMe and $0.00006/GB/hr for HDD, with 3x replication included.
+
+### Step 3: Provision a VM in 30 seconds
+
+From the dashboard, choose your CPU + GPU configuration, storage volume size, and OS image. The `OblivusAI` image ships with CUDA, PyTorch, TensorFlow, and the usual ML libraries pre-installed, so you can jump straight into training without configuring drivers. The platform claims 30-second cold boot — much faster than the 5-10 minute wait typical on AWS p-class instances.
+
+```bash
+# SSH into your new VM
+ssh ubuntu@<vm-ip> -i ~/.ssh/oblivus_key.pem
+
+# Verify GPU is online
+nvidia-smi
+# Expected: shows your chosen GPU model, driver version, memory
+```
+
+### Step 4: Use the API for scripted provisioning
+
+For ML pipelines that need to spin up training jobs on demand, the REST API lets you script the entire lifecycle:
+
+```python
+import requests
+
+API = "https://api.oblivus.com/v1"
+headers = {"Authorization": f"Bearer {OBLIVUS_TOKEN}"}
+
+# Create a V100 VM with PyTorch image
+vm = requests.post(f"{API}/vms", headers=headers, json={
+    "gpu": "tesla-v100",
+    "region": "us-east",
+    "image": "oblivusai-pytorch-2.3",
+    "storage_gb": 200,
+}).json()
+
+print(f"VM {vm['id']} provisioning at {vm['ip']}")
+```
+
+When the training job finishes, call `DELETE /vms/{id}` and the instance tears down immediately — billing stops the same minute.
+
+## Deeper Analysis
+
+### Pricing model
+
+The biggest contrast with hyperscalers is the absence of billable items that show up only at the end of the month. Oblivus pricing is built around three line items: the VM runtime (per minute), the storage volume (per GB per hour), and the public IP (billed only while the VM is running). Free ingress and egress, no NAT gateway fees, no data transfer surprises. A business account unlocks further volume discounts, but the public pricing already undercuts the majors by 50-80% on equivalent SKUs.
+
+This pricing structure is well-suited to bursty workloads — interactive notebooks, hyperparameter sweeps, fine-tuning experiments — where you provision a GPU, run a job, and tear down. Long-running production workloads still benefit, but the savings are most dramatic for users who would otherwise leave a p3.8xlarge instance running 24/7 "just in case."
+
+### Network and storage
+
+Every VM gets 10-40 Gbps public network connectivity depending on SKU. NVMe storage at $0.00011/GB/hr is 3x replicated for durability, which is unusually generous at this price point — many budget clouds skimp on replication to hit their headline storage cost. For ML datasets that are read-heavy during training, this means you do not need to architect a separate high-availability storage layer.
+
+### Quota philosophy
+
+The launch post calls out "no quotas or complex verification processes" as a deliberate design choice. For a researcher running a single fine-tune or a student working on a class project, this is a major quality-of-life improvement over the AWS/GCP experience of requesting quota increases and waiting for approval. The trade-off — Oblivus cannot prevent abuse at the same scale as a hyperscaler — is acknowledged but accepted by the founders as the right call for their target audience.
+
+## Practical Evaluation Checklist
+
+When deciding whether Oblivus fits your workload, work through these checks:
+
+- **Workload shape.** Burst-y, on-demand, or fine-tuning workloads see the biggest savings. Steady 24/7 production fleets are still cheaper on reserved instances elsewhere.
+- **Region coverage.** Confirm the [availability page](https://oblivus.com/availability) shows capacity in a region close to your data and users. Latency matters for inference endpoints.
+- **Image support.** If you need a non-standard image (custom CUDA version, specific framework nightly build), check that the platform supports custom image uploads or whether the `OblivusAI` base image can be extended.
+- **Data residency.** Verify that the chosen region meets any data residency or compliance requirements for your use case.
+- **API maturity.** The REST API is documented, but if you depend on Terraform/Pulumi providers, check whether the community has published one or whether you need to script against the raw API.
+- **Backup policy.** 3x replication covers disk failures but not accidental deletion. Plan for snapshot workflows if your datasets are critical.
+
+## Security Notes
+
+Per the launch documentation, VMs run in isolated virtualization, and the platform provides standard cloud security primitives — VPC isolation, security groups, SSH key-based auth, and TLS for the API. As with any cloud provider, your responsibility is to patch the OS image, rotate SSH keys, and lock down exposed ports.
+
+A few things worth verifying before you commit sensitive workloads:
+
+- Confirm whether the platform is SOC 2 / ISO 27001 certified. For enterprise procurement, this is often a hard requirement.
+- Check the data-at-rest encryption model — is it platform-managed keys only, or can you bring your own KMS keys?
+- Review the abuse-handling process. The "no quotas" stance is friendly to legitimate users but means the platform may respond slowly to anomalous activity on your account.
+
+For ML workloads handling PII or regulated data, the missing compliance certifications at launch mean you should plan a migration path back to a compliant provider if your compliance posture tightens.
+
+## FAQ
+
+**Q: How does Oblivus pricing compare to Lambda Labs, Vast.ai, or RunPod?
+A:** Oblivus undercuts hyperscalers (AWS, GCP, Azure) by 50-80% on equivalent SKUs. Compared to other indie GPU clouds, pricing is competitive — Vast.ai and RunPod often have lower spot prices but less predictable availability, while Lambda Labs targets reserved capacity. The Oblivus differentiator is the explicit no-hidden-fee structure and the 30-second cold boot.
+
+**Q: Can I bring my own container image or Docker setup?
+A:** Yes, the platform supports custom image uploads in addition to the pre-built `OblivusAI` base image. You can also script environment setup via cloud-init on first boot, which is the standard pattern for reproducible ML environments.
+
+**Q: What happens to my data when I delete a VM?
+A:** The compute VM is torn down immediately on delete, but storage volumes persist independently and continue to bill at the per-GB rate. You need to delete the volume separately to stop storage charges. This is the standard cloud pattern but worth noting if you are cost-sensitive.
+
+**Q: Is there a free tier or trial?
+A:** The launch mentions a promo code (HN community) and a free evaluation flow, but the documentation does not advertise a permanent free tier. Check the [pricing page](https://oblivus.com/pricing) for the latest offers.
+
+**Q: Does Oblivus support spot or preemptible instances?
+A:** The launch does not mention spot pricing — pricing is on-demand per minute. If you need interruptible capacity for non-critical training jobs, this is a gap compared to AWS Spot or Vast.ai's bidding model.
+
+## Conclusion
+
+Oblivus Cloud is a sensible choice for ML developers who have been burned by hyperscaler GPU bills and want a more honest pricing model. The 30-second cold boot, per-minute billing, and lack of quota gates address the three biggest pain points indie developers hit on AWS and GCP. The trade-offs — younger platform, smaller compliance footprint, less mature ecosystem — are real but manageable for research, prototyping, and small-team production workloads.
+
+If you are training models on a budget or running a Jupyter notebook server that only needs a GPU during business hours, the $0.27/hr RTX 4000 and $0.51/hr V100 SKUs are worth a serious look. For multi-GPU training jobs, A100 and H100 capacity is available but you will want to verify regional availability for your timeline.
