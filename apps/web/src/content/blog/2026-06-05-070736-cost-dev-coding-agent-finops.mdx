@@ -1,0 +1,205 @@
+---
+title: "Cost.dev - FinOps for AI Coding Agents and IaC"
+description: "Cost.dev (YC W21) is a CLI that makes Claude Code, Cursor, and Codex cost-aware. Region-accurate pricing, FinOps policies, and 79% token savings."
+pubDate: "2026-06-05"
+tags: ["ai-coding", "finops", "dev-tools", "terraform", "yc-w21"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cost-dev-coding-agent-finops.webp"
+  alt: "Cost.dev FinOps cloud cost awareness for coding agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cost.dev (formerly Infracost CLI) is a redesigned FinOps tool that runs locally and gives Claude Code, Cursor, Copilot, and other coding agents region-accurate cloud pricing for Terraform, CloudFormation, and CDK — cutting Claude's output tokens by up to 79% and API cost by up to 67% on real benchmark questions.
+
+## Source and Accuracy Notes
+
+- Product site: [https://cost.dev](https://cost.dev)
+- Pricing: [https://www.infracost.io/pricing](https://www.infracost.io/pricing)
+- CLI install docs: [https://www.infracost.io/docs](https://www.infracost.io/docs)
+- Token-optimization writeup by the team: [We cut Claude's token usage 79% by redesigning our CLI for agents](https://www.infracost.io/resources/blog/we-cut-claude-s-token-usage-79-by-redesigning-our-cli-for-agents)
+- Launch HN: [Show HN: Cost.dev (YC W21) - making agents cost-aware and cheaper to call](https://news.ycombinator.com/item?id=48397148) (29 points, 4 June 2026)
+- The Infracost team relaunched the existing CLI under the new name `cost.dev` after rebuilding it from the ground up for AI-agent callers. The CLI binary is still published as `infracost`.
+
+## What Is Cost.dev?
+
+Cost.dev is the agent-first evolution of the Infracost CLI. The original Infracost has been a FinOps standard for years — a CLI that reads Terraform and prints a cost delta on every PR. Cost.dev keeps that workflow but redesigns the binary and the output format around the assumption that the caller is a coding agent, not a human in a terminal.
+
+The redesign came from observing something the team did not expect: coding agents were already calling Infracost as a subprocess. Logs showed Claude Code, Cursor, and Copilot shells invoking the CLI on their own. The original tool was not built for that caller, so the team rebuilt the binary to make every byte count when the consumer is a model.
+
+The result is a CLI that:
+
+- Reads Terraform, CloudFormation, and AWS CDK and returns a region-aware monthly cost estimate for every change.
+- Supports 1,000+ services across AWS, Azure, and GCP with prices pulled from vendor feeds.
+- Exposes a token-efficient `-llm` output path that strips redundant JSON field names and pushes predicates into the CLI instead of forcing the agent to compose `jq | python | wc` pipelines.
+- Drops into Claude Code, GitHub Copilot, OpenAI Codex, Cursor, Gemini CLI, and IDEs like VS Code, JetBrains, Cursor, Windsurf, Antigravity, VSCodium, Eclipse, Theia, and Neovim.
+- Ships an agent skill file (`infracost-scan`) that Claude Code loads automatically when it sees the binary on PATH.
+
+The free tier is the local CLI plus 1,000 Infracost Cloud runs per month. The paid Cloud tier adds custom price books, FinOps policy enforcement, custom tagging rules, and central guardrails ($250/mo Starter, $1,000/mo Cloud plan).
+
+## Why a CLI Built for Agents
+
+Cloud pricing is one of those problems where LLM hallucinations are expensive and hard to spot. There are roughly 10M price points across AWS, Azure, and GCP, and instance families, region modifiers, and savings plan discounts interact in ways that models routinely get wrong. Telling an agent "make this Terraform cost-optimized" without grounding it in real numbers burns tokens loading context and still produces a guess you cannot trust.
+
+The Infracost team's May 2026 benchmark illustrates the gap. They asked 16 questions across a 3-project Terraform fixture with 1,171 resources, ran each one 5 times, and compared three configurations:
+
+```bash
+# bare-tf:    Claude with Bash + Read, no skill
+# skill-llm:  Claude with the infracost-scan skill + -llm output
+# skill-json: Claude with the same skill + -json output
+```
+
+One concrete question: "Count distinct resources failing the tagging policy, deduplicated across projects." Bare Claude burned $3.51 writing Python parsers against the JSON, hit the 25-turn cap, and returned no answer. With the redesigned CLI, the same question cost $0.25 and returned the right number.
+
+Across the 16-question battery, the redesigned CLI cut Claude's output tokens by up to 79% and API cost by up to 67% versus the bare-Claude baseline. The win comes from two design moves:
+
+```bash
+# 1. Push predicates into the CLI, not into shell pipelines
+infracost breakdown --path plan.json --format json \
+  --filter "resource_type=aws_lambda_function" \
+  --group-by "tags.Environment"
+
+# 2. Strip redundant field names on the LLM output path
+infracost breakdown --path plan.json --format llm
+# → "monthly: $612 → $378 · saves $234/mo (38%)"
+```
+
+The first move keeps the agent from re-parsing the same large JSON blob with `jq` chains. The second move replaces verbose JSON keys with short, agent-friendly summary lines that still preserve every number the agent needs to reason about.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+Cost.dev ships the same `infracost` binary as the previous product. The free, self-serve path is the local CLI — no account, no API key, no telemetry required to run a single breakdown.
+
+```bash
+# macOS
+brew install infracost
+infracost --version   # Should show 2.2.5 or later
+
+# Linux (install script)
+curl -fsSL https://raw.githubusercontent.com/infracost/cli/master/scripts/install.sh | sh
+
+# Windows
+choco install infracost
+infracost --version
+```
+
+### Step 2: Register for the Cloud Add-on (Optional)
+
+The local CLI is free forever for read-only breakdowns. To unlock custom price books, FinOps policy enforcement, custom tagging, and central guardrails, register an Infracost Cloud API key:
+
+```bash
+infracost auth login
+# Opens browser, returns an API key, writes it to ~/.config/infracost/credentials.yml
+```
+
+The free Infracost Cloud tier ships 1,000 CI/CD runs per month. Starter ($250/mo) bumps that to 10,000 runs and adds email support; Cloud ($1,000/mo) is the team plan with policy-as-code guardrails.
+
+### Step 3: Wire It Into Claude Code
+
+The agent skill ships with the CLI. Once `infracost` is on your PATH, Claude Code auto-discovers the `infracost-scan` skill from the standard `.claude/skills/` location on its next session.
+
+```bash
+# Verify the skill is visible
+ls ~/.claude/skills/infracost-scan/SKILL.md
+
+# Ask Claude Code to use it
+# "Run infracost breakdown on ./infra and show me what would change if I dropped the db.r5.2xlarge to db.t4g.large."
+```
+
+For Cursor, Copilot, and other tools that do not auto-load skills, the install script registers the binary the same way; the agent calls it as a subprocess.
+
+### Step 4: Drop Into a Terraform Repo
+
+```bash
+cd my-terraform-repo
+infracost breakdown --path .
+# → prints a per-resource monthly cost table for the current state
+
+# Compare a branch against main
+infracost diff --path . --compare-to main
+# → "$+340/mo · 1 new aws_nat_gateway, 1 resized aws_db_instance"
+```
+
+For pull-request automation, follow the Infracost CI/CD integration docs for GitHub Actions, GitLab, or Azure DevOps. The free tier covers 1,000 runs/mo on the Cloud plan.
+
+## Deeper Analysis
+
+### What the Token-Optimized Output Path Looks Like
+
+The `-llm` output format is the smallest practical payload the team could land on. For a cost-tradeoff question, it produces a single sentence that includes every number an agent needs:
+
+```bash
+$ infracost breakdown --path plan.json --format llm
+monthly: $612 → $378 · saves $234/mo (38%)
+m6g.large meets your performance budget at the target price.
+```
+
+The same scenario in raw JSON would print the full price graph — region, instance family, savings plan tier, monthly hours, on-demand rate — for every resource the model has to scan. The `-llm` path pre-computes the answer and ships only the delta plus a one-line justification.
+
+### Custom Price Books and Org Guardrails
+
+On the Cloud plan, the team can roll out a custom price book with negotiated Enterprise Discount Program (EDP) rates, RI/Savings Plan effective rates, and internal commitments. Agents calling the CLI then see the same dollar figure the finance team sees — not the public on-demand rate.
+
+Guardrails go further. A team can declare `monthly_max: $5,000` for a project, and the CLI will refuse to return a "stack is fine" verdict if the proposed plan exceeds that ceiling. In the agent's chat, this surfaces as a refusal to scaffold an over-budget architecture and a suggestion for a cheaper alternative:
+
+```bash
+claude-code · custom-policy
+> scaffold the new analytics pipeline I described
+
+# priced the stack against your org's pricebook + policies
+# EKS + Kafka + Redshift  $6,240/mo
+# guardrail monthly_max $5,000
+
+# This stack exceeds your team's $5K/mo budget by $1,240.
+# I can swap Redshift for BigQuery + scale Kafka to 2 brokers — same throughput, $4,680/mo.
+# Apply alternative / Request exception
+```
+
+### Tag-Compliance Backlog in One PR
+
+Tag drift is the FinOps work item that never closes. The CLI reads the org's tagging policy, scans every Terraform module, and emits a single PR that propagates the required tags through every resource. The team behind Cost.dev had a customer go from a 1-engineer full-time backlog to zero tagging violations on day one.
+
+## Practical Evaluation Checklist
+
+- [ ] **Local-first run.** `brew install infracost && infracost breakdown --path .` on a real repo returns a cost table in under 10 seconds with no account.
+- [ ] **Token-cost probe.** Run a "make this cheaper" prompt in Claude Code with and without the `infracost-scan` skill loaded. Watch the API cost delta in the Claude Code HUD.
+- [ ] **Multi-cloud sanity check.** Ask the agent "is a 3-tier app cheaper on AWS or GCP" against a real fixture. The CLI returns side-by-side numbers; the agent should not have to estimate.
+- [ ] **CI/CD smoke test.** Add the GitHub Actions integration on a feature branch, open a PR, confirm the cost comment posts within 2 minutes.
+- [ ] **Free-tier ceiling.** Track monthly runs. Once you cross 1,000 CI invocations, evaluate the $250/mo Starter tier before overage charges appear.
+
+## Security Notes
+
+- **Code never leaves the machine.** The CLI does static analysis on the local plan file; cloud calls only fetch vendor price feeds. There is no upload of IaC to a server in the default workflow.
+- **API key scope.** `infracost auth login` writes the Cloud key to `~/.config/infracost/credentials.yml` with read access to the registered org. The CLI does not need the key to run local breakdowns.
+- **Custom price books and policies** are org-scoped. Agents calling the CLI from outside the org see public on-demand rates only, not the negotiated price book.
+- **Skill file is local.** The `infracost-scan` skill ships inside the CLI; there is no third-party skill marketplace dependency. The binary itself is open source at [github.com/infracost/cli](https://github.com/infracost/cli) — verify the checksums on release.
+
+## FAQ
+
+**Q: Is Cost.dev a different product from Infracost?**
+A: Same team, same binary, same name on the wire. The May 2026 rebrand grouped the CLI and the Cloud platform under a unified product story, but the CLI binary is still published as `infracost`. Install via `brew install infracost` or the install script.
+
+**Q: Do I need an Infracost Cloud account to use the CLI?**
+A: No. The local CLI is free for read-only cost breakdowns with no account, no API key, and no telemetry. The Cloud account unlocks custom price books, FinOps policies, and central guardrails — none of which the local CLI requires.
+
+**Q: How does it integrate with Claude Code, Cursor, and Copilot?**
+A: The CLI ships an agent skill file that Claude Code auto-loads when it finds the binary on PATH. Cursor, Copilot, Gemini CLI, Codex, and the other supported tools call `infracost` as a subprocess through the IDE extension. All five coding agents and ten IDEs are listed on the Cost.dev integrations page.
+
+**Q: What is the difference between `-format json` and `-format llm`?**
+A: `-format json` returns the full price graph — useful for CI comments and dashboards. `-format llm` returns a token-optimized summary line per question, designed for coding agents. The team's benchmark shows the `-llm` path cuts Claude's output tokens by up to 79% and total API cost by up to 67% versus letting Claude parse raw JSON with `jq`.
+
+**Q: What clouds and services are supported?**
+A: 1,000+ services across AWS, Azure, and Google Cloud. Terraform, CloudFormation, and AWS CDK are all supported. The price feed is updated continuously from each cloud vendor.
+
+**Q: Is the CLI open source?**
+A: Yes. The CLI source is at [github.com/infracost/cli](https://github.com/infracost/cli). The Infracost Cloud platform (custom price books, FinOps policies, central guardrails) is a hosted product with a 14-day free trial.
+
+## Conclusion
+
+Cost.dev is the rare FinOps tool that gets meaningfully better when an agent is in the loop. The token-optimized output path, the predicate-friendly CLI shape, and the agent skill file turn "cloud cost reasoning" from a 25-turn hallucination marathon into a single subprocess call that returns the right dollar figure. The free local CLI is the easiest way to try it; the Cloud tier is the way to roll it out across a team with custom price books and org-level guardrails. If you ship Terraform, CloudFormation, or CDK and you have a coding agent in the loop, the install is a five-minute experiment.
