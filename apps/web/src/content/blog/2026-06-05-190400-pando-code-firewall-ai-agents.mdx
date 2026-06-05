@@ -1,0 +1,159 @@
+---
+title: "Pando - CAD for Code: 10-100x Faster AI Coding Agents"
+description: "Pando is a code firewall for AI agents that indexes your AST and gives Claude, Gemini, and Codex compiler-checked edits, atomic snapshots, and 100x token savings."
+pubDate: "2026-06-05"
+tags: ["ai-agents", "code-tools", "mcp", "developer-tools", "ai-coding"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pando-code-firewall-ai-agents.webp"
+  alt: "Pando CAD for code firewall for AI agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Pando ("CAD for code") is a code firewall that sits between AI agents and your codebase. It persists an indexed AST in a database, exposes a typed handle-and-signature API over MCP, and replaces the agent's text-based read/edit pipeline with compiler-checked atomic operations — claimed 10-100x faster, 100x+ token savings, and instant undo via auto-snapshots, with no source code ever leaving the developer's machine.
+
+## Source and Accuracy Notes
+
+- Official site: [getpando.ai](https://getpando.ai)
+- Show HN launch: [item?id=47169180](https://news.ycombinator.com/item?id=47169180) (11 points, 5 comments)
+- Author: George Ciobanu (solo founder, humansoftware)
+- License: Free for personal use; VS Code extension + MCP server
+- Language support at launch: TypeScript, JavaScript, Python, C/C++, C# — Java, Rust, Go, Clojure, R, Perl, Swift, Kotlin listed as "coming soon"
+- The 10-100x speed and 100x token figures are the founder's claims from the launch post, not independent benchmarks; treat as design targets, not measured results
+
+## What Is Pando?
+
+Pando is positioned as "CAD for code." The metaphor is deliberate: just as CAD tools give engineers precise handles on geometry instead of asking them to manually edit point clouds, Pando gives AI agents precise handles on code instead of asking them to read and rewrite text.
+
+The core problem the founder describes is one most people running AI agents have hit: "AI agents read and edit code as if it's just text. But code is more, much more: it has structure, syntax, relationships, and meaning." When the agent has to rename a symbol used in 200 places, it has to find all 200 occurrences, paste them into the prompt, pay for the inference, and stream the response back. Pando reframes the operation: the rename costs the same 40-ish tokens whether the symbol has 1 reference or 1,000, because the agent hands a single semantic intent to Pando, and Pando performs the edit locally against the persisted AST.
+
+The product ships as a VS Code extension and an MCP server. The model is "your code, your machine, your secrets" — the agent never sees the source, only the intent and the result.
+
+## Why "CAD for Code" Matters
+
+The launch post makes a specific argument about the current state of AI coding tools:
+
+1. **Correct Syntax.** Every edit is compiler-checked at apply time. You can force a syntactically invalid edit if you really want, but by default the model cannot ship broken code.
+2. **Always Safe.** Pando takes a snapshot of the file after every change. "Undo" is one click, no matter what the agent did.
+3. **10-100x Faster.** Text-based agents read context, send it to the LLM, wait for inference, and stream the response. Pando edits the file directly on disk, typically in seconds.
+4. **Token Savings.** The founder claims more than 100x token compression for symbol-level operations like rename. A single MCP call replaces a multi-kilobyte context dump.
+5. **Reduced Exposure.** The agent sends the intent of the transform — not your code — to the LLM provider. For some operations, the LLM sees nothing proprietary at all.
+
+The pitch is essentially: the bottleneck for AI coding agents in 2026 is not model quality, it is the I/O surface between the model and the codebase. Most of the latency, cost, and risk lives there. Pando replaces the I/O surface.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the VS Code Extension
+
+The extension is the canonical install. It runs a local server that indexes your workspace and exposes the typed API.
+
+```bash
+# From the VS Code marketplace
+code --install-extension humansoftware.pando-extension
+```
+
+After install, the extension starts indexing the open workspace. A status bar indicator shows indexing progress. Once complete, the project is queryable from any MCP-compatible agent.
+
+### Step 2: Connect an MCP-Compatible Agent
+
+Pando speaks MCP (Model Context Protocol), so any agent that supports MCP servers works out of the box. The pattern is the same as connecting any other MCP tool — point the agent at the local Pando server.
+
+For Claude Code, the configuration lives in `~/.claude/mcp_servers.json`:
+
+```json
+{
+  "mcpServers": {
+    "pando": {
+      "command": "pando-mcp",
+      "args": ["serve"],
+      "env": {
+        "PANDO_PROJECT_ROOT": "/absolute/path/to/your/repo"
+      }
+    }
+  }
+}
+```
+
+For Codex and Gemini CLI, the equivalent is to register Pando in their MCP configuration files. The point is the same: Pando runs on your machine, the agent talks to it locally, and your source never leaves your machine.
+
+### Step 3: Try the First Operation
+
+The simplest smoke test is a rename. Open any TS or Python project in VS Code with the Pando extension running, then ask Claude Code:
+
+```text
+Rename the function `parseUserInput` to `parseUserRequest` everywhere it is used.
+```
+
+Compare the round trip: Pando performs the rename in seconds and shows a diff, while a text-only agent would read each call site, send a large context window, and stream back a proposed edit. The token meter on the agent side makes the difference obvious.
+
+### Step 4: Verify the Snapshot Trail
+
+Pando's auto-snapshot lives alongside your file. You can roll back any edit:
+
+```bash
+# List recent snapshots
+pando history --last 20
+
+# Roll back the last edit
+pando undo
+
+# Roll back to a specific snapshot
+pando restore <snapshot-id>
+```
+
+This is the practical answer to the "agent deleted production data" failure mode — the change is reversible in one command, not recoverable from a git push.
+
+## Practical Evaluation Checklist
+
+Before adopting Pando in a real codebase, walk through this list:
+
+- [ ] Confirm your primary language is supported at launch (TS, JS, Python, C, C++, C#). Other languages are listed as coming soon.
+- [ ] Open a representative project in VS Code and let Pando index it. Check the index size in the status bar — projects over a few hundred thousand LOC may take a while.
+- [ ] Run a rename on a symbol with at least 50 references and compare token usage against your usual text-based agent.
+- [ ] Trigger an edit the model would normally get wrong (e.g. a function that is also a class member) and verify the compiler-checked guard actually blocks it.
+- [ ] Audit the network traffic during a Pando operation. The claim is "no source code leaves the machine" — verify it with a packet capture or a sandbox.
+- [ ] Test the snapshot-and-undo flow under load: roll back a 200-file refactor and confirm the working tree returns to a clean state.
+
+## Security Notes
+
+The architecture's security story has two halves:
+
+**What Pando does well:** The local-server design means the agent does not exfiltrate source code to a third party. Pando itself runs on the developer's machine and is open source (the launch post links the VS Code extension and references the human-software org). Snapshots make destructive edits recoverable, which is the most common production-failure mode for autonomous agents.
+
+**What to watch for:** The MCP server still passes the agent's intent to Pando. If a prompt-injection attack in a third-party MCP tool convinces the model to issue a malicious "delete this file" intent, Pando's job is to execute it efficiently, not to question it. Treat the existing Pando install like any other privileged local service: gate the MCP server behind the same approval flow you use for `rm -rf` on the host.
+
+The "firewall" framing in the marketing is honest about the threat model — Pando protects your source code from the agent, not the agent from a malicious prompt.
+
+## FAQ
+
+**Q: How is Pando different from LSP-based tools or from AI coding assistants that already understand code structure?**
+
+**A:** LSP and tools like tree-sitter are built for human-driven editors — they expose diagnostics, completions, and go-to-definition. Pando is built for autonomous agents: it persists the AST in a database, exposes it as a typed MCP API, and guarantees that the model's output compiles. The differentiating claim is the MCP + AST-DB + compiler-checked-gate combination, not any single piece of it.
+
+**Q: Does Pando work without VS Code?**
+
+**A:** At launch, the VS Code extension is the install path. The MCP server itself can be run standalone (the `pando-mcp serve` command), so any MCP-compatible agent that can reach the local socket should work. Headless CI usage is feasible but the docs and installer are VS Code-first.
+
+**Q: What about agent frameworks like LangChain or CrewAI that already have their own code tools?**
+
+**A:** The same MCP integration path applies — register Pando as an MCP server in the framework, and the agent's code tool calls get routed through Pando instead of the framework's default text-based code loader. There is no Pando-specific adapter per framework.
+
+**Q: Is Pando free?**
+
+**A:** Free for personal use according to the launch post. Pricing for team or commercial use is not announced on the site as of the post date.
+
+**Q: Can Pando index a monorepo with multiple languages?**
+
+**A:** It can, but the language support determines which trees get a full AST and which fall back to text. A TS monorepo with some Python scripts is well-supported; a polyglot monorepo with Rust, Go, and Kotlin will see partial coverage until those languages ship.
+
+## Conclusion
+
+Pando is a focused bet that the next big unlock for AI coding agents is not a better model but a better substrate between the model and the file system. The "CAD for code" framing is more than marketing — it implies a different relationship between the agent and the code, where the agent submits intents and the substrate applies them, rather than the agent producing diffs and hoping they compile.
+
+It is worth a 30-minute test drive on a real project: install the extension, point an MCP agent at it, run a rename, and look at the token meter. The 10-100x speed claim is most credible on the operations that scale with codebase size — renames across many references, large refactors, and bulk dependency upgrades. For small edits on small files, the overhead of the AST index may not pay off yet.
+
+If the model-side cost and latency of AI coding agents is the limiting factor in your current setup, Pando is one of the few products shipping in mid-2026 that is genuinely attacking the problem at the I/O layer.
