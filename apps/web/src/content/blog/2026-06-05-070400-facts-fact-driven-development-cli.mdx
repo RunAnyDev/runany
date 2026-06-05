@@ -1,0 +1,167 @@
+---
+title: "Facts: Spec and Verification Workflow for AI Coding"
+description: "Facts turns project claims into checkable records for coding agents, with lifecycle tags and CLI verification. This guide covers install, workflow, commands, and where it fits in real teams."
+pubDate: "2026-06-05"
+tags: ["github-trending", "rust", "specification", "testing", "claude-code"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/facts.webp"
+  alt: "Facts GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** `av/facts` is small Rust CLI with unusually sharp idea: write project truths as atomic facts, verify them with commands, and let coding agents move them from draft to spec to implemented. It is useful when normal issue trackers are too vague and normal tests do not explain product intent.
+
+## Source and Accuracy Notes
+
+- Official repo: [av/facts](https://github.com/av/facts)
+- Official wiki used here: [Facts CLI Reference](https://github.com/av/facts/wiki/Facts-CLI-Reference) and [Facts with AI Agents](https://github.com/av/facts/wiki/Facts-with-AI-Agents)
+- This post reflects public README and wiki content available on June 5, 2026.
+
+## What Is Facts?
+
+Facts is a Rust CLI for fact-driven development. Instead of keeping requirements buried in tickets, chat threads, or bloated specs, it stores them as short atomic claims in `.facts` files. Each claim can carry lifecycle tags like `@draft`, `@spec`, and `@implemented`, plus optional verification command.
+
+That makes project intent readable by humans and operable by agents.
+
+Simple example from README looks like this:
+
+```yaml
+# auth
+- users authenticate via OAuth2 @implemented
+- failed logins rate-limited to 5 per minute @spec
+- label: bcrypt password hashing with cost factor 12
+  command: grep -q 'bcrypt.*12' src/auth.ts
+```
+
+This is why tool feels different from generic checklist app. A fact can be plain language, but it can also be machine-checked. Agents then get tight loop between goal, implementation, and proof.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the tool
+
+README offers two primary install paths. Fastest manual path:
+
+```bash
+curl -fsSL https://av.codes/facts.sh | sh
+```
+
+Other supported paths include npm and pipx:
+
+```bash
+npm install -g @avcodes/facts
+pipx install facts-cli
+```
+
+Project describes itself as single Rust binary with minimal dependencies, which keeps adoption friction low.
+
+### Step 2: Initialize a repo
+
+Official scaffold flow is:
+
+```bash
+cd your-project
+facts init
+facts check
+```
+
+You can also initialize separate domain sheet such as `api.facts` with `facts init api`.
+
+### Step 3: Skim facts, then verify
+
+Wiki highlights `ll` alias as most common skim view and `check` as verification entry point:
+
+```bash
+facts ll
+facts check
+```
+
+`facts ll` expands to `list --light`, which intentionally hides extra noise and is designed for quick scanning by both humans and agents.
+
+### Step 4: Let agents use bundled skills
+
+`facts init` installs bundled skills. Wiki names four of them:
+
+- `facts`
+- `facts-discover`
+- `facts-refine`
+- `facts-implement`
+
+Those matter because repo is not only CLI syntax. It ships operating model for AI agents: discover current truths, refine vague drafts, implement specs, verify, then retag.
+
+### Step 5: Use filters aggressively
+
+CLI reference shows most useful pattern is selective work, not dumping whole file every time:
+
+```bash
+facts ll --search "auth and (login or token)" --depth 3
+facts check --tags "mvp and not blocked"
+facts check --file api.facts
+```
+
+This is important for large repos. Facts stays context-friendly because you can narrow by tags, search, section path, depth, or file.
+
+## Deeper Analysis
+
+Facts solves real problem in AI coding era: tests tell you whether code behaves a certain way, but they often do not tell agent what must be true about product.
+
+A normal ticket might say "improve auth." A fact can say "failed logins rate-limited to 5 per minute @spec" and attach shell command later. That is much more actionable.
+
+Three strengths stand out.
+
+**1. Spec is tiny enough to fit in model context.** README explicitly leans into this. Facts are short claims, not long design docs. That makes them easier for agent to re-read each session.
+
+**2. Lifecycle tags create permission model.** `@draft` means fuzzy idea, `@spec` means ready to build, `@implemented` means verified truth. That is cleaner than asking agent to guess whether note is aspirational or already shipped.
+
+**3. Verification is built in.** `facts check` gives objective signal. That matters because many agent workflows still stop at "I think this is done."
+
+There are tradeoffs too.
+
+- Someone still needs discipline to keep facts current.
+- Atomic-claim style is best for engineering truth, less ideal for ambiguous product strategy.
+- Teams already invested in heavyweight requirements tooling may see duplication unless they choose clear boundary for facts.
+
+Still, for codebases that now mix human and agent implementation, this repo is unusually well aimed. It narrows ambiguity without demanding giant process layer.
+
+## Practical Evaluation Checklist
+
+- Use Facts if your team often says "the agent changed it, but not for the right reason."
+- Start with one domain like auth, billing, or API guarantees rather than whole-company migration.
+- Prefer command-backed facts for security invariants and regression-sensitive rules.
+- Use `facts ll` and `facts check` as default session preflight for agent work.
+- Combine with repo-memory tools if you need broader intent history, not only current truths: [/blog/mainline-git-native-agent-memory/](/blog/mainline-git-native-agent-memory/).
+
+## Security Notes
+
+- Verification commands are shell commands. Review them like any executable project automation.
+- Do not put secrets inside `.facts` commands or labels; treat files as normal repo content.
+- If agents can edit fact files automatically, require review for sensitive domains like auth or billing so lifecycle tags do not become false proof.
+- Skills installed into agent directories influence coding behavior. Audit bundled or updated skill content before adopting in regulated environments.
+
+## FAQ
+
+**Q: Is Facts replacement for tests?**
+
+**A:** No. It sits above tests. Facts define what should be true and can point to checks, but they do not replace normal unit, integration, or end-to-end coverage.
+
+**Q: Why not keep this in README or issue tracker?**
+
+**A:** README is broad and issue trackers are noisy. Facts gives short, filterable, command-checkable project truths designed for repeated agent consumption.
+
+**Q: Can it work without AI agents?**
+
+**A:** Yes. It is still useful as human-readable spec and verification CLI. Agent skills make workflow stronger, but core tool does not depend on them.
+
+**Q: What command should teams learn first?**
+
+**A:** `facts ll` and `facts check`. One gives compact truth map, other tells you what is verified right now.
+
+## Conclusion
+
+Facts is narrow tool with strong edge. It does not try to replace ticketing, docs, or tests. It gives coding agents and reviewers a compact truth layer between those systems. That is why repo is gaining attention.
+
+If your team has entered phase where implementation is cheap but alignment is expensive, Facts is worth piloting on one subsystem immediately.

@@ -1,0 +1,156 @@
+---
+title: "Tessera: Multi-Agent Workspace for Claude Code and Codex"
+description: "Tessera organizes Claude Code, Codex, and OpenCode into one workspace with panes, tabs, worktrees, and Git status. This guide covers install paths, first run, architecture, and adoption tradeoffs."
+pubDate: "2026-06-05"
+tags: ["github-trending", "claude-code", "codex", "typescript", "developer-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tessera.webp"
+  alt: "Tessera GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tessera is one of most opinionated open-source workspaces for parallel AI coding. Instead of giving you one chat box per repo, it turns sessions, tabs, worktrees, diffs, and Kanban state into shared workspace primitives for Claude Code, Codex, and OpenCode.
+
+## Source and Accuracy Notes
+
+- Official repo: [horang-labs/tessera](https://github.com/horang-labs/tessera)
+- npm package: [@horang-labs/tessera](https://www.npmjs.com/package/@horang-labs/tessera)
+- This post uses project README and published package metadata from June 5, 2026.
+- Current package version in `package.json` is `0.1.6`, with Node `>=20` and npm `>=10`.
+
+## What Is Tessera?
+
+Tessera is a local web and desktop workspace for managing many AI coding sessions at once. It supports Claude Code, Codex, and OpenCode, then wraps them in persistent UI primitives: projects, collections, sessions, tabs, panes, worktrees, diffs, branch state, and pull-request status.
+
+That framing is important because most AI coding products still assume one-thread-at-a-time workflow. Tessera assumes opposite. You might have research session in one pane, implementation task in another, a review branch open in a worktree, and a Kanban column tracking what is ready for merge.
+
+README repeatedly leans on phrase "keep parallel AI coding work organized." After reading install and technical notes, that is accurate. Repo is less about better prompting and more about better coordination surface around existing agent CLIs.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Pick runtime
+
+Tessera ships in three modes:
+
+- Desktop app from GitHub Releases
+- Browser runtime via global npm package
+- Docker Compose deployment
+
+Desktop is easiest if you want packaged macOS, Windows, or Linux beta app. Browser runtime is lighter if you already trust local Node app.
+
+### Step 2: Install browser runtime
+
+README gives direct npm flow:
+
+```bash
+npm install -g @horang-labs/tessera
+tessera
+```
+
+Open printed local URL after launch. Package metadata says Node 20+ and npm 10+ are required, so older system Node installs will fail before you reach UI.
+
+### Step 3: Or run Docker Compose
+
+For isolated local deployment, repo includes compose path:
+
+```bash
+mkdir -p data/config data/local data/ssh data/codex data/tessera workspaces
+touch data/gitconfig
+docker compose up --build -d
+```
+
+Docs point you to `http://127.0.0.1:32123` after startup. If bind mounts are not writable, docs recommend changing ownership of `data` and `workspaces` to UID `1000`.
+
+### Step 4: Authenticate provider CLIs first
+
+First-run flow checks whether supported CLI is installed and authenticated. README explicitly mentions examples like:
+
+```bash
+claude login
+codex login
+```
+
+This is one of repo's strongest practical signals. Tessera does not pretend to replace provider auth or models. It sits on top of real CLIs, so your existing billing, permissions, and model availability stay with those tools.
+
+### Step 5: Start with project, then convert chat into task
+
+First run walks through local account creation for browser runtime, project-folder selection, and starting either chat or worktree-backed task. Once task becomes implementation work, worktree state becomes central object alongside conversation state.
+
+## Deeper Analysis
+
+Tessera is compelling because it models AI coding as workspace problem, not prompt problem.
+
+Most teams already know what breaks when multiple agent sessions run in parallel:
+
+- which branch belongs to which chat?
+- where did that diff come from?
+- which pane still owns terminal focus?
+- which task is research versus implementation?
+- which worktree is safe to delete?
+
+Tessera makes those questions first-class.
+
+Project docs point to several differentiators.
+
+**1. Worktrees are not afterthought.** Git worktree tracking is embedded into list view, Kanban flow, and session metadata. That is much more useful than generic "recent chats" dashboard.
+
+**2. Provider normalization matters.** Technical section says Claude Code `stream-json`, Codex `app-server` JSON-RPC, and OpenCode ACP events are translated into shared realtime message model. That is hard, necessary plumbing. Without it, multi-provider UI becomes thin wrapper. With it, one workspace can show tool calls, prompts, approvals, diffs, and session state consistently.
+
+**3. Composer is context object, not textbox.** README highlights `@` references, model choice, permissions, reasoning controls, attachments, and voice input in browser runtime. That makes sense for multi-session work where context routing is half task.
+
+**4. Browser and desktop share local runtime.** Package notes say desktop and browser runtimes share same local server, provider layer, and app-data directory model. That is cleaner than separate Electron-only logic.
+
+Tradeoffs remain.
+
+- This is substantial local app, not tiny CLI helper.
+- You still need underlying CLIs installed and working.
+- Linux support is beta.
+- Operational complexity is higher than running plain `codex` in terminal.
+
+But complexity maps to real need. If you only run one agent session at once, Tessera is too much. If you juggle five, it becomes easier to justify.
+
+## Practical Evaluation Checklist
+
+- Use Tessera if your bottleneck is session coordination, not raw model quality.
+- Prefer desktop release if you want lowest-friction local install across team members.
+- Prefer npm runtime if you want transparent local server and easier scripting.
+- Test your exact provider mix. Repo documents Claude Code, Codex, and OpenCode as supported today.
+- Validate worktree lifecycle before putting it in daily workflow: branch naming, cleanup, PR creation, and merge expectations.
+- Pair it with repo-memory tools when parallel work starts colliding: [/blog/mainline-git-native-agent-memory/](/blog/mainline-git-native-agent-memory/) is strong complement.
+
+## Security Notes
+
+- Tessera relies on provider CLIs you authenticate separately. Secret handling quality still depends on those underlying tools.
+- Browser runtime stores local workspace state, attachments, settings, and session history under local app-data directory. Review that storage location before using on shared machines.
+- Worktree automation means more branches and copies of repo state on disk. Clean old worktrees in sensitive repos.
+- Voice input is browser-runtime only. Disable it if microphone permissions are not acceptable in your environment.
+- If you use OpenCode bridge for local or air-gapped models, verify model/provider configs separately; Tessera exposes them, it does not harden them.
+
+## FAQ
+
+**Q: Is Tessera another model provider?**
+
+**A:** No. It is workspace layer over existing CLIs. You still authenticate Claude Code, Codex, or OpenCode separately.
+
+**Q: Does it support Git workflows directly?**
+
+**A:** Yes. Project docs describe commit, push, PR creation, merge actions, diff inspection, branch state, and managed worktree tracking inside workspace.
+
+**Q: Why would I use this instead of several terminal tabs?**
+
+**A:** Tabs alone do not preserve task ownership, worktree linkage, provider controls, PR state, or Kanban progression. Tessera turns those into explicit objects.
+
+**Q: Is desktop app required?**
+
+**A:** No. Repo supports browser runtime via npm and local Docker deployment. Desktop app is one install path, not only one.
+
+## Conclusion
+
+Tessera is early, but premise is sharper than many AI coding launch projects. It assumes sessions multiply faster than humans can manually track them, then builds around that operational truth. README and package metadata show real attention to provider normalization, worktree management, and persistent workspace state.
+
+If your current workflow is one repo, one branch, one agent, stay with terminal. If your workflow is three branches, six sessions, and constant context switching, Tessera is exactly kind of tool worth testing now.

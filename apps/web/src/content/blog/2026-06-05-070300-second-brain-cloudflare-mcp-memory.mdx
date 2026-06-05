@@ -1,0 +1,167 @@
+---
+title: "Second Brain on Cloudflare for MCP Memory Across AI Tools"
+description: "Second Brain on Cloudflare gives Claude, ChatGPT, Cursor, and MCP clients shared memory you host yourself. This guide covers one-click deploy, client wiring, auth choices, and real tradeoffs."
+pubDate: "2026-06-05"
+tags: ["github-trending", "cloudflare", "mcp", "ai-memory", "typescript"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/second-brain-cloudflare.webp"
+  alt: "Second Brain Cloudflare GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** `second-brain-cloudflare` is one of cleanest self-hosted memory backends for AI tools right now. It uses Cloudflare Workers, D1, Vectorize, and MCP so you can save context once and recall it from Claude Code, Claude Desktop, ChatGPT, or any compatible client.
+
+## Source and Accuracy Notes
+
+- Official repo: [rahilp/second-brain-cloudflare](https://github.com/rahilp/second-brain-cloudflare)
+- Official setup guide: [Setup Guide](https://github.com/rahilp/second-brain-cloudflare/wiki/Setup-Guide)
+- Official client guide: [Connect to AI Clients](https://github.com/rahilp/second-brain-cloudflare/wiki/Connect-to-AI-Clients)
+- Public repo README and wiki were used for this post on June 5, 2026.
+
+## What Is Second Brain?
+
+Second Brain is a self-hosted memory layer for AI tools. Instead of keeping useful context trapped inside one product's proprietary memory, you deploy your own backend and expose it to multiple clients through HTTP and MCP.
+
+The repo's core promise is simple: save a decision once, recall it anywhere. Supported flows already documented in official materials include CLI usage, Obsidian sync, browser capture, iOS shortcuts, and direct AI-client integration.
+
+From architecture side, this is very Cloudflare-native:
+
+- Workers handle HTTP and MCP endpoints
+- D1 stores structured memory records
+- Vectorize handles semantic retrieval
+- KV is used for OAuth token storage on `/mcp`
+- Workers AI is part of embedding/search stack
+
+That combination matters because it keeps deployment small. You do not need to provision Postgres, Redis, and separate vector DB before even testing concept.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Choose one-click deploy or manual deploy
+
+Official wiki recommends one-click Cloudflare deployment first. That provisions Worker, D1, Vectorize, and prompts for `AUTH_TOKEN`.
+
+If you want fastest path, use repo's deploy button from README. Only required input during deploy is your token.
+
+For stronger token generation, docs recommend:
+
+```bash
+openssl rand -base64 32
+```
+
+You can use simpler memorable phrase for testing, but secure random token is better because every connected client will use it.
+
+### Step 2: Test the deployment immediately
+
+Official docs give direct verification call:
+
+```bash
+curl -X POST https://<your-worker-url>/capture \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "second brain is working", "source": "test"}'
+```
+
+If response returns `{ "ok": true, ... }`, your memory store is live. Wiki notes schema auto-creates on first request, so you do not need separate SQL bootstrap in normal flow.
+
+### Step 3: Manual deploy path if you want full control
+
+Advanced path from wiki looks like this:
+
+```bash
+git clone https://github.com/rahilp/second-brain-cloudflare.git
+cd second-brain-cloudflare
+npm install
+npx wrangler login
+npm run db:create
+npm run vectors:create
+npx wrangler secret put AUTH_TOKEN
+npm run deploy
+```
+
+This is useful if you want to inspect `wrangler.toml`, bind your own resources, or integrate into existing Cloudflare account conventions.
+
+### Step 4: Connect real clients
+
+Official client guide includes exact commands. For Claude Code:
+
+```bash
+claude mcp add second-brain npx mcp-remote https://<your-worker-url>/mcp --header "Authorization: Bearer <your-token>"
+```
+
+For Claude Desktop, repo uses `mcp-remote` wrapper in JSON config. For generic clients that support headers, docs recommend plain MCP URL plus `Authorization` header.
+
+This is where product becomes useful. You stop treating memory as one-off export and start treating it as ambient infrastructure across tools.
+
+### Step 5: Understand OAuth versus token-in-URL
+
+README now documents OAuth support on `/mcp` for browser-based clients like claude.ai and ChatGPT. Client guide also shows token-in-URL fallback.
+
+That distinction matters. Header auth is safer. Query-string token is more compatible but less private.
+
+## Deeper Analysis
+
+Why does this repo stand out in crowded MCP ecosystem?
+
+Because it solves specific operational gap. Many people use Claude for reasoning, ChatGPT for drafting, Cursor for coding, and CLI tools for automation. Memory fragments across all of them. Second Brain turns memory into portable service instead of vendor feature.
+
+Three design choices are especially strong.
+
+**1. Self-hosting stays lightweight.** Cloudflare stack means no always-on VM, no container scheduler, no manual vector service maintenance for first deployment.
+
+**2. Capture surfaces are diverse.** README lists CLI, Obsidian plugin, browser extension, iOS shortcuts, bookmarklet, and direct AI-client use. That matters because memory systems fail when capture friction is high.
+
+**3. Semantic retrieval is default.** Project is built around recall by meaning, not exact string match. That is right fit for notes about decisions, plans, and partial context.
+
+Still, there are limits.
+
+- This is personal memory infrastructure, not shared enterprise knowledge base with role-based policy.
+- Your reliability depends on Cloudflare resources and your own token hygiene.
+- Browser-based connectors may still need token-in-URL if they cannot send headers, which introduces log and history leakage risk.
+
+This makes repo most attractive to power users, solo builders, and small engineering teams that want portable context without spinning full knowledge platform.
+
+## Practical Evaluation Checklist
+
+- Use it if you actively switch between Claude Code, Claude Desktop, ChatGPT, and MCP-capable tools.
+- Prefer one-click deploy first; it proves model before you customize anything.
+- Use header-based auth wherever client supports it.
+- Keep token rotation plan ready in Cloudflare dashboard.
+- Treat local capture integrations like Obsidian or browser extension as optional phase two after core MCP path works.
+- Pair it with agent-workspace tools if you want both memory and session management: [/blog/tessera-ai-coding-workspace/](/blog/tessera-ai-coding-workspace/).
+
+## Security Notes
+
+- `AUTH_TOKEN` is root credential for your memory service. Generate strong token and store it in password manager.
+- Official docs explicitly warn that token-in-URL is less secure because URLs can appear in browser history, logs, and referrers.
+- Header-based auth for Claude Code and Claude Desktop is safer and should be default.
+- OAuth support on `/mcp` requires KV namespace `OAUTH_KV`; confirm configuration before exposing browser login flow.
+- Local development without remote Vectorize/Workers AI will store entries but embedding calls fail gracefully. Do not confuse local dev behavior with production retrieval quality.
+
+## FAQ
+
+**Q: Does this replace built-in memory inside Claude or ChatGPT?**
+
+**A:** It complements or bypasses product-specific memory by hosting your own shared store that multiple tools can read and write.
+
+**Q: Is Cloudflare free tier enough?**
+
+**A:** Repo README positions it as workable at personal scale on free tier. Exact usage headroom depends on your write volume and embedding activity.
+
+**Q: What is safest way to connect clients?**
+
+**A:** Use `/mcp` with `Authorization: Bearer <token>` header whenever client supports custom headers. Avoid query-string token unless compatibility forces it.
+
+**Q: Can I test it before wiring AI tools?**
+
+**A:** Yes. Official setup guide starts with direct `curl` call to `/capture`, which is fastest sanity check after deployment.
+
+## Conclusion
+
+Second Brain on Cloudflare is practical because it does not oversell itself. It is memory service, not all-purpose agent platform. Within that scope, repo is well-shaped: lightweight deployment, concrete client docs, clear auth tradeoffs, and immediate path from deploy to first stored memory.
+
+If your AI workflow spans more than one client, this is one of better open-source ways to stop re-explaining yourself every day.

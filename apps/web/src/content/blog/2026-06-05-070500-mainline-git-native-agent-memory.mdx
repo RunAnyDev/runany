@@ -1,0 +1,161 @@
+---
+title: "Mainline: Git-Native Memory Before AI Code Review"
+description: "Mainline records intent, constraints, risks, and validation before AI-generated diffs land. This guide covers install, workflow, Git integration, and where repo memory beats PR descriptions."
+pubDate: "2026-06-05"
+tags: ["github-trending", "go", "git", "agent-memory", "software-engineering"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mainline.webp"
+  alt: "Mainline Git-native agent memory thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Mainline is repo-local memory layer for coding agents that stores intent before diff review. If your team now reviews large AI-generated changes and keeps asking "why was this done?", Mainline is one of most direct attempts to solve that exact problem.
+
+## Source and Accuracy Notes
+
+- Official repo: [mainline-org/mainline](https://github.com/mainline-org/mainline)
+- Official reference used here: [docs/reference.md](https://github.com/mainline-org/mainline/blob/main/docs/reference.md)
+- Project website listed in README: [mainline.sh](https://mainline.sh)
+- This post reflects public README and reference docs available on June 5, 2026.
+
+## What Is Mainline?
+
+Mainline is Git-native memory for coding agents. It records engineering intent, constraints, rejected alternatives, risks, follow-ups, and validation notes so next agent or reviewer can read them before touching code.
+
+Repo's phrase is strong and accurate: **repo memory before the diff**.
+
+That is different from normal code review tooling. GitHub PRs show what changed. Mainline tries to preserve why work exists, what constraints mattered, and what another agent should not repeat.
+
+README's billing-route example explains problem well: an agent deletes old endpoint because tests pass and UI no longer uses it, but hidden migration dependency still exists for enterprise customers. Diff alone does not surface that. Intent memory does.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install Mainline
+
+Reference doc gives three install paths. Fastest for macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mainline-org/mainline/main/install.sh | bash
+mainline doctor --setup
+```
+
+You can also use Go directly:
+
+```bash
+go install github.com/mainline-org/mainline@latest
+```
+
+Docs require Go 1.22+ for source-based install.
+
+### Step 2: Initialize repository once
+
+Per-repo setup is explicit:
+
+```bash
+cd your-repo
+mainline init --actor-name "alice"
+```
+
+Reference says this writes `.mainline/config.toml`, configures Git refspecs, installs Mainline skill, and installs repo-local hooks for supported agents such as Codex, Claude Code, and Cursor.
+
+### Step 3: Run preflight before non-trivial edits
+
+Mainline defines concrete agent protocol. Core loop starts with readiness gate:
+
+```bash
+mainline preflight --json
+```
+
+Docs are strict here. Preflight should happen before architecture changes, refactors, migrations, deletions, auth, billing, data-model changes, release work, or any "can we delete this?" question.
+
+### Step 4: Record work as engineering meaning
+
+Official loop then continues:
+
+```bash
+mainline start "replace export job with new pipeline" --json
+mainline append "kept legacy CSV route because enterprise migration still active" --json
+mainline seal --prepare --json > .ml-cache/seal.json
+mainline seal --submit --json < .ml-cache/seal.json
+```
+
+Reference explicitly says append should capture meaningful turns, not every shell command. That is good guardrail. Otherwise these systems become noisy transcript dump.
+
+### Step 5: Read and review through Git-native surfaces
+
+Repo exposes several read paths:
+
+```bash
+mainline log
+mainline show <intent_id>
+mainline hub open
+mainline status --actionable
+```
+
+Intent records travel through Git refs and Git notes, so they stay close to repository instead of disappearing into external SaaS.
+
+## Deeper Analysis
+
+Mainline is interesting because it treats AI code review as intent-review problem, not lint problem.
+
+That is right diagnosis for many teams. Large model-generated diffs are often readable line by line, yet still wrong at system level because prior constraints never entered context window.
+
+Three parts of Mainline design feel strong.
+
+**1. It makes stop-lines explicit.** Dirty worktree, stale sync, branch drift, parse errors, or semantic conflict warnings are documented recovery states. That matters. Agent memory only works if tool is willing to interrupt workflow instead of blindly journaling after damage.
+
+**2. It separates durable signals.** Reference doc distinguishes default seal path from structured commands like `mainline guard add`, `mainline risks add`, and `mainline followups add`. That is better than burying critical constraints in paragraph prose.
+
+**3. It stays Git-native.** Intent records live with repo through refs and notes. That gives teams chance to keep memory near code rather than building separate knowledge silo.
+
+There are limits.
+
+- It adds process. Small typo fixes do not need this, and docs say so.
+- Teams must accept discipline around `start`, `append`, and `seal`.
+- Reviewers need habit of checking intent layer, not only PR diff.
+
+But those are fair costs if your repo already suffers from fast, plausible, under-contextualized agent edits.
+
+## Practical Evaluation Checklist
+
+- Use Mainline if your main review failures are missing intent, hidden constraints, or duplicate agent work.
+- Roll it out first on higher-risk domains: auth, billing, migrations, infra, release, or cross-file refactors.
+- Treat `preflight` as required gate for non-trivial work, not optional journaling step.
+- Teach reviewers to inspect Mainline intent before or alongside diff.
+- Pair it with narrower spec tools when you also want machine-checkable truth statements: [/blog/facts-fact-driven-development-cli/](/blog/facts-fact-driven-development-cli/).
+
+## Security Notes
+
+- Intent records may include operational constraints, risk notes, and infrastructure detail. Review what should stay repo-local versus what should remain in external secure systems.
+- Repo-local hooks modify agent startup behavior. Audit generated hook changes before enabling on sensitive codebases.
+- Because Mainline can influence future agent actions, false or stale constraints can misdirect engineering work. Keep review discipline on sealed intents.
+- Git notes and refs are data too. Ensure backup and replication strategy includes them if they are part of engineering record.
+
+## FAQ
+
+**Q: Is Mainline replacement for PR descriptions?**
+
+**A:** No. It is more durable and structured than typical PR description, and it exists before review, but normal PR workflow still stays in place.
+
+**Q: Does every change need Mainline?**
+
+**A:** Official docs say no. Tiny typo fixes, formatting-only changes, and obvious one-line syntax repairs can skip it.
+
+**Q: Why not store this in comments?**
+
+**A:** Comments live in files and are easy to miss. Mainline stores repo-level decisions, constraints, and abandoned approaches in dedicated queryable layer.
+
+**Q: What problem does it solve best?**
+
+**A:** Preventing future agents from repeating bad deletions, ignoring migration constraints, or making large changes without knowing prior intent.
+
+## Conclusion
+
+Mainline is one of more serious open-source responses to AI-era code review. It does not chase nicer chat UX. It attacks missing-intent failure mode directly, with Git-native storage and explicit agent workflow.
+
+If your team has reached point where diff review is no longer enough, Mainline deserves real evaluation, not casual bookmark.
