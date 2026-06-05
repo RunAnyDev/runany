@@ -1,0 +1,194 @@
+---
+title: "Mnemom - Trust Protocols for AI Agent Teams"
+description: "Open-source trust infrastructure that gives AI agents behavioral contracts, real-time integrity monitoring, and cryptographic trust ratings across multi-agent systems."
+pubDate: "2026-06-05"
+tags: ["ai-agents", "trust-protocols", "multi-agent", "governance", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mnemom-trust-protocols-ai-agents.webp"
+  alt: "Mnemom trust protocols for AI agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Mnemom is an open-source trust layer for AI agents that defines what agents can do (AAP), watches what they are thinking (AIP), and generates cryptographic trust ratings - all working across Anthropic, OpenAI, and Gemini.
+
+## Source and Accuracy Notes
+
+This post is based on the [Show HN launch](https://news.ycombinator.com/item?id=47062824) (40 points, February 2026), the official [Mnemom website](https://www.mnemom.ai), the structured [llms.txt](https://mnemom.ai/llms.txt) product reference, and the open-source [AAP](https://github.com/mnemom/aap) and [AIP](https://github.com/mnemom/aip) protocol repositories on GitHub. All protocols are Apache 2.0 licensed.
+
+## What Is Mnemom?
+
+Mnemom is a trust plane for the agentic internet. As AI agents move from single-shot tools to autonomous, long-running, multi-agent systems, a critical gap has emerged: observability tools tell you what happened after the fact, but there is no standard way to declare what an agent is allowed to do, prove it is doing it, or detect when it has drifted from its intended behavior.
+
+Mnemom fills this gap with two open-source protocols that extend the Agent-to-Agent (A2A) protocol stack:
+
+- **Agent Alignment Protocol (AAP):** Defines what an agent can do and has done. Agents declare their alignment posture, produce auditable decision traces, and verify value coherence before coordinating with other agents.
+- **Agent Integrity Protocol (AIP):** Analyzes what an agent is thinking before it acts. It extracts thinking blocks from LLM responses, evaluates them against an Alignment Card, and delivers integrity verdicts in real-time - enabling intervention between turns, not after the damage is done.
+
+The core insight is that AI agents make autonomous decisions but have no standard way to declare their boundaries, prove compliance, or detect behavioral drift. Mnemom makes agent behavior observable and verifiable, not just logged.
+
+## The Alignment Card: Behavioral Contracts for Agents
+
+At the heart of Mnemom is the Alignment Card - a JSON document that declares an agent's permitted actions, forbidden behaviors, escalation triggers, and core values. Think of it as a behavioral contract that travels with the agent.
+
+```json
+{
+  "permitted": ["read_tickets", "draft_responses", "escalate_to_human"],
+  "forbidden": ["access_payment_data", "issue_refunds", "modify_account_settings"],
+  "escalation_triggers": ["billing_request_over_500"],
+  "values": ["accuracy", "empathy", "privacy"]
+}
+```
+
+When an agent receives a request like "Can you refund my last three orders?", AIP reads the agent's reasoning trace. If it detects the agent considering a call to the payments API - which is explicitly forbidden - it produces an Integrity Checkpoint:
+
+```json
+{
+  "verdict": "boundary_violation",
+  "concerns": ["forbidden_action: access_payment_data"],
+  "reasoning": "Agent considered payments API access, which is explicitly forbidden.",
+  "confidence": 0.95
+}
+```
+
+The agent gets nudged back before it acts. Not after, not in a log reviewed during a 2 AM triage, but between the current turn and the next.
+
+## Setup Workflow
+
+### Step 1: Install the SDKs
+
+Mnemom ships as SDKs on both PyPI and npm:
+
+```bash
+# Python
+pip install agent-alignment-protocol
+pip install agent-integrity-proto
+
+# Node.js
+npm install @mnemom/agent-alignment-protocol
+npm install @mnemom/agent-integrity-protocol
+```
+
+### Step 2: Generate an Alignment Card
+
+Use the AAP CLI to create an alignment card for your agent:
+
+```bash
+aap init --values "principal_benefit,transparency,harm_prevention"
+# Creates alignment-card.json
+```
+
+### Step 3: Instrument Your Agent
+
+Wrap your agent's decision points with the AAP trace decorator:
+
+```python
+from aap import trace_decision
+
+@trace_decision(card_path="alignment-card.json")
+def recommend_product(user_preferences):
+    # Your agent logic here
+    # Decisions are automatically traced
+    ...
+```
+
+### Step 4: Add Real-Time Integrity Checking
+
+Connect AIP to intercept thinking blocks before actions execute:
+
+```python
+from aip import create_client
+
+client = create_client(
+    base_url="https://gateway.example.com",
+    agent_id="my-agent",
+    shared_secret="your-secret",
+)
+
+signal = client.check(
+    thinking_block="I should help the user find the best product...",
+    alignment_card=card,
+)
+
+if signal.proceed:
+    execute_action()
+else:
+    escalate(signal.checkpoint.concerns)
+```
+
+### Step 5: Verify Behavior Matches Declaration
+
+Run the verification tool to compare agent traces against the alignment card:
+
+```bash
+aap verify --card alignment-card.json --trace logs/trace.json
+# Verified [similarity: 0.82]
+# Checks: autonomy, escalation, values, forbidden, behavioral_similarity
+```
+
+## Deeper Analysis
+
+### Where Mnemom Fits in the Protocol Stack
+
+Mnemom is designed to complement, not replace, existing agent protocols. The protocol stack for autonomous agents now looks like this:
+
+| Protocol | Function | Gap |
+|----------|----------|-----|
+| MCP | Agent-to-tool connectivity | No alignment semantics |
+| A2A | Task negotiation between agents | No value verification |
+| AP2 | Payment authorization | No behavioral audit |
+| AAP | Behavioral contracts and traces | Transparency, not enforcement |
+| AIP | Real-time thinking analysis | Intervention before action |
+
+AAP is explicitly a transparency protocol, not a trust protocol. It makes agent behavior more observable, not more guaranteed. AIP adds the real-time intervention layer on top.
+
+### Multi-Agent Coherence
+
+When multiple agents work together, they exchange Alignment Cards and verify value compatibility before coordination begins. An agent that values "move fast" and one that values "rollback safety" registers low coherence, and the system surfaces that conflict before work starts.
+
+Over time, AIP builds a drift profile for each agent. If an agent that was cautious starts getting aggressive, the system notices the shift. This is particularly valuable for teams running long-lived agents in production where behavioral drift is a real risk.
+
+### Trust Rating System
+
+Beyond the open-source protocols, Mnemom offers a Trust Rating system that assigns bond-style ratings (AAA through CCC) to AI agents. The rating is composed from integrity ratio, compliance score, drift stability, trace completeness, and coherence compatibility. Every verdict is Ed25519-signed, hash-chained, and Merkle-anchored, with ZK-STARK proofs available for high-stakes decisions.
+
+## Practical Evaluation Checklist
+
+- **Use case fit:** Best for teams running multi-agent systems in regulated workflows where liability is theirs and they need to prove agents stayed in bounds
+- **Integration complexity:** SDKs ship for Python and TypeScript; the free gateway proxy (smoltbot) adds integrity checking with zero code changes
+- **Model compatibility:** Works across Anthropic, OpenAI, Gemini, and local models - the protocols are model-agnostic
+- **Maturity:** Protocols are at spec v1.0.0 with CI, CodeQL, and codecov integration on GitHub
+- **Cost:** AAP and AIP are fully open source (Apache 2.0); the Trust Rating and AEGIS defensive network are commercial offerings
+
+## Security Notes
+
+AIP operates on thinking blocks - the internal reasoning of LLMs. This means it has access to what the model is considering before it acts. In a multi-tenant setup, ensure the shared secret and gateway credentials are properly scoped. The protocol itself is designed so that silence means aligned and voice means outside boundaries - following the daimonion philosophy where AIP only speaks up when something is wrong.
+
+The AEGIS component provides cross-tenant defensive networking, screening inbound and outbound messages for prompt injection, social engineering, PII leakage, and alignment-card violations. This is the commercial layer that goes beyond the open-source protocols.
+
+One important caveat noted by the community: the protocols cannot guarantee that agents behave as declared. They make behavior observable and verifiable, but a sufficiently adversarial agent could potentially circumvent the checks. Mnemom is best understood as a compliance and observability layer, not a security boundary.
+
+## FAQ
+
+**Q:** Does Mnemom work with any LLM provider?
+**A:** Yes. AAP and AIP are model-agnostic and work with Anthropic, OpenAI, Gemini, and local models. The protocols operate at the application layer, not the model layer.
+
+**Q:** What is the difference between AAP and AIP?
+**A:** AAP defines what an agent should do (the behavioral contract) and produces retroactive audit traces. AIP watches what the agent is actually thinking in real-time and flags when reasoning diverges from the declared behavior. They share the same Alignment Card format.
+
+**Q:** How does the free gateway proxy work?
+**A:** The smoltbot gateway proxy sits between your agent and external services. It adds integrity checking to any agent with zero code changes by intercepting thinking blocks and comparing them against the alignment card before actions execute.
+
+**Q:** Is this compatible with MCP and A2A?
+**A:** Yes. Mnemom is designed as a layer that extends A2A and works alongside MCP. AAP adds alignment semantics that neither MCP (tool connectivity) nor A2A (task negotiation) currently provide.
+
+**Q:** What happens when AIP detects a boundary violation?
+**A:** AIP produces an Integrity Checkpoint with a verdict, specific concerns, reasoning explanation, and confidence score. The agent framework can use this to escalate to a human, block the action, or redirect the agent - all before the action executes.
+
+## Conclusion
+
+As AI agents become more autonomous and start working in multi-agent teams on long-running tasks, the trust gap becomes a real blocker for production deployment. Mnemom addresses this with open-source protocols that make agent behavior transparent and verifiable. The Alignment Card concept - a JSON behavioral contract that travels with the agent - is a practical approach to a problem that currently has no standard solution. For teams shipping agents into regulated workflows, this is infrastructure worth evaluating early.
