@@ -1,0 +1,191 @@
+---
+title: "BookmarkSOS - X Bookmark Manager with MCP Server for Claude"
+description: "Free Chrome extension and web app to save, tag, and search X bookmarks, with a built-in MCP server so Claude Code and Cursor can query your saved tweets."
+pubDate: "2026-06-05"
+tags: ["mcp", "bookmarks", "chrome-extension", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bookmarksos-x-bookmarks-mcp-server.webp"
+  alt: "BookmarkSOS product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** BookmarkSOS is a free Chrome extension and web app that captures X tweets into folders and tags, with a built-in Model Context Protocol server so Claude Code, Cursor, and other MCP clients can search and reference your saved tweets from inside an agent loop.
+
+## Source and Accuracy Notes
+
+- Product page: [bookmarksos.com](https://bookmarksos.com)
+- HN launch: [Show HN: BookmarkSOS (3 pts, Mar 2026)](https://news.ycombinator.com/item?id=47384765)
+- The founder describes the problem as "X is a write-only database" and ships the bookmark manager plus an MCP server in one product. Stack is Next.js, Convex for the reactive backend, Better Auth with Google OAuth, and a Manifest V3 Chrome extension.
+
+## What Is BookmarkSOS?
+
+X bookmarks are useful for the thirty seconds after you click save, and useless after that. The list is reverse-chronological, there are no folders, no tags, and the in-app search is good enough to find a tweet you saved yesterday and bad enough that you will not bother trying to find one you saved last month. Most people end up with hundreds of unsorted bookmarks and effectively no history.
+
+BookmarkSOS replaces the bookmark button in the X UI with a one-click save action that captures the full tweet, including text, images, video URL, author, and timestamps, and routes it into a personal dashboard. From there you can drop the save into a folder, attach one or more color-coded tags, and search the full text of every saved tweet. The dashboard is the actual product, the extension is the capture mechanism, and the MCP server is what makes the archive usable from inside an agent.
+
+The MCP angle is the part that makes this post worth writing. The Chrome extension and the dashboard are polished, but plenty of tools save tweets. BookmarkSOS ships a small MCP server that exposes your saved bookmarks as tools, so any MCP-aware client can search and reference them. "Find that thread about programmatic SEO I bookmarked last week" becomes a single tool call from inside Claude Code, and the tweet is pasted into the agent's context with the original author and timestamp attached.
+
+## Core Building Blocks
+
+```text
+bookmarksos.com
+├── /                  marketing page + sign-in (Google OAuth via Better Auth)
+├── /dashboard         personal library: folders, tags, full-text search
+├── /extension         Manifest V3 Chrome extension, free on the Web Store
+└── /mcp               Model Context Protocol server, installable from CLI
+```
+
+The dashboard is the center of gravity. Folders group related saves (Design Inspo, Dev Tools, Marketing, AI / ML, Launch posts) and tags cross-cut them (Thread, Tutorial, Launch, Tool). Search is full-text, scoped to your library, and runs against the Convex reactive backend, so results update the moment a new save syncs in. The Chrome extension is a thin Manifest V3 wrapper that injects a save button on every tweet and forwards the capture payload to the same Convex tables the dashboard reads from.
+
+The MCP server lives at the same domain. After you install it, your MCP client sees a handful of tools for searching bookmarks, fetching the full content of a specific save, listing folders and tags, and adding new saves from inside the agent. The same Google OAuth session authorizes the MCP server, so there is no second account to create.
+
+## Step 1: Install the Chrome Extension
+
+The extension is free and lives in the Chrome Web Store. After install, sign in once with the same Google account you want your library to follow, and the save button appears in the action bar of every tweet.
+
+```bash
+# The extension does not have a CLI install path yet, but the underlying
+# service is a Next.js app on Convex, so you can also self-host the dashboard
+# by pointing NEXT_PUBLIC_CONVEX_URL at your own Convex deployment.
+```
+
+Sign in is handled by Better Auth, which keeps the OAuth flow short and the user model simple. There is no separate password, no separate email, and the same account works for the extension, the dashboard, and the MCP server.
+
+## Step 2: Build Up a Folder Structure That Actually Maps to How You Search
+
+The default folder set on a new account is empty, and the product does a reasonable job of letting you start flat. The mistake most users make is creating one folder per topic and ending up with thirty folders and no idea where a save belongs. A two-axis structure works better: folders for the broad destination, tags for the cross-cutting idea.
+
+```text
+Folders (broad)
+  ├── Design Inspo
+  ├── Dev Tools
+  ├── Marketing
+  ├── AI / ML
+  └── Launch posts
+
+Tags (cross-cutting)
+  ├── Thread
+  ├── Tutorial
+  ├── Launch
+  ├── Tool
+  ├── Quote
+  └── Data point
+```
+
+A save like a long-form thread on programmatic SEO architecture lands in `Marketing` with the tags `Thread` and `Tutorial`. When you search from the dashboard, you can filter by folder, by tag, or by both. When you search from inside Claude Code through the MCP server, the same filters are exposed as tool parameters.
+
+## Step 3: Wire the MCP Server Into Claude Code
+
+The MCP server is the feature that turns the bookmark library from a passive archive into an active reference. Install is a one-liner that adds a server entry to your Claude Code config.
+
+```json
+{
+  "mcpServers": {
+    "bookmarksos": {
+      "command": "npx",
+      "args": ["-y", "@bookmarksos/mcp-server"],
+      "env": {
+        "BOOKMARKSOS_TOKEN": "your-session-token"
+      }
+    }
+  }
+}
+```
+
+The token is the same one the dashboard issues when you sign in, and the MCP server reads it from the environment to authenticate against the Convex backend. After the entry is in place, restart Claude Code and the agent gains a new tool family for your bookmark library.
+
+## Step 4: Search Your Library From Inside the Agent
+
+Once the MCP server is connected, the agent can issue tool calls against your saved tweets. The most useful call is a full-text search with optional folder and tag filters, which returns a list of matching saves with the original author, timestamp, and the full tweet text.
+
+```text
+User:  Find that thread about programmatic SEO architecture I bookmarked
+       last week, and quote the part where they talk about internal linking.
+
+Claude Code:
+  → tool: bookmarksos.search
+    query: "programmatic SEO architecture internal linking"
+    folder: "Marketing"
+    tag: "Thread"
+    limit: 5
+
+  Result 1 of 3 matches
+    @ompatel  •  Mar 18, 2026
+    Folder: Marketing  •  Tags: Thread, Tutorial
+
+    "Programmatic SEO at scale is a linking problem before it is a content
+     problem. The internal-link graph is the part that compounds..."
+```
+
+The tweet is returned in the exact shape the agent needs to use it, with the author and timestamp included so the agent can cite it correctly. The dashboard search does the same thing, but the MCP path means the bookmark library is part of the agent's working set, not a tab you have to keep switching to.
+
+## Step 5: Save From Inside the Agent Too
+
+The MCP server also exposes a write tool, so the agent can save tweets it finds useful. This is the part that closes the loop: if Claude Code finds a thread while researching a launch post, it can drop the thread into your `AI / ML` folder with the `Thread` tag without you having to switch windows.
+
+```text
+User:  Save that thread by @karpathy on RLHF scaling laws to my AI / ML
+       folder with the "Thread" and "Tutorial" tags.
+
+Claude Code:
+  → tool: bookmarksos.save
+    url: "https://x.com/karpathy/status/1234567890"
+    folder: "AI / ML"
+    tags: ["Thread", "Tutorial"]
+    note: "Found while researching RLHF compute tradeoffs"
+```
+
+The save lands in the dashboard immediately, because the Convex backend pushes the new row to every subscribed client. You will see it the next time you open the dashboard, and the agent sees it the next time it searches the library.
+
+## Practical Evaluation Checklist
+
+- Free tier covers the extension, the dashboard, and the MCP server. No credit card, no paid feature flags observed on the launch post.
+- Folders and tags are unlimited on the free tier. Rate limits on the MCP server are not documented publicly as of the launch post.
+- Search is full-text across tweet text, author handle, and your own notes. Image-only saves are not searchable by image content, only by their attached text.
+- The Chrome extension is Manifest V3 and works on Chromium-based browsers. Firefox support is not confirmed.
+- The MCP server is published as an npm package and installs with `npx -y`, so any client that supports stdio MCP servers (Claude Code, Cursor, Windsurf, Cline) works out of the box.
+- OAuth is Google-only at launch. The dashboard plans to add email/password and passkeys, but the launch post is Google-only.
+- Convex is the backend of record. Self-hosting is theoretically possible by pointing the dashboard at a self-hosted Convex deployment, but the MCP server would also need to be repointed.
+
+## Security Notes
+
+The Chrome extension requests the minimum set of permissions needed to inject a save button on `x.com` and `twitter.com`. It does not read the timeline or any other content. The save payload is sent over HTTPS to the Convex backend, which sits behind the same Google OAuth session the dashboard uses.
+
+The MCP server runs locally as a stdio process and holds the session token in an environment variable. The token does not get sent to the model provider; it only gets sent to the Convex backend when the agent issues a tool call. If you want to limit the blast radius, scope the session token to a specific folder or set of tags instead of the full library.
+
+Better Auth handles the OAuth flow and stores the session in an HTTP-only cookie. The dashboard does not have a public API key system yet, so the only way to talk to the Convex backend is through the dashboard session or the MCP server token. This is the right default for a launch, but it does mean there is no programmatic export endpoint yet.
+
+## FAQ
+
+**Q: How is BookmarkSOS different from the dozens of other X bookmark managers I have already tried?
+
+**A:** The MCP server is the differentiator. Most bookmark managers give you a better place to read your saves. BookmarkSOS gives your agent access to them, so the archive is part of the working set when you are researching, writing, or building. The Chrome extension and the dashboard are well-executed, but the MCP server is the part that turns a passive archive into an active reference.
+
+**Q: Does the MCP server work with Cursor, Windsurf, and Cline, or only Claude Code?
+
+**A:** The MCP server is published as a standard stdio npm package, so any MCP client that supports stdio servers works. The launch post focuses on Claude Code because that is the writer's daily driver, but the server itself is protocol-compliant. Cursor, Windsurf, and Cline all consume the same `@bookmarksos/mcp-server` entry.
+
+**Q: Can I use the dashboard without installing the Chrome extension?
+
+**A:** Yes. The dashboard accepts manual paste of a tweet URL and the save payload is built from the URL fetch. The Chrome extension is the easy path, but the underlying service does not require it. The MCP server is independent of the extension entirely; you can install only the MCP server and skip both the extension and the dashboard.
+
+**Q: What happens to my bookmarks if the product shuts down?
+
+**A:** The launch post does not promise a data export, and Convex is the only backend in the stack. There is no public export endpoint yet. If the archive is mission-critical, the safe move is to keep your own copy by syncing the bookmark text into a personal note system on a schedule. The product is at version one and the founder is responsive on the HN thread, so an export endpoint is a reasonable thing to ask for.
+
+**Q: Does the MCP server work with image and video saves?
+
+**A:** The save payload includes the image URL and the video URL, and the read tool returns those URLs in the response. The agent cannot see the image or video content directly, only the URL and any text the user attached as a note. For text-heavy saves (the common case for X bookmarks), this is fine. For visual research, you will need a separate system that indexes image content.
+
+**Q: Is there a way to share a folder with a teammate?
+
+**A:** Not at launch. The dashboard is single-user, the MCP server is single-user, and the OAuth session is per Google account. If team sharing is important, the workaround is to install the MCP server in each teammate's Claude Code config with a shared session token, but the dashboard UI does not yet expose a shared library.
+
+## Conclusion
+
+BookmarkSOS is a polished X bookmark manager on its own, but the part that makes it worth writing about is the MCP server. The Chrome extension captures the tweet, the dashboard organizes it, and the MCP server puts the whole archive inside your agent's working set. The combination is the first one I have seen that takes a personal archive and makes it a first-class reference for an AI assistant. Install the extension, build a folder structure that maps to how you actually search, wire the MCP server into Claude Code, and the next time you ask the agent to find that thread you know you saved, it will.
