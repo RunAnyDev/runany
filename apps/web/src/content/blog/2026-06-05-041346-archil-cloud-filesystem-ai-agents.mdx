@@ -1,0 +1,222 @@
+---
+title: "Archil - The S3-Backed Filesystem Built for AI Agents"
+description: "Archil (YC F24) turns any S3 bucket into a POSIX cloud filesystem with sub-millisecond cached reads, mount tokens, and a serverless exec runtime for AI training and agents."
+pubDate: "2026-06-05"
+tags: ["ai-tools", "dev-tools", "self-hosted", "cloud-storage", "s3"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/archil-cloud-filesystem-ai-agents.webp"
+  alt: "Archil cloud filesystem for AI thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Archil mounts an S3 (or GCS, R2, MinIO, Azure Blob) bucket as a real POSIX filesystem on Linux, macOS, Kubernetes, and inside a `disk exec` serverless runtime. You get sub-millisecond cached reads, 99.99% uptime, 99.999% durability, HIPAA and SOC2, plus `npx disk` for agent-driven file I/O and `archil checkout` for shared-mode write delegations. Originally launched on HN as Regatta Storage (YC F24, 587 points, 320 comments), the company rebranded to Archil in 2026 and just closed an $11M Series A.
+
+## Source and Accuracy Notes
+
+All technical details below are drawn from the official Archil documentation and a `/skill.md` agent-facing reference at `https://archil.com/skill.md`, plus the November 2024 [Launch HN thread](https://news.ycombinator.com/item?id=42174204) for Regatta Storage (587 points, 320 comments) and the [Archil YC launch page](https://www.ycombinator.com/launches/M8T-archil-transform-s3-into-an-infinite-local-file-system).
+
+- Official site: [archil.com](https://archil.com)
+- Agent / CLI reference: [archil.com/skill.md](https://archil.com/skill.md)
+- Full docs index: [docs.archil.com/llms.txt](https://docs.archil.com/llms.txt)
+- Series A announcement: [archil.com/post/series-a](https://archil.com/post/series-a)
+- Serverless exec: [archil.com/post/serverless-execution](https://archil.com/post/serverless-execution)
+- Console (account + API keys): [console.archil.com](https://console.archil.com)
+- Trust center: [security.archil.com](https://security.archil.com)
+
+The product was previously called **Regatta Storage**. The HN-era domain `regattastorage.com` and the legacy `regatta.storage` are part of the same YC F24 batch; the current canonical domain is `archil.com`. Both domains resolve to the same product and team. Founder is Hunter Leath, ex-Amazon EFS and ex-Netflix storage.
+
+## What Is Archil?
+
+Archil is a pay-as-you-go cloud filesystem that mounts on top of object storage. You point it at an S3, GCS, Cloudflare R2, MinIO, DigitalOcean Spaces, Wasabi, Backblaze B2, or Azure Blob bucket and it shows up on your machine as a real POSIX directory tree. Reads from the local cache return in sub-millisecond. Writes propagate to the bucket in seconds to minutes. The S3 bucket is always the source of truth, so you can revoke Archil at any time and your data stays exactly where it is.
+
+The product is positioned as **"the file system your agents run on"** — a persistent home for agent context (code, weights, scratch space, intermediate artifacts) with the compute to operate on it built in. Three pieces ship together:
+
+1. **Disks** — elastic, durable POSIX filesystems backed by your object store. `archil mount` on Linux, Archil.app on macOS, CSI driver on Kubernetes, Terraform provider for declarative provisioning.
+2. **`disk` CLI / TypeScript SDK** — control-plane operations: list, create, delete disks, manage API keys, run `disk exec` to launch a serverless container with the disk mounted at `/mnt/data`.
+3. **Serverless execution** — `npx disk exec <disk-id> "<command>"` runs bash, python, or node with the disk pre-mounted. AWS-only today (`aws-us-east-1`, `aws-us-west-2`, `aws-eu-west-1`). Five-minute timeout, 128 KiB stdout cap, billed on `executeMs` with a 100 ms minimum.
+
+Pricing is time-weighted on the active cache: **$0.20/GiB-month** for data actively in the cache, with cache expiry about an hour after last access. API calls, transfers, and metadata are free.
+
+## Repo-Specific Setup Workflow
+
+The "install" path has two distinct surfaces — a control plane (`disk` CLI / SDK) and a data plane (`archil` mount CLI on Linux, Archil.app on macOS). For AI agent use, the control plane is usually enough.
+
+### Step 1: Create a free account and grab an API key
+
+Sign up at [console.archil.com](https://console.archil.com). The free tier ships 10 GB of storage with no credit card required, which is enough to evaluate the workflow end-to-end. Once logged in, the console issues an API key scoped to your account.
+
+### Step 2: Configure the CLI
+
+The `disk` npm package is a pure JavaScript CLI that runs anywhere Node 18+ does. No global install is required — use `npx` or `bunx`.
+
+```bash
+export ARCHIL_API_KEY="<paste-from-console>"
+export ARCHIL_REGION="aws-us-east-1"
+npx disk --help
+```
+
+Verify the credentials are valid by listing your existing disks:
+
+```bash
+npx disk list
+```
+
+If `disk list` returns your disks, the control plane is wired up. If it returns 401, double-check the API key and the region.
+
+### Step 3: Create a disk and capture the mount token
+
+`disk create` returns a one-time mount token in addition to the disk ID. The mount token is what you would paste into `ARCHIL_MOUNT_TOKEN` for FUSE mounts, or feed to the SDK as `ARCHIL_DISK_TOKEN`. Keep both — the API key manages disks, the mount token grants filesystem-level access to one specific disk.
+
+```bash
+DISK_ID=$(npx disk create my-agent-workspace | jq -r .id)
+echo "Disk: $DISK_ID"
+```
+
+### Step 4: Run a serverless command on the disk
+
+This is the "agent runs code on the disk" path. `disk exec` launches a container with the disk mounted at `/mnt/data` in shared mode, runs the command, and returns stdout, stderr, exit code, and timing. Files persist on the disk across exec calls; container state does not.
+
+```bash
+npx disk exec "$DISK_ID" "echo hello from archil && ls -la /mnt/data"
+```
+
+The exec container ships with `coreutils`, `grep`, `sed`, `awk`, `find`, `curl`, `jq`, `python3`, `node`, and the `archil` CLI. So you can chain multi-step workflows:
+
+```bash
+# Clone + install + build, all on the same persistent disk
+npx disk exec "$DISK_ID" "git clone https://github.com/user/repo.git /mnt/data/repo && cd /mnt/data/repo && npm i && npm run build"
+
+# Persistent agent scratch space
+npx disk exec "$DISK_ID" "mkdir -p /mnt/data/workspace && echo 'session note' >> /mnt/data/workspace/log.txt"
+
+# Fan-out across an S3 bucket
+for f in file1 file2 file3; do
+  npx disk exec "$DISK_ID" "grep -c ERROR /mnt/data/logs/$f" &
+done; wait
+```
+
+### Step 5: Mount on a Linux host (optional)
+
+If you want a real FUSE mount instead of (or in addition to) `disk exec`, install the `archil` CLI and use a mount token:
+
+```bash
+curl -s https://archil.com/install | sh
+export ARCHIL_MOUNT_TOKEN="<mount-token-from-step-3>"
+sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount my-agent-workspace /mnt/data --region aws-us-east-1
+```
+
+`archil mount` defaults to **single-client (exclusive) mode** on Linux. Add `--shared` for multi-client mode (the same model the macOS menu bar app and `disk exec` containers use). To unmount, use `archil unmount` — not `umount`, which does not release the delegation.
+
+For Kubernetes, the [CSI driver](https://docs.archil.com/reference/csi-driver) handles dynamic provisioning and mount lifecycle. For declarative management across many disks, the [Terraform provider](https://docs.archil.com/reference/terraform) is the cleanest path.
+
+## Deeper Analysis
+
+### Mount semantics: shared mode, delegations, and dynamic ownership
+
+This is the section the docs spend the most time on, and the part most worth understanding before wiring Archil into a multi-agent system.
+
+```text
+Single-client (exclusive) mode   Shared mode
+=========================================
+Linux: default                   Linux: --shared
+macOS: n/a                       macOS: default (Archil.app)
+disk exec: n/a                   disk exec: default
+```
+
+In **shared mode** every connected client sees the same view, but **writes require holding a delegation** (exclusive ownership of a path). Delegations are recursive — owning `/mnt/data/jobs/2026-06-05` covers every file and subdirectory beneath it. Only one client can hold a delegation on a given path at a time.
+
+The gotcha is that **creating a new file or directory in an unowned location auto-claims it** — this is what the docs call *dynamic ownership*. Most short-lived `disk exec` writes never notice the system because they write into fresh per-job subdirectories that dynamic ownership claims on the spot. But when you try to **delete or rewrite an existing file** without holding a delegation, the write fails with `Read-only file system`.
+
+There are two clean fixes, both documented:
+
+- **Scope writes to a fresh per-job subdirectory** so dynamic ownership claims it automatically.
+- **Explicitly check out the path** with `archil checkout <path>` inside the exec command (the `archil` CLI is in the container) before rewriting. Release with `archil checkin <path>` when done.
+
+Read-after-write consistency is strong between Archil clients after `fsync`. Between Archil and S3 in either direction, consistency is eventual — seconds to minutes. The cache itself defaults to `min(25% of RAM, 2 GiB)` per client, with a 30-second directory listing TTL. Tune with `archil set-cache-expiry`.
+
+### Workload patterns the docs call out
+
+The `workload-guide.md` ships a matrix of recommended mount options, cache sizes, and access patterns for each major workload. The headline use cases:
+
+- **AI training** — `Stream training data at multi-GB/s throughput from shared storage across your GPU cluster. No more waiting on network-attached volumes or manually staging datasets.`
+- **Data fan-out** — `Run map-reduce across a whole S3 bucket: Promise.all of disk.exec() calls, each with its own container. Faster than local grep, and never pulls a byte out of your bucket.`
+- **Inference** — `Share KV caches and model weights across GPUs with sub-millisecond reads from cache. Your serving layer never waits on storage.`
+- **Persistent agent context** — the headline Archil pitch. Agents get a stable, addressable filesystem they can read, write, and run code against across sessions.
+
+### Data sources
+
+The disk layer is storage-agnostic. The data-source table from `skill.md`:
+
+```text
+s3              Amazon S3 (bucket policy recommended, or IAM credentials)
+gcs             Google Cloud Storage (HMAC credentials)
+r2              Cloudflare R2 (API token + endpoint)
+s3-compatible   MinIO, DigitalOcean Spaces, Wasabi, Backblaze B2
+azure-blob      Azure Blob Storage (Terraform provider today)
+```
+
+The bucket stays in your account. Archil caches and syncs but never holds a persistent copy of your data outside your account — that is the contract that lets you revoke access at any time.
+
+### Why the rebrand from Regatta Storage to Archil
+
+Hunter's original November 2024 HN post described the product as a "new cloud file system that provides unlimited pay-as-you-go capacity, local-like performance, and automatic synchronization to S3-compatible storage." That positioning held. What changed is the audience framing: Regatta was pitched to general cloud-storage users; Archil is explicitly targeted at **AI agents and training/inference workloads** — the file system "your agents run on." The Series A post on archil.com frames the new positioning: "We've raised an $11M Series A to connect AI to data."
+
+## Practical Evaluation Checklist
+
+For anyone evaluating Archil against alternatives (EFS, Lustre, WekaFS, s3fs, goofys, JuiceFS, mountpoint-s3):
+
+- **What backend do I have?** S3, GCS, R2, MinIO, Azure Blob all work. Archil is storage-agnostic; s3fs and goofys are S3-only.
+- **Do I need POSIX semantics, or just streaming?** If you only need streaming, s3fs is cheaper. If you need random-access reads, partial writes, fsync durability, and shared-mode locking, Archil is the right tool.
+- **Am I running multi-agent fan-out?** `disk exec` with a shared disk is purpose-built for this. Each container gets the same view; the disk handles consistency.
+- **Where will the compute run?** Serverless `disk exec` is **AWS-only today** (us-east-1, us-west-2, eu-west-1). If you need GCP serverless, that path is not yet available. Direct FUSE mount on a Linux host works in any region your bucket lives in.
+- **What is my budget model?** Archil is $0.20/GiB-month on the active cache. EFS is similar but with more overprovisioning; Lustre is much faster but operationally heavy and not S3-backed.
+- **Do I need compliance?** Archil is HIPAA, SOC2, GDPR, with 99.99% uptime SLA and 99.999% durability. Documented at [security.archil.com](https://security.archil.com).
+- **Free tier?** 10 GB free storage, no credit card required. Enough to evaluate the workflow before committing.
+
+## Security Notes
+
+- **Encryption** — AES-256 at rest, TLS 1.3 in transit. Keys are fully managed; never exposed to application code or external processes.
+- **Data ownership** — your bucket is always the source of truth. Archil never stores a persistent copy outside your account. Revoke Archil access and your data stays exactly where it is.
+- **Access control** — IAM role-based, no standing credentials. API keys are scoped per environment. Every mount request is authenticated and authorized.
+- **Credential separation** — API keys (control plane) and mount tokens (data plane) are different credentials. A leaked mount token grants filesystem access to one disk; it does not let the attacker manage your account.
+- **Compliance** — HIPAA, SOC2, GDPR. Trust center at [security.archil.com](https://security.archil.com).
+- **Durability** — 99.999% (annual durability across replicated storage). Uptime SLA 99.99%.
+
+## FAQ
+
+**Q: Is Archil the same product as Regatta Storage?**
+**A:** Yes. Regatta Storage was the name at the November 2024 YC F24 Launch HN (587 points, 320 comments). The product, team, founder, and YC batch are the same; the company rebranded to Archil in 2026 with a sharper positioning around AI agents and AI training/inference workloads. The legacy domains `regattastorage.com` and `regatta.storage` resolve to the same product.
+
+**Q: Do I need to install anything?**
+**A:** For agent-driven workflows, no. The `disk` CLI is invoked with `npx disk` — no global install. For FUSE mounts on a Linux host, run `curl -s https://archil.com/install | sh`. For macOS, install the same script and launch `Archil.app` from the menu bar (requires macOS 26 Tahoe+). On macOS there is no `archil` CLI — use the menu bar app for mounts and `npx disk` for control plane.
+
+**Q: How is Archil different from s3fs or goofys?**
+**A:** s3fs and goofys are S3-only and have weaker POSIX semantics. Archil is a managed service that supports S3, GCS, R2, MinIO, Azure Blob, and adds shared-mode locking via delegations, a serverless `disk exec` runtime, HIPAA and SOC2 compliance, and a managed cache layer with 99.999% durability. The trade-off is that Archil is a paid managed service; s3fs and goofys are free open-source FUSE filesystems.
+
+**Q: Can I run `disk exec` on GCP?**
+**A:** Not today. Serverless exec is AWS-only (`aws-us-east-1`, `aws-us-west-2`, `aws-eu-west-1`). Direct FUSE mounts on a Linux host work in any region your bucket lives in.
+
+**Q: What happens if I disconnect mid-write?**
+**A:** Writes that have been `fsync`'d are durable. Writes that have not been `fsync`'d may be lost on disconnect. The cache layer replicates for 99.999% durability, but you should treat `disk exec` like any POSIX filesystem: `fsync` before treating data as committed.
+
+**Q: How do I let two agents write to the same disk at once?**
+**A:** Use shared mode (`--shared` on Linux, default on macOS and `disk exec`). Each agent that wants to write to a path must hold a delegation. Either scope writes to fresh per-job subdirectories (dynamic ownership auto-claims) or explicitly `archil checkout <path>` and `archil checkin <path>` around the write.
+
+**Q: What does it cost?**
+**A:** $0.20/GiB-month for the active cache (time-weighted average). Cache expires about an hour after last access, so you only pay for data you are actively using. API calls, transfers, and metadata are free. Serverless exec bills on `executeMs` with 1 ms granularity and a 100 ms minimum. Free tier is 10 GB with no credit card.
+
+**Q: Is there a Terraform provider or Kubernetes CSI driver?**
+**A:** Yes to both. The [Terraform provider](https://docs.archil.com/reference/terraform) covers disks, API keys, and data sources declaratively. The [CSI driver](https://docs.archil.com/reference/csi-driver) handles dynamic provisioning and mount lifecycle on Kubernetes clusters.
+
+## Conclusion
+
+Archil is the cleanest answer we have seen to the problem of giving AI agents a persistent, POSIX-compatible filesystem without forcing every team to operate their own S3-compatible cluster. The `disk exec` serverless runtime, the mount-token model, and the shared-mode delegation system all line up with how multi-agent systems actually behave — fan-out workers, ephemeral containers, persistent shared state.
+
+The original Regatta Storage pitch (587 points on Launch HN, 320 comments, founder ex-Amazon EFS and ex-Netflix) was about a better cloud filesystem in general. The Archil rebrand tightens the positioning to AI workloads, the recent $11M Series A confirms the market is there, and the HIPAA/SOC2/99.999% durability story makes it viable for production teams that are already past the "spin up a FUSE driver and hope" phase.
+
+If you have an S3 bucket and a fleet of agents that need to read and write to it, run the four `npx disk` commands above on the free 10 GB tier before committing. The control plane is the part that matters most, and it costs ten minutes to evaluate.
