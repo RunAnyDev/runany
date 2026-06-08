@@ -1,0 +1,154 @@
+---
+title: "Dispatched - Background Jobs for Serverless Apps"
+description: "Dispatched.dev provides a simple HTTP API for background job queues in serverless apps. No workers, no SDKs - just POST a job and receive webhook callbacks with smart retries."
+pubDate: "2026-06-08"
+tags: ["serverless", "background-jobs", "dev-tools", "webhooks"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dispatched-background-jobs-serverless.webp"
+  alt: "Dispatched background jobs serverless thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Dispatched.dev is a managed background job queue for serverless apps that replaces self-hosted worker infrastructure with a single HTTP POST and webhook callback pattern, supporting smart retries, flexible scheduling, and zero SDKs.
+
+## Source and Accuracy Notes
+
+- Product: [https://dispatched.dev](https://dispatched.dev)
+- Docs: [https://dispatched.dev/docs](https://dispatched.dev/docs)
+- Launch: [Show HN: Dispatched.dev – Background Job Queues for Your Serverless Apps](https://news.ycombinator.com/item?id=42551564)
+
+## What Is Dispatched?
+
+Serverless platforms like Vercel, Netlify, and Cloudflare Workers impose hard execution limits — typically 10 to 30 seconds per request. Any task that runs longer (video processing, bulk email, CSV imports, PDF generation) either times out or requires you to build your own background worker infrastructure.
+
+Dispatched solves this by providing a managed job queue accessed entirely through HTTP. You POST a job to their API with a payload, and they POST the job data to your webhook URL for processing. When your handler responds with a 200, the job is marked complete. If it fails, Dispatched retries automatically with configurable policies.
+
+The key design decision is simplicity: no SDKs to install, no worker processes to manage, no queue infrastructure to operate. Any language or framework that can make HTTP requests can use Dispatched.
+
+## How Dispatched Works
+
+### Step 1: Create an API Key and Set Your Webhook URL
+
+Sign up at dispatched.dev, generate an API key from the dashboard, and configure the webhook URL where you want to receive job processing requests. This is a one-time setup.
+
+### Step 2: Dispatch a Job
+
+Send a POST request with your job payload:
+
+```bash
+curl -X POST https://dispatched.dev/api/jobs/dispatch \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "payload": {"task": "process_video", "videoId": "abc123"}
+  }'
+```
+
+The API returns immediately with a job ID. Your serverless function can return its response to the user without waiting for the job to complete.
+
+### Step 3: Handle the Webhook
+
+Your webhook endpoint receives the job data and processes it:
+
+```javascript
+const express = require('express');
+const app = express();
+
+app.post('/webhook', express.json(), async (req, res) => {
+  const webhookSecret = process.env.DISPATCHED_WEBHOOK_SECRET;
+
+  // Verify webhook authenticity
+  if (req.headers.authorization !== `Bearer ${webhookSecret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { jobId, attempt, attemptNumber, payload } = req.body;
+
+  try {
+    console.log(`Processing job ${jobId}, attempt ${attemptNumber}`);
+    await processJob(payload);
+    res.status(200).json({ status: 'success' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+Dispatched expects a 200 response to mark the job as complete. Any non-200 response triggers a retry according to your configured policy.
+
+## Deeper Analysis
+
+### The Problem Dispatched Solves
+
+Traditional background job systems require significant infrastructure:
+
+```bash
+# Traditional approach - what you avoid with Dispatched
+User App → Your Server → Redis Queue → Worker Process → Database
+                              ↑
+                         BullMQ / Sidekiq / Celery
+```
+
+With Dispatched, the architecture collapses to:
+
+```bash
+User App → Your Serverless Function → Dispatched API → Webhook → Your Handler
+```
+
+No Redis instance to provision. No worker processes to monitor. No queue health to check. No scaling decisions to make.
+
+### Smart Retries
+
+Jobs automatically retry on failure with configurable attempts. You can set retry policies at the project level or customize them per job. This is critical for tasks that interact with flaky external services (email APIs, payment processors, third-party webhooks).
+
+### Flexible Scheduling
+
+Jobs can be dispatched immediately or scheduled for later — up to one year in advance. This covers common patterns like:
+
+- Delayed welcome emails (send 24 hours after signup)
+- Periodic data cleanup (remove abandoned carts after 30 days)
+- Scheduled report generation (monthly analytics digest)
+
+### Language Agnostic
+
+Because the interface is pure HTTP, you can use Dispatched from any runtime: Node.js, Python, Ruby, Go, PHP, or anything that can make a POST request. There is no vendor lock-in through SDK abstractions.
+
+## Practical Evaluation Checklist
+
+- [ ] **Execution time limits:** Does your serverless platform timeout before your task completes? If yes, Dispatched is relevant.
+- [ ] **Infrastructure tolerance:** Are you willing to manage Redis, worker processes, and queue monitoring? If no, Dispatched removes that burden.
+- [ ] **Retry requirements:** Do your background tasks need automatic retry on failure? Dispatched handles this out of the box.
+- [ ] **Scheduling needs:** Do you need delayed or scheduled job execution? Dispatched supports delays up to one year.
+- [ ] **Multi-language stack:** Do you need background jobs across different languages or frameworks? The HTTP API works everywhere.
+
+## Security Notes
+
+Dispatched handles job payloads and webhook delivery — treat the API key and webhook secret with the same sensitivity as any messaging platform credentials. Always verify incoming webhook requests using the `Authorization` header check shown in the setup section. This prevents spoofed job executions from triggering unintended processing.
+
+For jobs involving PII or customer data, review the payload contents against your compliance requirements. Dispatched processes job data through their infrastructure, so ensure this aligns with your data handling policies.
+
+## FAQ
+
+**Q: What happens if my webhook endpoint is down when Dispatched tries to deliver a job?**
+**A:** Dispatched retries failed deliveries according to your configured retry policy. If all retries are exhausted, the job is marked as failed and you can inspect it in the dashboard.
+
+**Q: Can I use Dispatched with Vercel Serverless Functions?**
+**A:** Yes. Dispatched is designed specifically for serverless environments like Vercel, Netlify, and Cloudflare Workers. The HTTP-only interface means no special integration is needed.
+
+**Q: How does Dispatched compare to building my own queue with Redis and BullMQ?**
+**A:** Dispatched eliminates the need to provision, monitor, and scale Redis infrastructure. You trade operational control for simplicity. If you already have Redis running and need fine-grained queue control, self-hosting may be preferable. If you want zero infrastructure management, Dispatched is the faster path.
+
+**Q: Is there a free tier?**
+**A:** Dispatched offers a free tier with no credit card required, suitable for indie hackers and small projects. Paid plans scale with job volume.
+
+**Q: Can I schedule jobs to run at a specific time?**
+**A:** Yes. Jobs can be scheduled up to one year in advance. Use the scheduling parameter when dispatching to set the execution time.
+
+## Conclusion
+
+Dispatched fills a genuine gap in the serverless ecosystem: background job processing without infrastructure. The pure HTTP interface means any developer can integrate it in minutes, and the managed retry and scheduling features cover the most common background task patterns. If you are building on Vercel, Netlify, or Cloudflare and hitting execution time limits, Dispatched is worth evaluating before committing to self-hosted queue infrastructure.
