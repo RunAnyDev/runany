@@ -1,0 +1,136 @@
+---
+title: "Pinch - Real-Time Speech Translation API with Voice Cloning"
+description: "Pinch is a YC-backed speech translation API offering real-time audio translation and async video dubbing across 50+ languages with voice cloning. Includes Python SDK and WebSocket support."
+pubDate: "2026-06-08"
+tags: ["ai", "api", "speech-translation", "voice-cloning", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pinch-real-time-speech-translation-api.webp"
+  alt: "Pinch real-time speech translation API thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Pinch is a YC W25-backed API that streams real-time speech translation across 50+ languages with voice cloning, plus an async video dubbing endpoint at $0.50 per minute.
+
+## Source and Accuracy Notes
+
+This post is based on Pinch's official documentation at [startpinch.com/docs](https://www.startpinch.com/docs), the machine-readable [llms.txt](https://startpinch.com/llms.txt), and the [OpenAPI spec](https://www.startpinch.com/openapi.json). The Python SDK lives at [github.com/pinch-eng/pinch-python-sdk](https://github.com/pinch-eng/pinch-python-sdk). Pinch launched on Hacker News twice: a Launch HN (YC W25) and a Show HN for the Mac app.
+
+## What Is Pinch?
+
+Pinch is a speech translation platform built by a YC W25 team. It started as a video conferencing product with an AI interpreter that mimicked your voice and lip-synced in real time. The team has since opened up the underlying technology as a developer API with two distinct products:
+
+- **Real-time Translation** - Stream audio in over WebSocket, get translated audio and transcripts back instantly. Supports 50+ languages with voice cloning so the output sounds like the original speaker.
+- **Video Dubbing** - Submit a video URL, receive a fully dubbed version asynchronously. Priced at $0.50 per minute with a 10-minute cap and 500 MB file limit.
+
+The real-time engine uses LiveKit for WebSocket transport, which means you can plug it into any WebRTC-compatible client. The dubbing pipeline is a standard async REST job queue with presigned upload URLs.
+
+## Setup Workflow
+
+### Step 1: Get API Keys
+
+Head to the [developer portal](https://portal.startpinch.com/dashboard/developers) and generate a Bearer token. All API requests authenticate via the `Authorization` header.
+
+### Step 2: Install the Python SDK
+
+```bash
+pip install pinch-sdk
+```
+
+The SDK wraps both the real-time WebSocket session and the dubbing job API. A Node.js demo is also available at [github.com/pinch-eng/pinch-realtime-demo](https://github.com/pinch-eng/pinch-realtime-demo).
+
+### Step 3: Start a Real-Time Translation Session
+
+Create a session by POSTing to the session endpoint:
+
+```bash
+curl -X POST https://api.startpinch.com/api/beta1/session \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceLanguage": "en-US",
+    "targetLanguage": "es-ES",
+    "voiceType": "clone"
+  }'
+```
+
+The response returns a WebSocket URL, a token, and a room name. Connect with a LiveKit client, publish your microphone audio, and you will receive translated audio tracks and transcript data messages in real time.
+
+### Step 4: Submit a Video for Dubbing
+
+For async dubbing, the flow is a three-step job pipeline:
+
+```bash
+# 1. Create a dubbing job
+curl -X POST https://api.startpinch.com/api/dubbing/jobs \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_url": "https://example.com/video.mp4",
+    "target_lang": "es",
+    "source_lang": "auto"
+  }'
+
+# 2. Poll for completion
+curl https://api.startpinch.com/api/dubbing/jobs/{job_id} \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# 3. Download the result
+curl https://api.startpinch.com/api/dubbing/jobs/{job_id}/result \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+Job statuses flow through `pending` to `downloading`, `processing`, `uploading`, and finally `completed` or `failed`.
+
+## Deeper Analysis
+
+**Why voice cloning matters.** Traditional translation APIs return text or robotic TTS output. Pinch clones the speaker's voice characteristics so the translated audio retains the original speaker's tone, pitch, and cadence. This is critical for use cases like multilingual podcasts, video localization, and cross-language meetings where speaker identity carries meaning.
+
+**LiveKit as transport.** Using LiveKit for the real-time WebSocket layer is a smart choice. LiveKit is open source, widely adopted in the WebRTC ecosystem, and has client SDKs for every major platform. Developers already familiar with LiveKit can integrate Pinch with minimal friction. It also means Pinch does not need to maintain custom WebSocket infrastructure.
+
+**Pricing model.** The dubbing API at $0.50 per minute is competitive with enterprise localization services that charge several dollars per minute. The 10-minute cap and 500 MB file limit suggest this is aimed at short-form content like product demos, tutorial videos, and social clips rather than full-length films.
+
+**Two launches, two products.** Pinch's first HN launch was a video conferencing platform with an AI interpreter. The second launch was a macOS app for real-time translation during meetings. The API is the third iteration, extracting the core translation engine into a developer-facing product. This evolution suggests the team is iterating toward the highest-leverage distribution channel.
+
+## Practical Evaluation Checklist
+
+- **Language coverage:** 50+ languages for real-time, 10 languages for dubbing (en, es, fr, de, it, pt, ru, ja, ko, zh)
+- **Latency:** Real-time streaming means sub-second translation delay, suitable for live conversations
+- **Voice quality:** Voice cloning preserves speaker identity; quality depends on source audio clarity
+- **SDK support:** Python SDK available, Node.js demo provided, LiveKit clients for other languages
+- **File limits:** Dubbing capped at 10 minutes and 500 MB per file
+- **Pricing:** Dubbing at $0.50/min; real-time pricing available in the developer portal
+- **Documentation:** Full docs, OpenAPI spec, and machine-readable llms.txt all available
+
+## Security Notes
+
+- API keys are managed through the developer portal and passed as Bearer tokens
+- Real-time sessions use WebSocket with token-based authentication per session
+- Dubbing uploads use presigned URLs with expiration (3600 seconds), limiting the window for unauthorized access
+- Video files are processed server-side; review Pinch's data retention policy if handling sensitive content
+- The real-time API is in beta (`/api/beta1/`), so expect potential breaking changes
+
+## FAQ
+
+**Q: What languages does the real-time API support?**
+**A:** 50+ languages for real-time translation. The dubbing API supports 10 languages: English, Spanish, French, German, Italian, Portuguese, Russian, Japanese, Korean, and Chinese.
+
+**Q: How does voice cloning work?**
+**A:** When you set `voiceType` to `clone` in the session request, Pinch analyzes the source speaker's voice characteristics and applies them to the translated output. The result sounds like the original speaker speaking the target language.
+
+**Q: Can I use Pinch for live video calls?**
+**A:** Yes. The real-time API streams audio over WebSocket via LiveKit, so you can integrate it into any WebRTC-based video call. The macOS app demonstrates this use case for meetings.
+
+**Q: What happens if a dubbing job fails?**
+**A:** The job status will show `failed`. You can poll the job endpoint to check status and retry with a different source file or language pair.
+
+**Q: Is there a free tier?**
+**A:** Check the developer portal for current pricing and any free tier offerings. The website mentions a free trial for the Mac app.
+
+## Conclusion
+
+Pinch carves out a specific niche in the speech translation space by combining real-time streaming, voice cloning, and a clean developer API. The LiveKit-based transport means integration is straightforward for teams already in the WebRTC ecosystem. The dubbing API provides a simple async alternative for batch video localization. If you are building multilingual features into a communication product, Pinch is worth evaluating against the established players.
