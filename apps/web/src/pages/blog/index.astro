@@ -24,6 +24,8 @@ const postsPerPage = 6;
 const initialPosts = sortedPosts.slice(0, postsPerPage);
 const initialTotal = sortedPosts.length;
 const hasMore = initialTotal > postsPerPage;
+const searchablePostCount = sortedPosts.length;
+const initialSearchQuery = Astro.url.searchParams.get('q')?.trim() || '';
 
 const siteUrl = 'https://runany.dev';
 const pageTitle = 'AI Setup, Dev Tools & Local LLM Blog';
@@ -118,11 +120,26 @@ const structuredData = [
     </section>
 
     <section aria-labelledby="posts-heading">
-      <div class="mb-4 flex items-center justify-between gap-3">
-        <h2 id="posts-heading" class="text-sm font-semibold uppercase tracking-wider text-slate-400">All Posts</h2>
-        <button id="load-more-btn" class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-300/20" type="button">
-          Load more posts
-        </button>
+      <div class="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div class="flex items-center justify-between gap-3 lg:flex-1">
+          <h2 id="posts-heading" class="text-sm font-semibold uppercase tracking-wider text-slate-400">All Posts</h2>
+          <button id="load-more-btn" class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-300/20" type="button">
+            Load more posts
+          </button>
+        </div>
+
+        <label class="block w-full max-w-xl" for="blog-search">
+          <span class="mb-2 block text-sm font-semibold text-slate-300">Search posts</span>
+          <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 focus-within:border-cyan-300/40">
+            <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5 shrink-0 text-slate-500">
+              <path fill="currentColor" d="M10 4a6 6 0 1 0 3.874 10.582l4.272 4.272l1.414-1.414l-4.272-4.272A6 6 0 0 0 10 4m-4 6a4 4 0 1 1 8 0a4 4 0 0 1-8 0" />
+            </svg>
+            <input id="blog-search" type="search" inputmode="search" autocomplete="off" placeholder="Search by title, keyword" class="w-full border-0 bg-transparent p-0 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-0" />
+            <button id="blog-search-clear" type="button" class="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200">
+              Clear
+            </button>
+          </div>
+        </label>
       </div>
       <div class="mb-4 flex items-center justify-between">
         <p class="text-sm text-slate-400" id="post-count">{initialTotal} posts</p>
@@ -162,7 +179,7 @@ const structuredData = [
     </section>
   </section>
 
-  <script define:vars={{ postsPerPage, initialTotal, hasMore }}>
+  <script define:vars={{ postsPerPage, initialTotal, hasMore, searchablePostCount, initialSearchQuery }}>
     document.addEventListener('DOMContentLoaded', () => {
       const grid = document.getElementById('posts-grid');
       const loadMoreBtn = document.getElementById('load-more-btn');
@@ -170,14 +187,31 @@ const structuredData = [
       const statusEl = document.getElementById('status');
       const tagToggle = document.getElementById('blog-tag-toggle');
       const hiddenTags = document.getElementById('blog-hidden-tags');
+      const postCountEl = document.getElementById('post-count');
+      const searchInput = document.getElementById('blog-search');
+      const clearSearchBtn = document.getElementById('blog-search-clear');
+      const emptyState = document.getElementById('empty-state');
 
       let currentPage = 1;
       const total = initialTotal;
       let hasMorePosts = hasMore;
       let loading = false;
       let observer = null;
+      let allPosts = null;
+      let searchQuery = '';
+      let searchTimeout = null;
+
+      const setPostCount = (count, query = '') => {
+        if (!postCountEl) return;
+        postCountEl.textContent = query ? `${count} result${count === 1 ? '' : 's'} for “${query}”` : `${count} posts`;
+      };
 
       const updateStatus = () => {
+        if (searchQuery) {
+          statusEl.textContent = `Searching ${searchablePostCount} posts by title, keyword`;
+          return;
+        }
+
         const showing = Math.min(currentPage * postsPerPage, total);
         statusEl.textContent = hasMorePosts ? `Showing ${showing} of ${total} posts` : `${total} posts`;
       };
@@ -217,28 +251,105 @@ const structuredData = [
         return clone;
       };
 
+      const setPagingVisibility = (visible) => {
+        if (loadMoreBtn) loadMoreBtn.style.display = visible ? '' : 'none';
+        if (sentinel) sentinel.style.display = visible ? '' : 'none';
+      };
+
+      const toggleEmptyState = (isEmpty) => {
+        if (!emptyState) return;
+        emptyState.classList.toggle('hidden', !isEmpty);
+      };
+
+      const ensureAllPosts = async () => {
+        if (allPosts) return allPosts;
+        const resp = await fetch('/api/posts-index.json');
+        if (!resp.ok) throw new Error('Failed to fetch search index');
+        allPosts = await resp.json();
+        return allPosts;
+      };
+
+      const renderPosts = (posts) => {
+        if (!grid) return;
+        grid.innerHTML = '';
+        posts.forEach((post) => grid.append(createPostCard(post)));
+        toggleEmptyState(posts.length === 0);
+      };
+
+      const resetFeed = async () => {
+        try {
+          const posts = await ensureAllPosts();
+          renderPosts(posts.slice(0, postsPerPage));
+          currentPage = 1;
+          hasMorePosts = total > postsPerPage;
+          setPagingVisibility(hasMorePosts);
+          if (observer && sentinel && hasMorePosts) observer.observe(sentinel);
+          setPostCount(total);
+          setPostCount(total);
+      updateStatus();
+        } catch (err) {
+          statusEl.textContent = 'Failed to reset posts.';
+          console.error(err);
+        }
+      };
+
+      const runSearch = async (query) => {
+        searchQuery = query.trim();
+        clearSearchBtn?.classList.toggle('hidden', !searchQuery);
+
+        if (!searchQuery) {
+          await resetFeed();
+          return;
+        }
+
+        try {
+          const posts = await ensureAllPosts();
+          const normalizedQuery = searchQuery.toLowerCase();
+          const filtered = posts.filter((post) => {
+            const title = (post.title || '').toLowerCase();
+            const tags = (post.tags || []).join(' ').toLowerCase();
+            return title.includes(normalizedQuery) || tags.includes(normalizedQuery);
+          });
+
+          if (observer) observer.disconnect();
+          setPagingVisibility(false);
+          renderPosts(filtered);
+          setPostCount(filtered.length, searchQuery);
+          updateStatus();
+        } catch (err) {
+          statusEl.textContent = 'Search failed. Try again.';
+          console.error(err);
+        }
+      };
+
+      const queueSearch = (value) => {
+        if (searchTimeout) window.clearTimeout(searchTimeout);
+        searchTimeout = window.setTimeout(() => {
+          runSearch(value);
+        }, 250);
+      };
+
       const fetchAndAppend = async () => {
-        if (loading || !loadMoreBtn) return;
+        if (loading || !loadMoreBtn || searchQuery) return;
         loading = true;
         loadMoreBtn.textContent = 'Loading...';
 
         try {
+          const posts = await ensureAllPosts();
           const nextPage = currentPage + 1;
-          const resp = await fetch(`/api/posts?page=${nextPage}&limit=${postsPerPage}`);
-          if (!resp.ok) throw new Error('Failed to fetch');
-          const data = await resp.json();
+          const nextPosts = posts.slice((nextPage - 1) * postsPerPage, nextPage * postsPerPage);
 
-          data.posts.forEach((post) => {
+          nextPosts.forEach((post) => {
             grid.append(createPostCard(post));
           });
 
-          currentPage = data.page;
-          hasMorePosts = data.hasMore;
+          currentPage = nextPage;
+          hasMorePosts = nextPage * postsPerPage < total;
           updateStatus();
 
-          if (!data.hasMore) {
+          if (!hasMorePosts) {
             if (observer) observer.disconnect();
-            loadMoreBtn.style.display = 'none';
+            setPagingVisibility(false);
           }
         } catch (err) {
           statusEl.textContent = 'Failed to load posts. Try again.';
@@ -252,6 +363,30 @@ const structuredData = [
       if (loadMoreBtn) {
         if (!hasMorePosts) loadMoreBtn.style.display = 'none';
         loadMoreBtn.addEventListener('click', fetchAndAppend);
+      }
+
+      if (searchInput instanceof HTMLInputElement) {
+        searchInput.addEventListener('input', (event) => {
+          const target = event.currentTarget;
+          if (target instanceof HTMLInputElement) queueSearch(target.value);
+        });
+      }
+
+      if (clearSearchBtn && searchInput instanceof HTMLInputElement) {
+        clearSearchBtn.addEventListener('click', async () => {
+          if (searchTimeout) window.clearTimeout(searchTimeout);
+          searchInput.value = '';
+          const url = new URL(window.location.href);
+          url.searchParams.delete('q');
+          window.history.replaceState({}, '', url);
+          await runSearch('');
+          searchInput.focus();
+        });
+      }
+
+      if (searchInput instanceof HTMLInputElement && initialSearchQuery) {
+        searchInput.value = initialSearchQuery;
+        queueSearch(initialSearchQuery);
       }
 
       if ('IntersectionObserver' in window && sentinel && hasMorePosts) {

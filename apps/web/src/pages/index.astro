@@ -10,6 +10,7 @@ const featuredPosts = sortedPosts.filter(p => p.data.featured).slice(0, 3);
 const postsPerPage = 9;
 const recentPosts = sortedPosts.slice(0, postsPerPage);
 const hasMoreRecentPosts = sortedPosts.length > postsPerPage;
+const searchablePostCount = sortedPosts.length;
 const indexableTags = getIndexableTags(allPosts);
 const siteUrl = 'https://runany.dev';
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
@@ -190,9 +191,24 @@ const structuredData = [
       </div>
     )}
 
-    <div class="mb-6">
-      <p class="text-sm font-semibold uppercase tracking-[0.24em] text-violet-300">Recent Posts</p>
-      <h2 class="mt-2 text-3xl font-bold text-white">Latest developer guides</h2>
+    <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.24em] text-violet-300">Recent Posts</p>
+        <h2 class="mt-2 text-3xl font-bold text-white">Latest developer guides</h2>
+      </div>
+
+      <label class="block w-full max-w-xl" for="home-search-posts">
+        <span class="mb-2 block text-sm font-semibold text-slate-300">Search posts</span>
+        <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 focus-within:border-cyan-300/40">
+          <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5 shrink-0 text-slate-500">
+            <path fill="currentColor" d="M10 4a6 6 0 1 0 3.874 10.582l4.272 4.272l1.414-1.414l-4.272-4.272A6 6 0 0 0 10 4m-4 6a4 4 0 1 1 8 0a4 4 0 0 1-8 0" />
+          </svg>
+          <input id="home-search-posts" type="search" inputmode="search" autocomplete="off" placeholder="Search by title, keyword" class="w-full border-0 bg-transparent p-0 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-0" />
+          <button id="home-search-clear" type="button" class="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 hover:border-cyan-300/40 hover:text-cyan-200">
+            Clear
+          </button>
+        </div>
+      </label>
     </div>
 
     <div id="home-post-grid" class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3" data-posts-per-page={postsPerPage}>
@@ -216,6 +232,8 @@ const structuredData = [
         <div id="home-infinite-scroll-sentinel" class="h-1 w-full" aria-hidden="true"></div>
       </div>
     )}
+
+    <p id="home-search-empty-state" class="mt-10 hidden text-center text-slate-500">No posts found.</p>
   </section>
 
   {hasMoreRecentPosts && (
@@ -247,20 +265,26 @@ const structuredData = [
       </article>
     </template>
 
-    <script define:vars={{ indexableTags }}>
+    <script define:vars={{ indexableTags, searchablePostCount }}>
       (function () {
         const grid = document.querySelector('#home-post-grid');
         const loadMoreBtn = document.querySelector('#home-load-more-posts');
         const statusEl = document.querySelector('#home-infinite-scroll-status');
         const sentinel = document.querySelector('#home-infinite-scroll-sentinel');
         const template = document.querySelector('#home-post-card-template');
+        const searchInput = document.querySelector('#home-search-posts');
+        const clearSearchBtn = document.querySelector('#home-search-clear');
+        const emptyState = document.querySelector('#home-search-empty-state');
 
-        if (!grid || !loadMoreBtn || !statusEl || !sentinel || !template) return;
+        if (!grid || !loadMoreBtn || !statusEl || !sentinel || !template || !searchInput || !clearSearchBtn || !emptyState) return;
 
         const postsPerPage = Number(grid.dataset.postsPerPage || 9);
         let hasMorePosts = true;
         let currentPage = 1;
         let loading = false;
+        let allPosts = null;
+        let searchQuery = '';
+        let searchTimeout = null;
 
         const formatDate = function (d) {
           if (!d) return '';
@@ -269,13 +293,20 @@ const structuredData = [
         };
 
         const updateStatus = function () {
-    if (!hasMorePosts) {
-      loadMoreBtn.hidden = true;
-      statusEl.textContent = 'All posts loaded.';
-      return;
-    }
-    statusEl.textContent = 'Scroll down to load more posts.';
-  };
+          if (searchQuery) {
+            statusEl.textContent = 'Searching ' + searchablePostCount + ' posts by title, keyword';
+            return;
+          }
+
+          if (!hasMorePosts) {
+            loadMoreBtn.hidden = true;
+            statusEl.textContent = 'All posts loaded.';
+            return;
+          }
+
+          loadMoreBtn.hidden = false;
+          statusEl.textContent = 'Scroll down to load more posts.';
+        };
 
         const createPostCard = function (post) {
     const clone = template.content.firstElementChild.cloneNode(true);
@@ -338,36 +369,108 @@ const structuredData = [
     return clone;
   };
 
+        const setPagingVisibility = function (visible) {
+          loadMoreBtn.hidden = !visible;
+          sentinel.hidden = !visible;
+        };
+
+        const toggleEmptyState = function (isEmpty) {
+          emptyState.classList.toggle('hidden', !isEmpty);
+        };
+
+        const ensureAllPosts = async function () {
+          if (allPosts) return allPosts;
+          const resp = await fetch('/api/posts-index.json');
+          if (!resp.ok) throw new Error('Failed to fetch search index');
+          allPosts = await resp.json();
+          return allPosts;
+        };
+
+        const renderPosts = function (posts) {
+          grid.innerHTML = '';
+          posts.forEach(function (post) {
+            grid.appendChild(createPostCard(post));
+          });
+          toggleEmptyState(posts.length === 0);
+        };
+
+        const resetFeed = async function () {
+          const posts = await ensureAllPosts();
+          renderPosts(posts.slice(0, postsPerPage));
+          currentPage = 1;
+          hasMorePosts = posts.length > postsPerPage;
+          setPagingVisibility(hasMorePosts);
+          updateStatus();
+        };
+
+        const runSearch = async function (query) {
+          searchQuery = query.trim();
+          clearSearchBtn.classList.toggle('hidden', !searchQuery);
+
+          if (!searchQuery) {
+            await resetFeed();
+            return;
+          }
+
+          const posts = await ensureAllPosts();
+          const normalizedQuery = searchQuery.toLowerCase();
+          const filtered = posts.filter(function (post) {
+            const title = (post.title || '').toLowerCase();
+            const tags = (post.tags || []).join(' ').toLowerCase();
+            return title.includes(normalizedQuery) || tags.includes(normalizedQuery);
+          });
+
+          if (observer) observer.disconnect();
+          setPagingVisibility(false);
+          renderPosts(filtered);
+          statusEl.textContent = filtered.length + ' result' + (filtered.length === 1 ? '' : 's') + ' found';
+        };
+
+        const queueSearch = function (value) {
+          if (searchTimeout) window.clearTimeout(searchTimeout);
+          searchTimeout = window.setTimeout(function () {
+            runSearch(value);
+          }, 250);
+        };
+
         const fetchAndAppend = async function () {
-    if (loading) return;
-    loading = true;
-    loadMoreBtn.textContent = 'Loading...';
+          if (loading || searchQuery) return;
+          loading = true;
+          loadMoreBtn.textContent = 'Loading...';
 
-    try {
-      const nextPage = currentPage + 1;
-      const resp = await fetch('/api/posts/' + nextPage + '.json');
-      if (!resp.ok) throw new Error('Failed to fetch');
-      const data = await resp.json();
+          try {
+            const posts = await ensureAllPosts();
+            const nextPage = currentPage + 1;
+            const nextPosts = posts.slice((nextPage - 1) * postsPerPage, nextPage * postsPerPage);
 
-      data.posts.forEach(function (post) {
-        grid.appendChild(createPostCard(post));
-      });
+            nextPosts.forEach(function (post) {
+              grid.appendChild(createPostCard(post));
+            });
 
-      currentPage = data.page;
-      hasMorePosts = data.hasMore;
-      updateStatus();
+            currentPage = nextPage;
+            hasMorePosts = nextPage * postsPerPage < posts.length;
+            updateStatus();
 
-      if (!data.hasMore && observer) observer.disconnect();
-    } catch (err) {
-      statusEl.textContent = 'Failed to load posts. Try again.';
-      console.error(err);
-    } finally {
-      loading = false;
-      loadMoreBtn.textContent = 'Load more posts';
-    }
-  };
+            if (!hasMorePosts && observer) observer.disconnect();
+          } catch (err) {
+            statusEl.textContent = 'Failed to load posts. Try again.';
+            console.error(err);
+          } finally {
+            loading = false;
+            loadMoreBtn.textContent = 'Load more posts';
+          }
+        };
 
         loadMoreBtn.addEventListener('click', fetchAndAppend);
+        searchInput.addEventListener('input', function (event) {
+          queueSearch(event.currentTarget.value);
+        });
+        clearSearchBtn.addEventListener('click', async function () {
+          if (searchTimeout) window.clearTimeout(searchTimeout);
+          searchInput.value = '';
+          await runSearch('');
+          searchInput.focus();
+        });
 
         let observer = null;
         if ('IntersectionObserver' in window) {
