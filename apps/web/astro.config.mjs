@@ -2,6 +2,7 @@ import { defineConfig } from 'astro/config';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
 import UnoCSS from '@unocss/astro';
+import cicadaGrammar from './src/shiki/cicada.tmLanguage.json';
 
 export default defineConfig({
   site: 'https://runany.dev',
@@ -40,6 +41,14 @@ export default defineConfig({
     shikiConfig: {
       theme: 'github-dark',
       wrap: true,
+      langs: [
+        {
+          id: 'cicada',
+          scopeName: 'source.cicada',
+          aliases: ['cicada'],
+          grammar: cicadaGrammar,
+        },
+      ],
     },
   },
 });
