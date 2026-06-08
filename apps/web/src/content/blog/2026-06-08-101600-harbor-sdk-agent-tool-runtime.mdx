@@ -1,0 +1,123 @@
+---
+title: "Harbor SDK for Agent Tool Runtimes"
+description: "Harbor SDK packages TypeScript and Python clients, generated protocol types, and a local Harbor-compatible server for teams building tool-heavy agent systems." 
+pubDate: "2026-06-08"
+tags: ["github-trending", "agents", "typescript", "python", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/harbor-sdk.webp"
+  alt: "Harbor SDK GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Harbor SDK is interesting because it does not start with a glossy agent shell; it starts with public client packages, auth modes, generated protocol types, and a local development server for teams that need composable tool runtimes.
+
+## Source and Accuracy Notes
+
+- Primary source: [zonko-ai/harbor-sdk](https://github.com/zonko-ai/harbor-sdk)
+- Hosted control plane reference: [tryharbor.ai](https://www.tryharbor.ai)
+- This review is based on the repo README, package layout, documented quickstart, architecture diagram, and the published security model section.
+
+## What Is Harbor SDK?
+
+Harbor SDK is a package-first way to build around Harbor instead of a dashboard-first way. The README makes that clear immediately. You get a Promise-first TypeScript client in `@hrbr/client`, a broader TypeScript facade in `@hrbr/sdk`, a Python distribution named `harbor-sdk`, generated protocol types, runtime result helpers, plugin and registry contracts, and a local Harbor-compatible development server with a browser frontend.
+
+That positioning matters. Many agent platforms start as a hosted control plane and add local packages later. Harbor SDK flips that order for external developers. The repo is shaped like a publishable artifact repository: what you see is the public consumption surface, not the internal monorepo where source generation happens.
+
+For runany readers, that makes Harbor SDK less like an “AI app” and more like plumbing for AI apps. If you are wiring tools, plugins, runtime execution, and auth into your own product, the repo is aimed at you.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install repo dependencies and smoke-test package health
+
+Harbor SDK documents Bun and Node as prerequisites, then starts with a tight local verification loop:
+
+```bash
+git clone https://github.com/zonko-ai/harbor-sdk.git
+cd harbor-sdk
+bun install
+bun run typecheck
+bun run smoke
+bun run python:sdk:test
+```
+
+That sequence tells you a lot. TypeScript types, smoke tests, and Python SDK validation are treated as first-class publish checks, which is exactly what you want from a cross-language client repo.
+
+### Step 2: Run the local platform example
+
+The README then points to the local platform example:
+
+```bash
+bun run --filter local-platform-example serve
+```
+
+Open the printed `http://127.0.0.1:<port>` URL in your browser. The example uses `local-token` as its bearer token when the frontend asks for auth. This is useful because it lets you evaluate Harbor’s local contract before you commit to the hosted control plane.
+
+### Step 3: Choose the right public package surface
+
+The repo is explicit that the intended TypeScript public surface is two package identities and that Python has one import package. Practical reading:
+
+- Use `@hrbr/client` when you need a normal application-facing API client.
+- Use `@hrbr/client/effect` if your host runtime is built around Effect values and layers.
+- Use `@hrbr/sdk` when you need access to wider system namespaces such as Runtime, Platform, Plugins, Registry, or Inspect.
+- Use `harbor_sdk` in Python when your workflow lives outside the TypeScript ecosystem.
+
+That split is clean. A lot of SDK repos dump everything into one namespace and leave users to discover the stable parts by trial. Harbor SDK draws harder boundaries.
+
+### Step 4: Evaluate auth and runtime result handling early
+
+The README highlights workspace API keys, bearer tokens, token providers, OAuth authorize URL helpers, and device-login helpers. It also calls out that runtime execution results preserve raw `result` JSON alongside typed content blocks for text, JSON, and explicit skill bundles.
+
+That is not just implementation detail. It tells you Harbor wants to support both ergonomic app code and lower-level runtime inspection without forcing lossy abstraction.
+
+## Deeper Analysis
+
+The strongest signal in Harbor SDK is restraint. The README does not pretend every internal package must be public. It says leaf runtime, protocol, and platform packages stay behind `@hrbr/sdk` unless there is a concrete reason to expose more. That is healthy package governance.
+
+The architecture diagram also clarifies where Harbor sits. Application code can call `@hrbr/client` or `@hrbr/sdk`; those feed into either hosted Harbor API routes or local platform contracts. That means the local development story is not a toy sandbox bolted on after the fact. It is part of the SDK design.
+
+For teams building agent products, that gives Harbor SDK a good adoption path. You can start local, test your integration shape, and delay platform dependency until workflow value is proven. That is exactly the sort of incremental adoption path many AI infra tools still get wrong.
+
+The repo is also refreshingly explicit about pre-release status. The README marks packages as pre-release and says current artifacts are distributed as GitHub release assets rather than npm or PyPI publishes. That is a limitation, but it is better than pretending the distribution story is already polished. It also means you should treat version pinning and release process as part of your evaluation.
+
+The biggest open question is ecosystem maturity. Harbor SDK exposes clients, namespaces, and local platform helpers, but its long-term leverage will depend on plugin quality, runtime contract stability, and how much of the Harbor model becomes public over time. Still, for a trending repo, this is already more concrete than many “agent framework” launches.
+
+If you are comparing options, Harbor SDK feels closer to infrastructure-minded projects than interface-minded ones. It fits readers who care about tool composition, runtime results, and auth boundaries more than prompt demos. That makes it a natural companion read to `/blog/mcpjam-inspector-mcp-server-testing/`, where protocol and developer ergonomics matter more than flashy UI.
+
+## Practical Evaluation Checklist
+
+- Verify whether your team needs the lightweight `@hrbr/client` surface or the broader `@hrbr/sdk` namespaces before importing both.
+- Run the local platform example and inspect how auth, run records, and browser frontend behave without hosted Harbor in loop.
+- Check release artifact workflow, because current distribution is GitHub-release based rather than standard registry publishing.
+- Test both TypeScript and Python paths if your stack crosses service boundaries.
+- Inspect runtime result objects to confirm Harbor preserves enough raw detail for debugging and auditability.
+
+## Security Notes
+
+Harbor SDK’s README makes one security promise especially worth noticing: secrets stay out of agent context. That is both marketing line and architectural requirement. If you evaluate the project, pressure-test where credentials live, how bearer tokens are injected, and whether local examples accidentally normalize insecure patterns.
+
+The local platform example uses `local-token`, which is fine for development but should never leak into production assumptions. Treat all local demo auth values as scaffolding only.
+
+Also note that the repo exposes multiple auth modes, including workspace API keys and OAuth/device login helpers. That flexibility is powerful, but it increases integration responsibility. Pick one auth path per product surface and document it hard, otherwise you will create operational confusion faster than Harbor creates leverage.
+
+## FAQ
+
+**Q: Is Harbor SDK meant for end users or for teams building products?**
+**A:** Mostly for builders. The repo packages clients, contracts, and a local platform surface, not a consumer-facing agent app.
+
+**Q: Why is local platform support important here?**
+**A:** Because it lets you test Harbor-compatible workflows before you commit to the hosted control plane. That lowers adoption risk for infrastructure teams.
+
+**Q: Does the repo look stable enough for production today?**
+**A:** It looks thoughtfully designed, but still pre-release. Current artifact distribution through GitHub releases is a sign to evaluate stability and upgrade process carefully.
+
+**Q: What is best reason to choose Harbor SDK over a single in-house wrapper?**
+**A:** Cross-language public packages, generated protocol types, runtime result helpers, and explicit auth models. If those map to your product needs, Harbor SDK can save real platform work.
+
+## Conclusion
+
+Harbor SDK is not trying to impress you with an agent demo. It is trying to make a tool runtime, plugin contract, and client surface composable enough that you can build your own product on top. That is more valuable than it sounds. If your team needs structured runtime results, multiple auth modes, and both TypeScript and Python entry points, Harbor SDK is one of the more credible GitHub-trending projects in this lane.

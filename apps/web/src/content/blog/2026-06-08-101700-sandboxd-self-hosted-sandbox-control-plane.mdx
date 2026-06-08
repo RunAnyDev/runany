@@ -1,0 +1,108 @@
+---
+title: "sandboxd Self-Hosted Sandbox Control Plane"
+description: "sandboxd packages multi-tenant Docker sandboxes, preview URLs, idle stop and wake, and agent task APIs for teams building app builders or coding playgrounds." 
+pubDate: "2026-06-08"
+tags: ["github-trending", "self-hosted", "docker", "agents", "dev-tools"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sandboxd.webp"
+  alt: "sandboxd GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** sandboxd is not another thin Docker wrapper; it is a self-hosted control plane for teams that need many isolated developer sandboxes, preview URLs, wake-on-request behavior, and built-in coding-agent execution.
+
+## Source and Accuracy Notes
+
+- Primary source: [tastyeffectco/sandboxd](https://github.com/tastyeffectco/sandboxd)
+- This article is based on the repo README, the documented quickstart, the project’s architectural diagram, and the project’s explanation of why a shell script stops being enough.
+
+## What Is sandboxd?
+
+sandboxd targets a specific problem that many AI product teams eventually hit: it is easy to run one container, but hard to run many isolated environments for many users without reinventing a small platform. The README is very clear about intended audience. If you need one or two personal containers, use a shell script or `docker run`. If you are building an AI app builder, coding playground, per-user preview service, or agent platform, sandboxd is the layer that starts to make sense.
+
+The project combines API control, preview URLs, lifecycle management, persistence, reconciliation, and agent execution. That combination is what separates it from hobby container wrappers. sandboxd wants to be infrastructure for products, not a convenience tool for one laptop.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install stack on Linux host with Docker
+
+The README keeps prerequisites narrow: Docker Engine plus Compose plugin on Linux. Installation is documented as:
+
+```bash
+git clone https://github.com/tastyeffectco/sandboxd.git
+cd sandboxd
+./install.sh
+```
+
+The install script checks Docker, writes a `.env`, builds the sandbox base image and control plane, and starts the stack. That matters because it shows sandboxd is opinionated about bootstrap. It wants working platform state, not partial manual assembly.
+
+### Step 2: Verify API health before testing agents
+
+After installation, the API is expected at `http://127.0.0.1:9090`, and the README gives a direct health check:
+
+```bash
+curl http://127.0.0.1:9090/healthz
+```
+
+Expected response is `ok`. For infrastructure tools, this tiny detail matters. A clearly documented health probe is usually first sign that operators were considered, not only developers.
+
+### Step 3: Test actual product value, not only container creation
+
+The README emphasizes that OpenCode and Claude Code CLIs are already present in the base image. That means your first meaningful test should not be “can I create a sandbox?” It should be “can I hand a sandbox a prompt, stream progress, and inspect result?” That is the workflow sandboxd is built for.
+
+Even without pasting every endpoint here, the documented surface includes create, exec, stop, destroy, write-files, and `run-agent-task`. That is enough to understand the design center: API-first orchestration for external applications.
+
+### Step 4: Evaluate density and wake behavior on realistic workloads
+
+sandboxd’s strongest promise is not raw creation. It is density. The README keeps returning to stop-on-idle and wake-on-request because that is where infra cost can collapse from cluster-sized to single-box-sized. If you evaluate the repo, simulate real idle periods and route traffic back into sleeping sandboxes. That is where value either holds or falls apart.
+
+## Deeper Analysis
+
+The best part of sandboxd’s README is the section arguing against itself. It tells you when not to use the project. That increases confidence because the maintainers understand scope. A lot of trending infra repos hand-wave over the jump from one container to a platform. sandboxd documents the exact features that appear once you have real users: URL routing, TLS, memory control, wake behavior, reboot reconciliation, auth, and durable task execution.
+
+The architecture is intentionally boring: SQLite as source of truth, Docker CLI as runtime boundary, Traefik for routing, a reconciler to converge Docker state after reboot, and a workspace directory that persists. For many teams, boring is correct. A single-machine control plane with strong density can beat premature Kubernetes by a wide margin.
+
+The repo also treats agents as first-class citizens rather than sidecar experiments. The base image ships with agent CLIs. `run-agent-task` is part of product surface. Progress streaming and durable results are part of design. That makes sandboxd relevant to current AI developer tooling rather than generic container ops.
+
+There are obvious boundaries. The README explicitly says current target is a single Docker host, not a distributed cluster. It also frames a future Kubernetes backend as an interface swap, not current reality. That is honest and useful. If your business already needs multi-region orchestration, sandboxd is probably too early. If you need dense single-host previews and isolated agent workspaces, it may be exactly right.
+
+For runany readers experimenting with local infra and agent workflows, sandboxd pairs naturally with projects like `/blog/harbor-sdk-agent-tool-runtime/` in spirit, even if they solve different layers. Harbor is SDK plumbing; sandboxd is runtime substrate.
+
+## Practical Evaluation Checklist
+
+- Install on real Linux host and confirm Docker, Traefik, and SQLite lifecycle are easy to inspect.
+- Measure idle-stop and wake-on-request on representative preview apps, not hello-world servers.
+- Check whether single-host architecture matches your near-term product horizon.
+- Review API surface for create, exec, write-files, and agent tasks before integrating from app backend.
+- Decide whether built-in OpenCode and Claude Code CLIs are enough, or whether you need additional agent runtimes in base image.
+
+## Security Notes
+
+sandboxd is multi-tenant infrastructure. That means isolation details matter more than nice demos. The README highlights per-sandbox memory and PID limits plus host-memory pressure reaping, which are good signs, but you should still inspect container boundaries and file persistence model before exposing system to outside users.
+
+Because the platform runs agent tasks, assume arbitrary code generation and execution are part of normal threat model. Treat workspace directories, network egress, secrets injection, and preview routing as security-critical surfaces.
+
+The project’s “single Docker host” design can also be security advantage for small teams because it reduces orchestration complexity. But it also means host hardening matters more. If this box is weak, every sandbox inherits that weakness.
+
+## FAQ
+
+**Q: Is sandboxd overkill for my own personal coding box?**
+**A:** Usually yes. Current project guidance is explicit on this point. If you only need one or two containers for yourself, a shell script or plain Docker is simpler.
+
+**Q: What makes sandboxd different from a DIY `docker run` wrapper?**
+**A:** Preview URLs, idle stop and transparent wake, reboot reconciliation, durable API control, auth, and agent task lifecycle. Those are exactly the parts that grow painful in homegrown scripts.
+
+**Q: Does sandboxd require Kubernetes?**
+**A:** No. Current documented target is one Docker host on Linux. A Kubernetes backend is described as possible future shape, not required setup.
+
+**Q: Who should evaluate sandboxd first?**
+**A:** Teams building AI app builders, coding playgrounds, per-user preview systems, or agent platforms where many isolated sandboxes must share one machine efficiently.
+
+## Conclusion
+
+sandboxd earns attention because it focuses on hard platform edges instead of toy container demos. It gives product teams a dense single-host control plane with preview routing, idle lifecycle management, and agent execution built in. If your “simple Docker script” has started accreting URLs, auth, and wake logic, sandboxd is exactly kind of project worth testing before you rebuild whole thing yourself.
