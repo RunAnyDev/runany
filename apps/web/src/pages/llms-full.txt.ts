@@ -6,6 +6,8 @@ const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').repl
 
 const normalizeText = (value: string) => value
   .replace(/^---[\s\S]*?---/m, ' ')
+  .replace(/^## TL;DR[\s\S]*?(?=\n##\s|$)/im, ' ')
+  .replace(/^## Source and Accuracy Notes[\s\S]*?(?=\n##\s|$)/im, ' ')
   .replace(/```[\s\S]*?```/g, ' ')
   .replace(/`([^`]+)`/g, '$1')
   .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
@@ -14,6 +16,7 @@ const normalizeText = (value: string) => value
   .replace(/^#{1,6}\s+/gm, '')
   .replace(/^>\s?/gm, '')
   .replace(/[*_~]/g, '')
+  .replace(/\bTL;DR:\s*/gi, '')
   .replace(/\s+/g, ' ')
   .trim();
 
