@@ -1,0 +1,145 @@
+---
+title: "Small Transfers - Per-Request Payments for SaaS and APIs"
+description: "Bill customers as little as $0.000001 per API request with Small Transfers. A Stripe Connect-powered payment platform built for usage-based billing, AI APIs, and micro-transactions."
+pubDate: "2026-06-08"
+tags: ["payments", "saas", "api", "dev-tools", "usage-based-billing"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/small-transfers-per-request-payments-saas.webp"
+  alt: "Small Transfers per-request payments platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Small Transfers is a payment platform that lets SaaS and API providers charge customers as little as $0.000001 per request, using Stripe Connect with OAuth-based authorization — no need to build your own billing, auth, or spending-limit infrastructure.
+
+## Source and Accuracy Notes
+
+- Official site: [smalltransfers.com](https://smalltransfers.com)
+- Integration Guide: [smalltransfers.com/merchant/docs/integration-guide](https://smalltransfers.com/merchant/docs/integration-guide)
+- Next.js Starter: [github.com/smalltransfers/nextjs-starter](https://github.com/smalltransfers/nextjs-starter)
+- AI Starter: [github.com/smalltransfers/ai-starter](https://github.com/smalltransfers/ai-starter)
+- HN Launch: 198 points, September 2025
+
+## What Is Small Transfers?
+
+Most payment processors have a fixed fee per transaction — usually around $0.30 plus a percentage. That makes billing below $1 impractical. If you run an AI API that costs $0.002 per request, or a SaaS tool where users might only need a handful of calls per month, traditional payment rails eat your margin alive.
+
+Small Transfers solves this by acting as a payment layer between your service and Stripe. Customers load a balance into their Small Transfers account (verified via Google Sign-In, 3-D Secure, and Stripe Radar), then authorize your service to charge them per request through OAuth. You call a simple REST API to authorize and capture charges with a minimum of $0.000001. The platform handles customer billing and sends payouts to your Stripe account via Stripe Connect.
+
+The merchant fee is a flat 3%. Customers pay payment processing fees when they top up their balance. No per-transaction fixed fees, no subscription enforcement, no need to implement your own auth layer for billing.
+
+## Setup Workflow
+
+### Step 1: Create a Merchant Account
+
+Sign up at [smalltransfers.com](https://smalltransfers.com) and connect your Stripe account via Stripe OAuth. You can link an existing Stripe account or create a new one through the onboarding flow. After connection, you receive a publishable key and a secret key for API access.
+
+### Step 2: Get Customer Authorization
+
+When a customer wants to start using your paid service, redirect them to the Small Transfers authorization page. The URL includes your client ID and redirect URI as query parameters. After the customer grants permission, they are redirected back to your app with an authorization code.
+
+Exchange this code for an access token via the Small Transfers API. Store the access token in your session or database — you will use it for all subsequent charges.
+
+### Step 3: Authorize and Capture Charges
+
+Before performing billable work, call the Authorize Charge endpoint with the access token and the maximum amount you might charge. This reserves the funds and checks spending limits. If authorization succeeds, perform your business logic (API call, computation, etc.), then call Capture Charge with the actual amount used.
+
+You can capture less than the authorized amount. If your business logic fails, simply do not capture — the customer is not charged.
+
+```bash
+# Example: Authorize a charge (pseudocode)
+POST https://smalltransfers.com/api/v1/charges/authorize
+Authorization: Bearer {access_token}
+{
+  "amount": 0.005,
+  "currency": "USD"
+}
+
+# After successful work, capture the actual cost
+POST https://smalltransfers.com/api/v1/charges/capture
+Authorization: Bearer {access_token}
+{
+  "charge_id": "ch_xxxxx",
+  "amount": 0.003
+}
+```
+
+### Step 4: Use a Starter Project
+
+Small Transfers provides two starter templates to accelerate integration:
+
+- **Next.js Starter** — Full-stack template with shadcn/ui, iron-session for session management, and Zustand for client state. Includes OAuth flow, charge authorization, and capture logic.
+- **AI Starter** — Same stack, pre-configured for AI API billing with OpenAI integration. Ideal if you are building a wrapper around LLM APIs.
+
+Both starters deploy to Vercel with a single click and include environment variable setup for `NEXT_PUBLIC_SMALL_TRANSFERS_PUBLISHABLE_KEY`, `SMALL_TRANSFERS_SECRET_KEY`, and `IRON_SESSION_PASSWORD`.
+
+## Deeper Analysis
+
+### Why This Matters for AI APIs
+
+The AI API economy runs on per-token or per-request pricing. OpenAI, Anthropic, and other providers charge fractions of a cent per call. If you are building a wrapper, aggregator, or value-added service on top of these APIs, you face the same micro-transaction problem. Small Transfers lets you pass through per-request costs without absorbing the fixed fees that Stripe or PayPal would add.
+
+The authorize-then-capture pattern is particularly well-suited for AI workloads. You authorize the maximum possible cost (e.g., worst-case token count), run the inference, then capture the actual cost. If the model fails or returns an error, you capture nothing.
+
+### Comparison with Stripe Usage-Based Billing
+
+Stripe offers metered billing and usage-based pricing, but it requires you to:
+- Implement your own authentication for customers
+- Build spending limit logic
+- Handle the subscription or invoice lifecycle
+- Deal with minimum invoice amounts
+
+Small Transfers abstracts all of this. The OAuth flow replaces your auth layer for billing purposes. Spending limits are enforced by the platform. There are no invoices — customers pre-load a balance and get charged in real time.
+
+### The Trade-Off
+
+The 3% merchant fee is higher than Stripe's standard 2.9% + $0.30 for larger transactions. For charges above $10, Stripe is cheaper. Small Transfers is designed for the sub-$1 range where fixed fees dominate. If your average transaction is $0.01, Stripe's $0.30 fixed fee makes it impossible. Small Transfers' 3% on $0.01 is $0.0003 — still viable.
+
+## Practical Evaluation Checklist
+
+- [ ] Does your service charge per request, per token, or per unit of work?
+- [ ] Is your average transaction below $1?
+- [ ] Do you want to avoid building subscription billing infrastructure?
+- [ ] Are your customers comfortable pre-loading a balance?
+- [ ] Do you need OAuth-based authorization rather than storing card details?
+- [ ] Is a 3% fee acceptable for your margin structure?
+
+If most answers are yes, Small Transfers is worth evaluating.
+
+## Security Notes
+
+- **Stripe Connect**: Payouts flow through Stripe's established infrastructure. Small Transfers never holds merchant funds directly.
+- **OAuth Authorization**: Customers grant permission via Small Transfers' hosted page. Your service receives short-lived access tokens, not card details.
+- **3-D Secure and Stripe Radar**: Customer verification uses Stripe's fraud detection. Chargebacks and disputes are handled through Stripe's standard processes.
+- **Spend Limits**: The platform enforces customer spending limits. Authorization failures prevent overcharging before your business logic runs.
+- **Test Environment**: Use `https://test.smalltransfers.com` for development. Switch to `https://smalltransfers.com` for production by changing the `NEXT_PUBLIC_SMALL_TRANSFERS_BASE_URL` environment variable.
+
+## FAQ
+
+**Q: What is the minimum charge amount?**
+**A:** $0.000001 USD per request. There is no fixed per-transaction fee on the merchant side.
+
+**Q: How does Small Transfers make money?**
+**A:** Merchants pay a flat 3% fee on each captured charge. Customers pay standard payment processing fees when they top up their balance.
+
+**Q: Do I need to store customer payment details?**
+**A:** No. Customers manage their balance through their Small Transfers account. Your service only stores an access token for authorization.
+
+**Q: Can I use Small Transfers with existing Stripe subscriptions?**
+**A:** Small Transfers is designed as an alternative to subscriptions for usage-based billing. It works alongside Stripe but does not replace subscription billing for recurring fixed-amount charges.
+
+**Q: What happens if a charge authorization fails?**
+**A:** The authorization endpoint returns an error before your business logic runs. Common failure reasons include the customer reaching their spending limit or insufficient balance.
+
+**Q: Is there a test mode?**
+**A:** Yes. Set `NEXT_PUBLIC_SMALL_TRANSFERS_BASE_URL` to `https://test.smalltransfers.com` for sandbox testing. Create a merchant account to get test API keys.
+
+## Conclusion
+
+Small Transfers fills a genuine gap in the payment infrastructure for usage-based SaaS and API products. The per-request billing model with sub-cent minimums, combined with OAuth-based authorization and Stripe Connect payouts, removes the need to build custom billing infrastructure. The 3% fee is the cost of that convenience — acceptable for micro-transactions where traditional processors are prohibitively expensive.
+
+If you are building an AI API wrapper, a usage-based developer tool, or any service where customers should pay per action rather than per month, Small Transfers deserves a spot in your evaluation stack.
