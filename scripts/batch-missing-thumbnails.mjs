@@ -1,7 +1,7 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "os";
 import path from "path";
+import { createThumbnailSvg, renderSvgToWebp } from "./lib/thumbnail-svg.mjs";
 
 const root = "/Users/friday/personal/runany";
 
@@ -42,17 +42,6 @@ const tools = [
   { slug: "agentmbox-ai-email-agent", name: "AgentMBOX", desc: "Pay-Per-Request Email for AI Agents on Solana", github: "", lang: "TypeScript", stars: "" },
 ];
 
-const promptTemplate = (tool) =>
-  `Create a 16:9 tech blog hero thumbnail for runany.dev. ` +
-  `Topic: ${tool.name} – ${tool.desc}. ` +
-  `Repository: ${tool.github || "N/A"}. ` +
-  `Visual cues: ${tool.lang}, ${tool.stars || "modern tech"}. ` +
-  `Style: futuristic developer workstation, multi-agent AI orchestration, abstract config panels, connected nodes, subtle GitHub/tooling references. ` +
-  `Color palette: dark navy (#0a0f1a), cyan (#00d4ff), electric blue (#0066ff), emerald (#00ff88) accents. ` +
-  `Composition: centered browser-like window with glowing blue border, ` +
-  `generative abstract tech patterns, clean editorial banner, strong focal object, high contrast, generous negative space for title overlay. ` +
-  `Strict: NO text, NO letters, NO numbers, NO words, NO logos, NO UI labels, NO code glyphs, NO captions, NO fake font rendering anywhere in the image.`;
-
 const r2Client = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -75,40 +64,20 @@ async function uploadToR2(slug, buf) {
 
 async function generateAndUpload(tool) {
   console.log(`Processing: ${tool.name} (${tool.slug})`);
-  
-  const payload = JSON.stringify({
-    model: "image-01",
-    prompt: promptTemplate(tool),
-    response_format: "base64",
-    n: 1,
-    aspect_ratio: "16:9",
-    prompt_optimizer: true,
+  const svg = createThumbnailSvg({
+    title: tool.name,
+    slug: tool.slug,
+    kicker: tool.github || "RUNANY.DEV",
+    subtitle: tool.desc,
+    metadata: [
+      tool.lang || "Developer tool",
+      tool.stars || "Modern workflow",
+      "SVG thumbnail → optimized WebP",
+    ],
+    seed: tool.github || tool.slug,
   });
-
-  const res = await fetch("https://api.minimax.io/v1/image_generation", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.MINIMAX_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: payload,
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error(`  MiniMax error: ${res.status} ${errText}`);
-    return;
-  }
-
-  const data = await res.json();
-  const b64 = data.data?.image_base64?.[0];
-  if (!b64) {
-    console.error("  No image in response:", JSON.stringify(data));
-    return;
-  }
-
-  const buf = Buffer.from(b64, "base64");
-  console.log(`  Generated: ${buf.length} bytes`);
+  const buf = await renderSvgToWebp(svg, { quality: 86 });
+  console.log(`  Generated SVG→WebP: ${buf.length} bytes`);
 
   await uploadToR2(tool.slug, buf);
 }

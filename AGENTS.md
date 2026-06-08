@@ -11,7 +11,6 @@ runany.dev is an English tech blog sharing knowledge about AI, developer tools, 
 **❌ NEVER hardcode credentials, API keys, access keys, or secrets in any file.**
 Always read from `~/.env` or environment variables. This includes:
 - R2 `accessKeyId` / `secretAccessKey`
-- `MINIMAX_API_KEY`
 - `GITHUB_TOKEN`
 - Any other API keys or secrets
 
@@ -115,9 +114,9 @@ Summary + next steps
 Thumbnail path: `apps/web/public/blog/thumbnails/[slug].webp`
 R2 CDN URL: `https://cdn.runany.dev/blog/thumbnails/[slug].webp`
 
-#### Priority Order — Try Source First, Generate as Fallback
+#### Priority Order — Try Source First, Generate SVG as Fallback
 
-**Rule:** Always try source extraction FIRST. Only generate with MiniMax if no usable image found.
+**Rule:** Always try source extraction FIRST. Only generate local SVG if no usable image found.
 
 **Priority 1: Extract from source (website or repo)**
 
@@ -172,7 +171,7 @@ cwebp /tmp/thumb_src.png -o /tmp/thumb.webp -resize 1200 630 -q 85
 
 > Skip Priority 1 if: site returns 403/404/captcha, image is < 300px wide, image is a 1-pixel tracker, or image is a generic stock photo. Fall through to Priority 2.
 
-**Priority 2: Generate with MiniMax (fallback only)**
+**Priority 2: Generate local SVG (fallback only)**
 
 Only when source extraction fails or yields unusable images.
 
@@ -182,70 +181,27 @@ cd ~/personal/runany
 node scripts/generate-github-tool-thumbnail.mjs owner/repo
 ```
 
-*Non-GitHub tools — Python direct call:*
-```python
-import os, urllib.request, json, base64
-
-root = "/Users/friday/personal/runany"
-with open(os.path.join(root, ".env")) as f:
-    for line in f:
-        line = line.strip()
-        if not line or line.startswith("#"): continue
-        if "=" in line:
-            k, _, v = line.partition("=")
-            v = v.strip().strip('"').strip("'")
-            if k not in os.environ: os.environ[k] = v
-
-api_key = os.environ["MINIMAX_API_KEY"]
-
-prompt = (
-    "Create a 16:9 tech blog hero thumbnail for runany.dev. "
-    "Topic: [Tool Name] – [short desc]. "
-    "Context: [1-2 sentence product description]. "
-    "Repository: [GitHub full_name if applicable]. "
-    "Visual cues: [language/tech stack], [star count or key feature]. "
-    "Style: futuristic developer workstation, multi-agent AI orchestration, abstract config panels without readable characters, connected nodes, subtle GitHub/tooling references. "
-    "Color palette: dark navy (#0a0f1a), cyan (#00d4ff), electric blue (#0066ff), emerald (#00ff88) accents. "
-    "Composition: centered browser-like window with glowing blue border, "
-    "generative abstract tech patterns, clean editorial banner, strong focal object, high contrast, generous negative space for title overlay. "
-    "Strict: NO text, NO letters, NO numbers, NO words, NO logos, NO UI labels, NO code glyphs, NO captions, NO fake font rendering anywhere in the image."
-)
-
-payload = json.dumps({
-    "model": "image-01",
-    "prompt": prompt,
-    "response_format": "base64",
-    "n": 1,
-    "aspect_ratio": "16:9",
-    "prompt_optimizer": True
-})
-
-req = urllib.request.Request(
-    "https://api.minimax.io/v1/image_generation",
-    data=payload.encode("utf-8"),
-    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    method="POST"
-)
-
-with urllib.request.urlopen(req, timeout=45) as r:
-    data = json.loads(r.read().decode("utf-8"))
-
-b64 = data["data"]["image_base64"][0]
-img_data = base64.b64decode(b64)
-with open("/tmp/thumb.png", "wb") as f:
-    f.write(img_data)
-print(f"Generated: {len(img_data)} bytes")
-```
-
-*Convert and upload:*
+*Direct SVG → WebP flow:*
 ```bash
-cwebp /tmp/thumb.png -o /tmp/thumb.webp -resize 1200 630 -q 85
+cat > /tmp/thumb.svg <<'EOF'
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#020617"/>
+  <rect x="64" y="60" width="1072" height="510" rx="36" fill="#0f172a" stroke="#334155"/>
+  <text x="88" y="210" fill="#f8fafc" font-size="60" font-family="Inter, Arial, sans-serif" font-weight="800">Tool Name</text>
+  <text x="88" y="266" fill="#67e8f9" font-size="24" font-family="Inter, Arial, sans-serif">Short category or repo name</text>
+  <text x="88" y="322" fill="#cbd5e1" font-size="24" font-family="Inter, Arial, sans-serif">One-line product description for thumbnail</text>
+</svg>
+EOF
+
+node --input-type=module <<'EOF'
+import sharp from 'sharp';
+await sharp('/tmp/thumb.svg').resize(1200, 630, { fit: 'cover' }).webp({ quality: 85 }).toFile('/tmp/thumb.webp');
+EOF
 # Upload to R2 — MUST use Node.js AWS Signature v4 script
 # ⚠️ wrangler r2 object put --remote SILENTLY FAILS
 ```
 
 **Environment variables** (`~/personal/runany/.env`):
-- `MINIMAX_API_KEY`
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`, `R2_ACCOUNT_ID`
 - `GITHUB_TOKEN`
 

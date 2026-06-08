@@ -101,6 +101,7 @@ Thumbnail requirement for maintainers:
 
 - Upload thumbnail to R2 before publishing.
 - Use CDN URL format `https://cdn.runany.dev/blog/thumbnails/[slug].webp`.
+- Prefer source image extraction first; use local SVG → optimized WebP fallback when needed.
 - Verify CDN returns HTTP 200 before merging.
 
 External contributors can submit content without R2 credentials; maintainers will upload thumbnails before publish.
