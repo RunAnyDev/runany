@@ -1,0 +1,197 @@
+---
+title: "SuperHQ - Run AI Coding Agents in Isolated Sandboxes"
+description: "SuperHQ runs Claude Code, Codex, and custom AI agents in isolated microVMs on macOS. Each agent gets its own sandbox with secure auth gateway and diff review."
+pubDate: "2026-06-08"
+tags: ["ai-agents", "dev-tools", "sandbox", "macos", "security"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/superhq-sandboxed-ai-coding-agents.webp"
+  alt: "SuperHQ sandboxed AI coding agents thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** SuperHQ is a macOS app that runs AI coding agents like Claude Code and OpenAI Codex in isolated microVM sandboxes, keeping your host machine safe while giving agents a full Debian environment to work in.
+
+## Source and Accuracy Notes
+
+This post is based on the [SuperHQ GitHub repository](https://github.com/superhq-ai/superhq) (272 stars), the [Shuru sandbox README](https://github.com/superhq-ai/shuru) (774 stars), and the [Show HN launch post](https://news.ycombinator.com/item?id=47877726) from April 2026. The product website is at [superhq.ai](https://superhq.ai).
+
+## What Is SuperHQ?
+
+SuperHQ is an open-source macOS application that orchestrates AI coding agents inside lightweight virtual machine sandboxes. Instead of running Claude Code, OpenAI Codex, or other agents directly on your host machine, each agent gets its own isolated microVM with a full Debian Linux environment.
+
+The core sandbox technology is called [Shuru](https://github.com/superhq-ai/shuru), which uses Apple's Virtualization.framework on macOS to boot ephemeral Linux VMs in seconds. Every sandbox resets on exit, so agents can install packages, run commands, and write code without ever touching your real filesystem.
+
+The project gained attention on Hacker News with a 63-point Show HN post, and the underlying Shuru sandbox has accumulated over 770 GitHub stars.
+
+## How the Sandbox Works
+
+The security model is the most interesting part of SuperHQ. Here is what happens when you launch an agent:
+
+1. **VM boot** - Shuru creates a fresh microVM using Apple's Virtualization.framework. The VM runs a minimal Debian Linux environment.
+
+2. **Directory mounts** - Your project directory is mounted into the VM as read-only by default. The agent can read your code but cannot modify it directly.
+
+3. **tmpfs overlay** - Any writes the agent makes go to an in-memory overlay filesystem (tmpfs). When the VM exits, the overlay is discarded. Your host files remain untouched.
+
+4. **Auth gateway** - This is the clever part. Your API keys (Anthropic, OpenAI, OpenRouter) never enter the sandbox. SuperHQ runs a reverse proxy on the host that intercepts API calls from the agent and injects credentials before forwarding them. The agent only sees the proxied responses.
+
+5. **Diff review** - After the agent finishes, SuperHQ shows you a unified diff of all changes the agent wants to make. You can accept or discard each change before it touches your real files.
+
+```bash
+# Install SuperHQ via Homebrew
+brew tap superhq-ai/tap && brew install --cask superhq
+
+# Or install just the Shuru sandbox CLI
+brew tap superhq-ai/tap && brew install shuru
+```
+
+## Setup Workflow
+
+### Step 1: Install and Launch
+
+SuperHQ requires macOS 14 (Sonoma) or later on Apple Silicon. The app is not yet notarized, so macOS Gatekeeper will block it on first launch. You need to go to System Settings > Privacy & Security and click "Open Anyway."
+
+```bash
+brew tap superhq-ai/tap && brew install --cask superhq
+```
+
+On first launch, SuperHQ downloads the Shuru runtime (about 500 MB). This is a one-time download.
+
+### Step 2: Configure API Keys
+
+Open SuperHQ settings and add your API keys:
+
+- **Claude Code**: Anthropic API key
+- **OpenAI Codex**: OpenAI API key, OpenRouter API key, or ChatGPT Plus/Pro subscription via OAuth
+- **Pi**: Anthropic and/or OpenAI API key
+
+Keys are stored on the host and injected via the auth gateway. Agents inside the sandbox never see them.
+
+### Step 3: Create a Workspace
+
+Create a new workspace and mount your project directory. The default mount is read-only, which is the safest option for experimenting with agents.
+
+```bash
+# Using Shuru CLI directly for more control
+shuru run --mount ./my-project:/workspace -- claude-code
+```
+
+### Step 4: Run an Agent
+
+Select your agent (Claude Code, Codex, or Pi) and start a new tab. The agent boots inside the microVM and begins working on your mounted project.
+
+### Step 5: Review Changes
+
+Open the review panel (Cmd+B) to see all file changes as a unified diff. Accept the changes you want and discard the rest. Accepted changes are written from the overlay to your host filesystem.
+
+## Remote Control from Mobile
+
+SuperHQ launched a remote control feature at [remote.superhq.ai](https://remote.superhq.ai). You scan a QR code on your Mac to pair your phone, and then you can:
+
+- See all your workspaces and agent output
+- Reply to agents and approve diffs
+- Run commands remotely
+
+No app store install required — it works in any mobile browser. The pairing is persistent, so you only need to scan the QR code once.
+
+## Deeper Analysis
+
+### Why Sandboxes Matter for AI Agents
+
+The current wave of AI coding agents (Claude Code, Codex, Cursor, Aider) all run directly on your host machine. They have access to your filesystem, your environment variables, and your API keys. A misbehaving agent can delete files, install malicious packages, or leak credentials.
+
+SuperHQ's approach treats AI agents like untrusted processes. The microVM boundary means:
+
+- **Filesystem isolation**: Agent writes stay in the overlay. Your code is read-only unless you explicitly allow writes.
+- **Network isolation**: By default, agents have no network access. You can allow specific hosts (e.g., `api.openai.com`, `registry.npmjs.org`) without giving blanket internet access.
+- **Credential isolation**: The auth gateway pattern means agents interact with APIs through a proxy. They never hold your actual keys.
+- **Ephemeral environment**: Every VM run starts fresh. No leftover state, no cached credentials, no persistent malware.
+
+### Shuru as a Standalone Tool
+
+Shuru (the sandbox engine) is useful beyond SuperHQ. You can use it as a CLI to run any command in an isolated VM:
+
+```bash
+# Run a command in a sandbox
+shuru run -- echo "hello from the VM"
+
+# Allow network access to specific hosts
+shuru run --allow-net --allow-host api.openai.com -- curl https://api.openai.com/models
+
+# Custom resource limits
+shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
+
+# Create a checkpoint for faster reboots
+shuru checkpoint create py --allow-net -- apt-get install -y python3
+shuru run --from py -- python3 script.py
+```
+
+This makes Shuru useful for running untrusted code, testing package installations, or experimenting with system changes without affecting your host.
+
+### Comparison to Alternatives
+
+| Feature | SuperHQ | Docker | Firecracker | E2B |
+|---------|---------|--------|-------------|-----|
+| VM isolation | Full microVM | Container | Full microVM | Cloud sandbox |
+| macOS native | Yes (Virtualization.framework) | Yes (via Docker Desktop) | No | No |
+| Agent-focused UX | Yes | No | No | Yes |
+| Auth gateway | Yes | No | No | No |
+| Diff review | Yes | No | No | No |
+| Open source | Yes (AGPL-3.0) | Partial | Yes | No |
+
+Docker containers share the host kernel, so a kernel exploit in the agent could escape. Firecracker provides full VM isolation but is designed for cloud workloads, not local development. E2B offers cloud sandboxes but requires internet and has usage costs. SuperHQ fills the gap for local-first, VM-isolated agent execution on macOS.
+
+## Practical Evaluation Checklist
+
+- [ ] macOS 14+ on Apple Silicon required — no Intel Mac or Windows support yet
+- [ ] App is not notarized — requires manual Gatekeeper bypass on first launch
+- [ ] ~500 MB disk space for Shuru runtime download
+- [ ] API keys stored locally — review the auth gateway implementation if handling sensitive keys
+- [ ] Linux support is experimental (ARM64 with KVM) — not ready for production
+- [ ] AGPL-3.0 license — check compatibility if modifying for commercial use
+- [ ] Very early alpha — expect breaking changes and rough edges
+
+## Security Notes
+
+The auth gateway is the most security-critical component. It runs as a reverse proxy on your host and holds your API keys in memory. Key considerations:
+
+- The gateway only accepts connections from the local microVM, not from the network
+- API keys are injected into outbound requests, never passed to the sandbox
+- For Codex OAuth, the gateway handles token refresh and forwards to ChatGPT's backend API
+- The tmpfs overlay means agent writes are in-memory only and vanish on VM exit
+- Read-only mounts by default prevent accidental host file modification
+
+The project is AGPL-3.0 licensed, which means the source is available for audit. The Shuru sandbox uses Apple's well-audited Virtualization.framework rather than a custom hypervisor.
+
+## FAQ
+
+**Q: Does SuperHQ work on Intel Macs or Windows?**
+
+**A:** No. SuperHQ requires macOS 14+ on Apple Silicon because it uses Apple's Virtualization.framework. Linux ARM64 with KVM is supported experimentally. There is no Windows or Intel Mac support.
+
+**Q: Can agents access the internet?**
+
+**A:** Not by default. You must explicitly allow network access with `--allow-net` and can restrict to specific hosts using `--allow-host`. This prevents agents from making unexpected outbound connections.
+
+**Q: What happens to agent changes if I don't accept them?**
+
+**A:** They are discarded. All agent writes go to a tmpfs overlay that is destroyed when the VM exits. Only changes you explicitly accept through the diff review panel are written to your host filesystem.
+
+**Q: Is SuperHQ production-ready?**
+
+**A:** No. The project describes itself as a "very early alpha." Expect rough edges, missing features, and breaking changes. It is suitable for experimentation and personal use, not for production workflows.
+
+**Q: How does this compare to running agents in Docker?**
+
+**A:** Docker containers share the host kernel, so a kernel-level exploit could escape the container. SuperHQ uses full microVMs with separate kernels, providing stronger isolation. SuperHQ also adds agent-specific features like the auth gateway and diff review that Docker does not provide.
+
+## Conclusion
+
+SuperHQ takes a principled approach to AI agent security by treating agents as untrusted processes that deserve real VM isolation. The combination of microVM sandboxes, an auth gateway that protects API keys, and a diff review workflow makes it the most security-conscious option for running AI coding agents on macOS today.
+
+The project is early-stage and macOS-only, but the architecture is sound. If you are running Claude Code or Codex regularly and want to protect your host machine from agent mistakes (or malicious prompts), SuperHQ is worth trying. The Shuru sandbox CLI is also useful as a standalone tool for running any untrusted command in isolation.
