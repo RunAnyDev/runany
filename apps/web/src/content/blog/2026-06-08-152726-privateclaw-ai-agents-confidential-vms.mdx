@@ -1,0 +1,160 @@
+---
+title: "PrivateClaw – AI Agents in Confidential VMs with TEEs"
+description: "Run AI agents in hardware-encrypted TEEs backed by AMD SEV-SNP. Private inference, vTPM-bound keys, and TEE-attested execution for OpenClaw workloads."
+pubDate: "2026-06-08"
+tags: ["ai-agents", "security", "tee", "confidential-computing", "openclaw"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/privateclaw-ai-agents-confidential-vms.webp"
+  alt: "PrivateClaw product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** PrivateClaw runs AI agents inside AMD SEV-SNP Trusted Execution Environments, giving you hardware-level encryption for both agent execution and inference without trusting the host OS.
+
+## Source and Accuracy Notes
+
+Official site: [privateclaw.dev](https://privateclaw.dev)
+HN discussion: [Show HN: PrivateClaw](https://news.ycombinator.com/item?id=47891569)
+
+## What Is PrivateClaw?
+
+PrivateClaw is a confidential computing platform for AI agents. It runs OpenClaw workloads inside Trusted Execution Environments (TEEs) backed by AMD's SEV-SNP standard, meaning your data stays encrypted at the hardware level — enforced by the AMD Secure Processor outside the host OS trust boundary.
+
+The pitch is straightforward: hosted OpenClaw platforms today require you to trust them with plaintext. PrivateClaw removes that requirement by moving encryption down to the silicon.
+
+## How It Works
+
+### Hardware Foundation: AMD SEV-SNP
+
+SEV-SNP (Secure Encrypted Virtualization – Secure Nested Paging) is AMD's hardware isolation technology. Each VM gets its own encrypted memory space that even the hypervisor cannot read. The AMD Secure Processor handles key management independently of the host OS.
+
+PrivateClaw builds on this by:
+
+- Running the agent runtime inside a SEV-SNP protected VM
+- Binding secrets to a virtual TPM (vTPM) that only unseals inside the attested environment
+- Providing TEE attestation so you can cryptographically verify which code is running before sending sensitive data
+
+### Encrypted Inference
+
+The inference layer also runs inside TEEs. This means both the agent's execution environment and the model inference happen within the same hardware trust boundary. Your prompts, tool outputs, and any data the agent touches never exist in plaintext outside the enclave.
+
+### SSH-First Access
+
+The product exposes itself through a simple SSH interface:
+
+```bash
+ssh privateclaw.dev
+```
+
+This gives you a terminal into your confidential agent environment. No web dashboard, no API keys to manage — just standard SSH with hardware-backed security.
+
+## Setup Workflow
+
+### Step 1: SSH Into PrivateClaw
+
+```bash
+ssh privateclaw.dev
+```
+
+You'll be dropped into your confidential VM environment. The connection itself is encrypted via standard SSH, and the VM you land in is already running inside a SEV-SNP enclave.
+
+### Step 2: Configure Your Agent
+
+Once inside, you configure your OpenClaw agent with your preferred model and tools. The agent runs entirely within the TEE — no data leaks to the host.
+
+### Step 3: Verify Attestation
+
+PrivateClaw provides TEE attestation reports that you can verify independently. This proves the exact code running in your VM and confirms the SEV-SNP protections are active.
+
+```bash
+# Attestation verification (conceptual)
+privateclaw attest --verify
+```
+
+### Step 4: Run Your Workload
+
+Send your agent tasks as you normally would. All inference, tool calls, and data processing happen inside the encrypted enclave.
+
+## Deeper Analysis
+
+### Why TEEs Matter for AI Agents
+
+AI agents increasingly handle sensitive operations: reading emails, accessing databases, making API calls with credentials, processing personal data. Running these agents on standard cloud VMs means the cloud provider (and anyone who compromises the host) can see everything.
+
+TEEs change this calculus. With SEV-SNP:
+
+- The hypervisor cannot read VM memory
+- Host OS compromises don't expose guest data
+- Key material is bound to the specific hardware instance via vTPM
+- Attestation provides cryptographic proof of the running code
+
+### Threat Model
+
+PrivateClaw's threat model covers:
+
+- **Host OS compromise**: SEV-SNP encrypts memory from the host's perspective
+- **Hypervisor attacks**: Nested paging isolation prevents hypervisor memory reads
+- **Physical attacks**: AMD Secure Processor handles keys in dedicated hardware
+- **Supply chain**: TEE attestation verifies the exact binary running
+
+What it does not cover: side-channel attacks on the CPU itself (though SEV-SNP includes mitigations), and social engineering of the operator.
+
+### Comparison to Alternatives
+
+| Approach | Encryption | Attestation | Inference Privacy |
+|---|---|---|---|
+| Standard cloud VM | In-transit only | None | No |
+| PrivateClaw (SEV-SNP) | Hardware-level | vTPM + TEE report | Yes |
+| On-premise GPU | Physical control | Manual | Yes |
+| Encrypted inference API | In-transit + at-rest | Varies | Partial |
+
+PrivateClaw's advantage is combining agent execution and inference in the same TEE, so data never leaves the enclave at any point.
+
+## Practical Evaluation Checklist
+
+- [ ] SSH access works from your environment
+- [ ] TEE attestation report verifies successfully
+- [ ] Agent can access required tools (APIs, databases) from inside the enclave
+- [ ] Inference latency is acceptable for your workload
+- [ ] vTPM-bound secrets persist across VM restarts
+- [ ] Attestation can be automated in your CI/CD pipeline
+
+## Security Notes
+
+**Key management**: Secrets are bound to the vTPM inside the TEE. If the VM is migrated or recreated, secrets must be re-provisioned. Plan for this in your automation.
+
+**Attestation verification**: Always verify the attestation report before sending sensitive data. The report contains a measurement of the running code — compare it against your expected binary hash.
+
+**Network egress**: The TEE protects memory, but network traffic still needs standard encryption (TLS). PrivateClaw's SSH interface handles this, but any outbound API calls from your agent should also use TLS.
+
+**AMD dependency**: PrivateClaw depends on AMD SEV-SNP hardware. This limits which cloud providers and regions can host your workloads. Verify availability in your target region before committing.
+
+## FAQ
+
+**Q: What happens if the host server is compromised?**
+**A:** SEV-SNP encrypts VM memory at the hardware level. Even a compromised host OS or hypervisor cannot read the encrypted memory. Your agent's data and keys remain protected.
+
+**Q: Does PrivateClaw support GPU acceleration inside the TEE?**
+**A:** Check the current documentation for GPU passthrough support. SEV-SNP with GPU acceleration is an evolving area — AMD and cloud providers are expanding support, but availability varies.
+
+**Q: How does attestation work in practice?**
+**A:** PrivateClaw generates a TEE attestation report signed by the AMD Secure Processor. You verify this report against your expected code measurement before trusting the environment with sensitive data.
+
+**Q: Can I run any LLM inside the TEE?**
+**A:** The inference layer runs inside TEEs, but model size is constrained by available TEE memory. Check current limits for your workload requirements.
+
+**Q: What's the performance overhead of SEV-SNP?**
+**A:** AMD reports minimal overhead for most workloads (typically under 5%). Memory-bound workloads may see slightly higher overhead due to encryption/decryption on memory access.
+
+## Conclusion
+
+PrivateClaw addresses a real gap in the AI agent stack: running agents on sensitive data without trusting the infrastructure provider. By combining SEV-SNP hardware isolation with encrypted inference, it offers a credible path to confidential AI agent workloads.
+
+The SSH-first interface keeps things simple, and the TEE attestation gives you cryptographic proof of what's running. For teams handling sensitive data with AI agents — financial records, personal information, proprietary code — PrivateClaw is worth evaluating.
+
+The main trade-off is hardware availability (AMD SEV-SNP instances aren't everywhere yet) and the operational complexity of managing attestation in production. But for the threat model it addresses, those are reasonable costs.
