@@ -1,0 +1,202 @@
+---
+title: "agentcookie - Sync Browser Sessions to Agent Macs"
+description: "agentcookie keeps Chrome cookies, CLI bearer tokens, and API keys synced from one Mac to another over Tailscale so headless agent machines stay authenticated without repeated logins."
+pubDate: "2026-06-09"
+tags: ["ai-agents", "macos", "tailscale", "browser-auth", "security"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agentcookie.webp"
+  alt: "agentcookie Mac agent session sync thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** agentcookie is a macOS-only tool for a specific but painful problem: keeping an agent machine continuously authenticated by replicating cookies and CLI secrets from your daily Mac to a second Mac over Tailscale.
+
+## Source and Accuracy Notes
+
+This post is based on the official [agentcookie repository](https://github.com/mvanhorn/agentcookie) and its linked project documentation, especially the install flow, architecture, verification, and threat-model sections. The project is MIT licensed and currently describes itself as macOS-only on both ends.
+
+## What Is agentcookie?
+
+Most agent demos quietly assume authentication is already solved. Real work is uglier.
+
+Your automation Mac, Mac mini, or second laptop needs access to the same logged-in websites and CLI sessions you use on your main machine. Without that, every workflow breaks on the boring parts: login prompts, browser state, API key sprawl, and credentials scattered across tool-specific files.
+
+agentcookie is built for that exact second-machine scenario. Its model is simple:
+
+- one Mac is your source, where you browse and log in normally
+- one Mac is your sink, where agents run
+- cookie changes and secrets are pushed continuously over your Tailscale tailnet
+
+The result is that OpenClaw, Hermes, browser-driving tools, and compatible CLIs can wake up already authenticated.
+
+This is not broad consumer sync software. It is specialized auth infrastructure for local agents.
+
+## Why This Repo Matters
+
+The repo is interesting because it treats browser cookies and CLI secrets as one operational surface.
+
+The published docs show that agentcookie syncs:
+
+- Chrome cookies
+- bearer tokens
+- API keys
+- per-CLI auth blobs persisted beside tools
+
+It delivers those through three different sink surfaces:
+
+1. the real Chrome Cookies SQLite database
+2. a plaintext sidecar at `~/.agentcookie/cookies-plain.db`
+3. per-CLI adapter outputs such as `session.json` or `config.toml`
+
+That three-surface model is smart. Agents and tools do not all consume auth in the same way, so agentcookie avoids forcing one format onto everything.
+
+## Prerequisites
+
+- macOS on both source and sink machines
+- Tailscale running on both Macs
+- Chrome installed
+- Go `1.22+` or a pre-built release
+- willingness to trust one machine to hold synced auth state for another
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install on both Macs
+
+The project documents installation with `go install` on both machines:
+
+```bash
+go install github.com/mvanhorn/agentcookie/cmd/agentcookie@latest
+```
+
+That gives you the `agentcookie` binary.
+
+### Step 2: Pair source and sink
+
+The documented source-side install flow is:
+
+```bash
+agentcookie wizard install --as source --peer
+```
+
+The wizard prints a pairing code.
+
+On the second Mac, you run the sink-side command and paste the pairing details:
+
+```bash
+agentcookie wizard install --as sink --peer \
+  --code <PAIRING_CODE> \
+  --pair-url http://<SOURCE_HOST>:9998/pair
+```
+
+The sink wizard installs a LaunchAgent, opens Chrome Safe Storage for universal delivery, and registers built-in adapters that fire after every sync.
+
+### Step 3: Understand degraded mode versus universal delivery
+
+One subtle but important part of the documentation is the difference between its preferred and fallback states.
+
+If the sink has access to the macOS login password during install, agentcookie can open Chrome Safe Storage and enable what the repo calls universal delivery. That means unmodified cookie readers can use the synced real Chrome profile.
+
+If no password is available, install continues in degraded mode. In that case the sidecar and adapters still work, but you do not get full universal delivery. The project documents a later upgrade command:
+
+`agentcookie wizard set-keychain-access`
+
+That is a good sign operationally. The tool does not fail hard if the perfect path is unavailable.
+
+### Step 4: Verify health
+
+The documented verification commands are practical and worth following exactly:
+
+```bash
+agentcookie doctor
+agentcookie wizard verify-adapters
+agentcookie wizard verify-adapters --json
+```
+
+The project says `agentcookie doctor` checks fifteen health categories including cookie delivery mode, binary signature and install state, Tailscale, config, keystore, listener bind, sink/source state, sealing posture, adapter coverage, and DBSC-suspect cookies.
+
+### Step 5: Manage site-level blocking
+
+The project also documents account toggles without editing YAML by hand:
+
+```bash
+agentcookie accounts off x.com
+agentcookie accounts on x.com
+agentcookie accounts list
+```
+
+That matters because not every site should be mirrored to an automation box.
+
+## Deeper Analysis
+
+### What agentcookie is doing under hood
+
+The documented architecture is opinionated:
+
+- it watches Chrome's Cookies file on the source Mac
+- it watches a secrets bus under `~/.agentcookie/`
+- it pushes diffs over HTTPS on the Tailscale network
+- it encrypts traffic with AES-256-GCM and uses replay defenses
+- it writes results into Chrome, a sidecar database, and adapter-specific files on the sink
+
+This is not hand-wavy "sync your cookies" marketing. It is a concrete pipeline with named delivery targets and documented failure modes.
+
+### Where this tool fits best
+
+agentcookie makes most sense if you run agents on a dedicated Mac that is not your daily browser machine. Typical fits include:
+
+- headless Mac minis for browser automation
+- second Macs for buying, booking, scraping, or research agents
+- CLI-heavy workflows where auth lives in both browser cookies and local config files
+
+If your agents already live on the same Mac where you browse, this tool is probably unnecessary.
+
+### Biggest caveat: DBSC and platform limits
+
+The repo is unusually explicit about limits. It says DBSC changes the landscape for device-bound cookies, and it describes current platform status instead of pretending everything syncs forever.
+
+It also says the project is macOS-only today on both ends. That is a hard product boundary, not a small inconvenience.
+
+## Practical Evaluation Checklist
+
+- [ ] You have a real two-Mac workflow, not a same-machine workflow
+- [ ] Your agents need both browser sessions and CLI secrets
+- [ ] Tailscale is already part of your setup or acceptable to adopt
+- [ ] You are comfortable giving a second Mac high-trust auth state
+- [ ] You want unattended sync rather than manual export or cookie-paste rituals
+- [ ] macOS-only constraints are acceptable for your environment
+
+## Security Notes
+
+agentcookie handles extremely sensitive material. Treat it accordingly.
+
+- It syncs cookies, bearer tokens, and API keys, so compromise of the sink can become compromise of your accounts.
+- The tool uses Tailscale, AES-256-GCM, replay defense, and per-peer pairing-derived keys, but secure transport does not remove endpoint risk.
+- Universal delivery intentionally makes unmodified cookie tools work against the real synced Chrome profile. That is powerful and dangerous at the same time.
+- Use the documented blocklist controls to exclude sites you do not want mirrored.
+
+This is one of those repos where reading the linked threat model before production use is not optional.
+
+## FAQ
+
+**Q: Does agentcookie work on Linux or Windows?**
+**A:** Not today. The current implementation is documented as macOS only on both source and sink.
+
+**Q: Do tools need to be modified to read synced auth state?**
+**A:** Not always. The default universal-delivery path is specifically designed so unmodified cookie tools can read the synced Chrome profile.
+
+**Q: What if I cannot provide the login password during sink install?**
+**A:** The project says install falls back to degraded mode, where the sidecar and adapter paths still work, and later can be upgraded with `agentcookie wizard set-keychain-access`.
+
+**Q: Is this only for browser cookies?**
+**A:** No. The project also documents a secrets bus for bearer tokens, API keys, and other `KEY=VALUE` auth blobs.
+
+## Conclusion
+
+agentcookie solves a narrow problem, but it solves a real one with more operational clarity than most agent-auth projects.
+
+If your second Mac exists mainly so agents can act while your daily machine stays personal, this repo is worth serious attention. If your workflow does not involve that split, it will look overly specialized. That is fine. Good infrastructure tools are often sharp, not broad.
