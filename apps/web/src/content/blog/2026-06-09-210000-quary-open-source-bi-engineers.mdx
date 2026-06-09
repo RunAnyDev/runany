@@ -1,0 +1,191 @@
+---
+title: "Quary – Open-Source BI for Engineers (2.4k Stars)"
+description: "Quary is a self-hosted, open-source BI platform that lets engineers query databases and build dashboards directly in the browser — no BI team, no enterprise license, no data movement required."
+pubDate: "2026-06-09"
+tags: ["open-source", "bi", "analytics", "sql", "self-hosted"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/quary.webp"
+  alt: "Quary open-source BI platform interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Quary is a self-hosted, open-source BI tool that connects directly to your data warehouse, lets engineers write SQL in-browser, and builds shareable dashboards — no cloud account, no data pipeline, no BI team required.
+
+## Source and Accuracy Notes
+
+- [Quary GitHub](https://github.com/quarylabs/quary) (MIT license, 2.4k stars)
+- [Quary Docs](https://www.quary.dev/docs)
+- [HN Launch Thread](https://news.ycombinator.com/item?id=44043990)
+
+## What Is Quary?
+
+Quary is an open-source business intelligence platform built for engineers who already know SQL. Instead of handing analysts a GUI to build queries, Quary assumes you can write `SELECT` statements and just want a faster way to turn those queries into shareable, refreshable dashboards.
+
+The stack is Rust plus PostgreSQL. Dashboards, credentials, and query history live in a local SQLite file on the host machine. Queries run directly against your existing data warehouse — there is no ETL, no data movement, and no separate analytical database to maintain.
+
+Key capabilities:
+
+- In-browser SQL editor with autocomplete and syntax highlighting
+- Drag-and-drop dashboard builder with chart components (bar, line, table, scatter, pivot)
+- Multiple database connections (PostgreSQL, MySQL, SQLite, DuckDB, MotherDuck, and more)
+- Scheduled refresh for dashboard tiles
+- Share dashboards via static HTML export or embedded iframe
+- REST API for programmatic access to query results
+
+## Setup Workflow
+
+### Step 1: Install Quary
+
+The fastest path is Docker:
+
+```bash
+docker run -d -p 8080:8080 \
+  -v ~/quary:/home/quary \
+ quarylabs/quary
+```
+
+Then open `http://localhost:8080` and create your admin account.
+
+Alternatively, install via npm for local development:
+
+```bash
+npm install -g @quary/quary
+quary init
+quary dev
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/quarylabs/quary
+cd quary
+cargo build --release
+./target/release/quary serve
+```
+
+### Step 2: Connect a Data Source
+
+From the Quary UI, navigate to **Connections → Add Connection** and select your database type. Quary supports:
+
+- PostgreSQL (most common)
+- MySQL / MariaDB
+- SQLite (for flat-file workflows)
+- DuckDB (great for local CSVs and Parquet files)
+- MotherDuck (DuckDB cloud)
+- BigQuery
+- MSSQL
+
+Credentials are stored locally in the SQLite config file, not sent to any external service.
+
+### Step 3: Write a Query
+
+Navigate to **Queries → New Query**. The editor supports:
+
+- SQL syntax highlighting
+- Column autocomplete from your schema
+- Result preview in-table
+- Save and name queries for reuse in dashboards
+
+Example query against a PostgreSQL `orders` table:
+
+```sql
+SELECT
+  date_trunc('month', created_at) AS month,
+  status,
+  count(*) AS order_count,
+  sum(total_cents) / 100.0 AS revenue
+FROM orders
+WHERE created_at >= now() - interval '12 months'
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2;
+```
+
+### Step 4: Build a Dashboard
+
+From a saved query, click **Add to Dashboard**. Choose a visualization type:
+
+- **Table** — sortable, filterable data grid
+- **Bar / Line** — time series and categorical comparisons
+- **Scatter** — correlation plots
+- **Pivot** — cross-tabulation
+
+Arrange tiles on the dashboard canvas. Set a refresh interval (e.g., every 15 minutes) or leave it manual.
+
+### Step 5: Share
+
+Dashboard sharing options:
+
+- **Static export** — generates a standalone HTML file with embedded data (no server required to view)
+- **Embedded iframe** — paste a snippet into any internal wiki or web page
+- **Scheduled email** — auto-send a snapshot on a cron schedule (requires email config)
+
+## Deeper Analysis
+
+### Architecture
+
+Quary's design philosophy is "your database is already your data warehouse." It does not extract, transform, or load data into a separate analytical store. Instead, it issues live queries against your existing database and caches results locally.
+
+The Rust backend handles connection pooling and query execution. The frontend is a React app served as static files. All state (dashboards, connections, credentials) lives in a SQLite file at `~/.quary/quary.db`.
+
+This architecture works well for teams that already have a well-structured relational database and want to expose it to non-engineering stakeholders without a full BI tool migration.
+
+### Why Engineers Prefer It
+
+Most engineers already know SQL. Quary removes the translation layer between "I have a question about the data" and "I get an answer." You write the query, save it, wire it to a chart, and share the link — all in under five minutes.
+
+For teams with a strict no-SaaS data policy, Quary is one of the few BI tools that can run entirely air-gapped on a local server or private VPC.
+
+### Comparison to Alternatives
+
+| Tool | License | Self-hosted | SQL-first | Target user |
+|---|---|---|---|---|
+| Quary | MIT | Yes | Yes | Engineers |
+| Metabase | AGPL | Yes | Partial | Analysts |
+| Superset | Apache 2 | Yes | Yes | Analysts |
+| Grafana | AGPL | Yes | No | SREs |
+| Looker | Proprietary | No | Yes | Business users |
+
+Quary's advantage is pure SQL focus and a developer-friendly setup. Its disadvantage is a narrower chart library and no drag-drop ETL.
+
+## Practical Evaluation Checklist
+
+- [ ] Quary starts and the UI is accessible at `localhost:8080`
+- [ ] Successfully connects to a PostgreSQL or SQLite data source
+- [ ] Runs a `SELECT` query and displays results in the editor
+- [ ] Saves a query and adds it to a dashboard
+- [ ] Changes visualization type (bar vs. table) and confirms rendering
+- [ ] Exports a dashboard as static HTML and opens it without Quary running
+- [ ] Checks the SQLite config file is local and not transmitted externally
+
+## Security Notes
+
+Quary stores all credentials in a local SQLite file on the host. There is no cloud sync and no external telemetry. Connections to databases use standard driver authentication (username/password or connection string).
+
+However, the local SQLite file contains plaintext credentials. On shared hosts, use file permissions or consider a connection proxy if that is a concern. Quary does not currently support LDAP/SSO integration, which limits its suitability for large organizations with centralized identity requirements.
+
+## FAQ
+
+**Q: Does Quary work with Google BigQuery?**
+**A:** Yes. BigQuery is listed as a supported connection type. You will need a service account JSON key file. Quary uses the BigQuery REST API under the hood, so it does not require a local BigQuery SDK installation.
+
+**Q: How is this different from Metabase?**
+**A:** Metabase is designed for non-technical users with a GUI query builder. Quary assumes you write SQL and provides a code-first editor. Quary also has a much simpler deployment story (single Docker image vs. Metabase's Java-based stack).
+
+**Q: Can I embed Quary dashboards in other apps?**
+**A:** Yes. Quary supports iframe embedding with a configurable signed token for access control. You can embed dashboards in internal wikis, web apps, or documentation sites.
+
+**Q: Does Quary support real-time dashboards?**
+**A:** Quary supports scheduled refresh (e.g., every 5 minutes), but it does not have true real-time push. For near-real-time use cases, consider pairing Quary with a database that has LISTEN/NOTIFY or a change data capture pipeline feeding into your warehouse.
+
+## Conclusion
+
+Quary fills a specific gap: engineers who want BI capabilities without the enterprise tool overhead. If your team already has a well-structured relational database and engineers who write SQL, Quary is the fastest path from query to shared dashboard.
+
+The MIT license, single Docker image deploy, and no-cloud-required architecture make it particularly attractive for teams with strict data residency requirements or limited BI budgets. The 2.4k GitHub stars and active development suggest it is production-ready for smaller teams.
+
+Start with the Docker one-liner, connect your PostgreSQL instance, and wire up your first query to a dashboard. You will have something shareable in under ten minutes.
