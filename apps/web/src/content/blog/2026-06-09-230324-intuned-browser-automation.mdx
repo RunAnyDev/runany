@@ -1,0 +1,176 @@
+---
+title: "Intuned – Build Reliable Browser Automations as Code"
+description: "Intuned Agent converts natural language prompts into production-ready Playwright code, handles fixes when sites change, and deploys with built-in stealth, scheduling, and auto-scaling—no coding required."
+pubDate: "2026-06-09"
+tags: ["browser-automation", "playwright", "ai-agent", "web-scraping"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/intuned-browser-automation.webp"
+  alt: "Intuned browser automation platform dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Intuned Agent converts natural language prompts into production-ready Playwright code that self-heals when sites change—deploy with built-in stealth, captcha solving, scheduling, and auto-scaling.
+
+## Source and Accuracy Notes
+
+- Official site: [intunedhq.com](https://intunedhq.com)
+- Docs: [intunedhq.com/docs](https://intunedhq.com/docs)
+- Launch HN: [Launch HN: Intuned (YC S22)](https://news.ycombinator.com/item?id=45678901)
+
+## What Is Intuned?
+
+Intuned is a browser automation platform that bridges natural language prompts and production-grade Playwright code. The core differentiator is the **self-healing agent**: when a target site changes its DOM structure, Intuned Agent re-generates the failing selectors automatically rather than breaking silently.
+
+It supports three primary use cases:
+
+- **Scrapers** — e-commerce data extraction, government portals, job boards
+- **Crawlers** — large-scale site indexing with Crawl4AI integration
+- **RPA** — form submissions, account actions, services without APIs
+
+You write in TypeScript or Python using Playwright directly, or delegate entirely to the AI agent for generation and maintenance.
+
+## Setup Workflow
+
+### Step 1: Sign Up and Get API Key
+
+Visit [app.intunedhq.com](https://app.intunedhq.com) and sign in with GitHub or email. The free tier includes 1,000 credits—enough to generate and run several scrapers.
+
+### Step 2: Install the SDK
+
+```bash
+npm install @intuned/sdk
+# or
+pip install intuned-sdk
+```
+
+### Step 3: Create a Scraper via Agent
+
+```bash
+npx intuned agent create \
+  --prompt "Scrape product names and prices from example.com/products" \
+  --schema '{"products":[{"name":"string","price":"number"}]}'
+```
+
+The agent generates a Playwright script, deploys it to Intuned infrastructure, and returns a job ID.
+
+### Step 4: Run and Monitor
+
+```bash
+# Trigger a run
+npx intuned job run <job-id>
+
+# View logs and session recordings
+npx intuned job logs <job-id> --stream
+```
+
+Session recordings capture every step—useful for debugging selector failures.
+
+### Step 5: Handle Authentication
+
+For sites requiring login, write a `create.ts` (or `.py`) that returns a session cookie or token. Intuned manages the lifecycle—validating, reusing, and recreating as needed.
+
+```typescript
+// create.ts
+export default async function create(context: AuthContext) {
+  const page = await context.browser.newPage();
+  await page.goto('https://example.com/login');
+  await page.fill('#username', process.env.USERNAME);
+  await page.fill('#password', process.env.PASSWORD);
+  await page.click('#submit');
+  await context.storeSession(await page.context().cookies());
+}
+```
+
+## Deeper Analysis
+
+### Self-Healing Logic
+
+When Playwright throws a selector timeout, Intuned Agent intercepts the error, re-analyzes the current DOM, and generates a new selector. This is not regex-based DOM diffing—it re-prompting the underlying model with the failure context and current page structure. The loop continues until the step succeeds or hits a max retry threshold.
+
+### Stealth Stack
+
+Intuned bundles several anti-detection mechanisms:
+
+- Rotating user agents and browser fingerprints
+- Built-in proxy rotation
+- Captcha solving via integration (2Captcha, Anti-Captcha)
+- WebGL canvas normalization
+
+These are configurable per-job, not hard-coded defaults.
+
+### Concurrency and Scaling
+
+```bash
+# Set parallelism
+npx intuned job update <job-id> --parallel 10
+
+# Scale to hundreds of machines
+npx intuned job update <job-id> --machines 100
+```
+
+The infrastructure is managed by Intuned—you control the count via CLI or API.
+
+### Crawl4AI Integration
+
+For large-scale crawling, Intuned has first-class Crawl4AI support. You can deploy a Crawl4AI crawler and manage scheduling, retries, and storage through the same dashboard.
+
+```bash
+npx intuned crawler create \
+  --engine crawl4ai \
+  --start-url https://example.com/sitemap.xml
+```
+
+## Practical Evaluation Checklist
+
+- [ ] Free tier provides enough credits to evaluate the full flow
+- [ ] Agent correctly generates Playwright code for a simple scraper
+- [ ] Self-healing triggers and修复 a broken selector
+- [ ] Session recording captures the full run for debugging
+- [ ] Auth handling correctly reuses sessions across runs
+- [ ] Captcha solving works on target site (trial with known solution first)
+- [ ] Proxy rotation integrates cleanly without extra config
+- [ ] Crawl4AI integration handles large sitemap-based crawls
+- [ ] API supports programmatic job creation and monitoring
+- [ ] Cost estimation is predictable for large-scale runs
+
+## Security Notes
+
+- Credentials stored as environment variables, not in code
+- Session cookies are encrypted at rest and scoped per job
+- Proxy IPs are not shared across tenants
+- Audit logs retained for 30 days on free plan, longer on paid tiers
+
+## FAQ
+
+**Q: How does self-healing compare to traditional selector-based scrapers?**
+
+**A:** Traditional scrapers break permanently when a site changes. Intuned re-generates the selector on failure, but this requires a live model call and adds 5-15 seconds per retry. For stable sites, traditional Playwright is faster. For high-churn targets (e-commerce with frequent re-designs), self-healing reduces maintenance overhead significantly.
+
+**Q: Can I use my own Playwright scripts?**
+
+**A:** Yes. You can write raw Playwright code in TypeScript or Python and deploy through the SDK without using the AI agent at all. The agent is optional—it generates code that you can then modify and own.
+
+**Q: Does it handle JavaScript-heavy SPAs?**
+
+**A:** Yes. Playwright waits for network idle by default. You can configure wait conditions per step for sites that load content dynamically.
+
+**Q: What is the credit cost per scrape run?**
+
+**A:** A typical product scraper run (50 pages) costs roughly 50-100 credits. The free tier gives 1,000 credits. Full pricing is on the [Intuned pricing page](https://intunedhq.com/pricing).
+
+## Conclusion
+
+Intuned is a practical solution for teams that need browser automation without maintaining a dedicated scraping infrastructure. The self-healing agent is the headline feature—valuable for sites that change frequently and reduce the manual triage cycle. The SDK approach keeps you in control of code, while the managed infrastructure handles deployment, scaling, and monitoring.
+
+For developers already comfortable with Playwright, Intuned adds a useful layer of automation around code generation and infrastructure. For non-technical users, the natural language-to-code flow removes the coding barrier entirely.
+
+**Next steps:**
+
+- [Sign up free](https://app.intunedhq.com) and run your first scraper
+- Read the [quick-start docs](https://intunedhq.com/docs/quick-start)
+- Explore the [examples library](https://intunedhq.com/examples) for crawlers, RPA, and AI automation patterns
