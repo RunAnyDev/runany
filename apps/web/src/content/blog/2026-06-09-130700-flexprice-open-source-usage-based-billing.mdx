@@ -1,0 +1,216 @@
+---
+title: "Flexprice - Open Source Billing for Usage-Based AI"
+description: "Flexprice is an open source billing platform built for AI and agentic companies. Meter API calls, manage credits, and automate invoices with usage-based and credit-based pricing."
+pubDate: "2026-06-09"
+tags: ["open-source", "billing", "ai", "saas", "monetization"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/flexprice-open-source-usage-based-billing.webp"
+  alt: "Flexprice usage-based billing dashboard thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Flexprice is an open source billing platform that handles usage-based, credit-based, and hybrid pricing for AI and agentic companies. It runs on your infrastructure with SOC 2 Type II controls and a developer-first API.
+
+## Source and Accuracy Notes
+
+- Official site: [flexprice.io](https://flexprice.io)
+- Documentation: [docs.flexprice.io](https://docs.flexprice.io)
+- llms.txt (32 KB structured source): [flexprice.io/llms.txt](https://flexprice.io/llms.txt)
+- Show HN launch: [news.ycombinator.com/item?id=44422663](https://news.ycombinator.com/item?id=44422663)
+
+## What Is Flexprice?
+
+Flexprice is an open source billing infrastructure platform designed for teams that charge by usage, credits, or a hybrid of both. It targets AI-native and SaaS companies that need to meter high-volume API calls, manage prepaid credit balances, and produce auditable invoices without building a custom billing stack.
+
+The platform is built for the specific failure modes of usage-based pricing:
+
+- Real-time event ingestion at 10,000 events per second
+- Backfills, retroactive credits, and idempotent replays
+- Prepaid credit expirations with priority rules
+- Per-customer usage analytics without custom SQL
+- Webhook delivery with retry and ordering guarantees
+- Self-hosting for teams that need full data control
+
+Flexprice is SOC 2 Type II compliant and ships with field-level RBAC, encryption in transit and at rest, and 30-day audit logs.
+
+## Why Usage-Based Billing Is Hard
+
+Traditional subscription billing assumes a stable seat count. AI products break that assumption because token spend, inference time, and tool calls vary by orders of magnitude across customers and even between calls for the same customer.
+
+The HN launch post calls out the production failure modes that drive teams to look for a billing platform instead of rolling their own:
+
+- High-volume event pipelines that drop events and cause underbilling
+- Backfills that corrupt invoice totals and force 3 AM log stitching
+- Prepaid credit mechanics that require expirations, partial deductions, and priority rules
+- Per-customer usage reports that need aggregation layers on top of raw events
+- Webhook integrations that fail on duplicates, out-of-order events, and time zone bugs
+- Architecture that works for 100 users but breaks at 10,000
+
+Flexprice addresses each of these with a single platform and an open source codebase you can audit.
+
+## Core Capabilities
+
+The product groups its features into six areas, each with its own dashboard and API surface.
+
+### Usage Metering
+
+Ingest usage events from any source with SDKs in Python, JavaScript, and Go. The event debugger lets you inspect payloads, filter by source, and replay failed events. Aggregation methods are configurable per event type, so you can sum token counts, average latency, or count unique users without a custom pipeline.
+
+### Credit Grants
+
+Issue prepaid, promotional, or paid credits with configurable expirations and rollovers. Map GPU minutes or tokens to a credit currency for predictable billing. Credit priority rules let you decide whether a promotional credit or a paid credit is consumed first.
+
+### Pricing Plans
+
+Define weekly, monthly, or annual billing cycles with flat, tiered, or usage-based charges. Test different models in parallel and promote a winner to production without a schema migration. The pricing playbook at [flexprice.io/pricing-playbook](https://flexprice.io/pricing-playbook) covers outcome-based and hybrid models.
+
+### Feature Entitlements
+
+Gate features by event-based usage. Filter usage by event fields and reset usage at the end of a billing cycle. This lets you charge for premium features that consume internal resources (like advanced model tiers or higher rate limits) without a separate entitlement service.
+
+### Invoicing and Workflows
+
+Generate invoices from subscription state plus usage aggregations. Issue credit notes for adjustments and route invoice events through webhooks to your finance stack. The recent Commit launch week shipped a workflow builder that automates billing tasks without glue code.
+
+### Real-Time Analytics
+
+Query usage with billing-grade aggregations: per-customer summaries, time-bucketed rollups, and breakdowns by event field. The same API serves customer dashboards, internal finance reports, and Stripe reconciliation jobs.
+
+## Self-Hosting vs Cloud
+
+Flexprice is open source (Apache 2.0) and ships as a self-hostable bundle. The cloud product at [flexprice.io](https://flexprice.io) is the managed version with SOC 2 Type II controls, dedicated infrastructure isolation, and continuous penetration testing.
+
+For most teams, the decision comes down to three questions:
+
+- Do you need billing data in your own VPC for compliance reasons? Self-host.
+- Do you want usage-based pricing live in production this week? Use the cloud.
+- Do you have a small finance team and no platform engineers? Cloud, definitely.
+
+The self-host path uses Docker Compose for the core services. The [GitHub repository](https://github.com/flexprice/flexprice) is the same code that powers the cloud, with configuration switches for hosted mode.
+
+## Architecture Overview
+
+```bash
+┌────────────┐      ┌──────────────┐      ┌─────────────────┐
+│ Your App   │──────│ Flexprice    │──────│ Aggregations    │
+│ (SDK/API)  │      │ Event Ingest │      │ + Credit Wallet │
+└────────────┘      └──────────────┘      └─────────────────┘
+                            │                       │
+                            ▼                       ▼
+                    ┌──────────────┐      ┌─────────────────┐
+                    │ Event Debugger│     │ Invoice + Webhook│
+                    │ (Realtime UI) │     │ Delivery        │
+                    └──────────────┘      └─────────────────┘
+```
+
+Events flow from your application through the SDK into the metering pipeline. Aggregations are computed per billing cycle and drained into the credit wallet when charges apply. Invoices are generated from the wallet state and webhook events fire on subscription changes, payment successes, and credit adjustments.
+
+## Setup Workflow
+
+The fastest path to a working installation is the Docker Compose quickstart.
+
+### Step 1: Clone the repository
+
+```bash
+git clone https://github.com/flexprice/flexprice.git
+cd flexprice
+```
+
+### Step 2: Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env with your database URL, secret key, and webhook signing secret
+```
+
+### Step 3: Start the stack
+
+```bash
+docker compose up -d
+# Wait for the API to be ready
+curl -fsS http://localhost:8080/healthz
+```
+
+### Step 4: Send a test event
+
+```python
+import flexprice
+
+client = flexprice.Client(api_key="sk_test_...")
+
+client.events.ingest(
+    event_name="api_call",
+    customer_id="cus_42",
+    properties={"tokens": 1234, "model": "gpt-4o"},
+)
+```
+
+### Step 5: Inspect in the dashboard
+
+Open `http://localhost:3000` and navigate to Events. The event should appear within a few seconds with the property breakdown visible.
+
+## Deeper Analysis
+
+The interesting design choice in Flexprice is treating credits as a first-class primitive rather than an extension of usage. Most billing systems model a prepaid credit as a negative balance on a usage record. Flexprice models it as a wallet with its own ledger, separate from usage events.
+
+This matters for three reasons:
+
+- Credit expirations can be enforced at the wallet layer without a usage query
+- Priority rules (promo before paid) are wallet-level, not usage-level
+- Refunds and credit notes are wallet operations, not invoice reversals
+
+The same separation lets the analytics API answer questions that are painful to answer in a usage-only model, like "how many promotional credits are still unspent across all customers" or "what is the effective credit burn rate per cohort".
+
+The platform also takes a strong position on observability. Every event, credit grant, and invoice line has an audit trail entry, and the event debugger shows the full payload of any event in the system. For finance teams that need to explain a customer dispute, this is the difference between a five-minute investigation and a multi-day incident.
+
+## Practical Evaluation Checklist
+
+Before you commit to a billing platform, walk through this list:
+
+- [ ] Can the platform ingest 10,000 events per second without drops? Load test it.
+- [ ] Does it support retroactive credit grants without corrupting prior invoices? Try a backfill.
+- [ ] Are webhook deliveries idempotent and ordered? Check the headers.
+- [ ] Can you export raw events for your own analytics warehouse? Confirm the data egress path.
+- [ ] Does the self-hosted version include the same security controls as cloud? Read the SOC 2 report.
+- [ ] Is the SDK maintained for your primary language? Check the commit history on GitHub.
+- [ ] Can you run a parallel test against your current billing system for a billing cycle? Most platforms offer a sandbox.
+
+## Security Notes
+
+Flexprice is SOC 2 Type II certified. The platform implements field-level RBAC, encryption in transit and at rest, and 30-day audit logs by default. Network isolation uses VPC peering and dedicated infrastructure for enterprise customers. The application layer is hardened with continuous penetration testing, dependency scanning, and strict CI/CD controls.
+
+For self-hosted deployments, the security responsibilities shift to you: you manage the database encryption keys, the network isolation, and the audit log retention. The open source codebase exposes the same primitives the cloud uses, so you can configure the same controls with your own policies.
+
+## FAQ
+
+**Q: Is Flexprice really open source?**
+**A:** Yes. The full platform is Apache 2.0 licensed on GitHub at github.com/flexprice/flexprice. The cloud product is the same codebase with hosted configuration and managed infrastructure layered on top.
+
+**Q: How does Flexprice compare to Stripe Billing?**
+**A:** Stripe Billing is strong for flat-rate and per-seat subscriptions but struggles with complex usage-based workflows, high-volume event ingestion, and credit-wallet mechanics. Flexprice is purpose-built for the usage-based and credit-based patterns that AI products need. The team has a public post on Stripe's limitations at flexprice.io/blog/why-stripe-billing-limitations-usage-based-pricing.
+
+**Q: Can I run Flexprice in my own VPC?**
+**A:** Yes. The self-hosted distribution includes all core services and runs on Docker Compose or Kubernetes. The cloud product also offers a dedicated infrastructure tier for customers who need network isolation without operating the platform themselves.
+
+**Q: What languages are supported by the SDK?**
+**A:** Python, JavaScript, and Go at launch. The REST API is the source of truth and any language with HTTP support can integrate directly.
+
+**Q: Does Flexprice handle subscription billing too, or only usage-based?**
+**A:** Both. You can run pure usage-based, pure subscription, or hybrid models in the same workspace. The pricing plan schema supports flat fees, tiered usage, and credits as composable components.
+
+**Q: What happens to events when a customer disputes a charge?**
+**A:** Every event has a full audit trail entry with the original payload, the customer ID, and the timestamp. The event debugger lets you replay events or export the raw data for a dispute investigation. The platform does not auto-delete events on dispute because audit trails must outlive the dispute window.
+
+**Q: How is the platform priced for the cloud product?**
+**A:** The pricing page at flexprice.io/pricing-page lists the plans. The pricing is consumption-aligned: a free tier for development, a usage-based tier for production, and an enterprise tier with dedicated infrastructure and SOC 2 attestation.
+
+## Conclusion
+
+Flexprice fills a specific gap in the billing market: the gap between Stripe Billing (which assumes stable subscriptions) and a fully custom billing stack (which takes a small team months to build and operate). For AI and agentic companies whose pricing models are still in flux, the open source codebase plus the managed cloud option lets you start fast and keep control of the data plane.
+
+If you are evaluating a billing platform for a usage-based AI product, Flexprice is worth a one-day spike. The self-hosted distribution comes up in minutes, and the SDK surfaces a working event ingestion pipeline by the end of a coffee.
