@@ -1,0 +1,176 @@
+---
+title: "Lanes - Run AI Coding Agents in Parallel"
+description: "Lanes is a macOS desktop workspace for running multiple AI coding agents (Claude Code, Codex, Gemini) side by side on isolated git worktrees, with a shared issue board."
+pubDate: "2026-06-09"
+tags: ["ai-coding", "dev-tools", "claude-code", "codex", "parallel-agents"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lanes.webp"
+  alt: "Lanes product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Lanes is a macOS desktop app that runs multiple AI coding agents in parallel on the same project, each in its own git worktree, with a shared issue board, live PTY terminals, a built-in SQLite browser, and resumable sessions for Claude Code, Codex, Gemini CLI, and any other AI coding CLI you already use.
+
+## Source and Accuracy Notes
+
+- Official site: [lanes.sh](https://lanes.sh)
+- Product changelog: [lanes.sh/blog](https://lanes.sh/blog)
+- Documentation: [lanes.sh/docs](https://lanes.sh/docs)
+- Show HN launch: [HN #47388478-adjacent](https://news.ycombinator.com/) for parallel coding workspaces, v0.42 release notes dated June 4, 2026
+
+Lanes is a closed-source macOS desktop application. It is not a wrapper around an LLM SDK and it does not meter tokens. Every session in Lanes is a real PTY that runs the official CLI of the agent you already pay for, so the plan, pricing, and rate limits stay the same as running the CLI in Terminal.app. Feature claims in this article come from the public homepage, the v0.40 through v0.42 changelogs, and the docs site. Verify current version numbers and pricing against the live download before recommending it to a team.
+
+## What Is Lanes?
+
+Lanes is a desktop workspace for parallel AI coding. Instead of running one AI coding agent in one terminal tab, you run many agents at once, each attached to an issue on a built-in kanban board, each in its own git worktree, each with a real live terminal you can watch.
+
+The product positions itself against three specific pains that show up the moment you start using a coding agent seriously:
+
+```text
+- Tab chaos          # Claude Code in tab 3, Codex in tab 7, which is on which branch?
+- Branch conflicts   # Two agents editing the same repo, stomping on each other
+- Lost context       # Quit a long Claude session, reopen the next day, context gone
+```
+
+The differentiator on the marketing page is "auto-created git worktrees, one per session, with cleanup when the session ends." That is a real engineering decision: every issue on the board gets its own branch and working directory, agents cannot stomp on each other, and the workspace is gone the moment the issue is closed.
+
+The target user is a developer or small team that already pays for Claude Code, Codex, Gemini CLI, or any combination of those, and has started hitting the wall of "I have one terminal tab per agent and I keep losing track of which is doing what." Lanes is the thing that replaces that mental overhead with a board.
+
+## Why It Matters
+
+The agent-coding workflow has shifted in the last 18 months from "use one tool, one at a time" to "use whichever tool fits this task, sometimes several at once." That shift broke a lot of personal workflows. The old "open VS Code, open one terminal, run one command" pattern does not scale to two parallel sessions, much less four.
+
+Three things Lanes does that you cannot easily do with raw CLI tabs:
+
+- Worktree isolation per session. Each agent gets its own branch, so merging work later is a normal git workflow rather than a triage exercise.
+- Shared kanban board. Issues move from Backlog to Planning to Implementation to Review to Done. You can see at a glance which agent is doing what, which is blocked, and which is waiting for input.
+- Resumable sessions. Claude Code sessions resume with full conversation history. You can close the app, reopen the next day, and the context is back.
+
+The trade-off is the usual one for a desktop app that wraps CLIs: you are tying your workflow to a single macOS app, and a chunk of value lives in the board UX rather than the underlying agent calls. If you only ever run one agent at a time, Lanes is overkill. If you run two or more, the cost of a missing tab or a cross-branch edit starts to outweigh the subscription.
+
+## Prerequisites
+
+- macOS (downloads page lists macOS as the supported platform; no Windows or Linux build is advertised at the time of writing)
+- A working install of at least one AI coding CLI: Claude Code, Codex, Gemini CLI, or any other tool that runs as an interactive PTY
+- A paid plan with whichever provider you are using, since Lanes does not meter or proxy tokens
+- A project that is already under git, because worktree isolation is built on top of git worktrees
+- Optional but recommended: a GitHub or Linear account, so Lanes can sync issues in via its integrations
+
+## Setup Workflow
+
+### Step 1: Download and install
+
+Grab the macOS build from [lanes.sh](https://lanes.sh) and drop it into Applications. Launch it once to grant accessibility and terminal access, which the app needs to spawn real PTY sessions.
+
+```bash
+# Verify your AI CLI is on PATH before opening Lanes
+which claude
+which codex
+which gemini
+```
+
+Lanes does not install or update the CLIs for you. The docs assume the agent binaries are already in your shell, with the same dotfiles, aliases, and shell config that Terminal.app would use.
+
+### Step 2: Open a project and add an issue
+
+The first time you open a project, Lanes scans the directory and creates a backlog. Add an issue by typing it into the Backlog column. The issue form is the entry point for the rest of the workflow: the title, body, labels, and dependencies all live on the issue.
+
+```text
+Backlog
+  #743  Add user authentication
+  #742  Add dark mode
+```
+
+When you start a session, Lanes creates a git worktree per issue, runs your setup script if you have one, and spawns the CLI you picked in a real terminal.
+
+### Step 3: Start a parallel session
+
+The whole point is parallelism. Drag an issue into Planning, start a Claude Code session on it, drag the same issue into Implementation, start a Codex session on the same issue, and you now have two competing implementations in two worktrees.
+
+```bash
+# Inside the worktree, the agent is a normal shell
+git status
+ls -la
+# Normal dev tools work. Nothing special.
+```
+
+You can also chain sessions on one issue. The v0.41 release notes describe running plan to implement to review on the same issue, with each session a different CLI or model.
+
+### Step 4: Open the built-in SQLite browser (v0.42)
+
+The v0.42 release adds a Databases tab to the context sidepanel. It is a read-only SQLite browser that finds `.db`, `.sqlite`, `.sqlite3`, and `.db3` files inside the working folder, lists every table and view, runs `SELECT * FROM "table" LIMIT 100` for you, and gives you a Monaco editor for ad-hoc queries.
+
+The point of the tab is to inspect the databases your agents create. Ask a session to scaffold a schema or seed test data, then open Databases and confirm the agent actually did what it said, without dropping into a terminal to remember the `sqlite3` incantation.
+
+### Step 5: Close out
+
+When the issue is Done, Lanes tears down the worktree. The branch, the changes, and any uncommitted work are still in git if you need them. Sessions can also be closed with the worktree kept around, which is useful when you want to review the diff before deleting the branch.
+
+## Deeper Analysis
+
+The interesting design choice in Lanes is the worktree model. Most "AI coding workspace" tools treat parallel agents as a UI problem: tabs, cards, statuses. Lanes treats it as a git problem first, and a UI problem second.
+
+That has a few real consequences:
+
+- Merge conflicts become normal git merge conflicts, not "two agents edited the same file" mysteries.
+- You can run the same issue through plan mode, implement mode, and review mode in three parallel sessions, then keep the winner.
+- The session boundary is the worktree, not the agent process. Stop a session, the worktree stays. Delete the issue, the worktree goes.
+
+The trade-off is that Lanes is not a great fit for monorepos where you cannot afford per-issue worktrees, or for projects where the build state is too heavy to spin up per session. The docs do not advertise per-session resource limits, and a real PTY session can be expensive on a large project.
+
+The other thing worth noting is what Lanes deliberately is not. It is not an IDE. There is a Monaco-based file browser and editor, but it is clearly a "view and tweak" tool, not a primary coding surface. It is also not an agent framework. Lanes does not have its own prompt DSL, tool registry, or model routing. It is a workspace that runs the CLIs you already use, with a board, worktrees, and resumable sessions on top.
+
+## Practical Evaluation Checklist
+
+- Confirm your stack runs on macOS. There is no advertised Windows or Linux build.
+- Pick at least two CLIs to test in parallel, otherwise the parallel-session model is overkill.
+- Try one issue with three parallel sessions (plan, implement, review) before deciding. That is the killer workflow.
+- Check the v0.40 release notes for the integrations list. GitHub, Linear, and a local MCP server are supported; everything else is via deep links.
+- Verify the price and license model on the download page before committing the team. Pricing and plan details change and the public changelog does not always list them.
+- Test the resume flow: run a long Claude Code session, quit the app, reopen, confirm the conversation history is back.
+
+## Security Notes
+
+Lanes runs every AI session as a real PTY on your machine, in your shell, with your dotfiles and your credentials. That is the point, and it is also the risk. Whatever an agent can do from a terminal, the agent can do in Lanes.
+
+A few specifics worth knowing before you point Lanes at a production repo:
+
+- Each session runs in its own git worktree, which contains a real checkout of the project, including any local secrets in `.env` files. The worktree is on your local disk and is destroyed when the issue is closed, but the worktree is real until then.
+- The local MCP integration lets Claude Code, Codex, and other agents read your Lanes board and drive sessions. If you enable it, an agent that is already running in your shell can see the rest of the board, including issue titles, bodies, and session state.
+- Token usage is shown per session, but Lanes does not proxy the LLM calls. The provider API key stays on the agent CLI, not on a Lanes server.
+- The product is closed source. There is no public security model, threat model, or bug bounty linked from the footer at the time of writing.
+
+Treat Lanes the way you would treat a second Terminal.app: useful, but assume anything you can do in a terminal, an agent can do in Lanes.
+
+## FAQ
+
+**Q: Does Lanes meter tokens or proxy LLM calls?**
+**A:** No. Every session is a real PTY that runs the official CLI of the agent you already pay for, in your shell, with your dotfiles. The pricing and rate limits of the underlying provider apply as if you had opened Terminal.app and run the CLI yourself.
+
+**Q: Can I run Claude Code, Codex, and Gemini CLI at the same time on the same project?**
+**A:** Yes. Each session is a separate worktree, so you can attach any CLI to any issue, switch CLIs mid-project, and run multiple sessions on the same issue in parallel. The v0.41 release notes describe the same workflow in production.
+
+**Q: Does Lanes work on Windows or Linux?**
+**A:** The downloads page advertises macOS only. There is no advertised Windows or Linux build at the time of writing. If you are on Linux, the closest alternative is to manage git worktrees by hand and run the CLIs in separate terminal tabs.
+
+**Q: How does the built-in SQLite browser work?**
+**A:** The v0.42 release adds a Databases tab to the context sidepanel. Lanes scans the working folder for `.db`, `.sqlite`, `.sqlite3`, and `.db3` files, lists every table and view, runs a default `SELECT * FROM "table" LIMIT 100` for the selected table, and gives you a Monaco editor with syntax highlighting for ad-hoc queries. The browser is read-only.
+
+**Q: Is Lanes open source?**
+**A:** No. Lanes is a closed-source macOS desktop app. The product page and footer do not link to a public repository at the time of writing.
+
+**Q: What integrations are supported?**
+**A:** GitHub, Linear, and a local MCP server that lets Claude Code, Codex, and other agents read the Lanes board. Anything else is reachable via deep links that pre-fill a new-issue draft from a bookmarklet or script.
+
+## Conclusion
+
+Lanes is a workspace for the part of AI-assisted coding that has gotten awkward: running more than one agent at a time. The product makes a specific bet, that parallel coding agents should be managed the way parallel branches already are, with git worktrees as the isolation boundary, and a board as the UI.
+
+For a developer or small team already paying for two or more AI coding CLIs and feeling the pain of juggling terminal tabs, the product is worth a download. The v0.42 SQLite browser is a small but useful signal that the team is iterating on real workflow friction, not just on the agent wiring. For anyone still running a single agent in a single tab, the value is much smaller, and a normal Terminal.app window is probably the right tool.
+
+The safest next step is to install Lanes on a side project, run one issue through three parallel sessions, and see whether the board UX is worth the dependency on a closed-source macOS app. If the workflow sticks, the next thing to look at is the GitHub and Linear integrations, which turn the board into the actual system of record for the work.
