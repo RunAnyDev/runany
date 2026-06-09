@@ -1,0 +1,207 @@
+---
+title: "Obot – Open-Source MCP Gateway for AI Agents"
+description: "Obot is an open-source MCP gateway that manages MCP servers, Skills, access policies, audit logs, and integrations for AI agents. Deploy via Docker, connect to any MCP client."
+pubDate: "2026-06-09"
+tags: ["mcp", "ai-agents", "self-hosted", "open-source"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/obot-mcp-gateway.webp"
+  alt: "Obot MCP Gateway product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Obot is an open-source MCP gateway that manages MCP servers, Skills, access policies, audit logs, and integrations for AI agents. Deploy via Docker and connect any MCP-compatible client.
+
+## Source and Accuracy Notes
+
+- **Product site:** https://obot.ai
+- **GitHub:** https://github.com/obot-platform/obot
+- **Documentation:** https://docs.obot.ai
+- **Stars:** 821 | **Forks:** 172 | **Language:** Go
+
+## What Is Obot?
+
+Obot is a self-hosted MCP (Model Context Protocol) gateway that acts as a central control plane for AI agents. Rather than hardcoding MCP server endpoints into each agent, Obot provides a registry + gateway pattern:
+
+- **Registry:** Discover and register MCP servers with their capabilities
+- **Gateway:** Route agent requests to the right MCP server with auth enforcement
+- **Skills:** Package agent capabilities as reusable, versioned Skills
+- **Access policies:** Define who can call which MCP server or Skill
+- **Audit logs:** Track every MCP call for compliance and debugging
+- **Integrations:** Connect to LangChain, LlamaIndex, or any MCP-compatible client
+
+The gateway speaks the standard MCP protocol, so agents built with Claude Code, OpenAI Agents SDK, CrewAI, or custom runtimes can all connect through Obot without code changes.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose installed
+- 2 GB RAM minimum (4 GB recommended for production)
+- Linux/macOS or WSL2 on Windows
+
+### Step 1: Deploy the Gateway
+
+```bash
+git clone https://github.com/obot-platform/obot.git
+cd obot
+docker compose up -d
+```
+
+The gateway starts on port `8080` by default. The control plane UI runs on port `3000`.
+
+### Step 2: Register an MCP Server
+
+Obot uses a YAML definition to register MCP servers:
+
+```yaml
+# mcp-servers/my-server.yaml
+name: web-search
+type: mcp
+endpoint: https://mcp.example.com/search
+auth:
+  type: api-key
+  key: ${MCP_API_KEY}
+```
+
+Apply it:
+
+```bash
+obot server apply -f mcp-servers/my-server.yaml
+```
+
+### Step 3: Create a Skill
+
+Skills bundle one or more MCP calls into a reusable agent capability:
+
+```yaml
+# skills/research.yaml
+name: web-research
+description: Search the web and extract key information
+mcp_servers:
+  - web-search
+tools:
+  - search
+  - extract
+```
+
+```bash
+obot skill apply -f skills/research.yaml
+```
+
+### Step 4: Connect an Agent
+
+Obot exposes a standard MCP endpoint. Point your agent SDK at it:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/mcp")
+response = client.chat.completions.create(
+    model="claude-3-5-sonnet",
+    messages=[{"role": "user", "content": "Search for the latest news on AI agents"}]
+)
+```
+
+Or with LangChain:
+
+```python
+from langchain_mcp_adapters import MCPGateway
+
+gateway = MCPGateway("http://localhost:8080")
+```
+
+### Step 5: Set Access Policies
+
+Restrict which agents or users can call which Skills:
+
+```yaml
+# policies/developer-policy.yaml
+name: developer-policy
+rules:
+  - skill: web-research
+    allowed_roles: [developer, admin]
+  - skill: code-execute
+    allowed_roles: [admin]
+```
+
+```bash
+obot policy apply -f policies/developer-policy.yaml
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Obot follows a hub-and-spoke model. All MCP traffic flows through the gateway, which handles:
+
+1. **Request routing** – Match agent requests to registered MCP servers
+2. **Auth enforcement** – API keys, JWT tokens, or RBAC policies
+3. **Telemetry** – Structured logging and OpenTelemetry traces
+4. **Rate limiting** – Per-server, per-skill, or per-tenant limits
+
+The registry is backed by SQLite in development and PostgreSQL in production.
+
+### Skill Lifecycle
+
+Skills are versioned. Each Skill version is immutable once published. Agents pin a Skill version, and Obot handles the routing. Upgrading an agent to a new Skill version is a config change, not a code change.
+
+### Multi-Tenant Support
+
+Obot supports multi-tenant isolation via namespaces. Each tenant gets its own registry, policies, and audit logs. This makes it suitable for agencies or platforms serving multiple independent agent deployments.
+
+### Comparison to Alternatives
+
+| Feature | Obot | LocalAI Gateway | FastMCP |
+|---|---|---|---|
+| Self-hosted | Yes | Yes | Yes |
+| Skill versioning | Yes | No | No |
+| Access policies | RBAC | None | None |
+| Audit logs | Yes | No | No |
+| Multi-tenant | Yes | No | No |
+| MCP client SDKs | Any MCP-compatible | Custom | Custom |
+
+## Practical Evaluation Checklist
+
+- Deploy the gateway with `docker compose up -d` (target: under 5 minutes)
+- Register at least one MCP server via YAML config
+- Create a Skill that combines two MCP server calls
+- Verify the agent can call the Skill through the gateway
+- Apply a restrictive access policy and confirm enforcement
+- Check audit logs for a successful and a blocked call
+- Scale to two MCP servers and confirm routing works
+
+## Security Notes
+
+- **Network isolation:** Run Obot behind a reverse proxy (nginx/Caddy) with TLS in production
+- **Secrets management:** Use environment variables or a vault for `MCP_API_KEY` and other credentials — never hardcode
+- **RBAC:** Define least-privilege access policies; default deny is the right posture for agent traffic
+- **Audit logs:** Export logs to your SIEM for long-term retention and anomaly detection
+- **Updates:** Obot releases are on GitHub; watch the repo for security patches
+
+## FAQ
+
+**Q: What is the difference between Obot and a simple MCP proxy?**
+**A:** A proxy forwards requests. Obot adds registry, versioning, RBAC, audit, and multi-tenant isolation. For a single-agent setup, a proxy may be sufficient. For teams or platforms managing multiple agents, Obot's control plane saves significant engineering.
+
+**Q: Does Obot work with Claude Code, OpenAI Agents SDK, and CrewAI simultaneously?**
+**A:** Yes. Obot implements the standard MCP protocol. Any client that speaks MCP can connect — Claude Code, OpenAI Agents SDK, CrewAI, LangChain agents, or a custom-built client.
+
+**Q: Can I self-host Obot on a Raspberry Pi or minimal VPS?**
+**A:** The gateway itself is lightweight (Go binary, ~50 MB image), but PostgreSQL for production mode adds overhead. A 2 GB VPS with Docker can run the gateway in development mode (SQLite backend). For production with multi-tenant isolation, 4 GB and PostgreSQL is the minimum.
+
+**Q: How does Obot handle an MCP server going down?**
+**A:** Obot returns a `503 Service Unavailable` and logs the failure. It does not auto-retry — retry logic belongs in the agent or client SDK. You can configure health-check intervals per server to mark them unhealthy automatically.
+
+**Q: Is there a managed cloud version of Obot?**
+**A:** No, Obot is fully self-hosted. The project is Apache-2.0 licensed.
+
+## Conclusion
+
+Obot fills the gap between "I have one MCP server" and "I run a platform with dozens of agents and services." Its registry + gateway + Skills + RBAC stack gives you the control plane that production AI agent systems need without locking you into a specific SDK or cloud provider.
+
+Deploy it in under 5 minutes with Docker. Start with one MCP server and one Skill, then grow into multi-tenant production as your agent fleet scales.
