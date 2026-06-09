@@ -1,0 +1,215 @@
+---
+title: "Nuanced - Call Graphs That Make AI Coding Tools Smarter"
+description: "Nuanced is an open-source Python library that turns your codebase into a queryable call graph, so AI coding agents stop breaking dependencies they should have seen."
+pubDate: "2026-06-09"
+tags: ["python", "ai-coding", "dev-tools", "code-analysis"]
+category: "dev-tools"
+author: "Du"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nuanced-py.webp"
+  alt: "Nuanced Python call graph library for AI coding agents"
+---
+
+## TL;DR
+
+> **TL;DR:** Nuanced is an open-source Python library that generates enriched function call graphs from a real codebase, then lets you hand that graph to a coding agent as context so the agent can answer "what breaks if I change this?" without guessing.
+
+## Source and Accuracy Notes
+
+- GitHub repo: [github.com/nuanced-dev/nuanced-py](https://github.com/nuanced-dev/nuanced-py) (MIT, 127 stars as of June 2026)
+- Docs: [docs.nuanced.dev](https://docs.nuanced.dev)
+- Product site: [nuanced.dev](https://nuanced.dev)
+- HN launch thread: Show HN post by the team, 34 points, July 2025
+- The product has since pivoted into a spec-driven desktop app for macOS, but the open-source Python call-graph library described here is still the foundation and is what the HN thread is about.
+
+## What Is Nuanced?
+
+Nuanced is a static-analysis library that turns a real Python package into a JSON call graph and exposes a CLI for slicing that graph down to whatever subset a coding agent needs.
+
+The pitch is straightforward: when you ask Cursor, Claude Code, or any other AI coding agent "what will break if I rename this function?", the agent is reading your source as text. It can grep for the name, but it cannot reason about call order, transitive callers, or functions that only get invoked through a wrapper. Nuanced solves that by giving the agent a precomputed call graph it can query at the same time it queries the source.
+
+The same idea generalizes to security review (which functions can actually reach a sensitive sink?), refactor planning (what is the blast radius of a signature change?), and onboarding (where do I start reading this codebase?). The library only does Python today, with JavaScript and TypeScript on the roadmap.
+
+## Why This Matters
+
+AI coding assistants have a structural blind spot. They see tokens, not topology.
+
+The same blind spot caused some of the most expensive AI-coding failures of 2025: agents that renamed a function and forgot to update the import, agents that "fixed" a failing test by deleting the assertion instead of tracing the call chain, and agents that confidently refactored a utility module without noticing the public method was inherited by three other internal packages.
+
+A call graph is a tiny artifact relative to the codebase it describes. A 5,000-line module compresses to maybe 200KB of JSON once you strip out bodies and keep just signatures, caller-callee edges, and module boundaries. That is small enough to stuff into a prompt, large enough to answer most "what calls what" questions a coding agent will ever ask.
+
+This is the bet Nuanced is making: that the next leap in AI coding productivity will not come from larger context windows, it will come from better-curated context.
+
+## Prerequisites
+
+- Python 3.9 or newer
+- `uv` (recommended) or `pip`
+- A Python codebase you want to analyze (any size works, but the payoff grows with size)
+- A coding agent that can read JSON files (every modern agent can)
+
+## Step 1: Install Nuanced
+
+The fastest path uses `uv tool install`, which gives you an isolated CLI install without touching your project dependencies.
+
+```bash
+uv tool install nuanced
+```
+
+If you prefer plain `pip`, that works too:
+
+```bash
+pip install nuanced
+```
+
+Verify the install landed:
+
+```bash
+nuanced --version
+```
+
+## Step 2: Initialize a Call Graph
+
+Pick a Python package in your project and point `nuanced init` at it. The CLI walks the package with static analysis, follows imports, and writes the resulting graph to a local cache.
+
+```bash
+cd my_project
+nuanced init path/to/my_package
+```
+
+A few real-world examples:
+
+```bash
+# A small CLI tool
+nuanced init ./src/myapp
+
+# A Django project (point at the apps you want analyzed)
+nuanced init ./myproject/users ./myproject/billing
+
+# A monorepo with several Python services
+nuanced init ./services/auth ./services/api ./services/worker
+```
+
+The first run on a large codebase can take 30 to 60 seconds. Subsequent runs are incremental.
+
+## Step 3: Enrich a Specific Function
+
+Once the graph is built, the `enrich` subcommand gives you everything Nuanced knows about a single function: who calls it, who it calls, what it imports, and which modules touch it transitively.
+
+```bash
+nuanced enrich path/to/my_package/file.py some_function_name > some_function_name_subgraph.json
+```
+
+The output is plain JSON. Pipe it into a file, into another tool, or directly into an agent prompt.
+
+## Step 4: Hand the Graph to a Coding Agent
+
+Here is the actual workflow the Nuanced team uses in their own debugging. You have a failing test, you do not know why, and you want the agent to reason about it with the call graph in hand:
+
+```bash
+# 1. Extract the subgraph for the failing function
+nuanced enrich path/to/my_package/file.py some_function_name > some_function_name_subgraph.json
+
+# 2. Build a prompt that points the agent at the graph
+cat > agent_prompt.txt << 'EOF'
+test_some_function_name_succeeds is failing. Can you use the call graph in
+some_function_name_subgraph.json to debug and update the relevant code to make
+the test pass?
+EOF
+
+# 3. Send both files to the agent
+cat agent_prompt.txt some_function_name_subgraph.json | claude-code --stdin
+```
+
+The same pattern works with any coding agent that accepts a file as context. The JSON is human-readable enough that you can also open it in your editor and read it yourself when you want to verify what the agent is being told.
+
+## Step 5: Use It for Refactor Planning
+
+The other common workflow is blast-radius estimation before a refactor. You are about to change the signature of `process_payment`. Before you do, ask Nuanced who calls it:
+
+```bash
+nuanced enrich ./billing/payments.py process_payment > blast_radius.json
+```
+
+The output will show you every caller, every transitive caller, and the module each one lives in. That is the input your refactor plan needs.
+
+A common pattern in larger teams is to commit the enriched subgraph into the PR description so reviewers can see the blast radius without re-running the analysis.
+
+## Deeper Analysis
+
+What the call graph actually contains:
+
+- Function signatures (name, parameters, return type, decorators)
+- Caller/callee edges (who calls whom, and at what call site)
+- Module boundaries (which functions are part of the public API vs internal helpers)
+- Import edges between modules (so you can see coupling at the file level)
+
+What it does not contain:
+
+- Function bodies (this is a feature: the graph is small and diff-friendly)
+- Runtime values or type information beyond static annotations
+- Dynamic dispatch (anything that goes through `getattr` or `__import__` will be missed)
+
+The static-analysis choice is the right tradeoff for a CLI you want to run in CI. The team is open about the limits and points users at the source on GitHub for anything that needs to be patched.
+
+## Practical Evaluation Checklist
+
+Before adopting Nuanced on a real codebase, run through this:
+
+- Does `nuanced init` finish in under a minute on your largest package?
+- Does the JSON for a critical function stay under 100KB? (Larger usually means you are enriching a too-broad entry point.)
+- Does the agent using the subgraph produce fewer false-positive "this will break" warnings than without it?
+- Can you diff two enriched subgraphs cleanly when the signature of a function changes?
+
+If three out of four are yes, the library will pay for itself inside a week.
+
+## Security Notes
+
+A call graph reveals the structure of your code. Treat the JSON output the same way you would treat source code: do not commit it to public repos, do not paste it into public chat tools, and do not send it to third-party APIs without checking what their training policy is.
+
+For internal use inside a closed coding-agent loop, the standard risk model applies: the agent is reading your code through the graph, but the graph is not a separate attack surface. If your code is safe to send to the agent as text, it is safe to send as a call graph.
+
+The library itself does not perform any network requests. Everything runs locally.
+
+## FAQ
+
+**Q: Does Nuanced replace my coding agent?**
+
+**A:** No. Nuanced is a context layer that sits in front of the agent. You still need an agent (Claude Code, Cursor, Codex, etc.) to actually read the graph, plan changes, and apply them. Nuanced only answers structural questions the agent would otherwise have to guess at.
+
+**Q: Does it work on JavaScript or TypeScript codebases?**
+
+**A:** Not yet. The initial release supports Python, and the team has JavaScript and TypeScript on the roadmap. Watch the GitHub repo for the language-port tracking issue.
+
+**Q: How big does a codebase need to be before Nuanced is worth it?**
+
+**A:** The library pays off fastest on codebases where the agent is making confident-but-wrong changes, which in practice is anything over a few thousand lines with non-trivial module boundaries. Below that, the source itself fits in the agent's context and you do not need a graph.
+
+**Q: Can I use Nuanced in CI to flag risky PRs?**
+
+**A:** Yes. A common pattern is to enrich a touched function in CI, diff the subgraph against main, and post the diff as a PR comment. The team has published example scripts in the GitHub repo for GitHub Actions.
+
+**Q: Is the call graph stable across Python versions?**
+
+**A:** The output format is versioned. The CLI embeds the schema version in every JSON file, and the library will refuse to read a graph from a newer version than it knows about. Old graphs still work, but new fields may be missing.
+
+**Q: What happens if the static analyzer cannot resolve an import?**
+
+**A:** It records the edge as "unresolved" and continues. You will see a small number of these in any real codebase, especially around third-party libraries. The CLI prints a summary of unresolved edges at the end of `nuanced init`.
+
+**Q: Is the desktop app the same product as the library?**
+
+**A:** The library and the desktop app are both from the same team, but they target different users. The library is the open-source core that anyone can use from a CLI. The desktop app wraps that core in a spec-driven workflow for macOS users. If you just want call graphs in your agent loop, install the library and skip the app.
+
+## Conclusion
+
+Nuanced is a small, well-scoped library that solves a real problem: AI coding agents do not know your code's structure, and pretending they do is what causes the worst AI-coding failures. By giving the agent a call graph as context, you replace guessing with grounding.
+
+The 30-minute evaluation path is short: install, run `init` on a real package, enrich one function you care about, and hand the JSON to your agent on the next refactor. If the agent's suggestions get more accurate, you have your answer.
+
+Useful links:
+
+- GitHub: [github.com/nuanced-dev/nuanced-py](https://github.com/nuanced-dev/nuanced-py)
+- Docs: [docs.nuanced.dev](https://docs.nuanced.dev)
+- Product: [nuanced.dev](https://nuanced.dev)
