@@ -1,0 +1,138 @@
+---
+title: "OpenLegion - AI Agent Fleet with Container Isolation"
+description: "OpenLegion is an AI agent platform for production. Deploy autonomous agents with Docker isolation, vault-proxied credentials, per-agent budgets, and fleet coordination."
+pubDate: "2026-06-10"
+tags: ["ai-setup", "dev-tools", "self-hosted"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openlegion.webp"
+  alt: "OpenLegion AI agent platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OpenLegion is a production AI agent platform that deploys autonomous agent fleets with Docker container isolation, vault-proxied credentials, and per-agent budget controls.
+
+## Source and Accuracy Notes
+
+- Official site: [https://www.openlegion.ai](https://www.openlegion.ai)
+- GitHub: [github.com/openlegion-ai/openlegion](https://github.com/openlegion-ai/openlegion)
+- Documentation: [docs.openlegion.ai](https://docs.openlegion.ai)
+
+## What Is OpenLegion?
+
+OpenLegion is an AI agent framework and platform built for production workloads. It lets you deploy autonomous agents that automate computer tasks — browsing, form filling, code execution, outreach, and data extraction. The core differentiator is its emphasis on security boundaries: agents run in Docker containers with vault-proxied credentials, and every agent has configurable daily and monthly budget enforcement.
+
+The platform supports two deployment modes: self-hosted via the PolyForm Perimeter License, or managed hosting on a dedicated VPS. Fleet coordination uses a blackboard + pub/sub + handoff pattern rather than a central CEO agent, which avoids bottleneck decision-making across the fleet.
+
+## Setup Workflow
+
+### Step 1: Choose Deployment Mode
+
+**Self-hosted** is the open-source path. You run the control plane on your own infrastructure.
+
+**Managed** mode provisions a dedicated VPS with the OpenLegion control plane pre-installed. No Docker or infrastructure configuration required.
+
+### Step 2: Install the CLI
+
+```bash
+npm install -g @openlegion/cli
+```
+
+Or use the official install script:
+
+```bash
+curl -fsSL https://get.openlegion.ai/install.sh | sh
+```
+
+### Step 3: Initialize a Fleet
+
+```bash
+openlegion init my-fleet
+cd my-fleet
+```
+
+### Step 4: Configure Credentials via Vault Proxy
+
+OpenLegion uses a vault proxy to inject credentials into agent containers at runtime. Credentials never live in environment variables or config files.
+
+```bash
+openlegion vault set GITHUB_TOKEN --agent my-agent
+openlegion vault set OPENAI_API_KEY --agent my-agent
+```
+
+### Step 5: Set Per-Agent Budget
+
+```bash
+openlegion budget set --agent my-agent --daily 5.00 --monthly 50.00
+```
+
+### Step 6: Launch an Agent
+
+```bash
+openlegion agent run my-agent --task "scrape product data from example.com/products"
+```
+
+Agents execute in isolated Docker containers. Each agent gets its own credential scope and budget envelope.
+
+## Deeper Analysis
+
+### Fleet Coordination Model
+
+OpenLegion uses a blackboard + pub/sub + handoff model for multi-agent coordination. Rather than routing all tasks through a central orchestrator, agents publish results to a shared blackboard and hand off tasks to specialized agents based on capability signals. This avoids the single-point-of-failure problem that plagues single-CEO architectures.
+
+### Budget Enforcement
+
+Every agent enforces a daily and monthly budget. The budget is enforced at the control plane level — if an agent exhausts its budget, the control plane stops it before it can make further API calls. This is useful for cost control on teams where multiple people are deploying agents against shared API keys.
+
+### Credential Vaulting
+
+Credentials are injected at container start via a vault proxy. Agents access credentials through a local proxy running inside the container, which resolves the actual secret from the vault. This means credentials are never written to disk and are revoked when the container stops.
+
+### LLM Provider Support
+
+OpenLegion aggregates over 100 LLM providers via a unified interface. You can configure a primary provider per fleet and override per-agent if needed. The platform speaks OpenAI-compatible API interfaces, so most model providers work without custom adapters.
+
+## Practical Evaluation Checklist
+
+- Agent runs in Docker container with network isolation
+- Credentials injected via vault proxy, not env vars
+- Per-agent budget enforcement works as documented
+- Fleet coordination handles handoff without a central bottleneck
+- CLI supports all major operations (agent run, vault, budget, fleet)
+- Self-hosted mode installs via Docker Compose or single binary
+- Managed mode provisions a working VPS without manual infra work
+
+## Security Notes
+
+OpenLegion's security model centers on container isolation and credential vaulting. Agents run as isolated Docker containers with no network egress allowed by default — you explicitly allow domains per agent. The vault proxy means credentials are short-lived and scoped to the specific agent that needs them.
+
+The self-hosted deployment uses the PolyForm Perimeter License, which restricts external data sharing and is designed for enterprise perimeter use cases. Review the license to confirm it fits your compliance requirements.
+
+## FAQ
+
+**Q: What LLMs does OpenLegion support?**
+**A:** Over 100 providers via OpenAI-compatible API interface. The platform handles provider aggregation and fallback automatically.
+
+**Q: Can I self-host OpenLegion?**
+**A:** Yes. The self-hosted mode uses Docker Compose and a control plane binary. The PolyForm Perimeter License governs data handling for self-hosted deployments.
+
+**Q: How does budget enforcement work?**
+**A:** The control plane tracks API call costs per agent against the configured daily and monthly budget. When a budget is exhausted, the control plane halts the agent before further calls are made.
+
+**Q: Is there a free tier?**
+**A:** The managed hosting has a free tier with rate limits. Self-hosted is free under the PolyForm Perimeter License. Check openlegion.ai/pricing for the latest tier details.
+
+**Q: How do agents coordinate in a fleet?**
+**A:** Agents use a blackboard + pub/sub + handoff pattern. Results are posted to a shared blackboard, and agents subscribe to specific result types. When an agent hands off a task, the receiving agent is selected based on capability signals, not a central dispatch decision.
+
+## Conclusion
+
+OpenLegion targets teams that need to run multiple autonomous agents in a controlled, auditable environment. The vault-proxied credential system and per-agent budget enforcement are the standout features for security-conscious teams. The fleet coordination model avoids single-point-of-bottleneck issues that plague simpler multi-agent setups.
+
+If you need production-grade agent isolation with cost controls and credential scoping, OpenLegion is worth evaluating. Try the self-hosted deployment first if you have Docker infrastructure, or use the managed mode for a zero-config start.
+
+Visit [https://www.openlegion.ai](https://www.openlegion.ai) to get started.
