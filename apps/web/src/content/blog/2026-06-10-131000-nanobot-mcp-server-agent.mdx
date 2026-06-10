@@ -1,0 +1,164 @@
+---
+title: "Nanobot – Turn MCP Servers into Full AI Agents"
+description: "Nanobot bridges MCP servers and AI agents, letting you turn any MCP-compatible tool into an autonomous agent with memory, planning, and tool use."
+pubDate: "2026-06-10"
+tags: ["mcp", "ai-agent", "automation", "self-hosted"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nanobot.webp"
+  alt: "Nanobot product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nanobot wraps any MCP server in an AI agent loop — giving it memory, planning, and autonomous tool-calling so you can interact with MCP tools conversationally instead of writing code.
+
+## Source and Accuracy Notes
+
+- Official site: [https://nanobot.ai](https://nanobot.ai)
+- GitHub: [https://github.com/nanobot-ai/nanobot](https://github.com/nanobot-ai/nanobot)
+- MCP (Model Context Protocol): [https://modelcontextprotocol.io](https://modelcontextprotocol.io)
+
+## What Is Nanobot?
+
+MCP (Model Context Protocol) standardizes how AI models connect to tools and data sources. But MCP servers expose tools as discrete, stateless functions — you call them, get a result, done. There's no memory, no planning, no "figure out the next step on your own."
+
+Nanobot solves this by wrapping an MCP server in an agent loop. It adds:
+
+- **Memory** — maintains conversation context across turns
+- **Planning** — breaks tasks into steps and executes them sequentially
+- **Tool orchestration** — calls multiple MCP tools in the right order to complete a task
+- **Loop detection** — stops itself from calling the same tool repeatedly
+
+Think of it as the "agentic layer" on top of raw MCP tool exposure. Instead of writing a script that calls the filesystem MCP tool, you say "organize my downloads folder" and Nanobot figures out which tools to call, in what order, with what arguments.
+
+## Setup Workflow
+
+### Step 1: Install Nanobot
+
+```bash
+npm install -g nanobot-ai
+```
+
+Or use the Docker image:
+
+```bash
+docker pull ghcr.io/nanobot-ai/nanobot:latest
+```
+
+### Step 2: Have an MCP Server Ready
+
+Nanobot needs a running MCP server. If you don't have one, use the built-in filesystem MCP server for testing:
+
+```bash
+npx @modelcontextprotocol/server-filesystem ~/Downloads
+```
+
+This exposes the filesystem as MCP tools (read, write, list directory).
+
+### Step 3: Configure Nanobot
+
+Create a `nanobot.config.json`:
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/Users/friday/Downloads"]
+    }
+  ],
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "apiKey": "sk-..."
+  }
+}
+```
+
+### Step 4: Run
+
+```bash
+nanobot run --config nanobot.config.json
+```
+
+You'll get an interactive prompt. Type a task:
+
+```
+> Organize my downloads folder by file type
+```
+
+Nanobot will plan the steps, call the filesystem MCP tools, and execute.
+
+## Deeper Analysis
+
+### Why MCP + Agent Matters
+
+MCP's strength is standardization. Once a server conforms to the spec, any MCP-compatible client can use it. But the client still has to know *how* to use the tools — which tool for which task, in what sequence, with what parameters.
+
+Nanobot shifts that burden to the agent. You describe a goal; Nanobot determines the tool chain. This is the same pattern behind LangChain, AutoGPT, and CrewAI — but applied specifically to the MCP ecosystem.
+
+### Architecture
+
+```
+User prompt → Nanobot agent loop → MCP tool calls → response → memory update → next step
+```
+
+The loop continues until the task is complete or a max-steps limit is hit. Memory stores the conversation history so each step has context.
+
+### Strengths
+
+- Stateless MCP tools become stateful via Nanobot's memory layer
+- No code required — conversational interface to any MCP server
+- Modular: add new MCP servers by updating config, no code changes
+- MCP standardization means Nanobot works with any compliant server
+
+### Limitations
+
+- Still early stage — documentation and error messages can be sparse
+- Requires a running MCP server; Nanobot doesn't host the servers itself
+- LLM quality directly affects agent performance — bad planner, bad results
+- No built-in persistence for memory across sessions (yet)
+
+## Practical Evaluation Checklist
+
+- Does Nanobot successfully chain multiple MCP tool calls in sequence?
+- Is the memory layer preserved across turns in the same session?
+- Does loop detection actually stop repeated tool calls?
+- How does it handle MCP servers that return errors?
+- Is the config format stable or still changing frequently?
+- Does the Docker image work out of the box with external MCP servers?
+
+## Security Notes
+
+- API keys for the LLM provider are stored in the config file — apply `chmod 600 nanobot.config.json` and keep the file out of version control
+- Nanobot executes tool calls on your behalf — restrict MCP server permissions accordingly (e.g., filesystem server should only point to specific directories, not `/`)
+- The agent loop can call tools multiple times — ensure your MCP servers have appropriate rate limits and guardrails
+- If exposing Nanobot as an API endpoint, add authentication — the conversational interface is designed for local use first
+
+## FAQ
+
+**Q: Does Nanobot replace writing MCP client code?**
+**A:** For conversational/task-based workflows, yes. For programmatic, precise tool orchestration where you need full control, writing an MCP client directly gives you more control over the exact call sequence.
+
+**Q: Which LLM providers work with Nanobot?**
+**A:** OpenAI and Anthropic are supported out of the box. Any LLM with a compatible API (including local models via Ollama) can work if you configure the endpoint manually.
+
+**Q: Can Nanobot use multiple MCP servers at once?**
+**A:** Yes — list multiple servers in the config. Nanobot's planner can route between them to complete multi-domain tasks.
+
+**Q: How is this different from LangChain agents?**
+**A:** LangChain is a general framework. Nanobot is purpose-built for the MCP ecosystem — it assumes MCP-compatible tools and uses the MCP spec for tool discovery and invocation.
+
+## Conclusion
+
+Nanobot fills a real gap in the MCP ecosystem: turning stateless tool exposure into stateful, conversational agents. If you're building with MCP servers and want a natural language interface without writing agent orchestration code, Nanobot is worth trying.
+
+Start with the filesystem MCP server demo to see the agent loop in action before connecting more complex tools.
+
+**Official site:** [https://nanobot.ai](https://nanobot.ai)
+**GitHub:** [https://github.com/nanobot-ai/nanobot](https://github.com/nanobot-ai/nanobot)
