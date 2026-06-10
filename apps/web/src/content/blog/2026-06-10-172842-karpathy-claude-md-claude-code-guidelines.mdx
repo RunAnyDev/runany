@@ -1,0 +1,250 @@
+---
+title: "Karpathy CLAUDE.md – Four Principles to Fix Claude Code Behavior"
+description: "Andrej Karpathy's viral CLAUDE.md skill turns 4 LLM coding pitfalls into 4 surgical principles—install it on Claude Code and Cursor in one command."
+pubDate: "2026-06-10"
+tags: ["claude-code", "ai-coding", "karpathy", "cursor", "llm"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/karpathy-claude-md-claude-code-guidelines.webp"
+  alt: "Karpathy CLAUDE.md guidelines thumbnail"
+draft: false
+---
+
+> **TL;DR:** Drop a single `CLAUDE.md` file into your repo (or install it as a plugin) and Claude Code starts assuming less, writing less code, touching less code, and looping on tests instead of vibes. 172k+ GitHub stars, MIT licensed, derived directly from [Andrej Karpathy's observations on LLM coding pitfalls](https://x.com/karpathy/status/2015883857489522876).
+
+## What Is the Karpathy CLAUDE.md Skill?
+
+It is a behavioral prompt file for AI coding agents. The project, originally by [forrestchang](https://github.com/forrestchang/andrej-karpathy-skills) and now actively maintained at [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills), distills one of Karpathy's viral posts into four short rules that Claude Code (and Cursor) follow during every edit.
+
+The file is roughly 50 lines. Its value is not novelty—it is that it converts vague "be a good coder" instructions into testable, enforceable constraints.
+
+**The four principles:**
+
+| # | Principle | What it kills |
+|---|---|---|
+| 1 | **Think Before Coding** | Silent assumptions, hidden confusion, missing tradeoffs |
+| 2 | **Simplicity First** | Over-engineering, speculative abstractions, 1000-line implementations |
+| 3 | **Surgical Changes** | Drive-by refactors, orthogonal edits, "while I'm here" rewrites |
+| 4 | **Goal-Driven Execution** | Vague prompts, "make it work", constant clarification loops |
+
+The repo also ships a `.claude-plugin/` manifest and a `.cursor/rules/karpathy-guidelines.mdc` rule, so the same guidelines work whether you are in Claude Code or Cursor.
+
+## Source and Accuracy Notes
+
+- **Original repo:** [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
+- **Community fork (more active):** [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) — 172k stars, 17.6k forks
+- **Source commentary:** [Andrej Karpathy on X](https://x.com/karpathy/status/2015883857489522876) (Jan 2026)
+- **License:** MIT
+- **Status:** 28 commits, actively maintained
+
+## Setup Workflow
+
+You have three install paths. Pick based on how broadly you want the rules to apply.
+
+### Option A: Claude Code Plugin (recommended for multi-project use)
+
+Run these from inside Claude Code itself:
+
+```bash
+# 1. Add the marketplace
+/plugin marketplace add forrestchang/andrej-karpathy-skills
+
+# 2. Install the skill
+/plugin install andrej-karpathy-skills@karpathy-skills
+```
+
+The guidelines now load automatically in every Claude Code session on your machine, regardless of which project you open.
+
+### Option B: Drop a CLAUDE.md into a single project (one-liner)
+
+For a new project:
+
+```bash
+curl -o CLAUDE.md https://raw.githubusercontent.com/forrestchang/andrej-karpathy-skills/main/CLAUDE.md
+```
+
+For an existing project, append it to whatever `CLAUDE.md` you already have:
+
+```bash
+echo "" >> CLAUDE.md
+curl https://raw.githubusercontent.com/forrestchang/andrej-karpathy-skills/main/CLAUDE.md >> CLAUDE.md
+```
+
+Commit the file. Claude Code picks it up on the next session in that repo.
+
+### Option C: Cursor (project-scoped rule)
+
+The repo already includes a committed rule at `.cursor/rules/karpathy-guidelines.mdc`. Copy that file into your own project's `.cursor/rules/` directory and the same four principles apply in Cursor. Full setup details are in [CURSOR.md](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CURSOR.md).
+
+### Step 4: Verify it is working
+
+Open a fresh Claude Code session and run a deliberately vague request:
+
+```text
+add user authentication
+```
+
+Without the skill, expect a multi-file implementation with JWT, refresh tokens, password reset, and rate limiting.
+
+With the skill loaded, expect Claude Code to:
+
+1. Ask which auth model (session, JWT, magic link, third-party)
+2. Note tradeoffs ("JWT is stateless but harder to revoke; sessions are simpler but need a store")
+3. Propose the smallest viable version first
+
+That back-and-forth is the principle working. The diff you get later will be smaller, simpler, and focused on the requested scope.
+
+## The Four Principles in Detail
+
+### 1. Think Before Coding
+
+The single biggest source of wasted LLM code is silent assumption. Claude picks an interpretation, runs with it, and only surfaces a problem when tests fail (or worse, when you read the diff).
+
+The skill forces explicit reasoning before any code is written:
+
+- **State assumptions out loud.** If the user says "add caching", Claude now asks "in-memory, file, or Redis?" before importing anything.
+- **Surface ambiguity, don't hide it.** "This could mean A or B—here is the difference."
+- **Push back.** "A simpler approach exists. Do you want me to do that instead?"
+- **Stop when confused.** "I am not sure what you mean by X. Can you clarify?"
+
+### 2. Simplicity First
+
+LLMs default to over-engineering. The skill enforces a senior-engineer heuristic: would a reviewer say this is overcomplicated? If yes, simplify.
+
+Concrete rules:
+
+- No features beyond what was asked
+- No abstractions for code used in exactly one place
+- No "configurability" or "flexibility" not explicitly requested
+- No error handling for impossible scenarios (e.g. `try/catch` around code that cannot throw)
+- If 200 lines could be 50, rewrite it
+
+This is the principle that most visibly shrinks diffs.
+
+### 3. Surgical Changes
+
+The classic failure mode: ask for a bug fix, get a refactored module, a renamed variable, a deleted comment, and a formatter pass. The skill kills this:
+
+- Touch only the lines the request traces to
+- Match the existing style, even if you would have done it differently
+- Do not refactor adjacent code
+- Do not delete pre-existing dead code (mention it, leave it)
+- Only clean up orphans your own changes created
+
+A useful self-test: every changed line should trace directly to the user's request. If a line does not, revert it.
+
+### 4. Goal-Driven Execution
+
+This is the principle that Karpathy highlighted as the unlock. The LLM does not need step-by-step instructions; it needs a success criterion and a verification loop.
+
+The skill reframes imperative tasks as verifiable goals:
+
+| Imperative | Verifiable goal |
+|---|---|
+| "Add validation" | "Write tests for invalid inputs, then make them pass" |
+| "Fix the bug" | "Write a test that reproduces it, then make them pass" |
+| "Refactor X" | "Ensure tests pass before and after" |
+
+For multi-step work, the skill instructs Claude to state a brief plan up front:
+
+```text
+1. Add a `validate()` function → verify: unit test for invalid email format passes
+2. Wire it into the request handler → verify: integration test returns 400 on bad input
+3. Update the error response shape → verify: existing client tests still pass
+```
+
+This converts open-ended work into a finite loop the agent can complete without check-ins.
+
+## Deeper Analysis
+
+### Why does one file change behavior so much?
+
+The skill exploits a property of LLM context: instructions at the top of the conversation exert disproportionate influence over subsequent output. A 50-line `CLAUDE.md` loaded on every session acts as a constant governor on tone, scope, and style.
+
+Without it, you have to re-assert the same constraints in every prompt ("be concise, don't refactor, ask first..."). With it, those constraints are ambient.
+
+### How it differs from a style guide
+
+A style guide tells humans how to write code. This skill tells the agent how to behave while writing code. The difference matters:
+
+- Style guide: "use early returns"
+- This skill: "do not refactor adjacent code, even if you would use early returns"
+
+The second is a *behavior* constraint, not an *output* constraint. Output constraints are easy to argue with ("here are five reasons I should..."). Behavior constraints change the decision tree before output is generated.
+
+### Compatibility with other tools
+
+Because the file is plain Markdown, it works with anything that reads `CLAUDE.md`:
+
+- **Claude Code** (native)
+- **Cursor** (via `.cursor/rules/`)
+- **Aider** (via `--read` flag pointing to the file)
+- **Continue.dev** (via `customCommands`)
+- **Custom agents** (load as a system prompt)
+
+This portability is a quiet advantage. You write the rules once, and they follow you across tools.
+
+### What it does NOT do
+
+- It does not pick a framework, language, or architecture for you.
+- It does not enforce type safety, test coverage, or lint rules (use a real linter for that).
+- It does not protect against prompt injection in untrusted input (defense-in-depth still matters).
+- It does not replace code review. It produces smaller, cleaner diffs—but humans still need to read them.
+
+## Practical Evaluation Checklist
+
+- [ ] Plugin installed (`/plugin install andrej-karpathy-skills@karpathy-skills`) OR `CLAUDE.md` committed to repo root
+- [ ] Cursor rule copied to `.cursor/rules/` if you also use Cursor
+- [ ] Test the "vague prompt" sanity check from Step 4
+- [ ] Open an existing PR—does the next diff look smaller and more focused?
+- [ ] Try a multi-step refactor—does Claude state the plan up front?
+- [ ] Add project-specific rules below the imported ones in `CLAUDE.md`
+- [ ] For trivial tasks (typo fix, one-liner), verify the skill does not slow Claude down—the README explicitly notes it should bias toward caution only on non-trivial work
+
+## Customization Pattern
+
+The skill is designed to be merged. After installing, add a `## Project-Specific Guidelines` section:
+
+```markdown
+## Project-Specific Guidelines
+
+- Use TypeScript strict mode
+- All API endpoints must have tests
+- Follow the error handling pattern in `src/utils/errors.ts`
+- Do not import lodash—use the standard library
+- Database queries go through `src/db/query.ts`, never raw SQL
+```
+
+Claude will read both the Karpathy rules and your project rules on every session.
+
+## FAQ
+
+**Q: Does this slow Claude Code down on simple tasks?**
+**A:** The README explicitly addresses this. The principles bias toward caution; for trivial tasks (typo fixes, one-liners) Claude uses judgment and skips the full rigor. In practice the overhead is negligible.
+
+**Q: Can I edit the file?**
+**A:** Yes. The plugin version is read-only by default, but you can fork the repo and point the marketplace at your fork. The per-project `CLAUDE.md` version is fully editable.
+
+**Q: Does it work with Cursor's Composer / Agent mode?**
+**A:** Yes. The repo ships `.cursor/rules/karpathy-guidelines.mdc` which Cursor's rule system applies to all agent invocations.
+
+**Q: Is this the same as Anthropic's official prompting guidance?**
+**A:** Different. Anthropic's official guidance covers prompt construction broadly. This skill is narrower: it is specifically about preventing common failure modes in autonomous coding loops. The two are complementary—you can use both.
+
+**Q: Will it conflict with my existing `CLAUDE.md`?**
+**A:** No. Append it to the bottom of your existing file. Claude reads the whole file as a single system prompt, so rules stack.
+
+**Q: Is the original Karpathy tweet the source of truth?**
+**A:** It is the inspiration, but the skill is a curated, structured interpretation. Karpathy posted the observations; the repo turns them into enforceable rules.
+
+## Conclusion
+
+The Karpathy CLAUDE.md skill is the rare viral AI-coding project that is genuinely useful rather than hype. It does one thing—convert four observations about LLM coding failure modes into four behavioral constraints—and it does that thing well.
+
+For solo developers, the win is smaller diffs and fewer rewrites. For teams, the win is consistency: every PR from every engineer, augmented by Claude Code, starts from the same behavioral baseline. That baseline is what makes AI-augmented code review tractable at all.
+
+The install is one command. The cost of trying it is roughly thirty seconds.
+
+**Try it:** [github.com/multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) · [Original by forrestchang](https://github.com/forrestchang/andrej-karpathy-skills) · [Karpathy's source post](https://x.com/karpathy/status/2015883857489522876)
