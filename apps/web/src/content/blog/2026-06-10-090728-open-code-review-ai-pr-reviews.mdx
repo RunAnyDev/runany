@@ -1,0 +1,150 @@
+---
+title: "Open Code Review for AI PR Reviews"
+description: "Alibaba's Open Code Review is an AI code review CLI with deterministic file coverage, line-accurate comments, CI examples, and agent integrations for Codex and Claude Code."
+pubDate: "2026-06-10"
+tags: ["github-trending", "dev-tools", "go", "code-review", "agent"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/open-code-review.webp"
+  alt: "Open Code Review GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** `alibaba/open-code-review` is one of rare AI review tools that treats coverage, file grouping, rule matching, and comment positioning as engineering problems instead of hoping prompt quality alone will save review quality.
+
+## Source and Accuracy Notes
+
+- Repository: [alibaba/open-code-review](https://github.com/alibaba/open-code-review)
+- Official docs site linked from repo: [alibaba.github.io/open-code-review](https://alibaba.github.io/open-code-review/)
+- This article is based on the official README, CI examples, and shipped skill/plugin docs in the repository.
+
+Last reviewed for this post: 2026-06-10.
+
+## What Is Open Code Review?
+
+Open Code Review, usually surfaced as `ocr`, is Alibaba's open-source AI code review CLI. It reads Git diffs, sends changed files to a configurable LLM, and returns structured review comments with line-level positioning. That headline is familiar. What makes this repo worth attention is deeper: it does not frame code review as “dump diff into model and pray.”
+
+The README is explicit about three failure modes in generic agent-based review:
+
+- incomplete coverage on larger changesets;
+- comment position drift;
+- unstable quality from prompt-only review pipelines.
+
+Alibaba's response is hybrid architecture. The deterministic layer decides which files must be reviewed, groups related files into bundles, matches rules per file, and runs extra positioning and reflection passes on comments. The model still performs reasoning, but hard constraints live outside model output. That is exactly right for review tooling because “missed file” and “wrong line” are product failures, not style issues.
+
+For teams already running AI review in CI, this is most important repo-specific idea: Open Code Review tries to make review reproducible at repository scale, not only impressive on small demos.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install the CLI
+
+The project ships through npm, GitHub release binaries, and source build. The npm path is shortest:
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
+If you want pinned binaries, the README documents direct downloads for macOS, Linux, and Windows from GitHub Releases.
+
+### Step 2: Configure an LLM endpoint
+
+`ocr` does nothing until you give it a model endpoint. The repo documents both persisted config and environment-variable setup.
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
+
+If you use Anthropic standard keys, the README also calls out `OCR_LLM_AUTH_HEADER=x-api-key` as important when your endpoint expects that header instead of bearer auth.
+
+### Step 3: Test connectivity before first review
+
+```bash
+ocr llm test
+```
+
+That small command matters. It separates “review tool broken” from “provider config broken” before you burn time on CI debugging.
+
+### Step 4: Run review in workspace, branch, or commit mode
+
+The project supports three review shapes directly from Git state:
+
+```bash
+cd your-project
+
+ocr review
+ocr review --from main --to feature-branch
+ocr review --commit abc123
+```
+
+Workspace mode covers staged, unstaged, and untracked changes. That makes it useful both before commit and inside local agent workflows.
+
+### Step 5: Wire it into CI or coding agents
+
+The repo includes a GitHub Actions example that runs:
+
+```bash
+ocr review --from origin/<base> --to <head_sha> --format json
+```
+
+and then posts inline PR review comments through GitHub's review API.
+
+For coding agents, the repository also ships a skill install path:
+
+```bash
+npx skills add alibaba/open-code-review --skill open-code-review
+```
+
+and a Codex plugin installation path through the local plugin marketplace.
+
+## Deeper Analysis
+
+The strongest idea in this repo is file bundling plus isolated sub-agents. The README uses translation files as example, but broader point is more valuable: related files should often be reviewed together even when diffs are small individually. A change in schema plus migration plus handler file is not three independent reviews. Open Code Review encodes that logic outside prompt text.
+
+Second, the rule-matching strategy is practical. Instead of handing every repository rule to every file, the tool narrows rule scope by file characteristics. That cuts noise and token waste while making outputs more stable. Many AI review setups fail because they overload context with generic policy prose.
+
+Third, repository integrations are mature enough to matter. The GitHub Actions example uses `pull_request_target`, supports trigger comments like `/open-code-review`, and explains secret configuration. This is not “maybe you could automate it later” documentation. It is already packaged as operational workflow.
+
+There are tradeoffs. You still need to operate and pay for your own LLM endpoint. Review quality will depend on provider behavior, token limits, and custom rules. The tool also focuses on Git diff review rather than full semantic understanding of long-running architectural drift. That means it complements human review; it does not replace ownership.
+
+Still, if your current AI review setup feels brittle, this repo provides better model. Build deterministic scaffolding first, then let model reason inside that boundary. That design logic also pairs well with broader agent-harness guidance such as [/blog/agents-best-practices-skill-for-agent-harnesses/](/blog/agents-best-practices-skill-for-agent-harnesses/) and with lighter-weight AI review tools like [/blog/wispbit-ai-code-review-linter/](/blog/wispbit-ai-code-review-linter/).
+
+## Practical Evaluation Checklist
+
+- [ ] Validate `ocr llm test` against your actual model endpoint before CI rollout.
+- [ ] Compare comment positioning accuracy against your current PR review bot.
+- [ ] Test large multi-file diffs to see whether file bundling improves issue coverage.
+- [ ] Add one or two repository-specific rules instead of importing giant policy files immediately.
+- [ ] Pilot the GitHub Actions example on internal repos before enabling forked PR review at scale.
+
+## Security Notes
+
+Open Code Review reads diffs and changed file contents, then sends that data to whichever LLM endpoint you configure. For private repositories, data-handling policy depends entirely on your chosen provider or self-hosted endpoint. Treat that as first review gate.
+
+The repo's CI example also relies on secrets for LLM access. Keep those in GitHub Actions secrets, not workflow YAML. If you enable PR reviews from forks, review `pull_request_target` behavior carefully because that event model carries different trust assumptions than plain `pull_request`.
+
+Finally, AI review comments can be wrong with confidence. Use them as structured findings for humans to accept, reject, or patch, not as autonomous merge authority.
+
+## FAQ
+
+**Q: What is most distinctive about Open Code Review compared with generic LLM review scripts?**  
+**A:** Deterministic coverage logic. It treats file selection, bundling, rule matching, and comment positioning as first-class engineering systems rather than prompt decorations.
+
+**Q: Can it work with more than one LLM provider?**  
+**A:** Yes. The README documents Anthropic and OpenAI-compatible endpoint configuration, plus environment-variable compatibility with Claude Code conventions.
+
+**Q: Is this only for CI?**  
+**A:** No. Local workspace review is first-class, and the repo also ships skill/plugin paths for Claude Code and Codex.
+
+**Q: Should teams replace human review with this?**  
+**A:** No. Best fit is first-pass defect finding, consistency checks, and scale support on noisy PR queues.
+
+## Conclusion
+
+Open Code Review is not interesting because it adds AI to PR review. Plenty of repos do that. It is interesting because it adds deterministic control to AI PR review. If your team wants better line accuracy, better large-diff coverage, and cleaner agent integration than prompt-only review bots usually provide, `ocr` is worth a serious pilot.

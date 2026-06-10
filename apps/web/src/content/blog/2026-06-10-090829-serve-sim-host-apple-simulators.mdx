@@ -1,0 +1,160 @@
+---
+title: "serve-sim to Host Apple Simulators"
+description: "Evan Bacon's serve-sim turns booted iOS simulators into browser-accessible streams with gesture control, camera injection, middleware embedding, and an agent skill for Codex or Claude Code."
+pubDate: "2026-06-10"
+tags: ["github-trending", "dev-tools", "typescript", "ios", "agent"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/serve-sim.webp"
+  alt: "serve-sim GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** `EvanBacon/serve-sim` makes Apple simulators scriptable infrastructure: stream them in browser, drive them with gestures and keyboard events, inject fake camera feeds, and hand control to coding agents through a shipped Agent Skill.
+
+## Source and Accuracy Notes
+
+- Repository: [EvanBacon/serve-sim](https://github.com/EvanBacon/serve-sim)
+- This article is based on the official README, included skill docs, and reference docs bundled with the repository.
+
+Last reviewed for this post: 2026-06-10.
+
+## What Is serve-sim?
+
+`serve-sim` is a local server for booted Apple simulators. Run `npx serve-sim`, and it spins up a browser preview backed by a small Swift helper that captures framebuffer output with `simctl io`, exposes MJPEG plus WebSocket control, and layers a React UI on top.
+
+That sounds like “screen sharing for iOS Simulator,” but repo is broader than that. It includes:
+
+- gesture and button control from CLI;
+- keyboard forwarding;
+- multi-device support;
+- camera feed injection for app testing;
+- middleware embedding for dev servers;
+- and an Agent Skill so Codex, Claude Code, or similar hosts can operate simulator flows as tools.
+
+This is why project is useful to developers even if they never expose simulator over tunnel. It gives local-first simulator automation surface that feels closer to `npx serve` than full device-lab product.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Verify platform assumptions
+
+The README is narrow and clear here. You need:
+
+- macOS;
+- Xcode command line tools with `xcrun simctl`;
+- Node.js 18+;
+- Apple Silicon for bundled helper.
+
+Intel Macs are explicitly unsupported by bundled `serve-sim-bin` helper.
+
+### Step 2: Start preview server
+
+With a booted simulator, the shortest path is:
+
+```bash
+npx serve-sim
+```
+
+Default preview lands on `http://localhost:3200`. If you boot more than one simulator, the tool can attach to multiple devices, or you can target a named one explicitly.
+
+```bash
+npx serve-sim "iPhone 16 Pro"
+```
+
+### Step 3: Drive simulator from CLI
+
+The repo documents several control verbs beyond streaming:
+
+```bash
+serve-sim type "Hello, world!"
+serve-sim gesture '<json>'
+serve-sim button home
+serve-sim rotate landscape_left
+serve-sim memory-warning
+```
+
+This matters because it makes `serve-sim` usable in automation pipelines, not only live demos.
+
+### Step 4: Test camera injection when app flow depends on camera
+
+One of most distinctive features is synthetic camera support. The documented path is:
+
+```bash
+serve-sim camera com.acme.MyApp --file ~/Pictures/face.png
+serve-sim camera switch placeholder
+serve-sim camera status
+```
+
+The README explains architecture: a host-side helper writes BGRA frames into shared memory, while injected dylib swizzles AVFoundation inside simulator process so app reads those frames instead of stub camera. That is much more useful than generic “mock camera” claim because it tells you where reliability risks and OS constraints live.
+
+### Step 5: Embed preview into your own dev server
+
+If you already have Metro, Vite, Next, or Express running, the repo documents middleware mounting instead of forcing separate tab workflow.
+
+```ts
+import { simMiddleware } from "serve-sim/middleware";
+
+app.use(simMiddleware({ basePath: "/.sim" }));
+```
+
+That turns simulator preview into another route in your local developer environment.
+
+### Step 6: Add agent support
+
+The repository ships Agent Skill docs under `skills/serve-sim`. Install path in README is:
+
+```bash
+bunx add-skill EvanBacon/serve-sim
+```
+
+That gives coding agents a documented way to tap buttons, inject gestures, inspect stream state, and work against browser-hosted preview flows.
+
+## Deeper Analysis
+
+The strongest product choice in `serve-sim` is local-first architecture. Instead of designing remote simulator cloud first and making local usage awkward, repo assumes local loop must feel instant. Then, when you want remote access, you tunnel URL outward. That order keeps development friction low.
+
+The second strong choice is separation between streaming helper and surrounding UI. The README's diagram shows Swift helper handling capture and control, state files in `$TMPDIR/serve-sim/`, then CLI and middleware reading from that layer. That modularity explains why repo can support both standalone preview page and embedded middleware.
+
+Camera injection is third differentiator. Many automation stacks can click around simulator. Fewer can help you test onboarding, QR capture, avatar upload, or webcam-dependent app paths without external hardware hacks. Here `serve-sim` treats camera path as first-class developer tool, not buried experiment.
+
+There are real constraints. This is Apple Simulator tooling, not Android device lab. It is bound to macOS and, today, Apple Silicon. If your team runs CI on Linux or mixes Intel Mac fleets, you need to account for that immediately. It also depends on simulator fidelity rather than physical-device fidelity, so hardware-specific camera, sensor, or thermal behavior still needs separate validation.
+
+Still, for teams working on iOS app flows, `serve-sim` closes gap between “I can see simulator on my laptop” and “I can expose simulator as controllable interface inside broader tooling.” That pairs naturally with browser automation and agent-assist workflows such as [/blog/intuned-browser-automation/](/blog/intuned-browser-automation/) or terminal control surfaces like [/blog/rmux-setup-guide-open-source-rust-ai-tool/](/blog/rmux-setup-guide-open-source-rust-ai-tool/).
+
+## Practical Evaluation Checklist
+
+- [ ] Confirm your team is Apple Silicon-only for machines that will run `serve-sim`.
+- [ ] Validate basic preview and keyboard forwarding on one real app flow.
+- [ ] Test multi-simulator attachment if you run tablet and phone layouts in parallel.
+- [ ] Exercise camera injection against your actual bundle ID before designing CI around it.
+- [ ] Decide whether you want standalone preview, middleware embedding, or agent-driven control as primary entry point.
+
+## Security Notes
+
+`serve-sim` exposes simulator control surface over browser plus WebSocket commands. Keep default local-only scope unless you intentionally tunnel it outward. Operator access effectively becomes device-control access.
+
+Camera injection uses dylib insertion and process-level manipulation inside simulator context. That is powerful and appropriate for local testing, but it also means teams should treat it as privileged development tooling rather than casual dependency.
+
+If you expose preview remotely, remember that simulator logs may also be forwarded to browser tools. Review what your app logs during authentication and onboarding before sharing URLs widely.
+
+## FAQ
+
+**Q: Is `serve-sim` only useful for agent demos?**  
+**A:** No. Agent tooling is one layer. Core utility is browser-accessible, controllable simulator preview with good local ergonomics.
+
+**Q: What makes it different from normal screen sharing?**  
+**A:** It is interactive, scriptable, embeddable, and simulator-aware. CLI verbs, camera injection, middleware, and skill integration all go beyond passive video streaming.
+
+**Q: Does it require an Expo project?**  
+**A:** No. Evan Bacon documents Expo integration because he works there, but repo is explicit that tool is app-agnostic.
+
+**Q: Can it replace physical device testing?**  
+**A:** No. It improves simulator-based automation and collaboration. It does not eliminate need for real-device validation.
+
+## Conclusion
+
+`serve-sim` turns Apple Simulator from local UI into controllable developer infrastructure. If your team works on iOS flows and wants better local-first automation, better browser visibility, or better agent integration without buying full remote-device platform first, this repo is unusually practical.
