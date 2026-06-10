@@ -1,0 +1,158 @@
+---
+title: "Capframe – Capability Security for AI Agents"
+description: "Capframe maps every tool your AI agents reach, mints scoped capability tokens in Rust, and enforces runtime policy decisions in microseconds—no LLM in the path."
+pubDate: "2026-06-10"
+tags: ["ai-agent", "security", "mcp", "rust"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/capframe-capability-security.webp"
+  alt: "Capframe product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Capframe is a deterministic runtime that maps every tool an AI agent calls, mints scoped capability tokens in Rust, and enforces policy decisions in single-digit microseconds—no LLM in the decision path.
+
+## Source and Accuracy Notes
+
+- Official site: [capframe.ai](https://capframe.ai)
+- GitHub: [capframe/capframe](https://github.com/capframe/capframe)
+- Version: v0.2.0, MIT License, Rust 1.78+
+
+## What Is Capframe?
+
+Capframe is a capability-based security layer for AI agents that use the Model Context Protocol (MCP). It sits between agents and the tools they call, adding a deterministic authorization layer that operates independently of the LLM.
+
+The core problem it solves: AI agents can be manipulated through prompt injection or tool-steering attacks to call tools in unexpected ways. Capframe ensures that even if an agent is compromised, each tool call must be backed by a valid, scoped, revocable capability token—verified in microseconds with no LLM involvement.
+
+**Three modules:**
+
+- **Discover** — Maps all tools an agent can reach
+- **Capability Tokens** — Minted in Rust, scoped and revocable
+- **Runtime Policy** — Enforces decisions in single-digit microseconds
+
+Capframe is OWASP LLM, NIST AI RMF, and MITRE ATLAS aligned.
+
+## Setup Workflow
+
+### Step 1: Install the Capframe CLI
+
+```bash
+cargo install capframe
+```
+
+Requires Rust 1.78 or later.
+
+### Step 2: Initialize a Policy File
+
+```bash
+capframe init --policy my-policy.yaml
+```
+
+This creates a policy configuration in YAML:
+
+```yaml
+capframe:
+  version: "0.2"
+  default_policy: deny
+  rules:
+    - tool: "database.query"
+      capability: "read-only"
+      ttl: 300
+    - tool: "payments.refund"
+      capability: "admin"
+      ttl: 60
+```
+
+### Step 3: Start the Runtime
+
+```bash
+capframe serve --policy my-policy.yaml --port 8080
+```
+
+The runtime starts an MCP proxy that intercepts tool calls.
+
+### Step 4: Connect Your Agent
+
+Point your MCP client to the Capframe proxy instead of direct tool endpoints:
+
+```bash
+export MCP_ENDPOINT=http://localhost:8080
+```
+
+Agents now request capability tokens through Capframe before executing tools.
+
+### Step 5: Verify a Call
+
+To check a capability token manually:
+
+```bash
+capframe verify --token <token-id>
+```
+
+Returns `OK` or `DENIED` with reason and expiry.
+
+## Deeper Analysis
+
+**Why capability tokens instead of API keys?**
+
+Traditional API keys are long-lived and broad. If leaked, they grant full access. Capability tokens are scoped to a specific tool, time-limited, and revocable. Capframe mints them per-call, so even a compromised agent can only act within the boundaries of its issued tokens.
+
+**Rust-based token verification**
+
+Token minting and verification are implemented in Rust for performance. The benchmark claim is single-digit microsecond overhead—which matters in high-throughput agent pipelines where a 10ms auth delay adds up fast.
+
+**MCP-native**
+
+The tool registry is MCP-compatible, meaning Capframe works with any MCP-compliant server. This covers a wide range of tools including database connectors, GitHub integrations, Slack, and custom internal tools.
+
+**Deterministic policy, no LLM**
+
+The policy engine evaluates tokens against rules deterministically. There is no probabilistic element—no LLM in the decision path. This eliminates a class of attacks where adversaries try to manipulate authorization through adversarial prompts.
+
+**What it does NOT do**
+
+Capframe does not scan for prompt injection in the agent's input. It assumes the agent may be compromised and enforces capability boundaries regardless. This is defense-in-depth: even if an injection succeeds, the attacker's tool calls still need valid tokens.
+
+## Practical Evaluation Checklist
+
+- [ ] Rust 1.78+ installed
+- [ ] Policy YAML written and validated
+- [ ] Runtime starts without errors
+- [ ] Agent MCP client redirected to proxy
+- [ ] Tool call without token → denied
+- [ ] Tool call with valid token → allowed
+- [ ] Expired token → denied
+- [ ] Revoked token → denied
+
+## Security Notes
+
+- Tokens are scoped per tool, not per session
+- TTL enforcement is server-side; clocks must be synchronized
+- Policy file should be stored securely (not in the repo)
+- Capframe runtime should run on a secured host with minimal blast radius
+
+## FAQ
+
+**Q: Does Capframe work with non-MCP tools?**
+**A:** Currently it is MCP-native. Non-MCP tools would need an MCP wrapper to integrate.
+
+**Q: How are tokens revoked?**
+**A:** The runtime maintains a token blocklist. Call `capframe revoke --token <id>` to immediately invalidate a token.
+
+**Q: What is the performance overhead?**
+**A:** Token verification is in single-digit microseconds. The main latency source is the proxy round-trip, typically under 1ms on localhost.
+
+**Q: Is Capframe suitable for production?**
+**A:** v0.2.0 is a release but still early. Review the changelog and test thoroughly before production deployment.
+
+## Conclusion
+
+Capframe fills a real gap in the AI agent security stack: deterministic, microsecond-scale authorization for MCP-based tool calls. Its Rust implementation and MITRE ATLAS alignment signal a serious approach to capability-based security.
+
+For self-hosted AI setups where agents interact with sensitive tools (databases, payment processors, internal APIs), adding Capframe as a policy enforcement layer reduces the blast radius of a compromised agent. It is not a silver bullet—prompt injection scanning is still your responsibility—but it closes the authorization gap that most agent frameworks leave open.
+
+**Try it:** [capframe.ai](https://capframe.ai) · [GitHub](https://github.com/capframe/capframe)
