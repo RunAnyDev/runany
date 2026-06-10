@@ -17,7 +17,7 @@ const { Content, headings } = await render(post);
 const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
 
 const extractFaqItems = (body: string) => {
-  const faqSectionMatch = body.match(/## FAQ([\s\S]*?)(?:\n##\s|$)/);
+  const faqSectionMatch = body.match(/##\s*FAQ([\s\S]*?)(?:\n##\s|$)/);
   if (!faqSectionMatch) return [];
 
   const faqSection = faqSectionMatch[1];
@@ -30,6 +30,45 @@ const extractFaqItems = (body: string) => {
   let currentQuestion = '';
   let currentAnswer = '';
 
+  // Strip leading Q:/A: markers and any wrapping **bold** so we can detect the Q/A role
+  // even when the format varies across posts. Captures the actual question/answer text.
+  const stripQAMarker = (line: string, marker: 'Q' | 'A'): string => {
+    // Patterns we accept (any one):
+    //   **Q:** question
+    //   **Q: question**
+    //   **Q: question         (unclosed bold, answer on next line)
+    //   Q: question
+    //   Q. question
+    const reList = [
+      new RegExp(`^\\*\\*${marker}:\\*\\*\\s*(.+)$`),     // **Q:** q
+      new RegExp(`^\\*\\*${marker}:\\s*(.+?)\\*\\*$`),   // **Q: q**
+      new RegExp(`^\\*\\*${marker}:\\s*(.+)$`),          // **Q: q   (unclosed)
+      new RegExp(`^${marker}:\\s*(.+)$`),                // Q: q
+      new RegExp(`^${marker}\\.\\s*(.+)$`),              // Q. q
+    ];
+    for (const re of reList) {
+      const m = line.match(re);
+      if (m) return m[1].replace(/\*\*$/, '').trim();
+    }
+    return '';
+  };
+
+  // Detect a "bolded question only" line, e.g. **Does it cost money?**
+  // This is used by some posts (e.g. taste-skill) that omit the Q:/A: prefix entirely.
+  // Fires when the previous pair (if any) is complete — i.e. we have an answer waiting
+  // to be pushed, or this is the very first line.
+  const isStandaloneBoldedQuestion = (line: string): string | null => {
+    // Must be **...?** (or **...** with sentence-ending punctuation) on its own line
+    const m = line.match(/^\*\*(.+?)\*\*\s*$/);
+    if (!m) return null;
+    const text = m[1].trim();
+    if (text.length < 8 || text.length > 200) return null;
+    if (!/[?!]/.test(text) && !/\b(is|are|do|does|can|how|what|why|when|where|who|which|will|should|would|could)\b/i.test(text)) {
+      return null;
+    }
+    return text;
+  };
+
   const pushCurrent = () => {
     if (currentQuestion && currentAnswer) {
       items.push({ question: currentQuestion, answer: currentAnswer.trim() });
@@ -39,19 +78,30 @@ const extractFaqItems = (body: string) => {
   };
 
   for (const line of lines) {
-    const questionMatch = line.match(/^\*\*Q:\*\*\s*(.+)$/) ?? line.match(/^\*\*Q:\s*(.+?)\*\*$/);
-    if (questionMatch) {
+    const qText = stripQAMarker(line, 'Q');
+    if (qText) {
       pushCurrent();
-      currentQuestion = questionMatch[1].trim();
+      currentQuestion = qText;
       continue;
     }
 
-    const answerMatch = line.match(/^\*\*A:\*\*\s*(.+)$/) ?? line.match(/^\*\*A:\s*(.+?)\*\*$/);
-    if (answerMatch) {
-      currentAnswer = answerMatch[1].trim();
+    const aText = stripQAMarker(line, 'A');
+    if (aText) {
+      currentAnswer = aText;
       continue;
     }
 
+    // Fallback: bolded question with no Q: marker (taste-skill style)
+    // Only fires when a question is starting fresh — either no current state, or
+    // the previous Q/A pair is complete (we have a pending answer to push first).
+    const boldQ = isStandaloneBoldedQuestion(line);
+    if (boldQ) {
+      if (currentAnswer) pushCurrent();
+      currentQuestion = boldQ;
+      continue;
+    }
+
+    // Continuation of the current answer (paragraph break inside an answer)
     if (currentAnswer) {
       currentAnswer = `${currentAnswer} ${line}`.trim();
     }
