@@ -1,0 +1,181 @@
+---
+title: "Baguette for Headless iOS Simulator Farms"
+description: "Baguette turns iOS Simulator into scriptable infrastructure with headless boot, browser dashboards, gesture injection, log streaming, and multi-device farm views for iOS 26-era workflows."
+pubDate: "2026-06-11"
+tags: ["github-trending", "dev-tools", "ios", "swift", "automation"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/baguette.webp"
+  alt: "Baguette GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Baguette is one of most practical new iOS automation repos because it treats simulators like controllable fleet resources: boot them headlessly, stream frames, inject gestures, inspect accessibility trees, and manage many devices from one local web UI.
+
+## Source and Accuracy Notes
+
+- Official repo: [github.com/tddworks/baguette](https://github.com/tddworks/baguette)
+- Main README: [tddworks/baguette/README.md](https://github.com/tddworks/baguette/blob/main/README.md)
+- Related runany post: [/blog/owlbrowser-browser-automation/](/blog/owlbrowser-browser-automation/)
+
+## What Is Baguette?
+
+Most mobile automation stacks still assume either heavyweight cloud device farm or UI-test harness glued around Xcode. Baguette takes different path.
+
+Official repo describes it as **headless iOS Simulator manager/farm + host-side input injection for iOS 26**. That wording matters. Project is not only screenshot streamer. It combines lifecycle control, input, accessibility inspection, logs, and browser control surface.
+
+## Prerequisites
+
+- macOS with modern Xcode/iOS Simulator stack
+- Swift toolchain for building from source
+- local browser for dashboard mode
+- willingness to work with simulator-focused, not physical-device, workflow
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install Baguette
+
+README install path uses Homebrew tap:
+
+```bash
+brew install tddworks/tap/baguette
+```
+
+Then start with help or device listing:
+
+```bash
+baguette --help
+baguette list
+```
+
+## Step 2: Launch Local Web UI
+
+Official quickstart begins with browser dashboard:
+
+```bash
+baguette serve
+```
+
+official docs say this serves single-device dashboard, device-farm view, camera card, accessibility inspector, logs panel, and in-browser recording. That is much richer than plain CLI wrapper.
+
+## Step 3: Control Simulators Headlessly
+
+Repo also documents terminal-only lifecycle and input commands:
+
+```bash
+baguette list
+baguette boot --udid <UDID>
+baguette tap --udid <UDID> --x 219 --y 478 --width 438 --height 954
+```
+
+CLI surface is broad. Official command set includes:
+
+- boot and shutdown
+- frame streaming and screenshots
+- `describe-ui` for accessibility tree JSON
+- `logs` for live unified logging
+- long-lived JSON gesture pipe through `baguette input`
+- one-shot gestures like tap, swipe, pinch, pan
+- keyboard and hardware button events
+
+That makes Baguette useful for both manual debugging and agent-driven automation.
+
+## Step 4: Understand Device Farm Model
+
+README documents `/farm` route and multi-device side-by-side view. This matters if your team tests onboarding, navigation, or gesture-heavy flows across several simulator profiles at once.
+
+Because Baguette exposes both web UI and CLI, you can split workflows cleanly:
+
+- human watches farm dashboard
+- script or agent sends gesture/input commands
+- accessibility tree and logs feed debugging loop
+
+## Deeper Analysis
+
+### Why This Works Better Than Older Tools
+
+Repo includes section titled **Why this works on iOS 26.4 when older tools don't**. That alone explains why repo took off. Apple simulator internals keep moving, and many old wrappers rot quickly.
+
+Baguette's architecture leans on private frameworks and lower-level event paths to keep control working in newer simulator runtime.
+
+### Strongest Feature: Accessibility + Input Loop
+
+`describe-ui` returns on-screen accessibility tree as JSON, with frames in device points that can pipe back into tap actions. That is ideal for agents and automation scripts because detection and action share same coordinate system.
+
+### Strongest Feature: One WebSocket per Stream
+
+README calls out single bidirectional WebSocket per stream for live frames plus control and input. For local device farms, that is simpler integration story than bolting separate video and RPC layers together.
+
+
+
+### Where Baguette Fits Best
+
+Baguette looks strongest in teams building repeatable simulator labs on one or several Macs. QA engineers, mobile platform teams, and AI-agent tool builders can all benefit when simulator state becomes queryable and scriptable instead of hand-driven.
+
+### Why Browser Control Matters Here
+
+Mobile debugging often stalls because only one person can comfortably operate Xcode-hosted simulator at a time. Baguette's local web surface lowers that friction. One person can observe, another can inspect logs, and automation can still inject input. That is very different workflow from screen recording and Slack messages.
+
+
+
+
+### Repo Signals Worth Checking First
+
+Baguette repo documentation is strong because it documents concrete surfaces: routes, WebSocket behavior, command matrix, source layout, testing, and known limits. For automation tooling, that specificity matters more than flashy demo GIF. It tells you maintainers understand where real users get stuck.
+
+
+
+
+### Where It Could Break Down
+
+Because Baguette depends on simulator internals and private frameworks, every major Xcode or runtime jump is possible regression point. Teams adopting it should keep upgrade testing in routine, not treat tooling layer as static forever.
+
+
+
+
+That maintenance cost is fair trade if Baguette keeps saving hours of manual simulator handling every week.
+
+
+
+### Best First Trial
+
+Start with one flaky mobile workflow you currently reproduce by hand, such as sign-in, onboarding, or push-permission handling. Baguette becomes easier to justify when it removes repeated manual simulator choreography rather than serving as generic automation toy.
+
+Once one flow is stable, expand to farm view and multi-device comparison. That staged rollout gives better signal than trying every feature on day one.
+
+## Practical Evaluation Checklist
+
+- Install from Homebrew and list simulators
+- Start `baguette serve` and inspect `/simulators` plus `/farm`
+- Run one `describe-ui` dump and confirm coordinates map back into `tap`
+- Stream logs during one app launch to see debugging signal quality
+- Test multi-device farm only after single-device control feels stable
+
+## Security Notes
+
+- This is simulator automation, but app content and logs may still contain sensitive data
+- Browser dashboard should stay on trusted local network unless you add your own access controls
+- Be careful recording or exporting sessions that include credentials or user data
+- Private-framework dependence means you should expect version-sensitive behavior over time
+
+## FAQ
+
+**Q: Does Baguette work with real iPhones?**  
+**A:** Repo is explicitly centered on iOS Simulator workflows.
+
+**Q: Is it only GUI tool?**  
+**A:** No. CLI commands cover lifecycle, streaming, logs, accessibility, gestures, keyboard events, and hardware buttons.
+
+**Q: Why is `describe-ui` useful?**  
+**A:** It gives machine-readable accessibility tree and coordinates, which makes scripted interaction much more reliable.
+
+**Q: Is this for CI or local development?**  
+**A:** It is strongest for local and lab-style simulator automation, though pieces can support broader automation setups.
+
+## Conclusion
+
+Baguette turns simulator control into real local infrastructure layer. If your mobile workflow includes agentic testing, UI debugging, or many repeatable simulator actions, this repo is far more interesting than another wrapper around screenshots.

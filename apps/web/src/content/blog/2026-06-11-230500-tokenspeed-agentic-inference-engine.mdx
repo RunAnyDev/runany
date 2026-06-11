@@ -1,0 +1,188 @@
+---
+title: "TokenSpeed for Agentic LLM Inference"
+description: "TokenSpeed targets production agentic inference with static-compiler parallelism, KV-safe scheduling, and aggressive Blackwell-era performance goals. Here is what official preview release shows today."
+pubDate: "2026-06-11"
+tags: ["github-trending", "dev-tools", "llm", "python", "inference"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tokenspeed.webp"
+  alt: "TokenSpeed GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** TokenSpeed is early, hardware-heavy, and still preview-only, but official design makes clear bet: agentic inference needs different scheduler, kernel, and parallelism choices than generic chat serving stacks.
+
+## Source and Accuracy Notes
+
+- Official repo: [github.com/lightseekorg/tokenspeed](https://github.com/lightseekorg/tokenspeed)
+- Main README: [lightseekorg/tokenspeed/README.md](https://github.com/lightseekorg/tokenspeed/blob/main/README.md)
+- Official docs index: [lightseek.org/tokenspeed](https://lightseek.org/tokenspeed/)
+- Getting started docs: [lightseek.org/tokenspeed/guides/getting-started](https://lightseek.org/tokenspeed/guides/getting-started)
+- Related runany post: [/blog/familiar-local-ai-agent-mac/](/blog/familiar-local-ai-agent-mac/)
+
+## What Is TokenSpeed?
+
+Most inference projects lead with benchmark number. TokenSpeed does that too, but repo also explains architectural reason behind performance goal.
+
+Official README breaks system into four pieces:
+
+- modeling layer with static compiler and placement annotations
+- scheduler with finite-state-machine control over request lifecycle and KV ownership
+- pluggable kernel registry with fast MLA implementation on Blackwell
+- AsyncLLM entrypoint for lower CPU-side overhead
+
+That is more informative than “faster vLLM alternative.” It says maintainers believe agentic workloads stress inference stack differently.
+
+## Preview Status Matters
+
+repo documentation is careful here. Current version is preview release for reproducing published Kimi K2.5 and TokenSpeed MLA results on B200. Repo also says major PRs are still pending, including:
+
+- more model coverage
+- runtime features like KV store and metrics
+- Hopper and MI350 optimization
+- VLM and related runtime improvements
+
+So TokenSpeed is not asking you to drop production stack tomorrow. It is showing direction of travel.
+
+## Prerequisites
+
+- NVIDIA Blackwell-focused environment if you want to reproduce headline results
+- Docker and GPU access for runner image path
+- Python environment if installing from source
+- willingness to work with preview software
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Start with Official Runner Image
+
+Docs provide container-first path:
+
+```bash
+docker pull lightseekorg/tokenspeed-runner:latest
+
+docker run -itd --shm-size 32g --gpus all \
+  -v /raid/cache:/home/runner/.cache \
+  --ipc=host --network=host --pid=host --privileged \
+  --name tokenspeed \
+  lightseekorg/tokenspeed-runner:latest /bin/bash
+```
+
+That is good signal: maintainers know reproducible GPU environment is half battle.
+
+## Step 2: Install from Source Inside Runner
+
+Official docs continue with editable installs:
+
+```bash
+git clone https://github.com/lightseekorg/tokenspeed.git
+cd tokenspeed
+export PIP_BREAK_SYSTEM_PACKAGES=1
+pip install -e "./python" --no-build-isolation
+pip install -e tokenspeed-kernel/python/ --no-build-isolation
+pip install -e tokenspeed-scheduler/
+```
+
+Then validate environment and server options:
+
+```bash
+tokenspeed env
+tokenspeed serve --help
+```
+
+## Step 3: Launch First Server
+
+Docs include direct serve example:
+
+```bash
+tokenspeed serve openai/gpt-oss-20b --host 0.0.0.0 --port 8000 --tensor-parallel-size 1
+```
+
+Even if that exact model is not your target, example reveals product shape: TokenSpeed wants OpenAI-compatible serving surface with explicit parallelism controls.
+
+## Deeper Analysis
+
+### Why “Agentic Workloads” Is Key Phrase
+
+Agentic systems do not look like simple long-chat benchmarking. They create many shorter requests, tool-calling bursts, and context reuse patterns. TokenSpeed's scheduler description focuses on request lifecycle overlap and safe KV reuse. That is exactly where inference cost often hides in agents.
+
+### Static Compiler Angle
+
+official docs say users do not hand-write parallelism logic. Instead, placement annotations generate collective communication. If that workflow matures, it could reduce operational pain for teams that want performance without living in custom distributed graph code.
+
+### Kernel Strategy
+
+Project keeps kernel layer pluggable with centralized registry. That matters because hardware optimization windows move fast. Repo is clearly built to chase those windows aggressively.
+
+### Main Caveat
+
+Preview warning is not marketing modesty. It is operational instruction.
+
+Do not treat headline TPS claims as proof that:
+
+- your hardware matches theirs
+- your model recipe is supported today
+- your observability and metrics needs are covered already
+- your production rollback path is ready
+
+
+
+### Who Should Watch TokenSpeed Closely
+
+Not every team needs TokenSpeed. This project is for teams already hitting real inference ceilings: slow multi-step agents, expensive context reuse, or GPU clusters where scheduler choices dominate bill. If you are still proving product-market fit with handful of chats per minute, simpler serving stack is safer.
+
+### Why Preview Repos Still Matter
+
+Even without immediate deployment, TokenSpeed is useful because it reveals where inference engineering is heading. The repo treats serving engine as compiler, scheduler, and kernel co-design problem. That framing often predicts next wave of production systems before docs become friendlier.
+
+
+
+
+### Repo Signals Worth Reading Closely
+
+TokenSpeed README does not hide unfinished parts. It marks preview status, lists missing or in-progress runtime features, and points readers into docs for recipes, parameters, and parallelism. That honesty is useful. It lets infrastructure teams evaluate roadmap fit without pretending current branch already solves all production needs.
+
+
+
+
+### Best Evaluation Path
+
+Treat TokenSpeed like performance R&D project. Reproduce vendor-doc flow first, then benchmark with your own tool-calling or multi-turn agent traces. That sequence keeps expectations honest and stops impressive public numbers from hiding mismatched real workload behavior.
+
+If it cannot beat your current stack on that workload, repo may still teach you what to measure next. But you should keep migration effort proportional to today's actual bottleneck, not to trend momentum.
+
+## Practical Evaluation Checklist
+
+- Read preview caveats before budgeting migration effort
+- Reproduce docs flow in isolated GPU environment first
+- Benchmark your own agent request pattern, not generic chat load
+- Check model recipe coverage for exact models you need
+- Inspect roadmap gaps around metrics, KV store, and platform support
+
+## Security Notes
+
+- Container examples use `--privileged`, `--network=host`, and `--pid=host`; treat test host accordingly
+- Keep runner environments isolated from multi-tenant production workloads
+- Review model artifact provenance and local cache paths carefully
+- Do not expose preview server endpoints directly to public internet without front-door controls
+
+## FAQ
+
+**Q: Is TokenSpeed production-ready today?**  
+**A:** Official official docs say current version is preview release and not for production deployments.
+
+**Q: What makes it different from generic inference engines?**  
+**A:** Repo emphasizes scheduler design, static-compiler parallelism, and kernels tuned for agentic workloads.
+
+**Q: Do I need Blackwell GPUs?**  
+**A:** For reproducing flagship benchmark claims, that is central in current preview story.
+
+**Q: Does it have docs beyond README?**  
+**A:** Yes. Official docs cover getting started, server launch, model recipes, parameters, and parallelism.
+
+## Conclusion
+
+TokenSpeed is one of more technically interesting 2026 inference repos because it argues from workload shape, not only from model compatibility table. If your team serves high-volume agents and can evaluate in modern GPU environment, keep close eye on this project.

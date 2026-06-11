@@ -1,0 +1,215 @@
+---
+title: "Bumblebee for Developer Endpoint Supply-Chain Checks"
+description: "Perplexity's Bumblebee scans lockfiles, package metadata, MCP configs, and extensions on macOS and Linux to answer one incident-response question fast: where is vulnerable software present?"
+pubDate: "2026-06-11"
+tags: ["github-trending", "dev-tools", "supply-chain-security", "golang", "mcp"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bumblebee.webp"
+  alt: "Bumblebee GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Bumblebee is not another SBOM platform or EDR agent. It is fast, read-only endpoint inventory for developer machines, built to answer exactly which packages, extensions, MCP servers, and local tool installs match known exposure criteria.
+
+## Source and Accuracy Notes
+
+- Official repo: [github.com/perplexityai/bumblebee](https://github.com/perplexityai/bumblebee)
+- Main README: [perplexityai/bumblebee/README.md](https://github.com/perplexityai/bumblebee/blob/main/README.md)
+- Exposure catalog format: [docs/EXPOSURE-CATALOG.md](https://github.com/perplexityai/bumblebee/blob/main/docs/EXPOSURE-CATALOG.md)
+- Related runany post: [/blog/enforceauth-authorization-ai-agent-era/](/blog/enforceauth-authorization-ai-agent-era/)
+
+## What Is Bumblebee?
+
+Modern supply-chain response usually splits into two partial views:
+
+- SBOM systems tell you what shipped in official builds
+- EDR tells you what executed or touched network
+- Neither cleanly answers what is sitting on developer laptops right now
+
+That gap matters when incident response starts with a package name, an extension ID, an MCP server, or a compromised version range. Bumblebee focuses on that narrower job.
+
+Perplexity describes it as a **read-only inventory collector** for macOS and Linux developer endpoints. The tool does not shell out to package managers and does not read source files. Instead, it walks known lockfiles, installed package metadata, editor and browser extension manifests, and supported MCP JSON configs, then emits structured NDJSON records.
+
+That design choice is main reason Bumblebee is interesting. It trades breadth for determinism.
+
+## Prerequisites
+
+- macOS or Linux developer endpoints
+- Go `1.25+` if you install from source or via `go install`
+- Optional: JSON exposure catalog for targeted matching
+- Optional automation runner such as cron, `launchd`, or `systemd`
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install Bumblebee
+
+The official install path is plain Go:
+
+```sh
+go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+```
+
+If you need reproducibility during incident response, pin exact tag:
+
+```sh
+go install github.com/perplexityai/bumblebee/cmd/bumblebee@v0.1.1
+```
+
+From local checkout:
+
+```sh
+go build -o bumblebee ./cmd/bumblebee
+go test ./...
+```
+
+One detail worth keeping: `bumblebee version` prints version, VCS revision, build time, and Go runtime. That matters when multiple teams compare findings from different builds.
+
+## Step 2: Run Self-Test Before Fleet Rollout
+
+Bumblebee ships with embedded fixtures and official smoke test:
+
+```sh
+bumblebee selftest
+# selftest OK (2 findings in 1ms)
+```
+
+That is small but smart. Before wiring scanners across many laptops, you can verify local install still detects what repo expects.
+
+## Step 3: Pick Right Scan Profile
+
+Bumblebee runs one scan, emits results, exits. Scheduling is external.
+
+Official profiles:
+
+- `baseline` for global and user-level inventory
+- `project` for known work roots like `~/code` or `~/Developer`
+- `deep` for explicit broader paths during incident response
+
+Example baseline run:
+
+```sh
+bumblebee scan --profile baseline > inventory.ndjson
+```
+
+Example project sweep:
+
+```sh
+bumblebee scan --profile project \
+  --root "$HOME/code" \
+  --root "$HOME/Developer"
+```
+
+Example focused exposure check across home directory:
+
+```sh
+bumblebee scan --profile deep \
+  --root "$HOME" \
+  --exposure-catalog ./catalog.json \
+  --max-duration 10m
+```
+
+If you want to validate what it would walk first:
+
+```sh
+bumblebee roots --profile baseline
+```
+
+## What Bumblebee Scans
+
+Coverage in repo is more useful than headline marketing. Official table includes:
+
+- npm, pnpm, Yarn, Bun lock and install metadata
+- PyPI metadata from `dist-info` and `egg-info`
+- Go module manifests
+- RubyGems and Composer metadata
+- MCP server definitions from JSON host configs
+- Agent skill lock files
+- VS Code, Cursor, Windsurf, and VSCodium extensions
+- Chromium-family and Firefox extensions
+- Homebrew formula and cask install markers
+
+Two boundaries matter.
+
+First, v0.1 does **not** parse non-JSON MCP configs such as Codex `config.toml` or Continue YAML. Second, repo explicitly says MCP host configs may contain `env` credentials, but Bumblebee parses only server inventory and does not emit those values.
+
+That is good operational hygiene.
+
+## Deeper Analysis
+
+### Where It Fits in Security Stack
+
+Bumblebee works best as developer endpoint evidence layer, not as universal software inventory.
+
+Use it when:
+
+- vendor advisory names package or extension version
+- you need fast read-only sweep across engineering laptops
+- you want inventory from local tool state without executing package managers
+- you want MCP and skill ecosystem visibility that traditional tooling misses
+
+Do not expect it to replace:
+
+- CI build provenance
+- production SBOM generation
+- runtime behavioral telemetry
+- deep malware triage
+
+### Why NDJSON Output Matters
+
+Structured NDJSON makes this easy to stream into existing responders, data pipelines, or lightweight scripts. Each run ends with a `scan_summary` record, which repo positions as receiver-side signal for promoting state.
+
+That makes Bumblebee feel built for operations, not screenshots.
+
+### Why It Is Trending
+
+Three trends line up:
+
+- MCP servers and agent skills now live on developer machines
+- supply-chain incidents increasingly start with local tooling compromise
+- security teams need targeted answers faster than full fleet asset normalization
+
+Bumblebee is narrow, but narrow in right direction.
+
+
+
+### Where Teams Should Pilot It First
+
+Start with engineering laptops that already have varied package managers, editor extensions, and MCP usage. That is where Bumblebee can show value fast, because conventional asset inventory is usually weakest there. Compare one advisory-driven sweep with your normal manual endpoint triage process and measure time saved.
+
+## Practical Evaluation Checklist
+
+- Run `bumblebee selftest` on clean machine
+- Compare `baseline` and `project` output size on same endpoint
+- Build small exposure catalog from recent advisory
+- Confirm MCP records match your local host config reality
+- Check whether existing SIEM or notebook tooling ingests NDJSON cleanly
+
+## Security Notes
+
+- Tool is read-only by design, but inventory data can still be sensitive
+- Output can reveal package names, editor extensions, and project locations
+- Review where `inventory.ndjson` lands and who can access it
+- For broad `deep` scans, use explicit roots and duration limits
+
+## FAQ
+
+**Q: Does Bumblebee replace SBOMs?**  
+**A:** No. It covers on-disk developer endpoint state, which complements SBOM and EDR views rather than replacing them.
+
+**Q: Does it execute package managers like `npm ls` or `pip show`?**  
+**A:** No. Official scope says it reads lockfiles and install metadata only.
+
+**Q: Can it inspect MCP server setups?**  
+**A:** Yes, for supported JSON host configs. Non-JSON configs are out of scope in current version.
+
+**Q: Is it suitable for continuous background scanning?**  
+**A:** Repo frames it as one-shot scanner. Schedule recurring runs externally with cron, `launchd`, `systemd`, or MDM.
+
+## Conclusion
+
+Bumblebee solves practical question many security teams still answer badly: what exactly is installed on developer machines when local tooling ecosystem changes fast? If your team cares about MCP, agent skills, extensions, and lockfile-level exposure checks, Bumblebee is worth piloting now.
