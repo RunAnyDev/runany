@@ -1,0 +1,138 @@
+---
+title: "Rove - Self-Hosted Container Deployments"
+description: "Rove is an open-source CLI tool that deploys containers to your own Linux machines via SSH. No cloud account, no telemetry, no lock-in — just Docker on machines you control."
+pubDate: "2026-06-11"
+tags: ["self-hosted", "docker", "containers", "devops", "cli"]
+category: "self-hosted"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rove.webp"
+  alt: "Rove product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rove is an open-source CLI that provisions Docker on your own Linux servers via SSH and deploys containers with full transparency — no cloud account, no telemetry, no black-box infrastructure.
+
+## Source and Accuracy Notes
+
+- Official site: [https://rove.dev](https://rove.dev)
+- GitHub: [https://github.com/niccari/rove](https://github.com/niccari/rove)
+- v0.0.4 (latest release at time of writing)
+
+## What Is Rove?
+
+Rove is a single-binary CLI tool for self-hosting Docker containers on Linux machines you control. It connects via SSH, provisions Docker, enables a firewall, and deploys your containers — all with explicit, auditable steps printed to your terminal before anything runs.
+
+The core promise is straightforward: your servers, your Docker, no third-party control plane watching what you deploy. There is no hosted dashboard, no account required, and no telemetry phone-home. Configuration lives in a local `.rove` file in your project directory.
+
+## Setup Workflow
+
+### Step 1: Install the binary
+
+```bash
+# Linux/macOS
+curl -fsSL https://rove.dev/install.sh | sh
+
+# Or download from GitHub releases
+# https://github.com/niccari/rove/releases
+```text
+
+The installer places the `rove` binary on your PATH. Verify:
+
+```bash
+rove --version
+```
+
+### Step 2: Add a machine
+
+```bash
+rove machine add <name> <ip> <user> ~/.ssh/id_ed25519
+```
+
+Rove will show you exactly what it plans to do on the remote machine before doing it:
+
+```text
+Rove will make the following changes to remote machine:
+  ~ Enable firewall
+  ~ Install docker
+  ~ Enable swarm
+```
+
+You type `yes` to approve each operation. This is the audit trail — nothing runs silently.
+
+### Step 3: Deploy a container
+
+```bash
+rove service run files --publish 80:80 python:3.12 \
+  python3 -m http.server 80
+```
+
+Rove shows the service manifest it will create, then waits for your `yes` before deploying. Containers can be published on custom ports, run with replicas, and attached to user-defined Docker networks.
+
+### Step 4: Manage networks
+
+```bash
+# Create an isolated Docker network
+rove network add fileshare
+
+# Attach a service to the network
+rove service update files --network fileshare
+```
+
+## Deeper Analysis
+
+**How Rove differs from CDEs and cloud workspaces**
+
+Cloud development environments (Gitpod, Cursor, VS Code in the cloud) give you a hosted VM with a browser IDE. Rove gives you a tool that manages containers on hardware you already own. These are not competing products — CDEs solve the "my laptop is not my build machine" problem; Rove solves the "I want to run my services on my own iron" problem.
+
+**The approval model as a feature**
+
+Most deployment tools either run blindly (`kubectl apply`, `docker-compose up`) or require a complex workflow to review changes before applying them. Rove's interactive `yes/no` approval for each remote operation is intentionally simple. It will never auto-approve, and it prints exactly what SSH commands it will fire. For teams that want auditable infrastructure changes without a full GitOps pipeline, this is a practical middle ground.
+
+**No telemetry claim**
+
+The homepage explicitly states no telemetry is collected. The binary does not phone home on startup or during normal operation. This is a meaningful differentiator for air-gapped or regulated environments where SaaS DevOps tools are not an option.
+
+**Current state**
+
+Rove is at v0.0.4. The feature set covers the core self-hosted container lifecycle — adding machines, running services, managing networks, and viewing logs. It does not yet have a declarative config file format for GitOps-style automation or a built-in secrets management system. These are common asks in the GitHub issues and likely on the roadmap.
+
+## Practical Evaluation Checklist
+
+- Does the single-binary install work cleanly on a fresh Ubuntu 22.04 VM?
+- Can you deploy a multi-container service (e.g., nginx + python backend) across two machines?
+- Is the `rove service logs` output readable for a crashing container?
+- Does `rove diff` correctly show pending changes before applying?
+- How does rollback work if a deployment goes wrong?
+
+## Security Notes
+
+- SSH private key must be on the local machine; Rove does not manage keys
+- All remote operations are printed and approved interactively — no silent SSH commands
+- No telemetry or outbound connections to third-party services
+- Docker runs in swarm mode on the target machine, which enables ingress routing mesh
+
+## FAQ
+
+**Q: Does Rove work on macOS as a deployment target?**
+**A:** No. Rove manages Linux machines remotely from any OS, but the target machines must be Linux with SSH access and apt/YUM package manager.
+
+**Q: Can Rove replace Docker Compose in a self-hosted setup?**
+**A:** Partially. Rove covers service deployment, networking, and replication, but it does not have volume mounting, environment variable files, or build-step support. For stateful services with complex compose files, Docker Compose is still the better fit on the target machine.
+
+**Q: Is there a way to run operations without the interactive approval?**
+**A:** Not currently. The interactive approval model is intentional and is the primary audit mechanism for remote operations.
+
+**Q: How does Rove handle container image updates?**
+**A:** `rove service update <name> --image <new-image>` will pull the new image and restart the service. Rove does not have an auto-update or rolling-replacement strategy built in yet.
+
+## Conclusion
+
+Rove is a focused tool for teams that want to run containers on their own hardware without adopting a hosted platform. The interactive approval model makes infrastructure changes auditable without requiring a full GitOps setup, and the zero-telemetry stance addresses a real concern in regulated environments.
+
+It is early-stage software — v0.0.4 — so the feature surface is intentionally narrow. If you need declarative configs, secrets management, or rolling deployments today, you will need to layer those on top. But if you want a simple, transparent bridge between your local machine and a Docker host you own, Rove is worth a look.
+
+Start at [https://rove.dev](https://rove.dev) and run through the five-minute tutorial on a test VPS.
