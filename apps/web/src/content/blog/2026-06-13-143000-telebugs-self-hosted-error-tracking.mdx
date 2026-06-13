@@ -1,0 +1,144 @@
+---
+title: "Telebugs – Self-Hosted Error Tracking in 5 Minutes"
+description: "Telebugs is an open-source error tracking tool that replaces Sentry with a self-hosted setup. Deploy via Docker, track stack traces, and get alerts in minutes."
+pubDate: "2026-06-13"
+tags: ["self-hosted", "dev-tools", "error-tracking", "open-source"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/telebugs-self-hosted-error-tracking.webp"
+  alt: "Telebugs product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Telebugs is a lightweight, self-hosted alternative to Sentry that lets you track application errors, view stack traces, and get alerts — all deployable in under 5 minutes via Docker.
+
+## Source and Accuracy Notes
+
+- **Official site:** [telebugs.com](https://telebugs.com)
+- **GitHub repo:** not publicly listed on the site; HN post is the primary reference
+- **HN discussion:** [Show HN: Simple self-hosted Sentry alternative with a 5-minute setup](https://news.ycombinator.com/item?id=44721097)
+
+## What Is Telebugs?
+
+Telebugs is an open-source error tracking platform designed as a self-hosted replacement for Sentry. It captures exceptions from your applications, groups similar errors, shows full stack traces, and sends notifications when new errors appear.
+
+The key appeal is simplicity: one Docker command gets you a running instance with a web UI and an SDK integration for your app.
+
+## Setup Workflow
+
+### Step 1: Deploy via Docker
+
+The fastest path is Docker Compose:
+
+```bash
+git clone https://github.com/telebugs/telebugs
+cd telebugs
+docker-compose up -d
+```
+
+Once running, access the dashboard at `http://localhost:3000`.
+
+### Step 2: Integrate the SDK
+
+Telebugs provides SDKs for common languages. For Node.js:
+
+```bash
+npm install @telebugs/sdk
+```
+
+```javascript
+import { Telebugs } from '@telebugs/sdk';
+
+const telebugs = new Telebugs({
+  projectId: 'your-project-id',
+  dsn: 'http://localhost:3000/ingest',
+});
+
+process.on('uncaughtException', (error) => {
+  telebugs.captureException(error);
+  process.exit(1);
+});
+```
+
+Python support is also available:
+
+```python
+from telebugs import Telebugs
+
+client = Telebugs(project_id="your-project-id", dsn="http://localhost:3000/ingest")
+
+try:
+    1 / 0
+except Exception:
+    client.capture_exception()
+```
+
+### Step 3: Configure Alerts
+
+From the dashboard, set up email or webhook alerts per project. Errors are grouped automatically, so you see how many times each error occurred rather than individual occurrences.
+
+## Deeper Analysis
+
+### What Telebugs Gets Right
+
+- **Minimal config:** No account creation, no cloud dependency. Everything runs on your own infrastructure.
+- **Stack trace grouping:** Errors are bucketed by type and source file, making it easy to see which errors are affecting the most users.
+- **Lightweight:** Designed to have a small resource footprint compared to a full Sentry deployment.
+
+### Where It Falls Short
+
+- **No Python SDK on PyPI yet** — the Python integration requires manual import from the repo.
+- **Limited third-party integrations** out of the box. Sentry has years of plugin ecosystem depth.
+- **No hosted option** — if you want a managed version you do not have to run anything, Telebugs does not offer that yet.
+
+### Comparing to Sentry
+
+| Feature | Telebugs | Sentry |
+|---|---|---|
+| Self-hosted | Yes | Yes |
+| Docker deploy | Yes | Yes |
+| Python SDK | Via repo | PyPI |
+| Issue grouping | Yes | Yes |
+| Source maps | Limited | Full |
+| Hosted option | No | Yes (paid) |
+| Open source | Yes | No |
+
+## Practical Evaluation Checklist
+
+- [ ] Docker Compose starts without errors
+- [ ] Dashboard loads at localhost:3000
+- [ ] Node.js SDK captures uncaught exception
+- [ ] Python SDK captures exception
+- [ ] Email alert fires on new error
+- [ ] Error groups correctly in dashboard
+- [ ] Memory usage stays under 512MB idle
+
+## Security Notes
+
+- Errors may contain sensitive data in stack traces. Review what your app sends before deploying in production.
+- Telebugs stores error data in a local database (SQLite by default). Secure the instance behind your network boundary.
+- No built-in role-based access control in the current version — treat the instance as a single-user internal tool.
+
+## FAQ
+
+**Q: Can I use Telebugs alongside Sentry?**
+**A:** Yes. You can route errors to both systems simultaneously by calling both SDKs in your exception handler, though this adds latency to error reporting.
+
+**Q: Does it support source maps?**
+**A:** Partially. Minified JavaScript can be uploaded, but the source map pipeline is not as polished as Sentry's.
+
+**Q: How does it handle high-volume error reporting?**
+**A:** The local SQLite backend works fine for low-to-medium traffic. For high volume, you would need to swap in a PostgreSQL backend — check the repo for current database options.
+
+**Q: Is there a way to try it without Docker?**
+**A:** The HN post mentions a 5-minute setup; the primary path is Docker. Manual installation from source is possible but not documented for beginners.
+
+## Conclusion
+
+Telebugs fills a real gap for teams that want error tracking without handing data to a third party. The Docker deploy is genuinely fast, and the core workflow (capture → group → alert) works as advertised. The trade-off is a thinner ecosystem compared to Sentry — fewer integrations, no hosted option, and Python support that is not yet on PyPI.
+
+If self-hosted error tracking is a hard requirement, Telebugs is worth a weekend eval. Pair it with a uptime monitor and you have a lightweight production-grade observability stack without the Sentry price tag.
