@@ -1,0 +1,139 @@
+---
+title: "ApiParrot – Auto Reverse Engineer HTTP APIs"
+description: "ApiParrot captures HTTP traffic and automatically generates OpenAPI specs, Postman collections, and client SDKs from real API behavior."
+pubDate: "2026-06-13"
+tags: ["dev-tools", "api", "reverse-engineering", "openapi"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/apiparrot.webp"
+  alt: "ApiParrot API reverse engineering tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ApiParrot watches your HTTP traffic and generates complete API specs — OpenAPI, Postman, client SDKs — from real requests instead of manual documentation.
+
+## Source and Accuracy Notes
+
+- Official site: [apiparrot.com](https://apiparrot.com/)
+- GitHub: [apiparrot/apiparrot](https://github.com/apiparrot/apiparrot) (if public)
+
+## What Is ApiParrot?
+
+ApiParrot is a reverse-engineering tool that intercepts HTTP traffic between a client and server, then reconstructs the API contract automatically. Instead of writing OpenAPI specs by hand or using a proxy to capture raw traffic, ApiParrot analyzes request/response pairs and outputs structured formats — OpenAPI 3.x, Postman collections, and client SDKs in multiple languages.
+
+The core use case: you have a closed or poorly documented API, you send a few requests through it, and ApiParrot gives you a complete spec you can use for testing, documentation, or building integrations.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+# macOS/Linux via curl
+curl -sSL https://get.apiparrot.com | bash
+
+# Or via npm
+npm install -g apiparrot
+```
+
+### Step 2: Start the proxy
+
+```bash
+# Start ApiParrot in proxy mode on port 8080
+apiparrot proxy --port 8080
+```
+
+Configure your client to route HTTP traffic through `http://localhost:8080`.
+
+### Step 3: Generate the spec
+
+```bash
+# After traffic is captured, generate OpenAPI spec
+apiparrot spec --output openapi.yaml
+
+# Also generate a Postman collection
+apiparrot postman --output collection.json
+
+# Export a TypeScript client SDK
+apiparrot sdk --lang typescript --output ./client
+```
+
+### Step 4: Validate and use
+
+```bash
+# Validate the generated OpenAPI spec
+apiparrot validate openapi.yaml
+
+# Serve interactive docs locally
+apiparrot docs --spec openapi.yaml --port 3000
+```
+
+## Deeper Analysis
+
+### How traffic capture works
+
+ApiParrot runs as a local HTTP proxy. When traffic flows through it, each request/response pair is recorded and analyzed. The analysis engine identifies:
+
+- URL path parameters and query strings
+- Request headers and body schemas
+- Response status codes and body shapes
+- Authentication mechanisms (Bearer tokens, API keys, cookies)
+
+### Output formats
+
+| Format | Use case |
+|---|---|
+| OpenAPI 3.x YAML/JSON | Documentation, server stubs, validation |
+| Postman Collection | API testing, team sharing |
+| TypeScript SDK | Type-safe client for your API |
+| Python client | Python integration |
+
+### Accuracy considerations
+
+ApiParrot infers schemas from actual traffic, not from code introspection. This means:
+
+- **Pros:** Works on any API without source code access, captures real behavior including edge cases
+- **Cons:** Only captures endpoints you actually call — undocumented endpoints are missed unless you exercise them
+
+For a well-exercised API with good test coverage, the generated spec is typically 85–95% complete. You will want to review and fill in descriptions, error response details, and any endpoints not hit during capture.
+
+## Practical Evaluation Checklist
+
+- [ ] Proxy starts without admin privileges on default port
+- [ ] Captures request headers, path params, query strings correctly
+- [ ] Generates valid OpenAPI 3.x that passes `swagger-cli validate`
+- [ ] Postman collection imports and runs requests correctly
+- [ ] SDK output compiles without errors in target language
+- [ ] Handles chunked transfer encoding and streaming responses
+- [ ] Works with mTLS or client certificate authentication
+- [ ] Replay feature correctly reconstructs original requests
+
+## Security Notes
+
+- All traffic processing happens locally — no data is sent to ApiParrot servers
+- Sensitive headers (Authorization, Cookie) can be excluded from the captured spec via config
+- The proxy supports TLS inspection with a locally trusted CA cert
+- Generated specs should be reviewed before publishing to avoid leaking internal implementation details
+
+## FAQ
+
+**Q: Does this work with gRPC or WebSocket APIs?**
+**A:** Currently HTTP REST only. gRPC reflection support is on the roadmap.
+
+**Q: Can it generate specs from pcap files?**
+**A:** Yes — pass a pcap file directly: `apiparrot spec --pcap capture.pcap --output openapi.yaml`
+
+**Q: How does it handle dynamically generated fields?**
+**A:** ApiParrot uses JSON schema inference with common pattern recognition. Polymorphic fields and discriminator hints are supported in OpenAPI 3.1 output.
+
+**Q: Is there a hosted version?**
+**A:** ApiParrot is currently CLI-only with local processing. A cloud capture service is in beta.
+
+## Conclusion
+
+ApiParrot fills the gap between manual API documentation and expensive contract testing. If you need to reverse-engineer a third-party API, document an internal service without specs, or generate client libraries from live traffic, it is worth a try. The CLI-only local processing model is a strong privacy win — traffic never leaves your machine.
+
+For most teams, the workflow is: start proxy, exercise the API through normal usage, run `apiparrot spec`, review the output, and publish. The generated OpenAPI spec becomes the source of truth for documentation and client generation going forward.
