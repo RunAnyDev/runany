@@ -1,0 +1,162 @@
+---
+title: "Cicada – Self-Hosted CI/CD Alternative to GitHub Actions"
+description: "Open-source, self-hosted CI/CD platform that runs workflows locally. No cloud lock-in, no per-minute billing. Deploy on your own VPS or Docker infra."
+pubDate: "2026-06-15"
+tags: ["cicada", "ci-cd", "self-hosted", "github-actions", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cicada.webp"
+  alt: "Cicada self-hosted CI/CD platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cicada is an open-source, self-hosted CI/CD platform that runs GitHub Actions-style workflows on your own infrastructure — no cloud dependency, no per-minute pricing.
+
+## Source and Accuracy Notes
+
+- Official site: [cicada.sh](https://cicada.sh)
+- GitHub: [github.com/cicada-sh/cicada](https://github.com/cicada-sh/cicada)
+- Documentation: [docs.cicada.sh](https://docs.cicada.sh)
+
+## What Is Cicada?
+
+Cicada is a free and open-source (FOSS) CI/CD engine designed as a direct self-hosted alternative to GitHub Actions, GitLab CI, and Drone CI. It executes workflow pipelines defined in YAML — the same syntax GitHub Actions uses — so migration is relatively straightforward.
+
+The project targets developers and teams who want full control over their build infrastructure without paying for cloud CI minutes or being locked into a specific vendor.
+
+Key differentiators:
+
+- **Self-hosted only** — no SaaS offering, no data leaves your infra
+- **Docker-based execution** — each job step runs in an isolated container
+- **GitHub Actions compatible** — many existing `.github/workflows/*.yml` files work with minimal changes
+- **Minimal config** — single binary deployment, no Java/Ruby/Node runtime required to run the server
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux host (or macOS for local dev)
+- Docker installed (for runner execution)
+- Git
+
+### Step 1: Install the Server
+
+```bash
+# Download the latest binary
+curl -L https://get.cicada.sh | bash
+
+# Or install via package manager (if available)
+# brew install cicada-sh/tap/cicada
+```
+
+### Step 2: Configure the Runner
+
+```bash
+cicada runner register \
+  --server http://your-ci-server:8080 \
+  --token YOUR_RUNNER_TOKEN
+```
+
+### Step 3: Define a Workflow
+
+Create `.cicada/workflows/demo.yml` in your repo:
+
+```yaml
+name: Build and Test
+
+on: push
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t myapp .
+      - name: Test
+        run: docker run --rm myapp pytest
+```
+
+### Step 4: Connect a Repo
+
+```bash
+cicada repo add \
+  --url https://github.com/your-org/your-repo \
+  --branch main
+```
+
+### Step 5: Trigger a Run
+
+Push to your repo or trigger manually:
+
+```bash
+cicada run --job build --repo your-org/your-repo
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Cicada uses a simple client-server model:
+
+- **Server** — schedules jobs, stores build history in SQLite, exposes a web UI and REST API
+- **Runner** — polls the server for work, executes jobs in Docker containers, streams logs back
+
+Both components are single Go binaries, making upgrades trivial.
+
+### Comparison to Alternatives
+
+| Feature | Cicada | GitHub Actions | GitLab CI | Drone CI |
+|---|---|---|---|---|
+| Self-hosted | Yes | No | Yes | Yes |
+| SaaS option | No | Yes | Yes | Yes |
+| GitHub Actions compat | High | N/A | Partial | Good |
+| Database | SQLite | GitHub-owned | PostgreSQL | SQLite or Postgres |
+| Per-minute billing | None | Yes (with free tier) | Yes | No |
+| Setup complexity | Low | None (hosted) | Medium | Low |
+
+### Current Maturity
+
+Cicada is actively developed but relatively young. The core pipeline execution works well; advanced features like matrix builds, reusable workflows, and secret management are improving with each release. Check the [GitHub releases](https://github.com/cicada-sh/cicada/releases) for the latest stability assessment.
+
+## Practical Evaluation Checklist
+
+- [ ] Installs in under 5 minutes on a fresh VPS
+- [ ] Existing GitHub Actions YAML runs without modification
+- [ ] Docker-based isolation per job step
+- [ ] Web UI shows live build logs
+- [ ] REST API enables custom tooling integration
+- [ ] Runners can be added horizontally (scale out)
+
+## Security Notes
+
+- Workflows run on **your own hardware** — no third-party has access to your build environment
+- Secrets are stored server-side; runners receive them at runtime via environment variables (ensure runner-to-server communication uses TLS in production)
+- Docker isolation prevents job steps from accessing the host filesystem beyond mounted volumes
+- Review the [security policy](https://github.com/cicada-sh/cicada/blob/main/SECURITY.md) before running untrusted third-party actions
+
+## FAQ
+
+**Q: How does Cicada compare to running GitHub Actions runners on self-hosted hardware?**
+**A:** GitHub's self-hosted runners still phone home to GitHub's servers — Cicada is fully offline with no external dependencies. You also avoid GitHub's 500-job-per-repo limit on self-hosted runners.
+
+**Q: Can I use GitHub Actions marketplace actions in Cicada?**
+**A:** Many `uses: actions/*` steps work directly since Cicada implements the same action interface. Actions that rely on GitHub-specific environment variables (`GITHUB_TOKEN`, `GITHUB_REPOSITORY`) may need adjustment.
+
+**Q: Does Cicada support matrix builds?**
+**A:** Yes, the `matrix` strategy in workflow YAML is supported in recent releases. Check your version's changelog for specifics.
+
+**Q: What's the storage requirement?**
+**A:** The server uses SQLite by default and stores artifacts locally. For high-throughput use cases, you can configure object storage (S3-compatible) for artifacts.
+
+## Conclusion
+
+Cicada fills a real gap for teams that want GitHub Actions-style YAML pipelines without the cloud dependency or per-minute billing. Setup is fast, the action compatibility is genuine, and being fully self-contained means your CI logs and artifacts never leave your infra.
+
+If you are running CI on cloud VMs you pay for by the minute, Cicada is worth a weekend evaluation. The migration path from an existing GitHub Actions setup is low-effort — clone your workflow YAML, point it at a Cicada runner, and go.
+
+Start at [cicada.sh](https://cicada.sh) or read the docs at [docs.cicada.sh](https://docs.cicada.sh).
