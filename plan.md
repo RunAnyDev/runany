@@ -70,7 +70,7 @@ date: "2025-05-27"
 tags: ["ollama", "local-llm", "tutorial"]
 category: "ai-setup"
 summary: "Hướng dẫn setup local LLM với Ollama và OpenWebUI trong 10 phút"
-author: "Du"
+author: "Friday"
 featured: false
 draft: false
 ---

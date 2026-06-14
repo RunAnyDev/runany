@@ -99,7 +99,7 @@ function assertValidPost(fileName, source) {
   assert.ok(data.description.length >= 120, `${fileName}: description must be at least 120 chars (${data.description.length})`);
   assert.ok(data.description.length <= 200, `${fileName}: description must be 200 chars or fewer (${data.description.length})`);
   assert.ok(validCategories.has(data.category), `${fileName}: invalid category ${data.category}`);
-  assert.equal(data.author, 'Du', `${fileName}: author must be Du`);
+  assert.equal(data.author, 'Friday', `${fileName}: author must be Friday`);
   assert.equal(data.draft, false, `${fileName}: draft must be false`);
   assert.ok(Array.isArray(data.tags), `${fileName}: tags must be an array`);
   assert.ok(data.tags.length > 0, `${fileName}: tags must not be empty`);
@@ -142,7 +142,7 @@ function assertValidTrendingPost(fileName, body) {
 
 describe('blog post template parser', () => {
   it('rejects missing code block language identifiers', () => {
-    const invalid = `---\ntitle: "Valid Title"\ndescription: "${'x'.repeat(130)}"\npubDate: "2026-05-28"\ntags: ["dev-tools"]\ncategory: "dev-tools"\nauthor: "Du"\ndraft: false\n---\n\n## TL;DR\n\n> **TL;DR:** Summary.\n\n## Body\n\n\`\`\`\necho hi\n\`\`\`\n\n## FAQ\n\n**Q: Test?**\n**A:** Yes.\n\n## Conclusion\n`;
+    const invalid = `---\ntitle: "Valid Title"\ndescription: "${'x'.repeat(130)}"\npubDate: "2026-05-28"\ntags: ["dev-tools"]\ncategory: "dev-tools"\nauthor: "Friday"\ndraft: false\n---\n\n## TL;DR\n\n> **TL;DR:** Summary.\n\n## Body\n\n\`\`\`\necho hi\n\`\`\`\n\n## FAQ\n\n**Q: Test?**\n**A:** Yes.\n\n## Conclusion\n`;
     assert.throws(() => assertValidPost('invalid.mdx', invalid), /missing language identifier/);
   });
 });

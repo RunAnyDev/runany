@@ -11,14 +11,14 @@ export async function GET(context: APIContext) {
     title: 'runany.dev',
     description: 'Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.',
     site: context.site ?? 'https://runany.dev',
-    customData: '<language>en-us</language><managingEditor>du@runany.dev (Du)</managingEditor><webMaster>du@runany.dev (Du)</webMaster>',
+    customData: '<language>en-us</language><managingEditor>friday@runany.dev (Friday)</managingEditor><webMaster>friday@runany.dev (Friday)</webMaster>',
     items: sortedPosts.map((post) => ({
       title: post.data.title,
       description: post.data.description,
       link: `/blog/${getSlug(post.id)}/`,
       pubDate: new Date(post.data.pubDate),
       content: post.body ? `<![CDATA[${post.body}]]>` : undefined,
-      author: 'du@runany.dev (Du)',
+      author: 'friday@runany.dev (Friday)',
       categories: [post.data.category, ...post.data.tags],
     })),
   });

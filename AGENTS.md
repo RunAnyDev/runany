@@ -52,7 +52,7 @@ description: "Short description 150-200 chars for SEO and AI extraction"
 pubDate: "2025-05-27"
 tags: ["tag1", "tag2", "tag3"]
 category: "ai-setup"
-author: "Du"
+author: "Friday"
 featured: false
 draft: false
 ---
@@ -243,7 +243,7 @@ description: "..."
 pubDate: "2025-05-27"
 tags: ["tag1"]
 category: "tutorial"
-author: "Du"
+author: "Friday"
 draft: false
 ---
 
@@ -368,7 +368,7 @@ description: "Step-by-step guide to setting up the N8N automation tool on an Ubu
 pubDate: "2025-05-27"
 tags: ["n8n", "automation", "self-hosted"]
 category: "self-hosted"
-author: "Du"
+author: "Friday"
 draft: false
 ---
 

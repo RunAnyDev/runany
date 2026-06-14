@@ -82,7 +82,7 @@ description: "Short SEO description under 200 characters."
 pubDate: "2026-05-29"
 tags: ["ai", "ollama", "self-hosted"]
 category: "ai-setup"
-author: "Du"
+author: "Friday"
 featured: false
 draft: false
 ---
