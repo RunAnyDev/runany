@@ -1,0 +1,176 @@
+---
+title: "Meetily - Self-Hosted AI Meeting Notes"
+description: "Meetily is a self-hosted AI meeting notes tool with 100% local processing. No cloud dependency — all data stays on your own server."
+pubDate: "2026-06-15"
+tags: ["self-hosted", "ai", "productivity", "privacy"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/meetily-self-hosted-ai-meeting-notes.webp"
+  alt: "Meetily product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Meetily is a self-hosted AI meeting notes tool that transcribes and summarizes meetings entirely on your own hardware — no cloud, no data leaving your network.
+
+## Source and Accuracy Notes
+
+- Official site: https://meetily.ai/
+- HN launch thread: https://news.ycombinator.com/item?id=45810161
+
+## What Is Meetily?
+
+Meetily is a self-hosted meeting notes tool that uses AI to transcribe and summarize your meetings. The entire pipeline runs locally — audio processing, transcription, and summary generation all happen on your own server. Nothing is sent to third-party cloud services.
+
+The pitch is straightforward: if your company handles sensitive meetings (legal, medical, executive, M&A), sending audio to Zoom, Otter.ai, or other cloud services may not be an option. Meetily gives you AI-powered meeting intelligence without the privacy trade-off.
+
+Key differentiators:
+- **100% offline** — no internet required after installation
+- **No bot joins** — record locally or feed existing audio files
+- **Self-hosted** — runs on a local machine, NAS, or VPS
+- **Open friendly** — targets privacy-conscious teams and regulated industries
+
+## Setup Workflow
+
+### Step 1: Check Requirements
+
+Meetily runs on a single server. Minimum specs:
+
+- **OS:** Linux (Ubuntu 20.04+, Debian 11+)
+- **RAM:** 8GB recommended (4GB minimum)
+- **Disk:** 10GB for the application + model files
+- **Python:** 3.9+ (for the backend)
+- **Audio source:** microphone input or pre-recorded audio files
+
+### Step 2: Install Meetily
+
+The recommended install uses Docker for a clean, isolated run:
+
+```bash
+# Clone the repository
+git clone https://github.com/meetily/meetily.git
+cd meetily
+
+# Copy environment template
+cp .env.example .env
+
+# Start with Docker Compose
+docker-compose up -d
+```
+
+After startup, access the web UI at `http://your-server:3000`.
+
+### Step 3: Configure Audio Input
+
+Meetily supports two input modes:
+
+**Live mode** — captures audio from a microphone or audio interface in real time:
+
+```bash
+# In the .env file, set input mode
+AUDIO_SOURCE= microphone
+```
+
+**File mode** — processes pre-recorded audio files (WAV, MP3, M4A, FLAC):
+
+```bash
+# Place files in the input directory
+cp my-recording.mp3 ./audio-input/
+# Meetily processes and transcribes automatically
+```
+
+### Step 4: Connect to Transcription Model
+
+Meetily uses local Whisper models for transcription. Choose the model size that fits your hardware:
+
+| Model | Size | Speed | Accuracy |
+|-------|------|-------|----------|
+| tiny  | ~75MB | Fastest | Baseline |
+| base  | ~150MB | Fast | Good |
+| small | ~500MB | Medium | Very good |
+| medium | ~1.5GB | Slow | Excellent |
+
+```bash
+# Set model in .env
+WHISPER_MODEL= base
+```
+
+Restart the container for the model change to take effect:
+
+```bash
+docker-compose restart
+```
+
+## Deeper Analysis
+
+### Privacy Model
+
+The core value proposition is privacy by architecture. Unlike cloud transcription services that store your audio on their servers, Meetily never makes an outbound network connection during transcription. This makes it suitable for:
+
+- Law firm client meetings
+- Healthcare provider consultations
+- Executive board meetings
+- M&A due diligence sessions
+- Any environment where data sovereignty is a hard requirement
+
+### Limitations
+
+- **No real-time collaboration** — summaries are generated after the fact, not during the meeting
+- **Self-managed** — no vendor support; you maintain your own infrastructure
+- **Audio quality dependent** — Whisper accuracy drops with background noise, multiple speakers, or low-quality recordings
+- **No automatic speaker diarization** in the base version — identifying "who said what" requires post-processing
+
+### Competitive Landscape
+
+The closest alternatives are:
+
+- **Otter.ai** — cloud-only, real-time, collaborative, but data leaves your control
+- **Fireflies.ai** — similar cloud model with CRM integrations
+- **Whisper + self-scripts** — DIY approach, requires more setup and maintenance
+- **Meetily** — purpose-built self-hosted solution, minimal config, all-in-one
+
+For regulated industries, Meetily is one of the few options that doesn't require a legal review of a vendor's data handling practices.
+
+## Practical Evaluation Checklist
+
+- [ ] Installs and starts without errors on a clean Ubuntu instance
+- [ ] Web UI loads and is accessible on LAN
+- [ ] Microphone input captures and transcribes speech correctly
+- [ ] Pre-recorded audio file transcription works for at least WAV and MP3
+- [ ] Summary output is coherent and captures key points
+- [ ] No outbound network connections observed during transcription (verify with `ss -tn` or `tcpdump`)
+- [ ] Restarting the container preserves past meeting data
+- [ ] Whisper model swap (tiny → base) takes effect after restart
+
+## Security Notes
+
+**Surface area:** Meetily runs as a Docker container on your own network. Attack surface is limited to whatever ports you expose. The web UI has no built-in authentication in the base install — you should put it behind a reverse proxy with authentication (nginx + Basic Auth, or a VPN).
+
+**Data at rest:** Meeting audio and transcripts are stored in a local volume. Encrypt the volume at rest if your threat model requires it (LUKS on the host, or filesystem-level encryption).
+
+**No telemetry:** Verify with `ss -tn` that no connections go out during processing.
+
+## FAQ
+
+**Q: Can Meetily transcribe meetings in languages other than English?**
+**A:** Yes. Whisper supports 99+ languages. Set `WHISPER_MODEL` and the model will auto-detect the language. Multilingual meetings are handled, though accuracy varies by language and accent.
+
+**Q: Does Meetily work with Zoom, Teams, or Google Meet recordings?**
+**A:** Not natively. Those platforms encrypt their recordings end-to-end. You would need to export the audio separately (local recording, native export) and feed the file to Meetily.
+
+**Q: How does it handle multiple speakers?**
+**A:** Base Whisper transcribes speech but does not inherently label speakers. For multi-speaker diarization, you would need to layer a separate diarization tool (e.g., pyannote) on top.
+
+**Q: Can multiple team members access the same Meetily instance?**
+**A:** Yes, by sharing the server URL. For multi-user access control, put Meetily behind a reverse proxy with authentication. Role-based access control is not built in.
+
+## Conclusion
+
+Meetily fills a specific gap: AI-powered meeting transcription with a hard privacy boundary. It is not trying to compete with Otter.ai on features — it competes on the one dimension that matters for regulated industries: your data never leaves your control.
+
+If you have a VPS or a spare Linux machine and need meeting intelligence without a cloud dependency, Meetily is worth 20 minutes of setup time. The Docker install is clean, Whisper transcription quality is solid for clean audio, and the zero-telemetry model is verifiable with basic network monitoring.
+
+For teams that have ruled out cloud transcription due to legal or compliance requirements, Meetily is currently one of the most turnkey self-hosted options available.
