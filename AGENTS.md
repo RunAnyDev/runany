@@ -16,45 +16,72 @@ Always read from `~/.env` or environment variables. This includes:
 
 ---
 
-## Creating a New Blog Post
+## Content Accuracy & Source Verification (MANDATORY)
 
-### ⚠️ Content Accuracy Rules (MANDATORY)
+> **Rule:** NEVER guess, assume, or fabricate information about a tool, repo, app, CLI, API, or framework. Every factual claim in a post must be traceable to a primary source the agent has actually read. Hallucinated version numbers, invented CLI flags, made-up features, or paraphrased-from-memory commands mislead readers and damage runany.dev's credibility. If you cannot verify a claim, **omit it** or **ask the user** — do not write it.
 
-**Rule: NEVER guess, assume, or make up information about a tool/repo/app.**
+### 1. Required source order (highest to lowest)
 
-Before writing ANY blog post, you MUST:
+1. **The repo's own `README.md`, `docs/`, or `llms.txt`** — read end-to-end before writing.
+2. **GitHub REST API** for metadata: `GET https://api.github.com/repos/{owner}/{repo}` returns `description`, `stargazers_count`, `license.spdx_id`, `default_branch`, `pushed_at`, `topics`. Use `GITHUB_TOKEN` from `~/.env` to avoid rate limits.
+3. **Latest release** via `GET /repos/{owner}/{repo}/releases/latest` or `git ls-remote --tags https://github.com/{owner}/{repo}.git` for the current version.
+4. **Source code** (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `wrangler.toml`, `Dockerfile`, `Makefile`, `helm/`) when in doubt about deps, install steps, or runtime versions.
+5. **Official site / docs** (`*.dev`, `docs.*`, official blog) as the canonical source for product claims.
+6. **Trusted secondary sources** (project blog, official announcements) only as a fallback — never as the only citation.
 
-1. **Read the actual source** — GitHub README, docs, llms.txt, or official website
-2. **Verify all claims** — features, commands, pricing, license, requirements
-3. **Quote exact text** when possible — copy from README/docs, don't paraphrase from memory
-4. **Include source links** — every post must have a "Source and Accuracy Notes" section with:
-   - GitHub repo URL (if applicable)
-   - Official docs/website URL
-   - Any HN launch thread or announcement
+### 2. Hard "NEVER" rules
 
-**❌ NEVER do this:**
-- Write "it supports X feature" without verifying in the repo/docs
-- Invent command examples or API endpoints
-- Guess at pricing, license, or requirements
-- Paraphrase features you haven't actually read
+- ❌ **NEVER** invent a version number, star count, license, dependency, env var, default port, CLI flag, config key, API endpoint, or pricing tier. If the README does not say it, do not write it.
+- ❌ **NEVER** paraphrase install steps, code snippets, or config blocks from memory. Copy them verbatim from the project's docs and only add a short explanation in your own words.
+- ❌ **NEVER** mix up similar tools (e.g., confusing `wrangler` with `miniflare`, `n8n` with `Node-RED`, `Open WebUI` with `LibreChat`). Verify the exact repo path, package name, and domain before writing the first sentence.
+- ❌ **NEVER** swap package managers. If the project uses `pnpm`, do not write `npm install`; if it uses `uv`, do not write `pip install`; if it uses `cargo`, do not write `go build`. Match the project's actual toolchain (`package.json` `packageManager`, `pnpm-lock.yaml`, `Cargo.lock`, etc.).
+- ❌ **NEVER** claim a feature exists ("supports streaming", "ships with auth", "includes rate limiting") unless the README, docs, or source code confirms it. "Sounds plausible" is not verification.
+- ❌ **NEVER** reuse commands from a different post without re-verifying them against the current version of the project. APIs and flags change between releases.
 
-**✅ ALWAYS do this:**
-- Clone/read the repo before writing
-- Check the README for actual feature list
-- Verify installation commands work
-- Link to official docs for details
+### 3. Hard "ALWAYS" rules
 
-**Example of correct "Source and Accuracy Notes" section:**
+- ✅ **ALWAYS** open the actual `README.md` and skim `docs/` before drafting the article. Use the GitHub API (`curl https://api.github.com/repos/...`) — do not rely on a search result snippet.
+- ✅ **ALWAYS** cross-check the version mentioned in the article against the latest release tag or `main` branch commit. If the version cannot be verified, write "current main branch" or omit the version.
+- ✅ **ALWAYS** quote commands, code blocks, config snippets, and `.env` keys **character-for-character** from the source. If you reformat for readability, link to the original.
+- ✅ **ALWAYS** add a "Source and Accuracy Notes" section (reader-facing) with:
+  - Project page / official site URL
+  - Source repository URL
+  - License (verified, not assumed)
+  - HN launch thread or official announcement (if applicable)
+  - Date the source was last checked
+- ✅ **ALWAYS** prefer the project's own description over your paraphrase. Quote it in a blockquote with attribution.
+
+### 4. When the information is missing or unclear
+
+1. Read the relevant docs file end-to-end.
+2. Check the repo's `Issues`, `Discussions`, and `Releases` for clarifications.
+3. If still unclear, **omit the claim**. Do not guess.
+4. If the gap is critical, ask the user. State exactly what is missing and why it matters.
+
+### 5. Pre-commit verification (mandatory before `git commit`)
+
+- [ ] Repo metadata (`description`, `stars`, `license`, `default_branch`, `pushed_at`) fetched from the GitHub API and matches the article.
+- [ ] Latest version / release tag verified against the Releases page or `git ls-remote --tags`.
+- [ ] Every install command, CLI flag, env var, port, and config key in the article was copy-pasted from the project's own docs.
+- [ ] Package manager in install commands matches the project's actual lockfile / `packageManager` field.
+- [ ] No "the project supports X" claim without a citation in the body or "Source and Accuracy Notes".
+- [ ] "Source and Accuracy Notes" section is present with at least the repo URL and the official site URL.
+- [ ] If anything on this checklist fails, **do not commit**. Fix the article or ask the user.
+
+### 6. Example "Source and Accuracy Notes" block
+
 ```markdown
 ## Source and Accuracy Notes
 
 - Project page: [anarlog.so](https://anarlog.so)
 - Source repository: [github.com/fastrepl/anarlog](https://github.com/fastrepl/anarlog)
-- License: MIT
+- License: MIT (verified via GitHub API `license.spdx_id`)
 - HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
+- Source last checked: 2026-06-15 (commit `a1b2c3d`)
 ```
 
-If you cannot verify information from a reliable source, **do not write the post**. Ask the user for clarification or skip the topic.
+---
+## Creating a New Blog Post
 
 ---
 
