@@ -18,6 +18,46 @@ Always read from `~/.env` or environment variables. This includes:
 
 ## Creating a New Blog Post
 
+### ⚠️ Content Accuracy Rules (MANDATORY)
+
+**Rule: NEVER guess, assume, or make up information about a tool/repo/app.**
+
+Before writing ANY blog post, you MUST:
+
+1. **Read the actual source** — GitHub README, docs, llms.txt, or official website
+2. **Verify all claims** — features, commands, pricing, license, requirements
+3. **Quote exact text** when possible — copy from README/docs, don't paraphrase from memory
+4. **Include source links** — every post must have a "Source and Accuracy Notes" section with:
+   - GitHub repo URL (if applicable)
+   - Official docs/website URL
+   - Any HN launch thread or announcement
+
+**❌ NEVER do this:**
+- Write "it supports X feature" without verifying in the repo/docs
+- Invent command examples or API endpoints
+- Guess at pricing, license, or requirements
+- Paraphrase features you haven't actually read
+
+**✅ ALWAYS do this:**
+- Clone/read the repo before writing
+- Check the README for actual feature list
+- Verify installation commands work
+- Link to official docs for details
+
+**Example of correct "Source and Accuracy Notes" section:**
+```markdown
+## Source and Accuracy Notes
+
+- Project page: [anarlog.so](https://anarlog.so)
+- Source repository: [github.com/fastrepl/anarlog](https://github.com/fastrepl/anarlog)
+- License: MIT
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
+```
+
+If you cannot verify information from a reliable source, **do not write the post**. Ask the user for clarification or skip the topic.
+
+---
+
 ### 1. File Location
 
 ```
