@@ -1,0 +1,218 @@
+---
+title: "IonRouter - High-Throughput Inference API"
+description: "YC W26 inference API with custom IonAttention engine. Drop-in OpenAI replacement, built for NVIDIA Grace Hopper. Per-second billing, no cold starts."
+pubDate: "2026-06-15"
+tags: ["ai-inference", "yc-w26", "gpu", "openai-api", "developer-tools"]
+category: "ai-setup"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ionrouter.webp"
+  alt: "IonRouter product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** IonRouter is a YC W26 inference API that delivers high-throughput, low-cost model serving using a custom IonAttention engine optimized for NVIDIA Grace Hopper, with a drop-in OpenAI-compatible API and per-second billing.
+
+## Source and Accuracy Notes
+
+- Project page: [ionrouter.io](https://ionrouter.io)
+- Source repository: [github.com/cumulus-compute-labs](https://github.com/cumulus-compute-labs) (organization, no public product repo)
+- License: Proprietary (commercial service)
+- HN launch thread: [news.ycombinator.com/item?id=47355410](https://news.ycombinator.com/item?id=47355410)
+- Source last checked: 2026-06-15
+
+## What Is IonRouter?
+
+IonRouter is an inference API service from Cumulus Labs (YC W26, NVIDIA Inception) that positions itself between expensive always-on GPU providers (Together, Fireworks) and cheap DIY options (Modal, RunPod). The core value proposition: swap in their base URL, keep your existing OpenAI client code, and get access to open-source and fine-tuned models running on their custom inference stack.
+
+The technical differentiator is **IonAttention**, their proprietary inference engine built from the ground up for NVIDIA Grace Hopper hardware. According to their benchmarks, a single GH200 running Qwen2.5-7B achieves 7,167 tokens/second with IonAttention, compared to ~3,000 tok/s from "top inference providers."
+
+## How It Works
+
+### Drop-in API Compatibility
+
+IonRouter is designed as a zero-code-change replacement. You point your existing OpenAI client at their endpoint:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="***",
+    base_url="https://api.ionrouter.io/v1"
+)
+
+response = client.chat.completions.create(
+    model="qwen3.5-122b-a10b",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+The same pattern works for TypeScript, Go, and any language with an OpenAI SDK. No code changes beyond the `base_url` parameter.
+
+### IonAttention Engine
+
+The custom inference stack multiplexes multiple models on a single GPU, swaps models in milliseconds, and adapts to traffic in real time. Key technical claims:
+
+- **Model multiplexing**: Multiple models coexist on one GPU
+- **Millisecond model swaps**: No cold starts when switching between models
+- **Traffic adaptation**: Dynamic resource allocation based on request patterns
+- **Grace Hopper optimization**: Built specifically for NVIDIA's Grace Hopper Superchip architecture
+
+### Custom Models and Fine-tunes
+
+IonRouter supports deploying custom models, LoRA fine-tunes, and open-source models on dedicated GPU streams. They claim zero cold starts and per-second billing for dedicated streams.
+
+## Pricing Model
+
+IonRouter uses per-token and per-second billing depending on the model:
+
+**Example pricing from their site:**
+
+- **qwen3.5-122b-a10b**: ~120 tok/s, $0.20/million tokens in, $1.60/million tokens out
+- **qwen3.5-120b** (GPT-OSS-120B): ~100 tok/s, $0.020/million tokens in, $0.095/million tokens out
+- **Wan2.2 Text-to-Video**: ~8 seconds/clip, $0.00194/GPU-second
+- **Flux Schnell Image**: ~3 seconds/image, ~$0.005 per image
+
+The pricing structure suggests they're targeting cost-sensitive workloads that still need production-grade throughput.
+
+## Available Models
+
+IonRouter provides access to multiple model categories:
+
+- **Language models**: Qwen 3.5 variants, GPT-OSS-120B
+- **Vision models**: Multiple VLMs for robotics and surveillance
+- **Image generation**: Flux Schnell and variants
+- **Video generation**: Wan2.2 and other text-to-video models
+- **Audio models**: Speech and audio processing models
+
+They advertise 9+ language models, 4+ vision models, 7+ video models, and 3+ audio models.
+
+## Use Cases
+
+IonRouter targets several high-performance scenarios:
+
+**Robotics**: Real-time vision-language model perception for autonomous systems
+
+**Surveillance**: Multi-stream video analysis with concurrent model inference
+
+**Game Asset Generation**: On-demand asset creation with low latency
+
+**AI Video Pipelines**: Text and image to video generation
+
+They highlight a case study running 5 VLMs on a single GPU, processing 2,700 video clips with concurrent users and under 1-second cold starts.
+
+## Setup Workflow
+
+### Step 1: Get API Access
+
+Visit [ionrouter.io](https://ionrouter.io) and sign up. They offer a Discord community with $5 in free credits to start.
+
+### Step 2: Update Your Client
+
+Replace your OpenAI base URL:
+
+```python
+# Before
+client = OpenAI(api_key="***")
+
+# After
+client = OpenAI(
+    api_key="***",
+    base_url="https://api.ionrouter.io/v1"
+)
+```
+
+### Step 3: Choose a Model
+
+Select from their model catalog. Models are identified by name in the API call:
+
+```python
+response = client.chat.completions.create(
+    model="qwen3.5-122b-a10b",  # or any other model name
+    messages=[{"role": "user", "content": "Your prompt"}]
+)
+```
+
+### Step 4: Deploy Custom Models (Optional)
+
+For fine-tuned models or custom LoRAs, contact their team to set up dedicated GPU streams.
+
+## Deeper Analysis
+
+### Technical Differentiation
+
+The claim of 7,167 tok/s on a single GH200 (vs ~3,000 from competitors) is significant if accurate. Grace Hopper's unified memory architecture (CPU + GPU on same package with NVLink-C2C) is well-suited for inference workloads, and a custom engine optimized for this hardware could deliver real gains.
+
+The millisecond model-swap claim addresses a real pain point in multi-model serving. Traditional approaches either keep all models loaded (expensive) or incur cold-start penalties when swapping (slow).
+
+### Market Positioning
+
+IonRouter sits in an interesting middle ground:
+
+- **vs Together/Fireworks**: Claims lower cost through better hardware utilization
+- **vs Modal/RunPod**: Eliminates DIY vLLM setup and cold-start management
+- **vs OpenAI/Anthropic**: Open-source model access at lower cost
+
+The YC W26 batch and NVIDIA Inception membership suggest strong industry backing.
+
+### Potential Concerns
+
+- **No public product repo**: The GitHub org exists but has no public IonRouter code. This makes it harder to verify technical claims independently.
+- **New service**: YC W26 means very recent launch. Production reliability and long-term pricing are unproven.
+- **Hardware lock-in**: Grace Hopper optimization is great for performance but limits hardware diversity.
+
+## Practical Evaluation Checklist
+
+Before adopting IonRouter, verify:
+
+- [ ] **Latency requirements**: Test actual p50/p95/p99 latency for your specific models and prompt sizes
+- [ ] **Cost comparison**: Run your actual workload through their playground and compare to current provider
+- [ ] **Model availability**: Confirm your required models are available and perform as advertised
+- [ ] **Uptime SLA**: Check their terms of service for uptime guarantees and credits
+- [ ] **Data residency**: Verify where inference happens if you have compliance requirements
+- [ ] **Rate limits**: Understand concurrent request limits and throttling behavior
+- [ ] **Custom model support**: If needed, confirm dedicated stream pricing and setup time
+
+## Security Notes
+
+- **API keys**: Treat IonRouter API keys like OpenAI keys—never commit to version control
+- **Data handling**: Review their privacy policy for data retention and training policies
+- **Network security**: Use HTTPS (enforced) and consider VPC peering for enterprise workloads
+- **Authentication**: They use standard API key auth; no OAuth or SSO mentioned for team accounts
+
+## FAQ
+
+**Q: Is IonRouter compatible with all OpenAI SDK features?**
+
+**A:** They support chat completions, which covers most use cases. Streaming, function calling, and other advanced features should work but aren't explicitly documented. Test in their playground first.
+
+**Q: What happens during traffic spikes?**
+
+**A:** Their IonAttention engine claims to adapt to traffic in real time. The case study mentions handling concurrent users with under 1-second cold starts, suggesting dynamic scaling is built in.
+
+**Q: Can I use my own fine-tuned models?**
+
+**A:** Yes. They support custom models, LoRA fine-tunes, and open-source models on dedicated GPU streams. Contact their team for setup.
+
+**Q: How does pricing compare to OpenAI?**
+
+**A:** Significantly cheaper for open-source models. Their qwen3.5-120b pricing ($0.020/$0.095 per million tokens) is a fraction of GPT-4 class pricing. However, you're trading proprietary model capabilities for cost savings.
+
+**Q: What's the minimum commitment?**
+
+**A:** Per-second billing suggests no minimum commitment for on-demand usage. Dedicated streams for custom models likely have different terms—check with their sales team.
+
+**Q: Is there a free tier?**
+
+**A:** They offer $5 in free credits via their Discord community, which is enough for testing but not production workloads.
+
+## Conclusion
+
+IonRouter addresses a real gap in the inference market: high-throughput, low-cost serving without the DIY overhead. The custom IonAttention engine optimized for Grace Hopper hardware could deliver meaningful performance gains, and the drop-in OpenAI compatibility makes adoption trivial.
+
+The main risks are the service's newness (YC W26 batch) and the lack of public source code to verify technical claims. For teams running high-volume inference workloads on open-source models, IonRouter is worth testing—especially if you're currently paying for always-on GPUs or dealing with cold starts on serverless inference.
+
+Start with their playground and $5 Discord credit to benchmark your specific workload. If the performance and pricing hold up, migration is a one-line code change.
