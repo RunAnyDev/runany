@@ -20,7 +20,7 @@ packages/shared Shared TypeScript package
 ## Local setup
 
 ```bash
-git clone https://github.com/meesudzu/runany.git
+git clone https://github.com/RunAnyDev/runany.git
 cd runany
 npm install
 npm run dev

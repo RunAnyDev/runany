@@ -28,7 +28,7 @@ packages/shared Shared TypeScript utilities and types
 ## Getting started
 
 ```bash
-git clone https://github.com/meesudzu/runany.git
+git clone https://github.com/RunAnyDev/runany.git
 cd runany
 npm install
 npm run dev
