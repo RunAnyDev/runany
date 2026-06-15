@@ -1,0 +1,250 @@
+---
+title: "Kexa.io - Open-Source IT Security and Compliance Scanner"
+description: "Open-source multi-cloud security and compliance verification tool. Monitors AWS, Azure, GCP, and OCI with instant alerting and low infrastructure overhead."
+pubDate: "2026-06-15"
+tags: ["security", "compliance", "open-source", "cloud", "devops"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kexa-io.webp"
+  alt: "Kexa.io product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kexa.io is an open-source multi-cloud security and compliance scanner that detects configuration drift and infrastructure misconfigurations across AWS, Azure, GCP, and OCI — with a simple rules engine and no heavy infrastructure overhead.
+
+## Source and Accuracy Notes
+
+- Official site: https://kexa.io
+- GitHub: https://github.com/4urcloud/Kexa (MIT license, 350+ stars)
+- Docs: https://docs.kexa.io
+
+## What Is Kexa.io?
+
+Kexa.io is an open-source infrastructure verification and compliance tool designed for DevOps and security teams managing multi-cloud environments. It focuses on catching configuration errors and compliance violations before they reach production, using a lightweight rules engine that runs as a single binary.
+
+Unlike heavyweight CSPM platforms, Kexa takes a simplicity-first approach: define checks as simple configuration rules, run the binary against your cloud accounts, and get structured alerts for any violations.
+
+The tool supports four major cloud providers out of the box: AWS, Azure, Google Cloud Platform, and Oracle Cloud Infrastructure. It can also monitor GitHub organizations for security misconfigurations.
+
+## Setup Workflow
+
+### Step 1: Install Kexa
+
+Kexa runs as a single binary. Install via the official install script:
+
+```bash
+# Linux/macOS
+curl -sSL https://get.kexa.io | bash
+
+# Or download the binary directly from GitHub releases
+# https://github.com/4urcloud/Kexa/releases
+```
+
+### Step 2: Configure Cloud Credentials
+
+Kexa uses environment variables or a credentials file for each provider:
+
+```bash
+# AWS
+export AWS_ACCESS_KEY_ID="your_key_id"
+export AWS_SECRET_ACCESS_KEY="your_secret_key"
+export AWS_REGION="us-east-1"
+
+# Azure
+export AZURE_SUBSCRIPTION_ID="your_subscription_id"
+export AZURE_TENANT_ID="your_tenant_id"
+export AZURE_CLIENT_SECRET="your_client_secret"
+
+# GCP
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+
+# OCI
+export OCI_TENANCY_OCID="your_tenancy_ocid"
+export OCI_USER_OCID="your_user_ocid"
+export OCI_FINGERPRINT="your_fingerprint"
+export OCI_PRIVATE_KEY_PATH="/path/to/private_key.pem"
+```
+
+### Step 3: Define Your First Rules
+
+Kexa rules are defined in YAML files. Create a `rules.yaml`:
+
+```yaml
+rules:
+  - name: S3-bucket-should-not-be-public
+    provider: aws
+    resource: s3
+    condition: public_access_blocked == true
+    severity: high
+
+  - name: RDS-should-have-backup-enabled
+    provider: aws
+    resource: rds
+    condition: backup_retention_period > 0
+    severity: medium
+
+  - name: VM-should-not-have-public-IP
+    provider: azure
+    resource: virtualmachine
+    condition: public_ip == null
+    severity: high
+```
+
+### Step 4: Run a Scan
+
+```bash
+# Scan all configured providers
+kexa scan --config ./rules.yaml
+
+# Scan specific provider
+kexa scan --provider aws --config ./rules.yaml
+
+# Output in JSON for automation
+kexa scan --config ./rules.yaml --format json --output results.json
+```
+
+### Step 5: Set Up Continuous Monitoring
+
+For continuous monitoring, run Kexa on a schedule via cron or a lightweight scheduler:
+
+```bash
+# Run every hour and alert on violations
+0 * * * * /usr/local/bin/kexa scan --config /opt/kexa/rules.yaml --format json | \
+  jq '.violations[] | select(.severity == "high")' | \
+  mail -s "Kexa High Severity Alert" ops@example.com
+```
+
+## Deeper Analysis
+
+### Rule Engine Architecture
+
+Kexa's rule engine evaluates cloud resource configurations against YAML-defined conditions. Rules are evaluated locally — there is no data sent to external servers. The rules themselves are stored in a Git repository, making version control and team collaboration straightforward.
+
+The rule format supports comparison operators (`==`, `!=`, `>`, `<`, `>=`, `<=`), boolean logic (`and`, `or`, `not`), and nested resource checks. For AWS, you can check resource properties like `s3.bucket_public_access_blocked`, `rds.backup_retention_period`, or `iam.password_policy.min_length`.
+
+### Alerting Options
+
+Kexa supports multiple alerting channels:
+- **Email** via SMTP or sendmail
+- **Slack** webhook integration
+- **PagerDuty** for incident management
+- **Webhooks** for custom integrations
+- **JSON/STDOUT** for log aggregation pipelines
+
+The alerting configuration is defined in a separate `alerts.yaml`:
+
+```yaml
+alerts:
+  slack:
+    webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    severity_threshold: "medium"
+
+  email:
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    from: "kexa@example.com"
+    to: ["ops@example.com", "security@example.com"]
+```
+
+### Multi-Account and Multi-Region Support
+
+For organizations managing multiple cloud accounts, Kexa supports scanning across all of them in a single run. Configure an `accounts.yaml` file:
+
+```yaml
+accounts:
+  - name: production
+    provider: aws
+    regions: ["us-east-1", "eu-west-1"]
+    credentials: env  # reads from environment
+
+  - name: staging
+    provider: aws
+    regions: ["us-east-1"]
+    role_arn: "arn:aws:iam::123456789:role/KexaScanner"
+```
+
+Kexa can assume cross-account IAM roles, making it suitable for AWS Organizations setups where you have a dedicated security account scanning member accounts.
+
+### Self-Hosting Requirements
+
+Since Kexa runs as a single binary, self-hosting is straightforward:
+- **Binary only** — no container orchestration required
+- **Minimal RAM** — scans run in-memory, ~100MB baseline
+- **Stateless** — results can be streamed to any storage backend
+- **No database** — for basic scans, output goes directly to STDOUT or files
+
+This makes it practical to run on a small VPS, a Docker container, or even a developer workstation for local testing.
+
+## Practical Evaluation Checklist
+
+- [ ] Binary installs and runs without container runtime
+- [ ] Rules YAML is readable and team-friendly
+- [ ] Scan completes across one AWS account in under 60 seconds
+- [ ] JSON output is structured and parseable
+- [ ] High-severity violations surface in output
+- [ ] Slack alerting fires correctly with formatted message
+- [ ] Cross-account role assumption works for AWS Organizations
+- [ ] Multi-provider scan runs sequentially without credential conflicts
+- [ ] CLI help text is accurate and up to date
+
+## Security Notes
+
+Kexa executes read-only API calls against your cloud providers to inspect resource configurations. It does not modify any resources or create new ones. The binary requires read-only IAM permissions (or equivalent for other providers).
+
+No telemetry is sent externally by default. All scan data stays on the machine running the binary. If you use the GitHub integration, Kexa needs a GitHub token with read access to your organization repositories.
+
+Recommended IAM policy for AWS reads as a starting point:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudtrail:LookupEvents",
+        "config:BatchGetResourceConfig",
+        "config:ListDiscoveredResources",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetAccountPublicAccessBlock",
+        "rds:DescribeDBInstances",
+        "ec2:DescribeInstances",
+        "iam:GetAccountPasswordPolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+## FAQ
+
+**Q: Which cloud providers does Kexa support?**
+**A:** AWS, Azure, GCP, and Oracle Cloud Infrastructure are officially supported. GitHub organization scanning is also available for security-relevant repository settings.
+
+**Q: Can I self-host Kexa?**
+**A:** Yes. Since it is a single binary with no external dependencies, you can run it on any Linux host, VPS, or container. There is no managed cloud offering required.
+
+**Q: How are rules managed?**
+**A:** Rules are defined in YAML files stored in your own repository. This means you get full version control, pull request reviews, and branching just like any other code. There is no rule management UI or external service.
+
+**Q: What is the difference between Kexa and cloud-native tools like AWS Config or Azure Policy?**
+**A:** Kexa is provider-agnostic — one ruleset works across all four supported clouds. Cloud-native tools like AWS Config are tied to a single provider and often require additional setup to aggregate findings across multiple accounts. Kexa also has no lock-in to a specific cloud's ecosystem.
+
+**Q: Does Kexa detect drift from a known-good state?**
+**A:** Yes. You define the desired configuration as rules, and Kexa reports any resource that deviates from that desired state on each scan. This makes it effective for drift detection in addition to compliance checking.
+
+**Q: How fast is a typical scan?**
+**A:** For a single AWS account with moderate resource counts (under 500 resources), scans typically complete in 30 to 90 seconds. The speed depends on API rate limiting and the number of resources being evaluated.
+
+## Conclusion
+
+Kexa.io fills a specific niche: teams that want multi-cloud compliance checking without deploying a full CSPM platform. The single-binary deployment, plain YAML rules, and provider-agnostic design make it particularly attractive for small to mid-size teams or for use as a supplement to existing security tooling.
+
+If you are managing infrastructure across more than one cloud provider and want a lightweight way to enforce configuration policies, Kexa is worth evaluating. The rules engine is human-readable, the alerts are actionable, and the footprint is minimal.
+
+Try it at https://kexa.io or browse the GitHub releases at https://github.com/4urcloud/Kexa.
