@@ -1,0 +1,242 @@
+---
+title: "Atomic – Local-First AI Knowledge Base"
+description: "Open-source, self-hosted knowledge graph with semantic search, wiki synthesis, and MCP integration. Turn markdown notes into connected ideas."
+pubDate: "2026-06-16"
+tags: ["knowledge-base", "ai-tools", "open-source", "self-hosted", "mcp"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/atomic-knowledge-base.webp"
+  alt: "Atomic knowledge base product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Atomic is an open-source, local-first knowledge base that turns markdown notes into a semantically-connected knowledge graph with AI-powered search, wiki synthesis, and MCP integration for Claude and other AI tools.
+
+## Source and Accuracy Notes
+
+- Project page: [atomicapp.ai](https://atomicapp.ai)
+- Source repository: [github.com/kenforthewin/atomic](https://github.com/kenforthewin/atomic)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47889110](https://news.ycombinator.com/item?id=47889110)
+- Latest version: v1.39.1 (verified 2026-06-16)
+- Source last checked: 2026-06-16 (commit on main branch, pushed 2026-06-14)
+
+## What Is Atomic?
+
+Atomic is a personal knowledge base that stores knowledge as **atoms** — markdown notes that are automatically chunked, embedded, tagged, and linked by semantic similarity. Unlike traditional note-taking apps that rely on folders and manual organization, Atomic uses AI to build connections between your ideas.
+
+The project is written in Rust with a React frontend, available as a desktop app (Tauri), self-hosted server (Docker), or iOS app. All business logic lives in `atomic-core`, a standalone Rust crate with no framework dependencies.
+
+Key capabilities from the README:
+
+- **Semantic Search** — Vector search using sqlite-vec, find notes by meaning not keywords
+- **Wiki Synthesis** — LLM-generated articles with inline citations built from your notes
+- **Canvas** — Force-directed spatial visualization where semantic similarity determines layout
+- **Reports** — Scheduled research tasks that turn atoms into recurring cited findings
+- **Chat** — Agentic RAG interface that searches your knowledge base during conversation
+- **Auto-Tagging** — LLM-powered tag extraction organized into hierarchical categories
+- **MCP Server** — Expose your knowledge base to Claude and other AI tools
+- **Browser Extension** — Chrome extension for capturing web content as atoms
+- **RSS Feeds** — Subscribe to feeds and automatically sync new articles
+
+## Setup Workflow
+
+### Option 1: Desktop App (Quickest)
+
+Download the latest release from [GitHub Releases](https://github.com/kenforthewin/atomic/releases) for macOS, Linux, or Windows. On first launch, the setup wizard walks you through AI provider configuration.
+
+### Option 2: Self-Host with Docker Compose
+
+```bash
+git clone https://github.com/kenforthewin/atomic.git
+cd atomic
+echo "ATOMIC_SETUP_TOKEN=*** rand -base64 24)" > .env
+docker compose up -d
+```
+
+This starts three services: the API server, the web frontend, and an nginx reverse proxy. Open `http://localhost:8080` and claim your instance through the setup wizard with the `ATOMIC_SETUP_TOKEN` value from `.env`.
+
+The proxy service is optional — if you already run your own reverse proxy (Caddy, Traefik, etc.), you can skip it and route traffic to the `server` and `web` containers directly.
+
+### Option 3: Deploy to Fly.io
+
+```bash
+cp fly.toml.example fly.toml
+fly launch --copy-config --no-deploy
+fly volumes create atomic_data --region <your-region> --size 1
+fly secrets set ATOMIC_SETUP_TOKEN=*** rand -base64 24)"
+fly deploy
+```
+
+Open `https://your-app.fly.dev` and claim your instance with the setup token. The public URL for OAuth/MCP is auto-detected from the Fly app name.
+
+### Option 4: Standalone Server (Development)
+
+```bash
+ATOMIC_SETUP_TOKEN=*** rand -base64 24)" \
+cargo run -p atomic-server -- --data-dir ./data serve --port 8080
+```
+
+On first run, enter `ATOMIC_SETUP_TOKEN` in the setup wizard, or create an API token directly:
+
+```bash
+cargo run -p atomic-server -- --data-dir ./data token create --name default
+```
+
+## AI Provider Configuration
+
+Atomic needs an AI provider for embeddings, tagging, wiki generation, and chat. Three options are supported:
+
+**OpenRouter** — Get an API key from [openrouter.ai](https://openrouter.ai). Supports separate model selection for embedding, tagging, wiki, and chat.
+
+**Ollama** — Install [Ollama](https://ollama.com) and pull models (e.g., `ollama pull nomic-embed-text`). Atomic auto-discovers available models. This is the fully local option.
+
+**OpenAI-compatible** — Any provider with an OpenAI-compatible API (OpenAI, Azure OpenAI, Together, Groq). Configure the base URL and API key.
+
+Configure via the setup wizard on first launch, or later in Settings.
+
+## MCP Integration
+
+Atomic exposes an MCP endpoint for Claude and other AI tools to search, read, create, update, and ingest atoms.
+
+### Desktop App (Local Mode)
+
+The desktop app bundles `atomic-mcp-bridge`, a stdio-to-HTTP bridge that reads the local auth token automatically. No token configuration needed — just point your MCP client at the binary:
+
+```json
+{
+  "mcpServers": {
+    "atomic": {
+      "command": "/Applications/Atomic.app/Contents/MacOS/atomic-mcp-bridge"
+    }
+  }
+}
+```
+
+The app's Settings > Integrations page shows the exact path for your system.
+
+### Remote / Self-Hosted
+
+For remote servers or the web app, connect via the HTTP endpoint at `/mcp` with a Bearer token:
+
+```json
+{
+  "mcpServers": {
+    "atomic": {
+      "type": "url",
+      "url": "https://your-server.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Create a token from Settings > Connection > API Tokens, or via the CLI:
+
+```bash
+atomic-server token create --name "claude"
+```
+
+**Available MCP tools:** `semantic_search`, `read_atom`, `create_atom`, `ingest_url`, `update_atom`
+
+## Architecture
+
+All business logic lives in `atomic-core`, a standalone Rust crate with no framework dependencies. `atomic-server` wraps it with a REST API, WebSocket events, and an embedded MCP endpoint. Every client connects to `atomic-server` over HTTP:
+
+```text
+                    +------------------+
+                    |   atomic-core    |
+                    |   (all logic)    |
+                    +--------+---------+
+                             |
+                    +--------v---------+
+                    |  atomic-server   |
+                    | (REST + WS + MCP)|
+                    +--------+---------+
+              +---------+----+----+---------+
+              v          v        v         v
+    +-----------+  +----------+  +------+  +----------+
+    | src-tauri |  | React UI |  | iOS  |  |mcp-bridge|
+    | (sidecar) |  | (browser)|  | app  |  | (stdio)  |
+    +-----+-----+  +----------+  +------+  +-----+----+
+          |                                       |
+    +-----v-----+                           +-----v-----+
+    |  React UI  |                          | MCP clients|
+    | (desktop)  |                          |(Claude,etc)|
+    +------------+                          +------------+
+```
+
+## Deeper Analysis
+
+### Why Local-First Matters
+
+Atomic's local-first architecture means your data lives on your hardware. The server is the source of truth, and every client (desktop, iOS, browser, MCP) points at it. You can run the whole stack on a laptop, or self-host and sync every device.
+
+This contrasts with cloud-only knowledge bases where your data lives on someone else's servers. With Atomic, you control the infrastructure, the AI provider, and the data.
+
+### Semantic Search vs. Keyword Search
+
+Traditional note apps use keyword search — you type what you remember, and hope the exact words appear in your notes. Atomic uses vector embeddings (via sqlite-vec) to search by meaning. Type a question; get back ideas — even when your notes don't use the words you searched for.
+
+This is particularly useful for finding a note from six months ago without remembering what you titled it.
+
+### Wiki Synthesis
+
+Pick any tag. Atomic generates a full wiki article from every note, clip, and saved page underneath — with inline citations back to the source atoms. Articles regenerate as you add more.
+
+This turns your scattered notes into structured, citable knowledge. It's particularly useful for research projects where you want to synthesize information from multiple sources.
+
+## Practical Evaluation Checklist
+
+Before adopting Atomic, verify:
+
+- [ ] **AI provider choice** — Do you want fully local (Ollama) or cloud-based (OpenRouter/OpenAI)? Atomic supports both.
+- [ ] **Deployment model** — Desktop app for single-user, or self-hosted server for multi-device sync?
+- [ ] **Storage requirements** — Atomic uses SQLite with vector embeddings. Check disk space for your note volume.
+- [ ] **MCP integration needs** — Do you use Claude, Cursor, or other MCP-compatible tools? Atomic's MCP server exposes your knowledge base to them.
+- [ ] **Browser extension** — If you capture web content frequently, the Chrome extension automates clipping.
+- [ ] **iOS app** — Native SwiftUI client available on the App Store for mobile access.
+
+## Security Notes
+
+- **Setup token** — The `ATOMIC_SETUP_TOKEN` is required to claim your instance on first run. Generate it with `openssl rand -base64 24` and store it securely in `.env`.
+- **API tokens** — Create separate tokens for different clients (desktop, iOS, MCP). Revoke compromised tokens from Settings > Connection > API Tokens.
+- **Local data** — Your knowledge base is stored in SQLite on your server. Back up the data directory regularly.
+- **AI provider keys** — API keys for OpenRouter/Ollama/OpenAI are stored in your server's configuration. Use environment variables, not hardcoded values.
+- **Network exposure** — If self-hosting, put Atomic behind a reverse proxy with TLS. The nginx config in `docker/nginx.conf` is a starting point.
+
+## FAQ
+
+**Q: Is Atomic really open source?**
+**A:** Yes, MIT license. The full source code is on GitHub at `kenforthewin/atomic`. The README states "Free. Open Source. Yours end-to-end."
+
+**Q: Can I use Atomic without an AI provider?**
+**A:** No. Atomic requires an AI provider for embeddings, tagging, wiki generation, and chat. You can use Ollama for fully local inference, or OpenRouter/OpenAI-compatible APIs for cloud-based models.
+
+**Q: Does Atomic work offline?**
+**A:** The desktop app and iOS app can read your local cache offline. Syncing, search, and AI features require the server to be running. If you use Ollama as your AI provider, the entire stack can run locally without internet.
+
+**Q: How is Atomic different from Obsidian or Notion?**
+**A:** Obsidian and Notion are manual organization tools — you create folders, link notes, and search by keywords. Atomic automates organization: it tags, embeds, and links notes by semantic similarity. The wiki synthesis feature generates articles from your notes with citations, which neither Obsidian nor Notion does natively.
+
+**Q: Can I import my existing notes?**
+**A:** The README mentions markdown notes as atoms, but doesn't detail bulk import. Check the `scripts/` directory in the repo for import utilities, or use the browser extension to capture content incrementally.
+
+**Q: What's the iOS app's status?**
+**A:** The iOS app is available on the App Store (link in README). It's a native SwiftUI client for reading and writing atoms on mobile.
+
+## Conclusion
+
+Atomic fills a gap in the personal knowledge management space: it's open-source, local-first, and AI-native. The combination of semantic search, wiki synthesis, and MCP integration makes it particularly useful for developers and researchers who want their notes to be more than a searchable dump.
+
+The Rust backend and Tauri desktop app suggest performance and native feel. The Docker and Fly.io deployment options make self-hosting straightforward. The MCP server integration means your knowledge base becomes a first-class citizen in your AI workflow — Claude or Cursor can search, read, and write to it directly.
+
+At 1,548 GitHub stars and active development (last push 2026-06-14), Atomic is gaining traction. The MIT license and local-first architecture make it a low-risk choice for long-term knowledge management.
+
+If you're tired of manual note organization and want AI to help build connections between your ideas, Atomic is worth trying. Start with the desktop app for the quickest onboarding, or self-host with Docker if you want multi-device sync.
