@@ -1,0 +1,240 @@
+---
+title: "Trigger.dev - Open Source AI Workflow Automation"
+description: "Build and deploy durable AI agent workflows in TypeScript. Open-source Zapier alternative with retries, queues, observability, and self-hosting."
+pubDate: "2026-06-16"
+tags: ["workflow-automation", "ai-agents", "typescript", "open-source", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/trigger-dev-workflow-automation.webp"
+  alt: "Trigger.dev product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Trigger.dev is an open-source TypeScript platform for building durable AI agent workflows with no timeouts, automatic retries, queues, and full observability -- a developer-first alternative to Zapier that you can self-host.
+
+## Source and Accuracy Notes
+
+- Project page: [trigger.dev](https://trigger.dev)
+- Source repository: [github.com/triggerdotdev/trigger.dev](https://github.com/triggerdotdev/trigger.dev)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=34610686](https://news.ycombinator.com/item?id=34610686) (745 points)
+- Latest release: v4.4.6 (2026-05-12)
+- Source last checked: 2026-06-16
+
+## What Is Trigger.dev?
+
+Trigger.dev is an open-source platform for building AI workflows in TypeScript. As the README states:
+
+> "Trigger.dev is the open-source platform for building AI workflows in TypeScript. Long-running tasks with retries, queues, observability, and elastic scaling."
+
+Unlike serverless platforms (AWS Lambda, Vercel) that impose hard timeouts, Trigger.dev runs tasks with **no timeouts at all**. Tasks are durable -- they survive crashes, restarts, and deployments thanks to a checkpoint-resume system.
+
+The project has 15,300+ GitHub stars and is used in production for AI agent orchestration, background job processing, and workflow automation.
+
+## Why Trigger.dev Over Zapier?
+
+| Feature | Zapier | Trigger.dev |
+|---|---|---|
+| Code location | Visual builder in their UI | Your codebase, version-controlled |
+| Timeouts | Minutes | None |
+| Retries | Basic | Configurable with exponential backoff |
+| Self-hosting | No | Docker and Kubernetes |
+| Pricing | Per-task, expensive at scale | Free self-hosted; cloud has free tier |
+| Type safety | None | Full TypeScript types |
+| Debugging | Limited logs | Full trace view per run |
+
+The key difference: Trigger.dev tasks live in **your codebase**. You version-control them, test them locally, review them in PRs, and deploy them through your existing CI/CD pipeline.
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+```bash
+npm install @trigger.dev/sdk
+```
+
+### Step 2: Define a Task
+
+```ts
+import { task } from "@trigger.dev/sdk";
+
+export const helloWorld = task({
+  id: "hello-world",
+  run: async (payload: { message: string }) => {
+    console.log(payload.message);
+    // This can run for hours -- no timeouts
+  },
+});
+```
+
+### Step 3: Create an Account and Project
+
+Sign up at [cloud.trigger.dev](https://cloud.trigger.dev), create a project, and follow the onboarding. The CLI handles authentication and links your local codebase to the cloud.
+
+### Step 4: Deploy
+
+```bash
+npx trigger.dev deploy
+```
+
+Your tasks are now running on Trigger.dev's infrastructure with automatic scaling, retries, and observability.
+
+## Key Features for AI Agents
+
+### Durable Execution
+
+Tasks survive crashes and restarts. The checkpoint-resume system serializes task state after each awaited operation, so a task that has been running for 3 hours can resume exactly where it left off.
+
+### Automatic Retries with Exponential Backoff
+
+```ts
+export const fetchWithRetry = task({
+  id: "fetch-with-retry",
+  retry: {
+    maxAttempts: 3,
+    factor: 2,
+    minTimeoutInMs: 1000,
+  },
+  run: async () => {
+    const res = await fetch("https://api.example.com/data");
+    return res.json();
+  },
+});
+```
+
+### Human-in-the-Loop with Waitpoints
+
+Pause a task until a human approves, rejects, or provides input:
+
+```ts
+import { wait } from "@trigger.dev/sdk";
+
+export const approvalFlow = task({
+  id: "approval-flow",
+  run: async () => {
+    const result = await doWork();
+    // Pause until human reviews
+    const approved = await wait.forToken({
+      id: "approval",
+      timeout: "24h",
+    });
+    if (approved) {
+      await deploy(result);
+    }
+  },
+});
+```
+
+### Real-time Streaming
+
+Subscribe to run updates in real time using Trigger.dev Realtime or React hooks. Useful for streaming LLM responses to your frontend while the task runs in the background.
+
+### Cron Schedules
+
+```ts
+export const dailyReport = task({
+  id: "daily-report",
+  cron: "0 9 * * *", // Every day at 9 AM
+  run: async () => {
+    await generateReport();
+  },
+});
+```
+
+## Self-Hosting Guide
+
+Trigger.dev is fully self-hostable under the Apache-2.0 license.
+
+### Docker Compose (recommended for small teams)
+
+```bash
+git clone https://github.com/triggerdotdev/trigger.dev.git
+cd trigger.dev
+cp .env.example .env
+# Edit .env with your database and Redis credentials
+docker compose up -d
+```
+
+See the [Docker self-hosting guide](https://trigger.dev/docs/self-hosting/docker) for full details.
+
+### Kubernetes (for production scale)
+
+Trigger.dev provides an official Helm chart. See the [Kubernetes self-hosting guide](https://trigger.dev/docs/self-hosting/kubernetes).
+
+Both self-hosting options include the full dashboard, API, and task runner -- identical to the cloud version.
+
+## Deeper Analysis
+
+### Architecture
+
+Trigger.dev uses a worker-based architecture:
+
+1. **Web app** -- dashboard for monitoring, triggering, and managing tasks
+2. **API server** -- handles task triggering, scheduling, and webhook ingestion
+3. **Task workers** -- execute your task code in isolated containers
+4. **Database** -- stores task state, run history, and schedules (PostgreSQL)
+5. **Message queue** -- manages task dispatch and retry logic (Redis/BullMQ)
+
+The checkpoint system works by serializing the JavaScript call stack after each `await`. When a worker crashes or is terminated, the serialized state is stored in the database. A new worker picks up the task and resumes from the last checkpoint.
+
+### Pricing (Cloud)
+
+Trigger.dev cloud has a free tier with limited runs per month. Paid plans add more runs, longer retention, and priority support. Check [trigger.dev/pricing](https://trigger.dev/pricing) for current rates -- pricing changes frequently and I do not want to quote stale numbers.
+
+### Comparison with Alternatives
+
+- **Temporal.io** -- more infrastructure to manage, Java/Go/TypeScript SDKs, better for microservice orchestration than AI workflows
+- **Inngest** -- similar durable execution model, but Trigger.dev has a more polished dashboard and React hooks
+- **n8n / Make** -- visual-first, less suitable for complex TypeScript logic
+- **AWS Step Functions** — vendor lock-in, harder to debug, no local development story
+
+## Practical Evaluation Checklist
+
+Before adopting Trigger.dev, verify:
+
+- [ ] Your team is comfortable with TypeScript (no Python/Go SDK)
+- [ ] You need long-running tasks (over 15 minutes) -- if not, simpler tools may suffice
+- [ ] You want self-hosting capability (Apache-2.0 license allows it)
+- [ ] You need durable execution (survive crashes, restarts, deployments)
+- [ ] Your workflows involve AI/LLM calls that benefit from retries and streaming
+- [ ] You want tasks in your codebase, not a visual builder
+
+## Security Notes
+
+- Self-hosted instances keep all data in your own infrastructure
+- Cloud version stores task payloads encrypted at rest
+- API keys are scoped per environment (dev, staging, prod)
+- No task code is sent to Trigger.dev servers -- only the serialized state checkpoints
+- Review the [security documentation](https://trigger.dev/docs/security) before handling sensitive data
+
+## FAQ
+
+**Q: Is Trigger.dev really free to self-host?**
+**A:** Yes. The entire platform is Apache-2.0 licensed. You can run it on your own infrastructure at no cost. The cloud version has a free tier and paid plans for managed hosting.
+
+**Q: Can I use Trigger.dev with Python or Go?**
+**A:** The SDK is TypeScript-only. Your tasks must be written in TypeScript or JavaScript. However, tasks can shell out to Python scripts or call external APIs written in any language.
+
+**Q: How does durability work without a database for every step?**
+**A:** Trigger.dev uses a checkpoint-resume system. After each `await`, the JavaScript call stack is serialized and stored. If the worker crashes, a new worker loads the checkpoint and resumes execution from that exact point.
+
+**Q: What happens if my task runs for days?**
+**A:** That is supported. There are no timeouts. The checkpoint system ensures the task survives worker restarts, deployments, and infrastructure scaling events.
+
+**Q: Can I migrate from Zapier to Trigger.dev?**
+**A:** Yes, but it requires rewriting your Zaps as TypeScript tasks. Trigger.dev is code-first, so you get type safety and version control in exchange for the migration effort.
+
+**Q: Does it support MCP servers?**
+**A:** Yes. The project topics include `mcp` and `mcp-server`, and the README mentions MCP integration as a feature area.
+
+## Conclusion
+
+Trigger.dev fills a real gap for TypeScript developers who need durable, long-running workflows -- especially for AI agent orchestration. The combination of no timeouts, automatic retries, checkpointing, and full observability makes it a strong alternative to Zapier for teams that want workflows in their codebase.
+
+The Apache-2.0 license and Docker/Kubernetes self-hosting guides mean you are not locked into their cloud. For AI-heavy workloads with expensive LLM calls, the retry and durability features alone can save significant money by preventing wasted API calls.
+
+If your team writes TypeScript and needs background jobs that actually survive failures, Trigger.dev is worth evaluating.
