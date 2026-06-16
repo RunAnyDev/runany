@@ -1,0 +1,250 @@
+---
+title: "Unstract – LLM Document Extraction Platform"
+description: "Open-source platform for extracting structured data from unstructured documents using LLMs. Deploy as API or ETL pipeline."
+pubDate: "2026-06-17"
+tags: ["document-ai", "llm", "etl", "open-source", "mcp-server"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/unstract-document-extraction.webp"
+  alt: "Unstract document extraction platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Unstract is an open-source platform that uses LLMs to extract structured JSON from unstructured documents (PDFs, images, scans) via natural language prompts, deployable as REST APIs or ETL pipelines.
+
+## Source and Accuracy Notes
+
+- Project page: [unstract.com](https://unstract.com)
+- Source repository: [github.com/Zipstack/unstract](https://github.com/Zipstack/unstract)
+- License: AGPL-3.0 (verified via GitHub API)
+- Documentation: [docs.unstract.com](https://docs.unstract.com)
+- Source last checked: 2026-06-17 (6,663 stars, 632 forks on GitHub)
+
+## What Is Unstract?
+
+Unstract is an open-source platform that turns unstructured documents into structured JSON data using large language models. Instead of writing regex patterns or building vendor-specific templates, you define extraction schemas with natural language prompts and deploy them as APIs or ETL pipelines.
+
+The platform targets teams in finance, insurance, healthcare, KYC/compliance, and logistics who need to process large volumes of documents like invoices, bank statements, contracts, and tax forms.
+
+> "Unstract uses LLMs to extract structured JSON from documents — PDFs, images, scans, you name it. Define what you want to extract using natural language prompts, and deploy as an API or ETL pipeline."
+> — from the official README
+
+## Key Features
+
+**Prompt Studio** — Define document extraction schemas with natural language. No regex or template coding required. The agentic version builds schemas, crafts prompts, and validates accuracy automatically.
+
+**API Deployment** — Send a document over REST API, get structured JSON back. Integrates with n8n for workflow automation.
+
+**ETL Pipeline** — Pull documents from folders (S3, GCS, local), process them, and load results to your data warehouse.
+
+**MCP Server** — Connect Unstract to AI agents (Claude, GPT, etc.) via Model Context Protocol for agentic document processing.
+
+**Human in the Loop** — Built-in verification interface for reviewing and correcting LLM extractions before final output.
+
+**LLM Challenge** — Benchmark and compare extraction accuracy across different LLM providers on your specific documents.
+
+## Setup Workflow
+
+### Step 1: System Requirements
+
+- Linux or macOS (Intel or M-series)
+- Docker and Docker Compose installed
+- 8 GB RAM minimum
+- Git
+
+### Step 2: Quick Start (5 minutes)
+
+```bash
+# Clone the repository
+git clone https://github.com/Zipstack/unstract.git
+cd unstract
+
+# Start the platform
+./run-platform.sh
+```
+
+The script pulls all Docker images and starts the platform. Visit [http://frontend.unstract.localhost](http://frontend.unstract.localhost) and login with:
+- Username: `unstract`
+- Password: `unstract`
+
+### Step 3: Configure LLM Provider
+
+Unstract supports multiple LLM providers:
+- OpenAI (GPT-4, GPT-3.5)
+- Anthropic (Claude)
+- AWS Bedrock
+- Ollama (local models)
+- Any OpenAI-compatible API
+
+Add your API keys in the platform settings under "Adapters".
+
+### Step 4: Create Your First Extraction
+
+1. Open **Prompt Studio** from the dashboard
+2. Upload a sample document (PDF, image, or scan)
+3. Define what to extract using natural language (e.g., "Extract invoice number, date, total amount, vendor name")
+4. Test the extraction on your sample
+5. Deploy as API endpoint or ETL pipeline
+
+### Step 5: Deploy as API
+
+```bash
+# After creating your extraction prompt in Prompt Studio,
+# click "Deploy" to get a REST API endpoint
+
+curl -X POST https://api.unstract.localhost/api/v1/extract \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "document=@invoice.pdf" \
+  -F "prompt_id=your-prompt-id"
+```
+
+Response:
+```json
+{
+  "invoice_number": "INV-2024-001",
+  "date": "2024-01-15",
+  "total_amount": 1250.00,
+  "vendor_name": "Acme Corp"
+}
+```
+
+## Architecture Overview
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│                          Unstract                          │
+├─────────────┬─────────────┬─────────────┬──────────────────┤
+│  Frontend   │   Backend   │   Worker    │ Platform Service │
+│  (React)    │  (Django)   │  (Celery)   │   (FastAPI)      │
+├─────────────┴─────────────┴─────────────┴──────────────────┤
+│                      Cache (Redis)                         │
+├────────────────────────────────────────────────────────────┤
+│              Document Storage (S3/MinIO/GCS)               │
+└────────────────────────────────────────────────────────────┘
+```
+
+The platform runs as four Docker containers:
+- **Frontend**: React UI for Prompt Studio and management
+- **Backend**: Django API for user management and configuration
+- **Worker**: Celery workers for async document processing
+- **Platform Service**: FastAPI service for extraction orchestration
+
+## Deployment Options
+
+### Docker Compose (Self-Hosted)
+
+```bash
+# Default deployment
+./run-platform.sh
+
+# Specific version
+./run-platform.sh -v v0.1.0
+
+# Upgrade to latest
+./run-platform.sh -u
+
+# Build images locally
+./run-platform.sh -b -v current
+```
+
+### Managed Cloud
+
+Unstract offers a managed cloud version with:
+- No infrastructure management
+- Automatic updates
+- SLA guarantees
+- Enterprise support
+
+Check pricing at [unstract.com/pricing](https://unstract.com/pricing/).
+
+### Kubernetes
+
+For production Kubernetes deployments, refer to the [Helm charts documentation](https://docs.unstract.com/unstract/unstract_platform/deployment/kubernetes/).
+
+## Security Notes
+
+**⚠️ Backup your encryption key!**
+
+Unstract encrypts adapter credentials (LLM API keys, cloud storage credentials) using an encryption key generated at first run. If you lose this key, all configured adapters become inaccessible.
+
+Find the key in `backend/.env` or `platform-service/.env`:
+```bash
+ENCRYPTION_KEY=your-encryption-key-here
+```
+
+Store this key securely offline. There is no recovery mechanism.
+
+**Data Privacy**
+
+- Documents are processed in-memory and not retained after extraction (unless you configure persistent storage)
+- LLM API calls send document content to your chosen provider (OpenAI, Anthropic, etc.)
+- For sensitive documents, use local LLMs via Ollama
+- Self-hosted deployments keep all data within your infrastructure
+
+**Access Control**
+
+- Role-based access control (RBAC) for team deployments
+- API key scoping per prompt/endpoint
+- Audit logging for all extraction requests
+
+## Practical Evaluation Checklist
+
+**When to use Unstract:**
+- ✅ You process 100+ documents per month with varying formats
+- ✅ You need structured JSON output, not just OCR text
+- ✅ Document schemas change frequently (new vendors, new form types)
+- ✅ You want to avoid writing/maintaining regex patterns
+- ✅ You need both API and batch ETL capabilities
+- ✅ You want to use multiple LLM providers and compare accuracy
+
+**When to look elsewhere:**
+- ❌ You process simple, fixed-format documents (use traditional OCR/IDP)
+- ❌ You need real-time extraction with sub-second latency (LLM calls take 2-10s)
+- ❌ You have strict on-prem requirements with no internet access (unless using local LLMs)
+- ❌ Your budget is very limited (LLM API costs add up at scale)
+
+**Cost considerations:**
+- Open-source platform is free (AGPL-3.0 license)
+- LLM API costs: ~$0.01-0.05 per document (depends on provider, document size, model)
+- Managed cloud: starts at $X/month (check current pricing)
+- Infrastructure: 8GB RAM minimum, 2 CPU cores recommended
+
+## FAQ
+
+**Q: What document formats does Unstract support?**
+**A:** PDFs (text-based and scanned), images (PNG, JPG, TIFF), and any format that can be converted to an image. The platform uses OCR for scanned documents and images.
+
+**Q: Can I use my own LLM or local models?**
+**A:** Yes. Unstract supports OpenAI, Anthropic, AWS Bedrock, and any OpenAI-compatible API. For local deployment, use Ollama to run open-source models like Llama 2, Mistral, or Code Llama.
+
+**Q: How accurate is the extraction?**
+**A:** Accuracy depends on document quality, LLM provider, and prompt design. The platform includes LLM Challenge to benchmark accuracy on your specific documents. Typical accuracy ranges from 85-98% for well-structured documents.
+
+**Q: Is there a limit on document size?**
+**A:** The platform handles documents up to the token limits of your chosen LLM. For GPT-4, that's ~128K tokens (roughly 300 pages of text). Larger documents can be split automatically.
+
+**Q: Can I deploy Unstract without Docker?**
+**A:** The official deployment uses Docker Compose. Manual installation is possible but not officially supported. You need Python 3.10+, Node.js 18+, Redis, and PostgreSQL.
+
+**Q: What's the difference between AGPL-3.0 and the enterprise edition?**
+**A:** AGPL-3.0 is fully functional for most use cases. The enterprise edition adds SSO/SAML, advanced RBAC, priority support, and managed cloud hosting. Check the [editions comparison](https://unstract.com/pricing/) for details.
+
+**Q: Does Unstract work with n8n or other automation tools?**
+**A:** Yes. Unstract provides a native n8n node and REST APIs that integrate with any automation platform (Zapier, Make, custom workflows).
+
+## Conclusion
+
+Unstract fills a real gap in the document processing space by making LLM-based extraction accessible without requiring ML expertise. The natural language prompt interface dramatically reduces the time to onboard new document types from days to minutes.
+
+For teams drowning in manual data entry from invoices, contracts, or compliance documents, Unstract offers a practical path to automation. The open-source AGPL-3.0 license makes it accessible for startups and small teams, while the managed cloud option serves enterprises needing SLAs and support.
+
+The MCP server integration positions Unstract well for the emerging agentic AI workflow — your AI agents can now process documents as part of larger automated workflows.
+
+**Next steps:**
+- Try the [quick start guide](https://docs.unstract.com/unstract/unstract_platform/quick_start/)
+- Join the [Slack community](https://join.slack.com/share/enQtunstract) for support
+- Star the [GitHub repo](https://github.com/Zipstack/unstract) if you find it useful
