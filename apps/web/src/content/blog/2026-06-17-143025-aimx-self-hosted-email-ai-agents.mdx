@@ -1,0 +1,280 @@
+---
+title: "AIMX: Self-Hosted Email Server for AI Agents"
+description: "AIMX is a self-hosted SMTP server with built-in MCP integration. Give AI agents their own email addresses with Markdown-based storage and DKIM trust."
+pubDate: "2026-06-17"
+tags: ["self-hosted", "email", "mcp", "ai-agents", "smtp"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/aimx-self-hosted-email-ai-agents.webp"
+  alt: "AIMX self-hosted email server thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AIMX is a self-hosted SMTP server that gives AI agents their own email addresses, storing messages as Markdown with TOML frontmatter and exposing a built-in MCP stdio server for seamless agent integration.
+
+## Source and Accuracy Notes
+
+- Project page: [aimx.email](https://aimx.email)
+- Source repository: [github.com/uzyn/aimx](https://github.com/uzyn/aimx)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=48134716](https://news.ycombinator.com/item?id=48134716)
+- Source last checked: 2026-06-17 (version 0.2.0)
+
+## What Is AIMX?
+
+AIMX (AI Mail Exchange) is a self-hosted email server designed specifically for AI agents. Unlike traditional email servers that require complex configuration and third-party integrations, AIMX provides a single Rust binary that handles SMTP directly, stores emails as Markdown files with TOML frontmatter, and exposes a built-in MCP stdio server with twelve tools for agent integration.
+
+From the official README:
+
+> AIMX (AI Mail Exchange) is a self-hosted email server (SMTP) and MCP stdio server that gives AI agents their own email addresses. Plugs into Claude Code, Codex CLI, Gemini CLI, Goose, and any other agent harness. No Gmail, no OAuth, no SaaS. Runs on the same VPS you already provisioned for your agents.
+
+The project is MIT licensed, runs on Linux, and requires only port 25 access and a domain you control.
+
+## Why Self-Hosted Email for AI Agents?
+
+Traditional email workflows force AI agents to rely on third-party services like Gmail or SaaS email APIs. This creates several problems:
+
+- **Privacy concerns**: Your emails live on third-party servers accessible to both the email provider and any MCP servers you connect
+- **Terms of Service violations**: Using free Gmail accounts with third-party MCP servers may violate Gmail's ToS
+- **Complexity**: Setting up multiple mailboxes for separate agentic use cases requires significant overhead
+- **Cost**: SaaS email APIs charge per message or per mailbox
+
+AIMX solves these by running entirely on your infrastructure. Your mail stays on your machine, end to end, with no middleman.
+
+## Key Features
+
+**Single binary with guided setup**
+AIMX ships as a single Rust binary. The `aimx setup` command walks you through preflight checks, DNS configuration, STARTTLS certificates, trust policy, service installation, and MCP wiring for your agents.
+
+**Markdown-based email storage**
+All incoming and outgoing emails are stored as Markdown files with TOML frontmatter. This makes them trivially easy for AI agents, RAG pipelines, and LLMs to read and parse — no MIME decoding required. Attachments are extracted and stored on disk in native format.
+
+**Direct MTA-to-MTA delivery**
+AIMX speaks SMTP directly to other mail servers on port 25, like an API call. No relay, no third-party involvement. Email becomes direct server-to-server delivery again.
+
+**Instant hooks with trust modeling**
+Inbound mail fires `on_receive` hooks the moment SMTP `DATA` completes. Outbound delivery fires `after_send` hooks when the MX attempt resolves. Hooks only trigger for senders you trust, with built-in DKIM verification recorded in the frontmatter so your agent always knows whether a message is authenticated.
+
+**Built-in MCP stdio server**
+The MCP server exposes twelve tools for mailbox CRUD, read, list, send, reply, and mark-read operations. It runs on demand via stdio and kills itself when done — efficient and stateless.
+
+**One-line agent integration**
+AIMX integrates directly with Claude Code, Codex CLI, Gemini CLI, Goose, OpenClaw, OpenCode, Hermes, and NanoClaw. The `aimx agents setup` command installs the MCP config and skill bundle in one command.
+
+## Prerequisites
+
+Before installing AIMX, you need:
+
+- A Linux server with port 25 open (inbound and outbound)
+- A domain or subdomain you control
+- Ability to set DNS records (MX, SPF, DKIM, DMARC)
+
+**Important**: Home ISPs typically block port 25. To check if port 25 is open without installing AIMX:
+
+```bash
+curl -fsSL https://aimx.email/portcheck.sh | sh
+```
+
+## Installation
+
+The recommended installation method uses the official installer script:
+
+```bash
+curl -fsSL https://aimx.email/install.sh | sh
+```
+
+This launches a guided setup that walks you through:
+
+1. Preflight checks on port 25
+2. Domain and DNS configuration
+3. STARTTLS certificate setup
+4. Trust policy configuration
+5. AIMX service installation
+6. MCP setup for your agent(s)
+
+To upgrade later:
+
+```bash
+sudo aimx upgrade
+```
+
+### Building from source
+
+If you prefer to build from source:
+
+```bash
+git clone https://github.com/uzyn/aimx.git
+cd aimx
+cargo build --release
+sudo cp target/release/aimx /usr/local/bin/
+
+# Run setup and follow the guided instructions
+sudo aimx setup
+```
+
+## DNS Configuration
+
+AIMX requires proper DNS records for email delivery and verification:
+
+**MX record**: Points your domain to your server's hostname. Email specifications (RFC 5321 §5.1) require the MX record to point to a domain name, not an IP. A subdomain works fine.
+
+**SPF record**: Specifies which servers are allowed to send email for your domain.
+
+**DKIM record**: Adds a cryptographic signature to outgoing emails. Generate a DKIM keypair with:
+
+```bash
+aimx dkim-keygen
+```
+
+**DMARC record**: Tells receiving servers how to handle emails that fail SPF or DKIM checks.
+
+The `aimx setup` wizard guides you through configuring all of these.
+
+## MCP Integration
+
+AIMX exposes a stdio MCP server with twelve tools. The compatible agent harnesses ship pre-wired configurations:
+
+| Agent | MCP | Skill / Recipe |
+|-------|-----|----------------|
+| Claude Code | Auto-wired | `~/.claude/skills/aimx/` |
+| Codex CLI | Auto-wired | `~/.codex/skills/aimx/` |
+| NanoClaw | Auto-wired | `<fork>/skills/aimx/` |
+| Goose | Bundled in recipe | `~/.config/goose/recipes/aimx.yaml` |
+| OpenClaw | Guided setup | `~/.openclaw/skills/aimx/` |
+| OpenCode | Manual JSONC paste | `~/.config/opencode/skills/aimx/` |
+| Gemini CLI | Manual JSON merge | `~/.gemini/skills/aimx/` |
+| Hermes | Manual YAML paste | `~/.hermes/skills/aimx/` |
+
+### Available MCP tools
+
+- `mailbox_list`: List all mailboxes with message counts
+- `mailbox_create`: Create a new mailbox
+- `mailbox_delete`: Delete a mailbox
+- `email_list`: List emails with optional filters (unread, from, since, subject)
+- `email_read`: Read full email content
+- `email_send`: Compose and send an email
+- `email_reply`: Reply to an email with correct threading
+- `email_mark_read`: Mark an email as read
+- `email_mark_unread`: Mark an email as unread
+
+To set up MCP for your agents after installation:
+
+```bash
+aimx agents setup
+```
+
+This command installs the MCP configuration and skill bundle for your chosen agent harness.
+
+## Mailbox Management
+
+Create mailboxes via the CLI or through MCP tools by instructing your AI agent in natural language:
+
+```bash
+aimx mailboxes create receipts@example.com
+```
+
+Or via MCP:
+
+> "Create a receipt@ mailbox and file receipts for me when you receive them."
+
+All mailboxes are stored under the AIMX data directory (default: `/var/lib/aimx`).
+
+## Configuration
+
+AIMX uses a single TOML configuration file at `/etc/aimx/config.toml`. The `aimx setup` wizard writes the initial file for you. Edit it directly to:
+
+- Add or remove mailboxes
+- Override defaults
+- Attach hooks for inbound/outbound events
+- Configure trust policies
+
+Override the data directory with the `AIMX_DATA_DIR` environment variable if needed.
+
+## Security Model
+
+AIMX implements a DKIM-based trust model to minimize prompt injection attacks from incoming emails:
+
+- **DKIM verification**: Every incoming message is verified with DKIM, and the result is recorded in the TOML frontmatter
+- **Trust gates**: Hooks only fire for senders you explicitly trust. Mail that fails DKIM or arrives from an unverified sender will not trigger any hooks
+- **No automatic execution**: AIMX does not call AI models directly. It is a mail server with an MCP interface — your agents decide what to do with the data
+
+The threat model and trust boundaries are documented in the [security guide](https://aimx.email/book/security.html).
+
+## CLI Reference
+
+AIMX provides a comprehensive CLI for server administration and operations:
+
+```text
+Usage: aimx [OPTIONS] <COMMAND>
+
+Operations (as current user):
+  send         Send an email
+  mailboxes    Manage mailboxes
+  hooks        Manage hooks
+  agents       Manage AI agent MCP wiring
+  mcp          Start the stdio MCP server (for AI agents)
+
+Server administration:
+  setup        Run the interactive setup wizard
+  serve        Start the SMTP daemon
+  doctor       Show server health, DNS, and recent logs
+  logs         Tail the aimx service log
+  dkim-keygen  Generate a DKIM keypair
+  portcheck    Check port 25 connectivity (inbound, outbound)
+  uninstall    Uninstall the aimx service (config and data retained)
+  upgrade      Fetch the latest release and swap the installed binary
+```
+
+## Practical Evaluation Checklist
+
+Before deploying AIMX in production, verify:
+
+- [ ] Port 25 is open inbound and outbound on your VPS
+- [ ] You have a domain with ability to set MX, SPF, DKIM, DMARC records
+- [ ] Your VPS provider allows port 25 traffic (some cloud providers block it by default)
+- [ ] You understand the trust model and have configured trusted senders
+- [ ] You have backup strategies for the `/var/lib/aimx` data directory
+- [ ] You've tested sending and receiving email with your agent harness
+- [ ] You've reviewed the security documentation
+
+## FAQ
+
+**Q: Why does AIMX need port 25 open?**
+
+**A:** AIMX is your mail server. SMTP runs on port 25, as defined in RFC 821 since 1982. AIMX speaks SMTP directly to other mail servers with no third-party relays. Your mail stays truly private and secure.
+
+**Q: Can I run AIMX on my home server?**
+
+**A:** Yes, as long as you have globally accessible port 25. Home ISPs typically block port 25. Use the port check script to verify before installing.
+
+**Q: What AI models does AIMX support?**
+
+**A:** All of them. AIMX does not call AI models directly. It is a mail server with a stdio MCP server built-in, so any MCP-compatible agent harness can connect to it.
+
+**Q: Can I run AIMX without owning a domain name?**
+
+**A:** No. You need a domain to define how emails are delivered to you (MX record) and verified (DKIM TXT record). Email specifications require the MX record to point to a domain name, not an IP. A subdomain works fine.
+
+**Q: Why do I need AIMX when I can use Gmail with MCP?**
+
+**A:** You can, if you don't mind your emails being stored on both Gmail servers and third-party MCP servers. If you're on a free Gmail account, you might also be violating Gmail's ToS. AIMX keeps everything on your infrastructure.
+
+**Q: How are emails stored?**
+
+**A:** All incoming and outgoing emails are stored as Markdown files with TOML frontmatter. This makes them trivially easy for AI agents, RAG pipelines, and LLMs to read and parse. Attachments are extracted and stored on disk in native format.
+
+**Q: Does AIMX prevent prompt injection from incoming emails?**
+
+**A:** AIMX supports hooks that fire on incoming mail, but only from senders you trust. AIMX verifies every incoming message with DKIM and records the result in the frontmatter. Mail that fails DKIM or arrives from an unverified sender will not trigger any hooks.
+
+## Conclusion
+
+AIMX fills a specific gap in the AI agent ecosystem: self-hosted, privacy-focused email infrastructure that speaks the same protocol as modern AI tooling (MCP). By storing emails as Markdown with TOML frontmatter, it makes email natively readable by LLMs without complex MIME parsing. The built-in DKIM trust model and instant hooks provide a secure foundation for agentic email workflows.
+
+If you're building AI agents that need to send, receive, or process email, and you want full control over your infrastructure without third-party dependencies, AIMX is worth evaluating. The single-binary installation and guided setup make it accessible even if you haven't managed an email server before.
+
+For more details, see the [AIMX Book](https://aimx.email/book/) or join the [Discord community](https://discord.gg/esWwA3YfK8).
