@@ -1,0 +1,215 @@
+---
+title: "Home Maker: Manage Dev Tools in One Makefile"
+description: "Stop tracking how you installed every CLI tool. Home Maker uses a single Makefile to declare, install, and upgrade all your dev tools across apt, cargo, uv, go, and npm."
+pubDate: "2026-06-17"
+tags: ["dev-tools", "cli", "makefile", "developer-workflow", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/home-maker.webp"
+  alt: "Home Maker product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Home Maker is a single Makefile that declares every tool on your dev machine—CLI utilities, language toolchains, desktop apps—with one command to install anything, supporting apt, cargo, uv, go, and npm.
+
+## Source and Accuracy Notes
+
+- Project page: [thottingal.in/blog/2026/03/29/home-maker](https://thottingal.in/blog/2026/03/29/home-maker/)
+- Source repository: [github.com/santhoshtr/hm](https://github.com/santhoshtr/hm)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47560959](https://news.ycombinator.com/item?id=47560959)
+- Source last checked: 2026-06-17 (commit from 2026-03-29)
+
+## What Is Home Maker?
+
+Your laptop has ripgrep, installed via `cargo install`. Ruff is there too, via `uv tool install`. golangci-lint came from `go install`. bash-language-server was `npm i -g`. Neovim was a tarball download. Kitty was a curl script.
+
+Six months later you get a new machine, or you just want to upgrade or reinstall. What do you even have installed? How did you install each one? Which version?
+
+Home Maker answers those questions with a single Makefile that declares every tool you care about, grouped by purpose, with one command to install anything.
+
+From the README:
+
+> A single Makefile that installs and upgrades every tool on your dev machine — CLI utilities, language toolchains, desktop apps — grouped by purpose, with a fuzzy-search frontend to run anything with a keystroke.
+
+## Why Not Nix or Ansible?
+
+The README addresses this directly:
+
+**Nix** solves a different problem — reproducible, hermetic, declarative environments. That power comes with a parallel package universe, a functional language most developers don't already know, multi-gigabyte closures, and a learning curve that takes weeks before it feels productive.
+
+**Ansible** is designed for fleet management — applying configuration to dozens of remote machines idempotently. A single developer laptop is not a fleet.
+
+Home Maker uses two things every Linux developer already knows: `make` and shell. The entire mechanism is visible in plain text in files you own. There is no daemon, no hidden state, no lock-in.
+
+The tradeoffs are honest: installs are not hermetic, there is no rollback, and reproducibility depends on upstream package managers staying stable. For a personal development machine those are acceptable costs in exchange for a system that is transparent, fast to modify, and requires zero framework knowledge to operate.
+
+## Setup Workflow
+
+### Step 1: Requirements
+
+From the README:
+
+- Linux (Debian/Ubuntu — adapt `APT_INSTALL` for other distros)
+- `make`, `bash`, `fzf`
+- The package managers you want to use (e.g. `cargo` for Rust tools, `uv` for Python tools)
+
+### Step 2: Clone and Install
+
+```bash
+git clone https://github.com/santhoshtr/hm.git
+cd hm
+```
+
+### Step 3: Use It
+
+```bash
+make ripgrep       # install a single package
+make cli           # install a group
+make dev           # install all dev tools
+make all           # install everything
+make clean         # purge package manager caches
+./hm.sh            # interactive fuzzy installer
+```
+
+### Step 4: Add Your Own Tools
+
+Open the relevant `.mk` file and append to the right list:
+
+```makefile
+# dev/python.mk
+UV += ruff black isort my-new-tool
+```
+
+That's it. The Makefile generates a `my-new-tool` target automatically. `make my-new-tool` works, and it appears in `hm` the next time you run it.
+
+### Step 5: Pin Versions
+
+```makefile
+UV += black@24.2.0
+GO += golangci-lint@v1.55.0
+```
+
+### Step 6: Interactive Installer
+
+`hm.sh` is a fuzzy-search frontend. It discovers every target from the Makefiles and presents them in `fzf`. Tab selects multiple items, Enter installs them. The preview pane shows exactly what will run.
+
+Add it to your PATH:
+
+```bash
+ln -s "$(pwd)/hm.sh" ~/bin/hm
+```
+
+The list is derived live from `make -pn`, so every package defined in any `.mk` file appears automatically. Nothing to keep in sync manually.
+
+## Project Structure
+
+From the README:
+
+```text
+.
+├── Makefile           # target generators, group targets, meta-targets
+├── hm.sh              # interactive fzf installer
+├── dev/
+│   ├── cli.mk         # ripgrep, jq, bat, fzf, htop, tmux, eza, zoxide, fd
+│   ├── python.mk      # uv (bootstrap) + ruff, black, isort, pyright
+│   ├── node.mk        # nodejs/npm + eslint, prettier, typescript
+│   ├── go.mk          # gopls, golangci-lint
+│   ├── rust.mk        # cargo-cache, cargo-edit
+│   └── lsp.mk         # shellcheck, shfmt, stylua, bash-language-server, yaml-language-server
+└── desktop/
+    └── apps.mk        # example custom target (alacritty)
+```
+
+## How It Works
+
+Each `.mk` file appends packages to one of five lists: `APT`, `CARGO`, `UV`, `GO`, `NPM`. The Makefile expands each list into individual `.PHONY` targets using `$(foreach ...)` and a `gen-*` macro per manager. Each macro generates a target that runs the right install command with optional version pinning.
+
+Group targets (`cli`, `python`, etc.) depend on their member packages. Meta-targets (`dev`, `desktop`, `all`) depend on groups. `make all` installs everything. `make clean` purges caches.
+
+`hm.sh` runs `make -pn`, filters out group and meta targets, and feeds the remainder to `fzf`.
+
+## Deeper Analysis
+
+### What Makes This Different
+
+Most dev environment tools fall into two categories:
+
+1. **Heavyweight declarative systems** (Nix, Ansible, Chef) — powerful but require learning a new language or framework
+2. **Ad-hoc shell scripts** — flexible but opaque, hard to maintain, no grouping or discovery
+
+Home Maker sits in the middle: it's declarative (you declare what you want in `.mk` files), but the implementation is plain Make that you can read and modify in 5 minutes.
+
+### The Fuzzy Search Frontend
+
+The `hm.sh` script is a nice touch. Instead of memorizing package names, you run `hm` and get an interactive fzf interface showing every available package. The preview pane shows the exact command that will run, so there are no surprises.
+
+### Version Pinning
+
+The ability to pin versions (`black@24.2.0`) is critical for reproducibility. Without it, `make all` on a new machine might install different versions than your current setup.
+
+### Custom Install Scripts
+
+For tools not in any package manager — curl scripts, tarballs, local builds — you can add handwritten `.PHONY` targets:
+
+```makefile
+.PHONY: my-tool
+my-tool:
+	@echo "installing/upgrading $@..."
+	@curl -fsSL https://example.com/my-tool -o /usr/local/bin/my-tool
+	@chmod +x /usr/local/bin/my-tool
+```
+
+This covers the long tail of tools that don't fit the five supported package managers.
+
+## Practical Evaluation Checklist
+
+Before adopting Home Maker, verify:
+
+- ✅ You're on Linux (Debian/Ubuntu or willing to adapt `APT_INSTALL`)
+- ✅ You have `make`, `bash`, `fzf` installed
+- ✅ You're comfortable with non-hermetic installs (no rollback)
+- ✅ You want transparency over reproducibility
+- ✅ You're willing to maintain the `.mk` files yourself
+
+If you need hermetic environments or rollback, look at Nix instead. If you're managing a fleet of machines, look at Ansible. For a single dev laptop where you want to know exactly what's installed and how, Home Maker is a solid choice.
+
+## Security Notes
+
+- Home Maker runs `make` targets that execute shell commands — review `.mk` files before running `make all`
+- The `hm.sh` script runs `make -pn` to discover targets — this is read-only and safe
+- Custom install scripts (`.PHONY` targets) may download and execute arbitrary code — verify URLs before adding them
+- No telemetry or network calls beyond what the underlying package managers do
+- The project is MIT licensed and the entire codebase is visible in the repo
+
+## FAQ
+
+**Q: Does this work on macOS?**
+**A:** The README specifies Linux (Debian/Ubuntu) and mentions adapting `APT_INSTALL` for other distros. macOS would require replacing `apt` targets with `brew` equivalents. The `cargo`, `uv`, `go`, `npm` targets should work unchanged.
+
+**Q: Can I use this without fzf?**
+**A:** Yes. `fzf` is only needed for the interactive `hm.sh` frontend. You can use `make <target>` directly without it.
+
+**Q: How do I update all tools?**
+**A:** Run `make all` again. Each target re-runs the install command, which upgrades to the latest version (unless pinned). There's no separate "update" command.
+
+**Q: Can I share my configuration across machines?**
+**A:** Yes — the entire system is just text files. Commit the `.mk` files to a private repo and clone on each machine. You'll need to re-run `make all` to install, but the configuration is portable.
+
+**Q: What if a package manager fails?**
+**A:** `make` will stop at the first error. Fix the issue (e.g., install the missing package manager) and re-run. There's no automatic retry or error recovery.
+
+**Q: Can I use this for non-dev tools?**
+**A:** Yes. The `desktop/apps.mk` file shows an example with Alacritty. You can add any tool that has a command-line install method.
+
+## Conclusion
+
+Home Maker solves a real problem: tracking how you installed every tool on your dev machine. It's not trying to be Nix or Ansible — it's a transparent, Make-based system that works with the package managers you already use.
+
+If you've ever set up a new machine and spent hours trying to remember how you installed ripgrep, or if you want a single command to bootstrap your entire dev environment, Home Maker is worth a look.
+
+The project is young (41 stars as of June 2026), but the approach is sound: use tools you already know, keep everything in plain text, and accept the tradeoffs of non-hermetic installs in exchange for simplicity.
