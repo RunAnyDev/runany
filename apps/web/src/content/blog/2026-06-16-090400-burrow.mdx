@@ -1,0 +1,144 @@
+---
+title: "Burrow macOS GUI for Mole CLI and MCP Server"
+description: "Burrow is a free, open-source, native macOS GUI for the Mole CLI, with long-range metric history, an MCP server for AI agents, and tools for clean, purge, and uninstall."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "macos", "swift", "mcp"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/burrow.webp"
+  alt: "Burrow GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Burrow is a free, MIT-licensed native macOS SwiftUI app that wraps the open-source Mole CLI (`mo`) with a translucent window, live system monitoring, long-range SQLite-backed metric history, and a stdio MCP server so any agent can ask what your Mac has been doing.
+
+## Source and Accuracy Notes
+
+- Project page: [burrow.henryzh.dev](https://burrow.henryzh.dev)
+- Source repository: [github.com/caezium/Burrow](https://github.com/caezium/Burrow)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Requires: macOS 14+, Homebrew, `mo` CLI
+- Source last checked: 2026-06-16
+
+## What Is Burrow?
+
+Burrow is a native macOS app that wraps the free, open-source Mole CLI (`mo`) by `tw93` in a SwiftUI GUI. It gives you a translucent window with seven tools: Status, Clean, Purge, Installers, Optimize, Software, and Analyze. It also adds things the CLI does not have: a long-running metric history backed by local SQLite, an Activity log, a menu-bar HUD, and a stdio MCP server so any MCP-aware agent can query the Mac's recent state.
+
+Burrow is not affiliated with mole.fit, the official Mole for Mac app from the same `mo` author. The README is explicit that Burrow is an independent reimplementation with its own brand, palette, and copy. The recommended way to fund `mo` development is to buy mole.fit for $9.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Requirements
+
+- macOS 14 or later
+- Homebrew
+- The Mole CLI (`mo`)
+
+### Step 2: Install `mo`
+
+```bash
+brew install mole
+```
+
+### Step 3: Install Burrow
+
+The fastest path is the Homebrew cask:
+
+```bash
+brew install --cask caezium/tap/burrow
+```
+
+### Step 4: Build from source
+
+If you want to build it yourself:
+
+```bash
+brew install xcodegen mole
+git clone https://github.com/caezium/Burrow.git && cd Burrow
+xcodegen generate
+xcodebuild -project Burrow.xcodeproj -scheme Burrow \
+  -configuration Release -destination 'generic/platform=macOS' \
+  -derivedDataPath build \
+  CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+cp -R build/Build/Products/Release/Burrow.app /Applications/
+xattr -cr /Applications/Burrow.app
+open /Applications/Burrow.app
+```
+
+Burrow lives in the menu bar by default. Click the icon and choose Open Burrow, or turn the menu-bar icon off in Settings to run it as a Dock app.
+
+### Step 5: Wire it into an AI agent
+
+Burrow doubles as an MCP server over stdio. The same `{command, args}` config works in Claude Code, Cursor, Codex, Cline, and Zed:
+
+```json
+{
+  "mcpServers": {
+    "burrow": {
+      "command": "/Applications/Burrow.app/Contents/MacOS/Burrow",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+If you installed via Homebrew, you can use `command: "burrow", args: ["mcp"]` instead. The exposed tools are `burrow_snapshot`, `burrow_history`, `burrow_top_processes`, `burrow_process_usage`, and `burrow_info`.
+
+## Deeper Analysis
+
+### The seven tools
+
+The Status dashboard is a live read of CPU, load averages, temperature, memory pressure, swap, GPU, disk I/O, network throughput, battery health, and the Mole health score, with a pinnable top-process table. Clean is a categorized cache, log, and leftover removal path with a `--dry-run` preview. Purge reclaims space from dev projects such as `node_modules`, build directories, `target/`, and `__pycache__`. Installers finds and removes leftover `.dmg` and `.pkg` files in bulk. Optimize runs one-tap safe maintenance such as rebuilding caches, repairing metadata, flushing DNS, and restarting Dock and Finder. Software is an installed-app list with search, sort, multi-select uninstall, and a Homebrew Updates tab. Analyze is a squarified treemap of the disk with drill-down and reveal-in-Finder.
+
+### The two Burrow-only extras
+
+The long-range History view is the first thing `mo` does not give you. Burrow samples metrics into a local SQLite database (WAL mode) and renders them as 5-minute to 90-day charts with peak-per-process tables. The retention setting is configurable from one day to one year, and the prune job runs hourly. The Activity log records every clean, optimize, and scan Burrow has done plus the live status of anything in flight.
+
+### The MCP surface
+
+The stdio MCP server runs as `burrow mcp` or `Burrow --mcp`. It forks before SwiftUI claims the process, so the same binary serves the GUI and the agent. The five tools cover the snapshot, time-series history, top processes, ranked process usage (with `cpu_time`, `peak_cpu`, `avg_cpu`, and `peak_mem`), and meta information about what Burrow is recording. There is also an optional loopback-only HTTP API on `127.0.0.1:9277` for dashboards, with endpoints for `/health`, `/info`, `/snapshot`, and `/metrics`.
+
+### Comparison with peers
+
+The README ships a factual comparison table. Burrow is the only entry in the table that is free, MIT-licensed, and offers both an MCP server and a long-term metric history. mole.fit is $9 once and signed and notarized. CleanMyMac is subscription-only. Pearcleaner is free but focused on uninstall. The `mo` CLI and `ncdu` are free and open source but TUI-only with no GUI and no agent API.
+
+## Practical Evaluation Checklist
+
+- [ ] Do you run macOS 14 or later and use Homebrew?
+- [ ] Are you already comfortable with `mo` and want a GUI on top?
+- [ ] Do you want long-range charts of CPU, memory, disk, and battery over days to months?
+- [ ] Would you like any MCP-aware agent to read your Mac's recent state?
+- [ ] Do you prefer a free, MIT-licensed GUI over a $9 or subscription commercial app?
+- [ ] Are you willing to grant Full Disk Access for disk analysis and clean operations?
+- [ ] Do you want a menu-bar HUD that surfaces live jobs and top processes?
+
+## Security Notes
+
+Burrow drives the audited `mo` CLI rather than reimplementing cleanup. There are no accounts, no ads, and no remote telemetry of files, paths, metrics, or stored IPs. The opt-out anonymous analytics and crash reports bucket sizes and counts only, and the full list is in `TELEMETRY.md`. When Clean or Optimize need admin rights, macOS's own dialog prompts for elevation and Burrow runs that single `mo` command before exiting. The MCP HTTP server is loopback-only and the history is a local SQLite file. The project is unsigned and pre-1.0, and the full security write-up is in `SECURITY.md`.
+
+If you enable the MCP server, treat `burrow_snapshot` and `burrow_history` output as sensitive. They expose process names, resource use, and disk structure. Keep the HTTP API off (it is on by default) if you do not actively need it.
+
+## FAQ
+
+**Q: Is Burrow affiliated with mole.fit?**
+**A:** No. Burrow is an independent open-source project that depends on `mo` at runtime and shares the same author of the Mole CLI for inspiration. mole.fit is the official Mac app by the same `mo` author.
+
+**Q: Does Burrow work without an internet connection?**
+**A:** Yes. The GUI, the metrics, the history, the Activity log, the MCP server, and the loopback HTTP API are all local. Cloud features are limited to opt-out anonymous analytics.
+
+**Q: Can I use Burrow with Claude Code, Cursor, or Codex?**
+**A:** Yes. Burrow is a stdio MCP server. The README ships a config block that works in Claude Code, Cursor, Codex, Cline, and Zed with only the config file path changing.
+
+**Q: Does Burrow ship its own cleaner, or does it call `mo`?**
+**A:** Burrow calls `mo`. The `mo clean`, `mo purge`, `mo installer`, `mo optimize`, `mo analyze --json`, and `mo status --json` commands back the corresponding tools.
+
+**Q: Is the unsigned build safe to run on macOS?**
+**A:** The README is honest about the trade-offs. macOS Gatekeeper will require the standard `xattr -cr` step on first launch because the build is unsigned and pre-1.0. Read `SECURITY.md` before granting Full Disk Access.
+
+## Conclusion
+
+Burrow is one of the more interesting new macOS utilities. It takes a CLI most people already know, adds a thoughtful GUI, and then adds the two things the CLI does not have: a long-term metric history and a real MCP server. The fact that the MCP server is local and loopback, that telemetry is opt-out, and that cleanup is delegated to the audited `mo` CLI all suggest a team that takes trust seriously. It is not the right tool if you want a signed and notarized commercial product. It is the right tool if you want a free, transparent, agent-friendly Mac maintenance app.

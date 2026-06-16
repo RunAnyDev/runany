@@ -1,0 +1,153 @@
+---
+title: "OpenOSINT: AI OSINT Agent with REPL, CLI, and MCP"
+description: "OpenOSINT is an MIT-licensed AI OSINT agent with 16 tools, an interactive REPL, a CLI, a Web UI, and an MCP server, supporting Anthropic Claude, OpenAI, and local Ollama models."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "osint", "python", "mcp"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openosint.webp"
+  alt: "OpenOSINT GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OpenOSINT is an MIT-licensed, AI-driven OSINT agent that ships 16 tools behind an interactive REPL, a CLI, a Web UI, and an MCP server. It works with Anthropic Claude by default and can switch to local Ollama models or any OpenAI-compatible endpoint for authorized security research.
+
+## Source and Accuracy Notes
+
+- Project page: [openosint.tech](https://openosint.tech)
+- Source repository: [github.com/OpenOSINT/OpenOSINT](https://github.com/OpenOSINT/OpenOSINT)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Python: 3.10+
+- MCP server: published at `io.github.OpenOSINT/openosint`
+- Source last checked: 2026-06-16
+
+## What Is OpenOSINT?
+
+OpenOSINT is an OSINT (open-source intelligence) agent that wraps a tool collection and an LLM in a single package. The README's own positioning is "AI-powered OSINT agent. Interactive REPL · CLI · MCP Server · Web UI," with 16 tools, Anthropic Claude or local Ollama as the default backends, and an explicit note that the project is for authorized security research only.
+
+The 16 tools cover email and username enumeration through `holehe` and `sherlock`, phone intelligence through `phoneinfoga`, subdomain enumeration through `sublist3r`, breach lookups through HaveIBeenPwned, IP intelligence through ipinfo, Shodan, VirusTotal, IP2Location, Censys, and AbuseIPDB, GitHub searches, Google dorking, web scraping, DNS and WHOIS, and report export. If a tool's external binary or API key is missing, it returns a descriptive error string and the rest of the agent keeps working.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install openosint
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/OpenOSINT/OpenOSINT.git
+cd OpenOSINT
+pip install -e .
+```
+
+Python 3.10+ is required.
+
+### Step 2: Install the optional external binaries
+
+The agent calls into well-known open-source tools. If a binary is absent, the corresponding tool returns an error; the rest of the agent stays operational.
+
+```bash
+pip install holehe
+pip install sherlock-project
+pip install sublist3r
+```
+
+`phoneinfoga` is a separate Go binary you download from its GitHub releases page.
+
+### Step 3: Configure the environment
+
+Copy `.env.example` to `.env` at the project root. `python-dotenv` loads it automatically.
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ANTHROPIC_API_KEY` | Yes (or use Ollama / OpenAI) | Anthropic API key |
+| `OPENAI_BASE_URL` | Optional | OpenAI-compatible endpoint, e.g. `http://localhost:4000/v1` |
+| `OPENAI_API_KEY` | Optional | API key for the OpenAI-compatible endpoint |
+| `OPENAI_MODEL` | Optional | Model name (default `gpt-4o-mini`) |
+| `HIBP_API_KEY` | Optional | HaveIBeenPwned v3 |
+| `IPINFO_TOKEN` | Optional | ipinfo.io higher rate limits |
+| `SHODAN_API_KEY` | Optional | Shodan API |
+| `VIRUSTOTAL_API_KEY` | Optional | VirusTotal API v3 |
+| `IP2LOCATION_API_KEY` | Optional | IP2Location.io |
+| `CENSYS_API_ID` + `CENSYS_SECRET` | Optional | Censys Search API |
+| `ABUSEIPDB_API_KEY` | Optional | AbuseIPDB v2 |
+| `GITHUB_TOKEN` | Optional | GitHub API, raises rate limit from 60 to 5000 req/h |
+| `BRIGHTDATA_API_KEY`, `BRIGHTDATA_SERP_ZONE`, `BRIGHTDATA_UNLOCKER_ZONE` | Optional | Bright Data SERP and Web Unlocker |
+
+### Step 4: Run
+
+```bash
+openosint          # interactive AI REPL
+openosint web      # web interface
+openosint email target@example.com   # direct tool, no AI
+```
+
+## Deeper Analysis
+
+### The two interfaces: REPL and Web UI
+
+The REPL is the default and the canonical interface for an analyst. The Web UI is a separate process started with `openosint web` and exists for users who would rather work in a browser than a terminal. Both share the same tool layer and the same configuration.
+
+### The MCP server
+
+OpenOSINT is published in the MCP registry as `io.github.OpenOSINT/openosint`, and the project ships a configuration block for any MCP client. The block uses an HTTP MCP transport by default against `https://api.openosint.tech/mcp` (the OpenOSINT Cloud hosted API), and it can also be configured against a local install.
+
+The hosted API itself is scoped to IP addresses and domain names only. It does not search for personal data about individuals, does not use leaked or breached data sources, and does not perform people-search lookups. That scoping matters when you weigh whether to use the hosted tier for non-personal investigations.
+
+### Tool routing and what the agent decides
+
+The 16 tools are presented to the LLM with a tool/function-calling contract. The agent picks the next tool based on the user's prompt, the available credentials, and the rate limits of each backend. The Anthropic provider is the default. If `OPENAI_BASE_URL` is set and `ANTHROPIC_API_KEY` is absent, the OpenAI-compatible endpoint takes precedence over Ollama. The Ollama path is for fully local operation and requires the `ollama` Python client plus the Ollama runtime.
+
+### Rate limits and cost
+
+The agent is rate-limit aware. `GITHUB_TOKEN` raises the GitHub API quota from 60 to 5000 requests per hour. HaveIBeenPwned, Shodan, VirusTotal, IP2Location, Censys, and AbuseIPDB all use paid keys, and the absence of a key turns the matching tool into an error-returning stub. Bright Data is the paid web search and scraping path with a free tier of 5000 requests per month. The agent does not retry aggressively, so you will see error strings instead of back-off loops.
+
+### Cloud and Prompt Pack
+
+OpenOSINT Cloud is a hosted REST and MCP API for IP and domain intelligence, with plans from a $10 pay-as-you-go tier to monthly subscriptions. The "AI OSINT Prompt Pack" is a separate $20 7-page PDF that ships 30+ tested prompts for collection, pivoting, and verification flows. It is sold through Polar.sh, and buying it directly funds OpenOSINT development.
+
+## Practical Evaluation Checklist
+
+- [ ] Are you running authorized OSINT work that fits the project's DISCLAIMER.md?
+- [ ] Do you have an Anthropic API key, or can you stand up Ollama or an OpenAI-compatible endpoint?
+- [ ] Do you need the email, username, phone, and breach investigation tools?
+- [ ] Will you invest in the paid API keys that materially raise the rate limits and coverage?
+- [ ] Do you need the MCP server to expose the tool set to Claude Code, Cursor, or Codex?
+- [ ] Are you comfortable with the Web UI and REPL as the two main interfaces?
+- [ ] Will you read `DISCLAIMER.md` before running the agent against any real target?
+
+## Security Notes
+
+The project is explicit that OpenOSINT is for legal and authorized use only. The legal disclaimer is in `DISCLAIMER.md`, and the project accepts no liability for misuse. Treat the `holehe` and `sherlock` tools as the highest-risk primitives: they probe real third-party services with the target email or username as the lookup key. The breach, IP, and domain tools rely on third-party paid keys, so the same data handling rules that apply to those providers apply to OpenOSINT runs.
+
+The hosted OpenOSINT Cloud is scoped to IP addresses and domain names. It does not store or return personal data about individuals. If you are investigating personal data, run OpenOSINT locally with the relevant provider keys and treat the local log and report files as sensitive. The bundled Holehe, Sherlock, Sublist3r, and PhoneInfoga tools each have their own legal and ethical guidelines; read them before use.
+
+Do not commit a populated `.env` file. The configuration table includes keys for paid third-party services and you should keep them out of version control.
+
+## FAQ
+
+**Q: Do I need an Anthropic API key to use OpenOSINT?**
+**A:** The project documents an Anthropic key as the default unless you use Ollama or an OpenAI-compatible endpoint. Ollama needs the Ollama runtime plus the `ollama` Python client, and the OpenAI-compatible path needs `OPENAI_BASE_URL` plus an optional `OPENAI_API_KEY`.
+
+**Q: What happens if a tool's external binary is missing?**
+**A:** The corresponding tool returns a descriptive error string. The rest of the agent remains operational, so the REPL, the Web UI, and the other tools keep working.
+
+**Q: Is OpenOSINT legal to run?**
+**A:** OpenOSINT is intended for legal and authorized use only. The README and `DISCLAIMER.md` make that explicit. You are responsible for compliance with applicable laws and the terms of each provider whose API the agent calls.
+
+**Q: How is OpenOSINT Cloud different from a local install?**
+**A:** OpenOSINT Cloud is a hosted REST and MCP API for IP and domain intelligence. It does not store or return personal data about individuals, does not use leaked or breached data sources, and does not perform people-search lookups. A local install lets you add the people-search and breach tools via `holehe`, `sherlock`, and HIBP.
+
+**Q: Does OpenOSINT ship a Prompt Pack?**
+**A:** Yes, as a separate paid PDF from Polar.sh. The pack is a method companion that gives you 30+ tested investigation prompts designed to be used with ChatGPT, Claude, or OpenOSINT itself.
+
+## Conclusion
+
+OpenOSINT is one of the more complete AI OSINT agents in the open-source ecosystem. Sixteen tools, three interfaces, a published MCP server, and clear support for local and hosted LLMs make it a reasonable starting point for an analyst who wants an agent to drive their existing toolchain. The legal disclaimer and the third-party API surface are the trade-offs. Run it with the right authorization, treat the API keys as production secrets, and the project delivers.

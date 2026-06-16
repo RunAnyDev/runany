@@ -1,0 +1,135 @@
+---
+title: "boo: Ghostty-Powered Terminal Multiplexer for AI Agents"
+description: "boo is a GNU screen-style terminal multiplexer written in Zig on top of libghostty-vt, with a faithful terminal state model and agent-friendly peek, send, wait, and JSON primitives."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "terminal", "zig", "ai-agent"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/boo.webp"
+  alt: "boo GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** boo is an MIT-licensed, Zig-based terminal multiplexer in the GNU screen tradition, built on libghostty-vt, with a faithful screen state model and agent-friendly `send`, `peek`, `wait`, and `--json` primitives that work without a TTY.
+
+## Source and Accuracy Notes
+
+- Project repository: [github.com/coder/boo](https://github.com/coder/boo)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Language: Zig (built on libghostty-vt)
+- Source last checked: 2026-06-16
+
+## What Is boo?
+
+boo is a terminal multiplexer with a distinctive design choice. Instead of maintaining its own screen state for each session, it pipes every session's output through Ghostty's terminal emulation core. The result is that boo always knows the exact screen state of every session: contents, styles, cursor, scrollback, and terminal modes. That state is used to rehydrate your terminal on attach, to answer terminal queries for detached sessions, and to let scripts and AI agents read the screen exactly as a human would see it.
+
+The second design choice is the automation surface. Everything except `attach` works without a TTY, which makes boo a natural sandbox for scripts and AI agents driving interactive programs. The canonical loop is `boo new`, `boo send`, `boo wait`, `boo peek`, `boo kill`, with `--json` output for the parts that need to be parsed by a script.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install
+
+For Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/coder/boo/main/install.sh | sh
+```
+
+Pre-built binaries are published on the [releases page](https://github.com/coder/boo/releases). Set `BOO_VERSION` to pin a release and `BOO_INSTALL_DIR` to change the install location (default `/usr/local/bin` when writable, otherwise `~/.local/bin`).
+
+### Step 2: Start a session
+
+```sh
+boo new                    # new session running $SHELL, attached
+boo new work               # named session
+boo new work -d -- make    # create detached, running a command
+```
+
+With no name, `boo new` names the session after the current directory, falling back to the process id when that name is taken or unusable.
+
+### Step 3: Use the full-screen UI
+
+```sh
+boo ui                     # manage sessions in a full-screen UI
+```
+
+`boo ui` lists sessions in a sidebar, with keybinds for switching, resizing, hiding the sidebar, creating sessions, and killing them.
+
+### Step 4: Drive an interactive program from a script
+
+```sh
+boo new build -d -- bash               # 1. headless session
+boo send build --text 'make' --enter   # 2. type into it
+boo wait build --idle                  # 3. let output settle
+boo peek build --scrollback            # 4. read the screen
+boo kill build                         # 5. clean up
+```
+
+## Deeper Analysis
+
+### Why libghostty-vt
+
+The README's argument for libghostty-vt is that boo gets a real terminal emulator for free. SGR styles, cursor position, scrolling regions, window title, and terminal modes are all parsed by Ghostty, so boo does not need to reimplement them. The same state is what the agent-friendly `peek` command returns when a script reads the screen.
+
+### The agent-friendly surface
+
+The four primitives that make boo useful for AI agents are `send`, `peek`, `wait`, and `--json`. `send` types text into a session. `peek` reads the rendered screen. `wait` blocks until the output settles. `--json` returns machine-parseable output for the parts that need to be parsed by a script. The combination is the canonical loop above: a script can drive a build, a database CLI, a REPL, or any other interactive program without a TTY.
+
+### GNU screen compatibility
+
+Bindings follow GNU screen's defaults, including the `C-x` variants. `C-a d` and `C-a C-d` detach. `C-a l` and `C-a C-l` redraw. `C-a a` sends a literal `C-a`. The README is clear that the binding set is intentionally screen-compatible, so users who already have screen muscle memory do not need to learn a new set of keybinds.
+
+### Sessions that survive disconnects
+
+The fundamental guarantee of any session multiplexer is that sessions survive disconnects. boo detaches with `Ctrl-A d` and reattaches with `boo attach work`. The `peek` and `wait` commands work on detached sessions, which is what makes the automation primitives useful for long-running jobs that the script does not need to be attached to.
+
+### The full-screen UI
+
+`boo ui` is the full-screen session manager. It lists sessions in a sidebar, supports keybinds for switching, resizing, and hiding the sidebar, creating sessions, and killing them. The full-screen UI is the right answer for the "I have five jobs running and I want to see them all" workflow.
+
+### Why a screen-style multiplexer for AI
+
+The README's positioning is the most useful framing. AI agents driving interactive programs need three things from a multiplexer: a way to start a session without a TTY, a way to type into it from a script, and a way to read the screen back as a structured object. boo is a multiplexer that ships those three things as first-class primitives rather than as a wrapper around `expect`.
+
+## Practical Evaluation Checklist
+
+- [ ] Do you want a screen-style multiplexer that also serves as an agent sandbox?
+- [ ] Do you need `send`, `peek`, `wait`, and `--json` primitives that work without a TTY?
+- [ ] Is a faithful terminal state model from libghostty-vt more useful than a custom one?
+- [ ] Do you prefer GNU screen keybinds over tmux-style bindings?
+- [ ] Will you run boo on Linux and macOS via the install script, or download a pre-built binary?
+- [ ] Do you need the full-screen UI (`boo ui`) for managing many sessions at once?
+- [ ] Will you use `BOO_VERSION` and `BOO_INSTALL_DIR` to pin and direct the install?
+
+## Security Notes
+
+boo is a terminal multiplexer, which means it has the same trust model as `screen` or `tmux`. A session runs as your user, and anything you can do in a regular shell you can do in a boo session. The automation primitives (`send`, `peek`, `wait`, `--json`) work without a TTY, so a script that has access to your user account can drive a session, which means the same script can also read the screen. Treat the script's access to boo the way you would treat its access to your shell.
+
+The install script downloads a pre-built binary or builds from source. If you prefer a reproducible build, clone the repository, build it, and install it manually. The `BOO_INSTALL_DIR` flag lets you put the binary anywhere on your `PATH`, so a private install is straightforward.
+
+The libghostty-vt dependency is the right architectural call, but it means boo inherits Ghostty's terminal emulation correctness and quirks. If you have a session that depends on a specific terminal mode that libghostty does not parse correctly, that is a real issue you would have to test for.
+
+## FAQ
+
+**Q: Is boo a tmux replacement?**
+**A:** boo is a GNU screen-style multiplexer, not a tmux replacement. The bindings, the detach/attach model, and the command set follow GNU screen. The differentiator is the libghostty-vt state model and the agent-friendly primitives.
+
+**Q: Can I drive a session without a TTY?**
+**A:** Yes. Everything except `attach` works without a TTY. The canonical agent loop is `boo new`, `boo send`, `boo wait`, `boo peek`, `boo kill`, with `--json` output for parts that need to be parsed.
+
+**Q: What does `peek` return?**
+**A:** `peek` prints the rendered screen reconstructed from libghostty-vt's state. With `--scrollback` it includes the scrollback. The output is what a human would see on the terminal, with SGR styles, cursor position, and terminal modes all represented.
+
+**Q: How do I pin a specific version?**
+**A:** Set `BOO_VERSION` before running the install script. The script pins the release you specify. Set `BOO_INSTALL_DIR` to change the install location.
+
+**Q: Is the full-screen UI required?**
+**A:** No. `boo ui` is the full-screen session manager, but the same workflow is available through `boo ls`, `boo new`, `boo attach`, `boo rename`, and `boo kill` from the command line. The UI is for the "I have many sessions open" workflow.
+
+## Conclusion
+
+boo is a focused bet on a particular combination: a screen-style multiplexer, a real terminal emulation core, and an automation surface that works without a TTY. If you already use screen or tmux and you want a multiplexer that doubles as an agent sandbox, boo is worth a serious look. If you want a graphical terminal multiplexer with tmux-style bindings and a plugin model, this is not the project.

@@ -1,0 +1,139 @@
+---
+title: "agent-skills-eval: Test Runner for Agent Skills"
+description: "agent-skills-eval is an MIT-licensed test runner for the agentskills.io standard that runs every eval with_skill and without_skill, grades both with a judge model, and ships a static HTML report."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "agent-evals", "typescript", "openai-compatible"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agent-skills-eval.webp"
+  alt: "agent-skills-eval GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** agent-skills-eval is an MIT-licensed TypeScript test runner for the agentskills.io standard that runs every eval twice — once with the `SKILL.md` loaded into context and once without — and grades both outputs with a judge model, producing a side-by-side report and JSONL artifacts.
+
+## Source and Accuracy Notes
+
+- Project page: [darkrishabh.github.io/agent-skills-eval](https://darkrishabh.github.io/agent-skills-eval/)
+- Source repository: [github.com/darkrishabh/agent-skills-eval](https://github.com/darkrishabh/agent-skills-eval)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Spec: [agentskills.io](https://agentskills.io)
+- Source last checked: 2026-06-16
+
+## What Is agent-skills-eval?
+
+agent-skills-eval is the test framework for the Agent Skills ecosystem. The Agent Skills open standard from Anthropic makes it easy to ship a `SKILL.md` and assume the agent is now better at the task. The hard part is proving it. agent-skills-eval runs your skill against the same prompts twice — once `with_skill` loaded into context, once `without_skill` baseline — has a judge model grade both outputs, and gives you a side-by-side report. If the skill does not make a measurable difference, the report shows it. If it does, you have receipts.
+
+The framework is separated from any specific agent runtime, so it works wherever skills do. It is OpenAI-compatible by default, which means it works out of the box with OpenAI, Together, Groq, Anthropic via an OpenAI-compat layer, or any local Llama server that speaks the OpenAI chat API.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Quickstart
+
+```bash
+npx agent-skills-eval ./skills \
+  --target gpt-4o-mini \
+  --judge gpt-4o-mini \
+  --baseline \
+  --strict
+```
+
+Point it at a folder of skills, give it a target model and a judge model, and it produces a workspace with full artifacts and a static HTML report.
+
+### Step 2: Read the workspace
+
+```text
+agent-skills-workspace/
+└── iteration-1/
+    ├── meta.json            # run metadata
+    ├── benchmark.json       # rolled-up pass/fail per skill
+    ├── eval-basic/
+    │   ├── with_skill/      # output, timing, judge grading
+    │   └── without_skill/   # same, with the skill stripped
+    └── report/
+        └── index.html       # the visual report
+```
+
+Open `iteration-1/report/index.html` for the visual report.
+
+### Step 3: Install as a dependency
+
+```bash
+npm install agent-skills-eval
+```
+
+Or run without installing:
+
+```bash
+npx agent-skills-eval --help
+```
+
+## Deeper Analysis
+
+### The with_skill / without_skill split
+
+The most important design choice is the with_skill / without_skill split. Every eval runs both ways so you can see the actual lift from the skill — or its absence. The judge sees the eval's `expected_output` and `assertions` and grades each side independently. The `--baseline` flag is what enables the comparison; without it you only get the `with_skill` run, which is the part of the test that does not actually answer "is the skill helping."
+
+### The judge-graded outputs
+
+The judge is any chat model that speaks the OpenAI chat API. Pass/fail is reported with cited assertions, not vibes. That is a real win for the agentskills.io community: a `SKILL.md` that reads well but does not measurably improve outputs gets a failing grade, and a `SKILL.md` that reads poorly but consistently improves outputs gets a passing grade. The framework is honest about which kind of skill you have.
+
+### Tool-call assertions
+
+The framework supports deterministic checks for agents that call tools, not just generate text. Tool-call assertions are the right primitive for skills that wrap a CLI, a database, or an HTTP API. The output is a structured pass/fail against the expected tool calls, which is the same shape CI expects.
+
+### Portable artifacts
+
+The output is JSON and JSONL all the way down. Run today, diff tomorrow, plug into your own dashboard. The static HTML report is a drop-in report site you can publish anywhere with no infrastructure. The combination is what makes the framework fit into a real CI loop.
+
+### Spec compliance
+
+The framework implements the full agentskills.io specification: `SKILL.md` validation, `evals/evals.json`, the official `iteration-N` artifact layout, and the frontmatter rules. That compliance is what makes the framework usable for any `SKILL.md` that follows the spec, not just the ones the project author wrote.
+
+### How it works in practice
+
+The mental model is: for every eval defined in your skill, the framework runs the same prompt twice (with the skill loaded into context, and without the skill), sends both outputs to the target model, then sends both outputs to the judge model with the eval's `expected_output` and `assertions`. The judge grades each side independently. The rolled-up `benchmark.json` is the pass/fail per skill, and the `index.html` report is the visual answer to "is my skill working?"
+
+## Practical Evaluation Checklist
+
+- [ ] Do you author or maintain Agent Skills and want a real test framework for them?
+- [ ] Do you want a side-by-side comparison of with_skill vs without_skill outputs?
+- [ ] Do you have a judge model that speaks the OpenAI chat API?
+- [ ] Will you use the JSONL artifacts to diff runs over time?
+- [ ] Do you need tool-call assertions for skills that wrap a CLI or HTTP API?
+- [ ] Is the static HTML report the right output for your CI loop?
+- [ ] Do you need spec compliance with the full agentskills.io specification?
+- [ ] Will you run agent-skills-eval from CI as part of your skill release pipeline?
+
+## Security Notes
+
+agent-skills-eval is a test runner, not an agent runtime. The model endpoint you point it at is the trust boundary. Use a separate API key for evals so a leaked test key does not become a production key, and rotate it on a schedule. If you use the static HTML report, do not commit the report artifacts to a public repository if the eval inputs or model outputs include anything sensitive.
+
+The framework runs every eval twice. That doubles the model spend per eval, so a CI loop that runs on every PR can become expensive. Pin the target and judge models to the cheapest models that still give you useful signal, and only use the strongest judge model for the final report.
+
+The `SKILL.md` is loaded into context for the with_skill run. If your `SKILL.md` includes any prompt that should not be exposed to the model endpoint, the test runner is not the right place to keep it. The same is true of `evals.json` and the `expected_output` payloads.
+
+## FAQ
+
+**Q: Does agent-skills-eval work with Anthropic Claude?**
+**A:** Yes, via an OpenAI-compatible layer. The framework is OpenAI-compatible by default, so any provider that exposes an OpenAI chat API endpoint works.
+
+**Q: What is the difference between with_skill and without_skill?**
+**A:** The with_skill run loads the `SKILL.md` into the model's context. The without_skill run strips it. The judge grades both outputs against the same `expected_output` and `assertions`. The diff is the lift the skill actually provides.
+
+**Q: Can I use agent-skills-eval in CI?**
+**A:** Yes. The CLI is a one-liner, the artifacts are JSON and JSONL, and the report is a static HTML site. Most teams wire it into a workflow that runs on every `SKILL.md` change and stores the report as a build artifact.
+
+**Q: Does the framework support tool-call assertions?**
+**A:** Yes. Tool-call assertions are first-class and let you check the tool calls the agent made, not just the text output.
+
+**Q: Is agent-skills-eval spec compliant?**
+**A:** Yes. The framework implements the full agentskills.io specification: `SKILL.md` validation, `evals/evals.json`, the official `iteration-N` artifact layout, and the frontmatter rules.
+
+## Conclusion
+
+agent-skills-eval is the missing test framework for the Agent Skills ecosystem. The with_skill / without_skill split, the judge-graded outputs, the tool-call assertions, and the spec compliance make it a credible tool for any team that takes skill authoring seriously. If you author Agent Skills and you have been relying on vibes so far, this is the upgrade path. If you are not in the agentskills.io ecosystem, the framework is still a useful reference for how to do honest, side-by-side agent evaluation.

@@ -1,0 +1,144 @@
+---
+title: "MobileGym: Verifiable Mobile GUI Agent Simulator"
+description: "MobileGym is a browser-hosted Android simulator with 28 apps, 416 task templates, deterministic code-level judges, 256 parallel instances, and Sim-to-Real validated GRPO training."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "agent", "android", "reinforcement-learning"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mobilegym.webp"
+  alt: "MobileGym GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** MobileGym is an Apache-2.0, browser-hosted Android simulation environment with 28 apps, 416 parameterized task templates, sub-millisecond code-level judges, 256 parallel instances per server, and a Sim-to-Real validated GRPO run that transfers +42.8 pt in simulation to +40.7 pt on real hardware.
+
+## Source and Accuracy Notes
+
+- Project page: [mobilegym.dev](https://mobilegym.dev)
+- Source repository: [github.com/Purewhiter/mobilegym](https://github.com/Purewhiter/mobilegym)
+- License: Code Apache-2.0, data CC BY-NC 4.0 (verified in README badges)
+- Paper: [arxiv.org/abs/2605.26114](https://arxiv.org/abs/2605.26114)
+- Requires: Node 22+, Python 3.11+, Playwright Chromium
+- Source last checked: 2026-06-16
+
+## What Is MobileGym?
+
+MobileGym is a verifiable and highly parallel simulation platform for mobile GUI agent research. The README positions it against three walls in real-device and emulator environments: unreadable state, unwritable state, and irreversible side effects. Real-device ADB and accessibility trees expose UI but not balances, orders, or chat history. Daily-app state hides in encrypted databases and server backends. Transfers move real money, deactivation is permanent, and real RL on those apps is mostly a fantasy.
+
+MobileGym treats the entire environment as a structured JSON snapshot. The state is fully readable, fully writable, fully resettable, and fully cloneable. Judges read state directly rather than through stochastic VLM judgments. Reset, inject, snapshot, and clone the state into hundreds of parallel instances. The same environment powers trustworthy evaluation and scalable online RL.
+
+The headline numbers are 28 simulated apps, 416 parameterized task templates, deterministic sub-millisecond judges, 256 parallel instances on one server (about 400 MB RAM per instance and about 3 s cold start each), and a Sim-to-Real validated GRPO run on Qwen3-VL-4B that gains +42.8 pt in simulation and retains 95.1% of that gain on a real device (+40.7 pt).
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Install
+
+```bash
+# Frontend (the simulator itself)
+git clone https://github.com/Purewhiter/mobilegym.git
+cd mobilegym
+npm install
+
+# Benchmark / agent runtime (Python)
+pip install -r bench_env/requirements.txt
+playwright install chromium
+
+# Companion dataset (~1.4 GB)
+curl -L -o mobilegym-data.tar.gz \
+  https://github.com/Purewhiter/mobilegym/releases/download/data-v1.0/mobilegym-data-v1.tar.gz
+tar -xzf mobilegym-data.tar.gz && rm mobilegym-data.tar.gz
+```
+
+Node 22+ and Python 3.11+ are required. A Conda environment is recommended. The dataset is CC BY-NC 4.0.
+
+### Step 2: Boot the simulator
+
+Three serving modes cover exploration, single-agent evaluation, and heavy benchmark or RL:
+
+```bash
+npm run dev                                            # http://localhost:3000
+npm run build && npm run preview -- --port 4173        # http://localhost:4173
+./scripts/server/start_nginx_gateway.sh                # https://localhost:4180
+```
+
+The nginx gateway is required for more than about 8 parallel rollouts. The script builds `dist/`, generates a self-signed cert, and starts nginx with HTTP/2, 8 workers, and an API gateway. The `bench_env` runtime already sets `ignore_https_errors`, so the self-signed cert works out of the box.
+
+### Step 3: Talk to an agent
+
+```bash
+python -m bench_env.run \
+  --exec "Open WeChat and send 'blank.' a message 'Hello World!' " \
+  --env-url http://localhost:4173 \
+  --agent autoglm \
+  --model-base-url http://localhost:8001/v1 \
+  --model-name autoglm-phone-9b
+```
+
+### Step 4: Run the benchmark
+
+```bash
+# List every task template
+python -m bench_env.run --list
+```
+
+The benchmark emits five metrics: SR (Success Rate), PR (Progress Rate), FC (False Complete), USE (Unexpected Side Effects), and OT (Over-Turn). The README's leaderboard invites PRs to add new model rows with the full run command and a link to public run logs.
+
+## Deeper Analysis
+
+### The three walls
+
+The README names three walls that prior mobile agent benchmarks hit. Unreadable state forces verification onto stochastic VLM judges, which the project measures at 10.2% misjudgment. Unwritable state hides daily-app state in encrypted databases, so you cannot reset, inject, snapshot, or clone it. Irreversible side effects mean real-RL on real apps is mostly a fantasy. MobileGym is the design that breaks all three at once: state is structured JSON, so it is fully resettable, cloneable, and side-effect free.
+
+### Sim-to-Real transfer
+
+The Sim-to-Real transfer result is the most useful piece of evidence in the README. On a 59-task signal-bucket subset, 10 GRPO steps on one node lift Qwen3-VL-4B by +42.8 pt in simulation and +40.7 pt on real hardware, a 95.1% retention of the simulation gain. The training recipe is in the paper Appendix and uses 3 RTX Pro 6000 GPUs and 96 parallel browser instances. The result is a credible demonstration that simulation can train models that transfer.
+
+### Apps catalog and tasks
+
+The 28 apps and 416 task templates are the breadth of the platform. Apps are simulated in the browser and parameterized through runtime overlays, so a single task template can be instantiated with a contact named "Mom" and a chat message, a particular Bilibili video, a particular RedBook post, an eBay listing, or a theme or wallpaper. That is what makes the benchmark extensible: you add a new app by adding its state schema and a few task templates.
+
+### The benchmark loop
+
+The benchmark loop is: (1) instantiate a task, binding template parameters and patching the runtime overlay; (2) fork the structured state into N parallel rollouts where the agent acts via tap, type, swipe, back, home, wait, drag, or complete; (3) verify outcomes by diffing the post-rollout state against expectations and side-effect rules; (4) emit benchmark metrics and a dense RL reward (success + progress - side-effect - false-completion). The judge runs in sub-millisecond because it is a code-level diff rather than a VLM call.
+
+## Practical Evaluation Checklist
+
+- [ ] Are you researching or training mobile GUI agents that need verifiable evaluation?
+- [ ] Do you need structured JSON state rather than accessibility-tree + VLM judgment?
+- [ ] Will you run more than 8 parallel rollouts, and can you operate the nginx gateway?
+- [ ] Do you have Node 22+, Python 3.11+, and Playwright Chromium ready?
+- [ ] Can you download the ~1.4 GB companion dataset (CC BY-NC 4.0)?
+- [ ] Do you need the Sim-to-Real validated GRPO training recipe from the paper?
+- [ ] Will you extend the platform with new apps and task templates through the runtime overlay?
+- [ ] Are you prepared to publish your benchmark numbers to the leaderboard with a run command and a public run log?
+
+## Security Notes
+
+MobileGym runs entirely in the browser, so the simulation itself is sandboxed and consequence-free. The risk surface is the agent runtime (`bench_env`), the model endpoint URL, and the dataset. The dataset is CC BY-NC 4.0, so you cannot use it in a commercial product without a separate license from the rightsholder, and the dataset disclaimer is in `mobilegym-data/DISCLAIMER.md`.
+
+The agent runtime calls the model endpoint you provide. Treat the model base URL and API key the way you would treat any other LLM endpoint: keep the key out of version control, rotate it on a schedule, and isolate the agent from any production credentials. If you use the nginx gateway with a self-signed cert, only do that on a private network; the gateway is intended for local benchmark and RL runs, not for production traffic.
+
+## FAQ
+
+**Q: Is MobileGym an Android emulator?**
+**A:** No. MobileGym is a browser-hosted mobile simulation environment. The 28 apps are simulated in JavaScript, and the entire state is a structured JSON snapshot that is fully readable, writable, resettable, and cloneable.
+
+**Q: How is Sim-to-Real transfer measured?**
+**A:** The README documents a 59-task signal-bucket subset and a Qwen3-VL-4B GRPO run with 10 steps. The simulation gain is +42.8 pt and the real-device gain is +40.7 pt, a 95.1% retention of the simulation gain. The training recipe is in the paper Appendix.
+
+**Q: How many parallel instances can I run?**
+**A:** About 256 parallel instances on a single server, with about 400 MB RAM per instance and about 3 s cold start each. The nginx gateway is required for more than about 8 parallel rollouts.
+
+**Q: Can I add a new app or task template?**
+**A:** Yes. Apps and tasks are extensible. The README invites PRs to the leaderboard with the full run command and a link to public run logs. The runtime overlay pattern lets you parameterize a single task template across many bindings.
+
+**Q: What is the difference between SR, PR, FC, USE, and OT?**
+**A:** SR is Success Rate, PR is Progress Rate, FC is False Complete, USE is Unexpected Side Effects, and OT is Over-Turn. The benchmark emits all five plus a dense RL reward.
+
+## Conclusion
+
+MobileGym is the most credible open mobile agent benchmark we have seen. The combination of structured JSON state, code-level judges, hundreds of parallel instances, and a Sim-to-Real validated GRPO run makes it a real platform, not a demo. If you are researching or training mobile GUI agents, MobileGym belongs in your evaluation pipeline. If you are just exploring mobile automation, the dev mode at `localhost:3000` is a friendlier starting point than a real device.

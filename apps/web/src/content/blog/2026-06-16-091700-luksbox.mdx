@@ -1,0 +1,120 @@
+---
+title: "LUKSbox: Rust Encrypted Vaults for Cloud and Shared Media"
+description: "LUKSbox is an Apache-2.0 Rust encrypted-container tool with passphrase, FIDO2, TPM 2.0, and ML-KEM hybrid post-quantum keyslots, mountable as a real drive on Linux, macOS, and Windows."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "encryption", "rust", "post-quantum"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/luksbox.webp"
+  alt: "LUKSbox GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** LUKSbox is an Apache-2.0, Rust-based encrypted-container tool that lets you store sensitive files on cloud sync, NAS, USB sticks, or shared media without trusting the host, with passphrase, FIDO2 (YubiKey, Titan, Nitrokey, Windows Hello), TPM 2.0, and ML-KEM-768/1024 hybrid post-quantum keyslots, and mounts as a real drive on Linux, macOS, and Windows.
+
+## Source and Accuracy Notes
+
+- Project page: [luksbox.penthertz.com](https://luksbox.penthertz.com/)
+- Source repository: [github.com/PentHertz/LUKSbox](https://github.com/PentHertz/LUKSbox)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- Status: pre-1.0, on-disk format locked
+- Source last checked: 2026-06-16
+
+## What Is LUKSbox?
+
+LUKSbox is a traveling encrypted vault. The README opens with a threat model that almost everyone actually has: you already store sensitive files where you do not fully control the storage. iCloud, Drive, Dropbox, OneDrive, S3, Backblaze, NAS units, USB sticks that travel, backup tapes that end up at a recycler — the provider promises encryption-at-rest with their keys. LUKSbox encrypts the file before it leaves your machine, under your keys, in a single container that is opaque to the provider and tamper-evident on the way back.
+
+A LUKSbox vault is one file (`.lbx`), optionally with a separate header (`.hdr`) and post-quantum sidecar (`.kyber`) that you keep on different storage. Drop it on any cloud or shared medium. The provider sees one indistinguishable-from-random blob and cannot decrypt it even under legal compulsion. Mount it locally as a real drive when you need to use it.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Requirements
+
+LUKSbox is a Rust workspace. The README's status table documents `cargo test --workspace` with 200+ tests passing and `cargo audit` reporting 0 vulns on Linux and macOS, plus 30M+ fuzz iterations across 10 libFuzzer harnesses. Building from source is the standard `cargo` flow.
+
+### Step 2: Build and install
+
+```bash
+git clone https://github.com/PentHertz/LUKSbox.git
+cd LUKSbox
+cargo build --release
+cargo install --path crates/luksbox-cli
+```
+
+### Step 3: Create a vault
+
+The CLI is the entry point. The README's architecture section documents the on-disk graph and the unlock sequence. The first step is to create a vault and pick at least one keyslot (passphrase, FIDO2, TPM 2.0, or hybrid post-quantum).
+
+### Step 4: Mount the vault
+
+The vault mounts as a real drive on Linux, macOS, and Windows. The detailed mount steps and platform-specific caveats are in the docs at [luksbox.penthertz.com/docs/](https://luksbox.penthertz.com/docs/).
+
+### Step 5: Forensic recovery if needed
+
+The forensic toolkit ships `header-backup`, `check`, and `extract --tolerate-errors`. The README is honest that the toolkit helps in many damage scenarios but cannot recover bytes that are no longer on disk or no longer AEAD-tagged. Always keep an unencrypted copy somewhere you trust for any file you cannot afford to lose.
+
+## Deeper Analysis
+
+### The comparison table
+
+The README's threat-model comparison table is the most useful piece of evidence. Plain cloud upload leaves the file readable by the provider and exposed to a government request. Cloud + provider encryption still allows the provider to read the data because they hold the key. LUKSbox's claim is that the provider cannot read the file, the data is not exposed to a government request, silent file tamper is detected via per-chunk AEAD, whole-vault rollback is detected via an anchor sidecar, the "harvest now, decrypt later" threat is mitigated by an ML-KEM-768/1024 hybrid slot, a hardware key (FIDO2, TPM, or Windows Hello) can be required to open the vault, and the vault file looks like random data with a detached header. The full per-tool comparison (vs LUKS2, VeraCrypt, age, gocryptfs, Cryptomator, BitLocker, FileVault) is on the project website.
+
+### The unlock sequence
+
+The architecture diagram makes the unlock sequence concrete. The Master Volume Key (MVK) is the root secret. Keyslots do not encrypt files directly; they wrap the MVK. Once a valid keyslot unwraps the MVK, every other key in the vault is derived from it via HKDF-SHA256 with a per-purpose `info` string. The Header HMAC key authenticates the header. The Metadata AEAD key encrypts the metadata tree. Per-file HKDF keys encrypt the file chunks. The Anchor HMAC key signs the rollback anchor. Lose the keyslot material, lose the MVK; revoke a slot, and that material is permanently unable to recover the MVK from this vault.
+
+### The cryptographic primitives
+
+The default AEAD is AES-256-GCM-SIV, with AES-256-GCM and ChaCha20-Poly1305 as alternatives. The header is authenticated with HMAC-SHA256 over the entire 8 KiB header. Passphrases are stretched with Argon2id (default 256 MiB / 3 / 4) and the cost parameters are bounded by the parser to reject DoS attempts. FIDO2 hmac-secret (CTAP2 sec.6.5) supports both wrap mode and direct mode. TPM 2.0 binds a vault to the local chip on Linux, with an optional PIN and a fused TPM+FIDO2 mode. ML-KEM-768 and ML-KEM-1024 (FIPS 203) provide the post-quantum half of every hybrid keyslot, mixed with the classical half via HKDF.
+
+### The status table
+
+The status table is unusually honest for a pre-1.0 project. The on-disk format is locked. The cryptographic primitives are NIST/RFC standards built on RustCrypto. Nine internal audit rounds have shipped. External paid audit and broader real-world deployment are the next milestones. The third-party audit has not yet been performed, but an engagement scope package is available on request to `security@penthertz.com`.
+
+### What LUKSbox is not
+
+The README is explicit that a LUKSbox vault is a traveling copy, not a master copy. Use it for the cloud, a USB stick, a vault you share with a colleague or client, anywhere you would not put plaintext. Like every encrypted container, it is a single point of failure: if the `.lbx` file is corrupted or every keyslot becomes inaccessible, the data is gone. The forensic toolkit helps in many damage scenarios but cannot recover bytes that are no longer on disk.
+
+## Practical Evaluation Checklist
+
+- [ ] Do you store sensitive files on cloud sync, NAS, USB sticks, or shared media?
+- [ ] Do you need the provider to not be able to read the file, even under legal compulsion?
+- [ ] Will you use FIDO2 (YubiKey, Titan, Nitrokey, Windows Hello) or TPM 2.0 as a keyslot?
+- [ ] Do you need the ML-KEM-768/1024 hybrid post-quantum keyslot for "harvest now, decrypt later"?
+- [ ] Will you keep the `.lbx`, `.hdr`, and `.kyber` files on different storage?
+- [ ] Do you need the vault to mount as a real drive on Linux, macOS, and Windows?
+- [ ] Will you run the forensic toolkit (`header-backup`, `check`, `extract --tolerate-errors`) as part of your backup discipline?
+- [ ] Are you prepared to keep an unencrypted master copy for any file you cannot afford to lose?
+
+## Security Notes
+
+LUKSbox is an encrypted container, so the security model is the standard one: the strength of the container is the strength of the weakest keyslot, the weakest passphrase, and the integrity of the underlying storage. The `.lbx`, `.hdr`, and `.kyber` files are designed to live on different storage so that a single failure does not compromise the vault, and the anchor sidecar detects whole-vault rollback. Treat the sidecar as a tamper detector, not as a backup.
+
+The pre-1.0 status is real. The on-disk format is locked and the cryptographic primitives are NIST/RFC standards, but the external paid audit has not yet been performed. The README offers an engagement scope package on request to `security@penthertz.com` if you want to commission one. Treat the pre-1.0 status as the project's honest answer to "should I trust this with my most sensitive files."
+
+The forensic toolkit helps in many damage scenarios but cannot recover bytes that are no longer on disk or no longer AEAD-tagged. Always keep an unencrypted copy somewhere you trust for any file you cannot afford to lose. The README is explicit that the vault is a traveling copy, not a master copy, and the same caveat applies to your backup discipline.
+
+## FAQ
+
+**Q: Can the cloud provider read my LUKSbox vault?**
+**A:** No. The provider sees an indistinguishable-from-random blob and does not have the key. The README's threat-model comparison table documents this against plain cloud upload and cloud + provider encryption.
+
+**Q: Does LUKSbox support FIDO2 hardware keys?**
+**A:** Yes. FIDO2 hmac-secret (CTAP2 sec.6.5) supports wrap mode and direct mode, and works with YubiKey, Titan, Nitrokey, and Windows Hello authenticators.
+
+**Q: Is the post-quantum keyslot real?**
+**A:** Yes. ML-KEM-768 and ML-KEM-1024 (FIPS 203) provide the post-quantum half of every hybrid keyslot, mixed with the classical half via HKDF. The `.kyber` sidecar holds the ML-KEM seed on separate storage.
+
+**Q: What is the pre-1.0 status?**
+**A:** The on-disk format is locked, the cryptographic primitives are NIST/RFC standards, and nine internal audit rounds have shipped. The external paid audit has not yet been performed. The README offers an engagement scope package on request to `security@penthertz.com`.
+
+**Q: What if my vault is corrupted?**
+**A:** The forensic toolkit ships `header-backup`, `check`, and `extract --tolerate-errors`. The toolkit helps in many damage scenarios but cannot recover bytes that are no longer on disk or no longer AEAD-tagged. Keep an unencrypted master copy for any file you cannot afford to lose.
+
+## Conclusion
+
+LUKSbox is one of the more credible encrypted-container projects in the open-source ecosystem. The threat model is the one almost everyone actually has, the on-disk format is locked, the cryptographic primitives are standards-based, and the post-quantum keyslot is real rather than aspirational. The pre-1.0 status and the lack of an external paid audit are the trade-offs. If you need a traveling encrypted vault that survives the next decade of "harvest now, decrypt later" threats, LUKSbox is worth a serious look. If you need a system-disk encryption tool, LUKS2 or FileVault is the right answer.

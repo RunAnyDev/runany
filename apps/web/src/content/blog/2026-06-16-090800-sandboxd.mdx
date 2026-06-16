@@ -1,0 +1,145 @@
+---
+title: "sandboxd: Self-Hosted Dev Sandboxes with Preview URLs"
+description: "sandboxd is an MIT-licensed self-hosted engine for isolated Linux sandboxes, built-in OpenCode and Claude Code agents, and live preview URLs from a single Go binary."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "self-hosted", "sandbox", "docker"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sandboxd.webp"
+  alt: "sandboxd GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** sandboxd is an MIT-licensed, self-hosted engine that gives every user an isolated Linux container, a built-in OpenCode or Claude Code coding agent, and a live preview URL, runnable from a single Go binary on a single host with Docker.
+
+## Source and Accuracy Notes
+
+- Project page: [sandboxd.io](https://www.sandboxd.io/)
+- Source repository: [github.com/tastyeffectco/sandboxd](https://github.com/tastyeffectco/sandboxd)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Requirements: Docker Engine + Compose plugin on Linux
+- Source last checked: 2026-06-16
+
+## What Is sandboxd?
+
+sandboxd is the open-source backend for the "describe an app, get a live link" category of products. Where Lovable, Bolt, v0, and Replit are the closed-source products, sandboxd is the self-hostable engine. A single HTTP request creates a private, isolated Linux container with its own filesystem and memory limits, runs an AI coding agent inside it, and exposes the dev server at a shareable preview URL.
+
+The architecture is deliberately small. One Go control plane tells Docker what to do, Traefik handles the URLs, and SQLite is the database. There is no Kubernetes, no separate database server, and no message queue. A host-memory pressure reaper keeps one noisy user from taking the rest of the platform down. A reconciler re-converges Docker to the SQLite state of truth on every boot, so the platform survives a host restart without manual recovery.
+
+sandboxd is a "many sandboxes for other people" platform. The README is explicit that if you need one or two long-lived containers for yourself, a shell script, `docker run`, or LXD is simpler. sandboxd earns its keep the moment you have many users, many sandboxes, or per-user preview URLs in your product.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Requirements
+
+- Linux host
+- Docker Engine
+- Docker Compose plugin
+
+### Step 2: Install
+
+```bash
+git clone https://github.com/tastyeffectco/sandboxd.git
+cd sandboxd
+./install.sh
+```
+
+`install.sh` checks Docker, writes a `.env`, builds the sandbox base image and the control plane, and starts the stack. The API is then live at `http://127.0.0.1:9090` (verify with `curl http://127.0.0.1:9090/healthz` → `ok`).
+
+### Step 3: Have an agent build an app
+
+The base image already includes OpenCode and Claude Code CLIs. OpenCode runs on its free plan out of the box; pass your own provider key via `env` to use your account.
+
+```bash
+API=http://127.0.0.1:9090
+
+# create a sandbox that will serve on port 3000
+ID=$(curl -s -XPOST $API/sandbox -H 'content-type: application/json' \
+       -d '{"ports":[3000]}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+echo "sandbox: $ID"
+
+# spin a coding agent with a request — it works in ~/workspace/app
+curl -s -XPOST $API/v1/sandboxes/$ID/tasks -H 'content-type: application/json' -d '{
+        "prompt":"create a Vite app that shows a todo list and run it on port 3000",
+        "agent":"opencode"
+     }'
+
+# stream the agent's progress (Server-Sent Events)
+curl -N $API/v1/sandboxes/$ID/tasks/<taskId>/events
+```
+
+### Step 4: Open the live preview
+
+Once the app serves on port 3000 it is reachable at its preview URL:
+
+```text
+http://s-<id>-3000.preview.localhost
+```
+
+`*.localhost` resolves to `127.0.0.1` in every modern browser, so it works locally with no DNS and no certificates. The first request to a stopped sandbox wakes it automatically. On a real domain you get `https://s-<id>-3000.preview.yourdomain.com` with TLS handled by Traefik.
+
+## Deeper Analysis
+
+### Sleep and wake
+
+The single most important design choice is that sandboxes go to sleep when nobody is using them and wake on the next request. The workspace files are kept on disk the whole time, so a stopped sandbox can resume from where it was. That is the difference between "many sandboxes on a $20 server" and "one VM per user on a $2,000 cluster." The README cites it as the headline reason for the project's existence.
+
+### The reconciler
+
+A reconciler converges Docker to the SQLite state of truth on every boot. If the host restarts, every sandbox the platform believed existed is rebuilt, files and all, and any orphan containers are removed. The result is that the platform recovers from crashes and reboots without manual intervention. For a multi-tenant product, that property is not optional.
+
+### Per-sandbox limits
+
+Each sandbox has its own memory limit, PID limit, and isolated filesystem. The host has a memory pressure reaper that will stop the least-recently-used sandboxes if free memory drops below a threshold. One user cannot read or break another user's code, and one user's runaway process cannot starve the rest of the platform.
+
+### The agent lifecycle
+
+The HTTP API exposes `create`, `exec`, `stop`, `destroy`, `write-files`, and `run-agent-task` endpoints. The agent endpoint submits a prompt, streams progress through SSE, and captures a durable result. That is the full lifecycle the README positions as "agents with a lifecycle" rather than the typical "fire-and-forget" CLI invocation.
+
+### Kubernetes as an interface swap
+
+The control plane talks to the container runtime through a thin `docker` CLI boundary, so a Kubernetes Job/Pod backend is an interface swap rather than a rewrite. The README invites a Kubernetes backend as a great first contribution. Today the platform targets a single Docker host, which is the explicit sweet spot for teams that do not want to run a cluster just for sandboxes.
+
+## Practical Evaluation Checklist
+
+- [ ] Are you building a multi-tenant product (AI app-builder, agent platform, coding playground, per-branch preview environments)?
+- [ ] Do you want to self-host on a single Linux host with Docker, not Kubernetes?
+- [ ] Is per-user preview URL routing with TLS a real requirement?
+- [ ] Do you need per-sandbox memory and PID limits plus a host-memory pressure reaper?
+- [ ] Do you want the built-in OpenCode or Claude Code agents in the base image?
+- [ ] Do you need the API to expose `create`, `exec`, `stop`, `destroy`, `write-files`, and `run-agent-task`?
+- [ ] Are you prepared to operate a single Go control plane backed by SQLite and Traefik?
+- [ ] Will you commit to letting the reconciler handle crash recovery, or do you need a different control model?
+
+## Security Notes
+
+sandboxd is a multi-tenant platform, so the security model is the product. Each sandbox is an isolated Linux container with its own filesystem, memory, and PID limits, and the host has a memory pressure reaper. The preview URLs are scoped to a wildcard under your domain; in production, terminate TLS at Traefik and consider authn/authz at the Traefik or sandboxd layer.
+
+The agent task endpoint writes files and runs commands inside the sandbox. Treat any prompt submitted through `run-agent-task` as code that will execute against your platform's resources. Use the same secret hygiene you would for any other agent surface: do not commit `.env` files, inject provider keys at create time via the `env` field, and rotate the keys on a schedule.
+
+The sleep and wake cycle means a stopped sandbox can be re-woken by anyone who knows the preview URL. If the URLs are predictable or shared, add a token or a session check before you expose the platform to real users.
+
+## FAQ
+
+**Q: Is sandboxd a single binary?**
+**A:** The control plane is a single Go binary. The full stack is the binary, Docker, Traefik, and SQLite, all orchestrated by an `install.sh` script that writes a `.env` and builds the base image.
+
+**Q: Do sandboxes run on Kubernetes?**
+**A:** Not by default. The control plane talks to the container runtime through a thin `docker` CLI boundary, so a Kubernetes backend is an interface swap. The README targets a single Docker host, which is the sweet spot for teams that do not want to run a cluster.
+
+**Q: What agents are included in the base image?**
+**A:** The OpenCode and Claude Code CLIs are pre-installed. OpenCode runs on its free plan out of the box. To use your own account, inject the provider key at create time via the `env` field.
+
+**Q: How do preview URLs work?**
+**A:** Traefik handles the routing. Locally, `*.localhost` resolves to `127.0.0.1` with no DNS or certificates. On a real domain, Traefik handles TLS for `s-<id>-3000.preview.yourdomain.com` and the first request to a stopped sandbox wakes it.
+
+**Q: What survives a host reboot?**
+**A:** The SQLite state of truth. The reconciler re-converges Docker to it on every boot, rebuilding sandboxes and removing orphans. Workspace files are kept on disk the whole time.
+
+## Conclusion
+
+sandboxd is a focused, well-documented self-hosted engine for the "describe an app, get a live link" category. The choice to ship one Go binary plus Docker, Traefik, and SQLite keeps the platform legible, and the sleep-and-wake plus reconciler design is what makes "many sandboxes on one host" a real option. If you are building an AI app-builder, an agent platform, or per-user preview environments, and you are willing to operate a single Linux host, sandboxd is worth a serious look. If you need one or two sandboxes for yourself, the README itself will tell you to use a shell script instead.

@@ -1,0 +1,134 @@
+---
+title: "Parastore: Isometric 3D Retail Simulator with LLM Shoppers"
+description: "Parastore is a synthetic-consumer retail sandbox where you draw a store, generate LLM personas, and watch them shop an isometric 3D space with pathfinding and per-aisle analytics."
+pubDate: "2026-06-16"
+tags: ["github-trending", "dev-tools", "agent-simulation", "llm", "react-three-fiber"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/parastore.webp"
+  alt: "Parastore GitHub tool guide thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Parastore is an MIT-licensed synthetic-consumer retail sandbox where you draw a store layout, generate LLM personas, and watch the shoppers walk an isometric 3D space with pathfinding, picking up items, and producing per-aisle analytics.
+
+## Source and Accuracy Notes
+
+- Project page: [intellicia.co](https://intellicia.co)
+- Source repository: [github.com/intellicia-public/parastore](https://github.com/intellicia-public/parastore)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Tech: Python 3.13 + FastAPI + LiteLLM, React 19 + Vite + React Three Fiber
+- Source last checked: 2026-06-16
+
+## What Is Parastore?
+
+Parastore is an experiment in extending synthetic consumers from surveys to physical retail. Intellicia's broader tooling is built around LLM-generated personas run against surveys; Parastore is the question of whether the same approach can simulate how a synthetic shopper walks a store, picks up products, and ends up paying for them.
+
+The project is a prototype, not a production forecasting tool. The README is explicit that a rigorous offline-sales model would need POS history, real foot-traffic data, SKU-level taxonomies, weather and seasonality signals, queueing dynamics, and a lot more than what is wired up here. Parastore is closer to a sketch. The team is open sourcing it because the sketch is useful: as a starting point, as a reference for LLM-driven agent simulation end-to-end, or as something fun to play with.
+
+## Repo-Specific Setup Workflow
+
+### Step 1: Requirements
+
+- Python 3.13+ with [uv](https://github.com/astral-sh/uv)
+- Node 20+ with pnpm 10.33.0 (pinned in `frontend/package.json`)
+- An LLM provider API key. The default model is `gemini/gemini-3.1-pro-preview` via LiteLLM, so a `GEMINI_API_KEY` works out of the box. To switch providers, edit `backend/src/store_emulator/application/config.py` and supply the matching `*_API_KEY`.
+
+### Step 2: Configure the backend
+
+```bash
+cp backend/.env.example backend/.env   # add your LLM API key — DO NOT commit real keys
+```
+
+### Step 3: Run the dev script
+
+```bash
+./scripts/dev.sh
+```
+
+`scripts/dev.sh` runs the backend (`uvicorn` on `:8000`) and the frontend (`vite` on `:5173`) together. `Ctrl-C` stops both. Open `http://localhost:5173` in a browser.
+
+### Step 4: Run each side separately
+
+**Backend:**
+
+```bash
+cd backend
+uv sync
+uv run uvicorn store_emulator.server.main:app --reload
+```
+
+Health check: `curl http://localhost:8000/api/health`. The interactive OpenAPI docs are at `http://localhost:8000/docs`.
+
+**Frontend:**
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+The frontend runs on `http://localhost:5173`.
+
+## Deeper Analysis
+
+### The four use cases
+
+The README positions Parastore against four concrete use cases. Store Layout and Circulation A/B Testing experiments with different aisle structures, entry points, and customer pathways to optimize traffic flow and eliminate dead zones. Product Placement and Conversion Testing simulates how moving high-margin items or changing rack categories impacts engagement and conversion. Acquisition and Renewal Valuation prototypes potential store layouts for new acquisitions or upcoming remodels before committing physical resources. The use cases are all "risk-free environment" experiments, which is the right framing for a prototype.
+
+### The simulation accuracy chart
+
+The README ships a `predicted_vs_actual_sales.png` chart that compares actual sales history from a physical convenience store with synthetic consumer simulations driven by Parastore. The headline numbers are Spearman correlation 0.955 by category, JS-Similarity 0.802 across all 109 products, and NDCG@all 0.868 across all 109 products. The README adds a footnote that the results were generated via Intellicia's own synthetic consumers, not the synthesis method published in this repo. That footnote is the kind of disclosure that makes the rest of the chart easier to take seriously.
+
+### The tech stack
+
+The backend is Python 3.13 with FastAPI, Pydantic, LiteLLM, Instructor, pathfinding, pandas, and openpyxl. The frontend is React 19 with Vite, TypeScript, React Three Fiber (Three.js), TanStack Router and Query, Zustand, Tailwind v4, shadcn/ui, Recharts, and ExcelJS. The pathfinding library is what lets a persona walk the store rather than teleport between aisles, and the LiteLLM integration is what lets you switch providers by editing a config file.
+
+### The draw-a-store model
+
+The most distinctive UX choice is the "draw a store" model. You sketch the aisles and racks, place the entry and exit, set the high-margin items, and then generate personas that shop the space. The combination of a drawable store and LLM personas is what makes the simulator usable: you can change a layout in a few minutes and re-run the simulation, instead of rebuilding a model.
+
+### The synthetic consumer harness
+
+The LLM shopper loop is the heart of the platform. A persona is given a goal, a budget, and a shopping list, then asked to navigate the store, pick up items, and pay. The pathfinding layer moves the persona through the space, and the LLM layer decides what to do at each step. The combination produces per-aisle analytics that the README positions as "what if we tried it this way?" experiments.
+
+## Practical Evaluation Checklist
+
+- [ ] Are you researching LLM-driven agent simulation end-to-end?
+- [ ] Do you want to A/B test store layouts, circulation, or product placement without physical prototypes?
+- [ ] Will you start from the synthetic-consumer harness and add your own data?
+- [ ] Do you have a `GEMINI_API_KEY` or another LiteLLM-supported provider key?
+- [ ] Are Python 3.13+ with `uv` and Node 20+ with pnpm 10.33.0 available?
+- [ ] Will you treat the prototype as a sketch, not a production forecasting tool?
+- [ ] Do you want a React Three Fiber + Tailwind v4 frontend you can extend?
+
+## Security Notes
+
+Parastore is a prototype, so the security model is the same as any other dev server: the backend listens on `:8000` and the frontend on `:5173`. The LLM provider key is loaded from `backend/.env`, so do not commit that file. The README explicitly says "DO NOT commit real keys." If you switch providers, edit `backend/src/store_emulator/application/config.py` and supply the matching `*_API_KEY`, and keep the config in a private fork.
+
+The personas and the simulation are generated locally. The persona prompts and the resulting transcripts may include real product names, categories, and prices. Treat the simulation output as collaboration data and keep it in private repositories if your store plans are sensitive.
+
+## FAQ
+
+**Q: Is Parastore a production forecasting tool?**
+**A:** No. The README is explicit that it is a prototype, not a production forecasting tool. A rigorous model would need POS history, real foot-traffic data, SKU-level taxonomies, weather and seasonality signals, and queueing dynamics.
+
+**Q: What LLM providers are supported?**
+**A:** Any provider LiteLLM supports. The default is `gemini/gemini-3.1-pro-preview` via a `GEMINI_API_KEY`. To switch providers, edit `backend/src/store_emulator/application/config.py` and supply the matching `*_API_KEY`.
+
+**Q: Where do the simulation accuracy numbers come from?**
+**A:** The README cites a chart that compares actual sales history from a physical convenience store with synthetic consumer simulations driven by Parastore. A footnote clarifies that the results were generated via Intellicia's own synthetic consumers, not the synthesis method published in the repo.
+
+**Q: Can I run the backend and frontend separately?**
+**A:** Yes. `cd backend && uv sync && uv run uvicorn store_emulator.server.main:app --reload` runs the backend on `:8000`, and `cd frontend && pnpm install && pnpm dev` runs the frontend on `:5173`.
+
+**Q: What is the right way to think about Parastore?**
+**A:** The README's framing is the most useful one: a "what if we tried it this way?" sketch. Use it as a starting point for your own experiments or as a reference for how to wire up an LLM-driven agent simulation end-to-end.
+
+## Conclusion
+
+Parastore is an honest prototype with a clear use case and a credible accuracy chart. The combination of a drawable store, LLM personas, and a pathfinding-aware isometric 3D space is genuinely useful for retail A/B testing without physical prototypes. Treat the published numbers as Intellicia's internal benchmark, not as a generic claim about LLM shopper simulation, and Parastore becomes a more useful starting point for your own experiments.
