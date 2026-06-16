@@ -1,0 +1,226 @@
+---
+title: "machine0 - Persistent NixOS VMs from the CLI"
+description: "machine0 gives developers persistent NixOS and Ubuntu VMs with static IPs, per-minute billing, and an MCP server so AI agents can provision infrastructure from the terminal."
+pubDate: "2026-06-16"
+tags: ["nixos", "cloud-vms", "cli", "mcp", "yc", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/machine0.webp"
+  alt: "machine0 product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** machine0 is a YC-backed CLI tool that provisions persistent NixOS and Ubuntu VMs with static IPs, per-minute billing, and a remote MCP server so AI agents like Claude Code and Hermes can manage infrastructure programmatically.
+
+## Source and Accuracy Notes
+
+- Project page: [machine0.io](https://machine0.io)
+- Documentation: [docs.machine0.io](https://docs.machine0.io)
+- Source repository (images): [github.com/fdmtl/machine0-nixos](https://github.com/fdmtl/machine0-nixos), [github.com/fdmtl/machine0-ubuntu](https://github.com/fdmtl/machine0-ubuntu)
+- HN launch thread: [news.ycombinator.com/item?id=48543245](https://news.ycombinator.com/item?id=48543245)
+- Source last checked: 2026-06-16
+
+## What Is machine0?
+
+machine0 is a CLI-first cloud VM platform designed for developers who want persistent, reproducible environments without dashboard-driven workflows. Every VM runs real KVM/QEMU with dedicated CPU and RAM, a static public IP, and an HTTPS endpoint at `<vm-name>.mac0.io`.
+
+The project launched on Show HN with 86 points and active discussion from developers already using it for hosting OpenClaw, Hermes, and web apps.
+
+Key differentiators from traditional VPS providers:
+
+- **NixOS with Flakes** — define your entire OS as code, deterministic builds, one-command rollbacks
+- **CLI-only operations** — every command supports `--json` output for scripting and agent integration
+- **Remote MCP server** — AI agents can create, manage, and destroy VMs programmatically
+- **Suspend/resume** — snapshot a VM's full state, stop billing, restore later
+- **Per-minute billing** — starts at $0.013/hr ($9/month) for a small instance
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+curl -LsSf https://machine0.io/install.sh | sh
+```
+
+Or via npm:
+
+```bash
+npm install -g @machine0/cli
+```
+
+### Step 2: Create Your First VM
+
+```bash
+# Create a NixOS VM with default size
+machine0 new my-vm
+
+# Specify image, size, and region
+machine0 new devbox --image nixos-25-11-loaded --size large --region us
+
+# Ubuntu with pre-installed tools (Docker, Node, Python, Claude Code, Codex)
+machine0 new ubuntu-dev --image ubuntu-24-04-loaded --size medium
+```
+
+### Step 3: SSH In and Start Working
+
+```bash
+machine0 ssh my-vm
+
+# The VM has root access via sudo, a dedicated IP, and HTTPS at:
+# https://my-vm.mac0.io
+```
+
+### Step 4: Manage VMs
+
+```bash
+machine0 ls                    # list all VMs
+machine0 get my-vm             # show details (IP, size, status)
+machine0 stop my-vm            # stop (still billed, resources reserved)
+machine0 suspend my-vm         # snapshot + destroy (pay only storage)
+machine0 start my-vm           # resume from stopped or suspended state
+machine0 rm my-vm              # destroy permanently
+```
+
+### Step 5: Snapshot and Clone
+
+```bash
+# Create a golden master image from your configured VM
+machine0 images new my-vm my-snapshot
+
+# Remove the original
+machine0 rm my-vm
+
+# Spin up clones from the snapshot
+machine0 new my-clone --image my-snapshot --size xxl
+```
+
+## Pricing and Sizes
+
+machine0 uses per-minute billing with the same pricing across all four regions (US, UK, EU, Asia). Suspend VMs to stop billing — you only pay for image storage ($0.078/GB/month) while suspended.
+
+| Size | vCPU | RAM | Disk | $/hour | ~$/month |
+|------|------|-----|------|--------|----------|
+| `small` | 1 | 1 GB | 25 GB | $0.013 | $9 |
+| `medium` | 2 | 2 GB | 40 GB | $0.026 | $19 |
+| `large` | 2 | 4 GB | 80 GB | $0.052 | $38 |
+| `xl` | 4 | 8 GB | 160 GB | $0.104 | $76 |
+| `xxl` | 8 | 16 GB | 320 GB | $0.208 | $152 |
+| `xxxl` | 16 | 64 GB | 200 GB | $0.825 | $602 |
+| `4xl` | 32 | 128 GB | 480 GB | $1.980 | $1,445 |
+| `5xl` | 48 | 192 GB | 720 GB | $2.970 | $2,168 |
+| `6xl` | 60 | 240 GB | 900 GB | $3.714 | $2,711 |
+
+GPU instances (H100, H200, L40S, MI300X) are available for ML workloads.
+
+## MCP Integration for AI Agents
+
+machine0 ships with a remote MCP server that lets AI agents manage infrastructure without SSH keys or manual intervention. This is particularly useful for autonomous coding agents like Claude Code, Codex, and Hermes that need their own isolated environments.
+
+Example workflow with Claude Code:
+
+```bash
+# Create a VM and SSH in
+machine0 new openclaw --image nixos-25-11-openclaw --size large
+machine0 ssh openclaw
+
+# Start the agent's onboarding flow
+openclaw onboard --install-daemon
+
+# Back up data and suspend when done
+machine0 sync pull openclaw:~/.openclaw/ ~/Backups/openclaw
+machine0 suspend openclaw
+```
+
+The MCP server exposes tools for creating VMs, listing sizes, managing images, executing commands remotely via SSH, and more. Agents can drive the entire lifecycle programmatically.
+
+## NixOS: Your OS as Code
+
+One of machine0's core features is first-class NixOS support with Flakes. Your entire operating system — packages, services, users, networking — is defined in a `flake.nix` file.
+
+```bash
+# Clone the official machine0 NixOS repo
+git clone https://github.com/fdmtl/machine0-nixos.git ./
+
+# Modify the config (e.g., add PostgreSQL)
+# Then provision the VM from the flake
+machine0 provision devbox ./flake.nix#loaded
+```
+
+Benefits of this approach:
+
+- **Deterministic builds** — same flake produces identical VMs every time
+- **No configuration drift** — manual changes outside the flake are detected and can be reset
+- **One-command rollbacks** — if something breaks, rebuild from the previous flake state
+- **Agent-friendly** — AI coding tools can author and verify NixOS configs programmatically
+
+## How machine0 Differs from Alternatives
+
+**vs. Traditional VPS (DigitalOcean, Linode, Hetzner):**
+VPS platforms give you dashboards and require dozens of decisions. machine0 gives you a CLI and MCP server, NixOS declarative provisioning, suspend/resume with full state snapshots, per-minute billing, and pre-built images with developer tools.
+
+**vs. Ephemeral Sandboxes (E2B, Modal, Fly.io):**
+Sandboxes are short-lived containers optimized for quick tasks. machine0 is persistent VMs you own — static IPs, real KVM virtualization, data persists across reboots, NixOS declarative configs. Built for workloads that run for hours or days.
+
+**vs. Cloud IDEs (GitHub Codespaces, Gitpod):**
+Cloud IDEs are tied to specific repos and have limited customization. machine0 gives you full root access to a persistent VM with any tools you want, plus the ability to snapshot and clone environments.
+
+## Practical Evaluation Checklist
+
+Before adopting machine0, consider:
+
+- [ ] **Do you need persistent VMs?** — If your workloads are ephemeral (CI jobs, quick tests), sandboxes like E2B may be more cost-effective
+- [ ] **Are you comfortable with NixOS?** — The NixOS learning curve is real, but Ubuntu images are available if you prefer traditional package management
+- [ ] **Do you need GPU instances?** — machine0 offers H100, H200, L40S, and MI300X GPUs for ML workloads
+- [ ] **Is per-minute billing important?** — If you spin up/down VMs frequently, per-minute billing saves money compared to hourly billing
+- [ ] **Do you use AI coding agents?** — The MCP server integration makes machine0 ideal for Claude Code, Codex, and Hermes workflows
+
+## Security Notes
+
+- VMs run on dedicated KVM/QEMU infrastructure with a 99.99% uptime SLA
+- Each VM gets its own static IP and HTTPS endpoint — no NAT, no tunnels
+- machine0 submits to regular external security audits and publishes a [Privacy Policy](https://machine0.io/privacy) and [DPA](https://machine0.io/dpa)
+- SSH access uses your `~/.ssh/id_rsa.pub` by default; you can manage multiple keys via the CLI
+- All VM images are open source ([NixOS](https://github.com/fdmtl/machine0-nixos), [Ubuntu](https://github.com/fdmtl/machine0-ubuntu)) — you can audit exactly what's installed
+
+## FAQ
+
+**Q: Can I use Ubuntu instead of NixOS?**
+
+**A:** Yes. machine0 offers Ubuntu 24.04 images pre-installed with Docker, Node.js, Python, Claude Code, and Codex. You get the same CLI, MCP server, and per-minute billing regardless of which OS you choose.
+
+**Q: What happens to my data when I suspend a VM?**
+
+**A:** Suspending creates a full state snapshot of your VM (memory, disk, running processes) and destroys the instance. You pay only for image storage ($0.078/GB/month) while suspended. When you resume with `machine0 start`, everything is restored exactly as it was.
+
+**Q: Can I run my own custom NixOS flake?**
+
+**A:** Yes. Clone the official `machine0-nixos` repo, modify the `flake.nix` to add packages, services, or users, then run `machine0 provision <vm-name> ./flake.nix#<configuration>`. The VM rebuilds deterministically from your flake.
+
+**Q: Is there a dashboard or web UI?**
+
+**A:** Yes, there's a dashboard at [app.machine0.io](https://app.machine0.io) for viewing VMs, billing, and usage. However, the primary workflow is CLI-first — every operation is available via `machine0` commands with `--json` output for scripting.
+
+**Q: How does machine0 handle network security?**
+
+**A:** Each VM gets a static public IP and HTTPS endpoint at `<vm-name>.mac0.io`. There's no NAT or tunneling — you have direct network access. You're responsible for configuring firewalls and security groups within the VM itself.
+
+**Q: Can I migrate my VM to another cloud provider?**
+
+**A:** With NixOS, your OS is defined as code in a flake, which is portable to any NixOS host. You can pull your data anytime with `machine0 sync pull`. There's no vendor lock-in — the flake can be deployed elsewhere.
+
+## Conclusion
+
+machine0 fills a gap between ephemeral sandboxes and traditional VPS providers by offering persistent, CLI-managed VMs with NixOS declarative configuration and AI agent integration via MCP. The per-minute billing, suspend/resume functionality, and pre-built images with developer tools make it particularly well-suited for:
+
+- **AI coding agents** that need isolated, persistent environments
+- **Developers** who want reproducible dev environments without dashboard overhead
+- **Self-hosters** who need static IPs and long-running VMs at reasonable cost
+- **ML engineers** who need GPU instances with flexible billing
+
+The NixOS-first approach is a double-edged sword — powerful for reproducibility and agent automation, but requires learning the Nix ecosystem. Ubuntu images are available as a fallback.
+
+At $9/month for a small instance with per-minute billing, machine0 is competitive with traditional VPS providers while offering significantly more developer-friendly workflows.
