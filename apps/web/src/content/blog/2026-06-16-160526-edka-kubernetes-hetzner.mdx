@@ -1,0 +1,218 @@
+---
+title: "Edka - Kubernetes on Hetzner"
+description: "Edka automates production-ready Kubernetes clusters on your own Hetzner Cloud account. Provision in under 2 minutes with GitOps, one-click add-ons, and built-in monitoring."
+pubDate: "2026-06-16"
+tags: ["kubernetes", "hetzner", "dev-tools", "self-hosted", "paas"]
+category: "dev-tools"
+author: "Du"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/edka-kubernetes-hetzner.webp"
+  alt: "Edka Kubernetes platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Edka provisions production-ready Kubernetes clusters on your own Hetzner Cloud account in under 2 minutes, with GitOps workflows, one-click add-ons, and up to 70% cost reduction compared to managed Kubernetes services.
+
+## Source and Accuracy Notes
+
+- Project page: [edka.io](https://edka.io)
+- Documentation: [edka.io/docs](https://edka.io/docs/)
+- Pricing: [edka.io/pricing](https://edka.io/pricing/)
+- HN launch thread: [news.ycombinator.com/item?id=44915164](https://news.ycombinator.com/item?id=44915164)
+- Source last checked: 2026-06-16
+
+## What Is Edka?
+
+Edka is a Kubernetes Management Platform that automates the creation of a production-ready Platform as a Service (PaaS) on top of Hetzner Cloud. Unlike managed Kubernetes services from cloud providers, Edka provisions clusters directly in your own Hetzner account, giving you full control over infrastructure while abstracting away the operational complexity.
+
+The platform handles cluster bootstrapping, add-on installation, and application deployment through a web UI and GitOps workflows. If you disconnect Edka, your clusters continue running and you can manage them with standard tools like `kubectl`, Lens, or your existing GitOps pipeline.
+
+## Why Edka?
+
+Managed Kubernetes services from major cloud providers (EKS, GKE, AKS) typically cost 3-5x more than raw compute. Hetzner Cloud offers competitive pricing on bare-metal and virtual machines, but setting up a production-ready Kubernetes cluster with monitoring, ingress, certificate management, and storage requires significant manual work.
+
+Edka bridges this gap by providing:
+
+- **Cost reduction**: Up to 70% compared to managed Kubernetes services
+- **Speed**: Cluster provisioning in under 2 minutes
+- **Control**: Clusters run in your own Hetzner account with full root access
+- **Portability**: No vendor lock-in; CNCF-based open standards
+
+## Setup Workflow
+
+### Step 1: Create an Edka Account
+
+Sign up at [console.edka.io](https://console.edka.io/signup) and connect your Hetzner Cloud account. You will need a Hetzner Cloud API token with read/write permissions.
+
+```bash
+# Generate a Hetzner Cloud API token
+# Go to: Hetzner Cloud Console > Security > API Tokens > Generate Token
+# Permissions: Read & Write
+```
+
+### Step 2: Provision a Cluster
+
+From the Edka dashboard, click "Create Cluster" and configure:
+
+- **Region**: Choose a Hetzner datacenter (Falkenstein, Nuremberg, Helsinki, Ashburn, Hillsboro)
+- **Node count**: Start with 3 nodes for a production setup (1 control plane, 2 workers)
+- **Node type**: Select instance size (CX21 for dev, CX31 for production workloads)
+- **Kubernetes version**: Pick the latest stable version
+
+Edka bootstraps the cluster, installs core add-ons, and configures networking automatically.
+
+```bash
+# After provisioning, download kubeconfig
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE   VERSION
+# node-1     Ready    control-plane   2m    v1.30.2
+# node-2     Ready    worker          2m    v1.30.2
+# node-3     Ready    worker          2m    v1.30.2
+```
+
+### Step 3: Install Add-ons
+
+Edka provides one-click installation of production add-ons:
+
+- **Gateway API**: NGINX or Envoy-based ingress controllers
+- **cert-manager**: Automatic TLS certificate provisioning via Let's Encrypt
+- **Monitoring**: Prometheus + Grafana stack preconfigured for Hetzner
+- **PostgreSQL**: CNPG operator with automated backups to Hetzner Object Storage
+- **Redis**: Clustered Redis with persistent volumes
+
+```bash
+# Deploy PostgreSQL with one click from the UI
+# Or via CLI:
+kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/config/crd/bases/postgresql.cnpg.io_clusters.yaml
+```
+
+### Step 4: Deploy Applications
+
+Edka supports two deployment models:
+
+**GitOps workflow**: Connect your GitHub repository, and Edka automatically deploys on push. Preview environments are created for pull requests.
+
+```yaml
+# edka-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app
+        image: ghcr.io/myorg/myapp:latest
+        ports:
+        - containerPort: 8080
+```
+
+**Manual deployment**: Use standard Kubernetes manifests or Helm charts.
+
+```bash
+kubectl apply -f deployment.yaml
+kubectl expose deployment my-app --type=ClusterIP --port=80
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Edka uses a control-plane/data-plane split model:
+
+- **Control plane**: Managed by Edka, handles cluster lifecycle, add-on orchestration, and UI
+- **Data plane**: Runs entirely in your Hetzner account; Edka never touches your workloads or secrets
+
+The platform is built on CNCF-certified Kubernetes and uses open-source components (Terraform, Helm, ArgoCD) under the hood. This means you can replicate the setup manually if needed.
+
+### Networking
+
+Edka configures Hetzner Cloud Load Balancers for ingress traffic and uses the Hetzner Cloud Controller Manager for automatic node registration. The default setup includes:
+
+- **Gateway API**: Replaces legacy Ingress resources with the newer Gateway API standard
+- **Tailscale integration**: Optional mesh networking for secure cluster-to-cluster communication
+- **Private networking**: Nodes communicate over Hetzner's private network (no public IPs on workers)
+
+### Storage
+
+Persistent volumes use Hetzner Cloud Volumes (block storage) or Hetzner Object Storage (S3-compatible). The CNPG operator for PostgreSQL automatically provisions volumes and configures backups to Object Storage.
+
+### Security
+
+- **RBAC**: Preconfigured role-based access control with read-only and admin roles
+- **Network policies**: Default-deny ingress with explicit allow rules for system namespaces
+- **Secrets management**: External Secrets Operator syncs secrets from external vaults (AWS Secrets Manager, GCP Secret Manager, Vault)
+- **Audit logging**: Kubernetes audit logs forwarded to Hetzner Object Storage
+
+## Practical Evaluation Checklist
+
+Use this checklist when evaluating Edka for your workloads:
+
+- [ ] **Cost comparison**: Calculate your current managed Kubernetes bill vs. Hetzner + Edka pricing
+- [ ] **Region availability**: Verify Hetzner has a datacenter close to your users (US East, EU Central)
+- [ ] **Compliance**: Check if Hetzner's data residency (Germany, Finland, US) meets your requirements
+- [ ] **Add-on coverage**: Confirm Edka offers the add-ons you need (monitoring, ingress, databases)
+- [ ] **GitOps maturity**: Test the GitHub integration with a staging cluster before production
+- [ ] **Backup strategy**: Verify automated backups for databases and etcd are enabled
+- [ ] **Exit plan**: Download kubeconfig and verify you can manage the cluster without Edka
+
+## Security Notes
+
+Edka runs in your own Hetzner account, which means:
+
+- **Root access**: You have full control over nodes and can SSH in if needed
+- **Network isolation**: Worker nodes have no public IPs by default; only the load balancer is exposed
+- **Secret handling**: Edka never stores your application secrets; they live in Kubernetes etcd or External Secrets
+- **API token scope**: The Hetzner API token you provide should be scoped to the specific project, not your entire account
+
+Rotate your Hetzner API token periodically and enable 2FA on your Hetzner account.
+
+## FAQ
+
+**Q: What happens if I stop paying for Edka?**
+
+**A:** Your clusters continue running in your Hetzner account. You retain full access via `kubectl` and can manage them manually or migrate to another tool. Edka does not lock you in.
+
+**Q: Does Edka support multi-cluster setups?**
+
+**A:** Yes. The Standard plan includes 2 clusters, and the Pro plan includes 5 clusters. You can manage multiple clusters from a single Edka dashboard.
+
+**Q: Can I use my own domain for applications?**
+
+**A:** Yes. Edka integrates with cert-manager to automatically provision TLS certificates from Let's Encrypt. You configure DNS records to point to the Hetzner Load Balancer IP.
+
+**Q: Is Edka open source?**
+
+**A:** The control plane is proprietary, but Edka uses open-source components (Kubernetes, Helm, ArgoCD, Terraform) and does not lock you into proprietary APIs. You can replicate the setup manually using the documentation.
+
+**Q: What Kubernetes versions are supported?**
+
+**A:** Edka supports the latest stable Kubernetes version and the two previous minor versions. You can upgrade clusters from the dashboard with zero-downtime rolling updates.
+
+**Q: Does Edka work with GitHub Actions or GitLab CI?**
+
+**A:** Yes. Edka's GitOps integration works with any Git provider (GitHub, GitLab, Bitbucket). You can also trigger deployments from CI pipelines using `kubectl` or Helm.
+
+## Conclusion
+
+Edka fills a specific niche: teams that want Kubernetes on Hetzner's affordable infrastructure without the operational burden of setting up a production cluster from scratch. The 70% cost reduction claim is plausible when comparing Hetzner's pricing to AWS EKS or GKE, especially for workloads that don't require multi-region deployment.
+
+The platform is best suited for:
+
+- Startups and small teams running workloads in Europe or US East
+- Developers who want Kubernetes without managing the control plane
+- Teams migrating from managed Kubernetes to reduce costs
+- Projects that need GitOps workflows with preview environments
+
+If you need multi-cloud deployment, edge computing, or regions outside Hetzner's footprint, you will need a different solution. But for cost-conscious teams comfortable with Hetzner's datacenter locations, Edka provides a solid middle ground between raw infrastructure and fully managed services.
