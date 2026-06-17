@@ -1,0 +1,226 @@
+---
+title: "Zoonk - AI Learning Platform Setup"
+description: "Zoonk is an open-source AI learning platform that turns any topic into structured interactive lessons. Self-host with Next.js, pnpm, and PostgreSQL."
+pubDate: "2026-06-17"
+tags: ["ai-setup", "dev-tools", "education", "nextjs", "typescript"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zoonk-ai-learning-platform.webp"
+  alt: "Zoonk AI learning platform thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Zoonk is an open-source AI-powered learning platform that generates structured, interactive courses from any topic. Built with Next.js, TypeScript, Prisma, and PostgreSQL, it runs as a pnpm monorepo and is deployable on Vercel.
+
+## Source and Accuracy Notes
+
+- Project page: [zoonk.com](https://www.zoonk.com)
+- Source repository: [github.com/zoonk/zoonk](https://github.com/zoonk/zoonk)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread (original project as Uneebee): [news.ycombinator.com/item?id=38316936](https://news.ycombinator.com/item?id=38316936)
+- Source last checked: 2026-06-17 (commit on `main` branch, no versioned releases yet)
+
+## What Is Zoonk?
+
+Zoonk is an AI-powered learning platform that turns any topic into clear, structured lessons. It started as **Uneebee** (an open-source Duolingo alternative for creating interactive courses) and has been rewritten from the ground up with a new focus: using LLMs to generate personalized learning paths.
+
+From the project's README:
+
+> Turn any topic into clear, structured lessons.
+
+The platform offers:
+
+- **Personalized lessons** tailored to your goals, level, and interests
+- **70 languages** with pronunciation guidance
+- **Guided courses** with progress tracking
+- **Exam preparation** with simulations and quizzes
+- **Interactive exercises** instead of passive video watching
+
+## Tech Stack
+
+Zoonk is a TypeScript monorepo managed with pnpm workspaces and Turborepo:
+
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Node.js v24 |
+| Package manager | pnpm v11 |
+| Framework | Next.js (App Router) |
+| ORM | Prisma |
+| Database | PostgreSQL v18 |
+| UI | shadcn/ui + Tailwind CSS |
+| AI | Vercel AI SDK |
+| Auth | Better Auth |
+| Background jobs | Workflow (useworkflow.dev) |
+| Linting | oxlint + oxfmt |
+| Testing | Vitest + Playwright |
+| Hosting | Vercel (OSS program) |
+
+## Prerequisites
+
+Before setting up Zoonk locally, ensure you have:
+
+- **Node.js v24** (use `mise` or `nvm` to manage versions)
+- **pnpm v11** (`corepack enable` or `npm install -g pnpm@11`)
+- **PostgreSQL v18** (see setup below)
+
+## Setup Workflow
+
+### Step 1: Clone and install dependencies
+
+```bash
+git clone https://github.com/zoonk/zoonk.git
+cd zoonk
+pnpm install
+```
+
+### Step 2: Set up PostgreSQL
+
+On macOS with Homebrew:
+
+```bash
+brew install postgresql@18
+brew services start postgresql@18
+
+# Add to PATH if needed
+export PATH="$(brew --prefix postgresql@18)/bin:$PATH"
+
+# Create the database
+createdb zoonk
+
+# Create test database (optional)
+createdb zoonk_test
+```
+
+The test setup expects a `postgres` user with password `postgres`. Create it:
+
+```bash
+psql postgres
+```
+
+```sql
+CREATE USER postgres WITH PASSWORD 'postgres' SUPERUSER;
+\q
+```
+
+### Step 3: Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your database connection string and API keys. Check `packages/db/README.md` for database-specific variables and `apps/main/README.md` for app-specific setup.
+
+### Step 4: Generate Prisma client and run migrations
+
+```bash
+pnpm db:generate
+```
+
+### Step 5: Start the development server
+
+```bash
+pnpm dev
+```
+
+The app runs via Turborepo, which starts all workspace apps in parallel.
+
+### Step 6: Run tests
+
+```bash
+pnpm test          # Unit tests (Vitest)
+pnpm e2e           # End-to-end tests (Playwright)
+pnpm typecheck     # TypeScript checking
+pnpm lint          # Linting (oxlint)
+```
+
+## Deeper Analysis
+
+### From Uneebee to Zoonk
+
+The original Uneebee project (1,300+ stars) was built with Elixir/Phoenix and focused on course creation. The README now carries a caution notice:
+
+> Uneebee is no longer being maintained. I'm building a new platform, Zoonk, with a different focus.
+
+The rewrite swaps Elixir for the TypeScript/Next.js ecosystem, trading Phoenix LiveView's real-time capabilities for the broader Next.js/Vercel deployment story. The new architecture uses:
+
+- **Vercel AI SDK** for LLM integration (course generation, personalized content)
+- **Better Auth** for authentication (replacing Phoenix's built-in auth)
+- **Workflow** for durable background jobs (AI generation tasks)
+- **Prisma** as the ORM layer over PostgreSQL
+
+### Monorepo Structure
+
+```text
+zoonk/
+├── apps/
+│   ├── main/          # Next.js app (zoonk.com)
+│   └── evals/         # AI evaluation test suite
+├── packages/
+│   ├── auth/          # Better Auth config
+│   ├── db/            # Prisma schemas + client
+│   └── ...            # Shared packages
+├── turbo.json         # Turborepo config
+└── package.json       # pnpm workspace root
+```
+
+### AI-First Approach
+
+Unlike traditional LMS platforms (Moodle, Canvas), Zoonk generates content on-demand. You describe a learning goal, and the AI produces:
+
+1. A structured course outline
+2. Individual lessons with explanations
+3. Quizzes and exercises
+4. Progress tracking
+
+This is closer to Khanmigo (Khan Academy's AI tutor) than to course marketplaces like Udemy.
+
+## Practical Evaluation Checklist
+
+Before self-hosting Zoonk for production use:
+
+- [ ] **Node.js v24 requirement** — this is cutting-edge; most hosting providers default to v20/v22. Verify your deployment target supports v24.
+- [ ] **PostgreSQL v18** — similarly bleeding-edge. Neon, Supabase, and RDS may not yet offer v18.
+- [ ] **AI API costs** — Zoonk uses the Vercel AI SDK, which supports multiple providers (OpenAI, Anthropic, etc.). Estimate per-user generation costs.
+- [ ] **No versioned releases** — the project tracks `main` with no tags. Expect breaking changes without migration guides.
+- [ ] **Vercel dependency** — the project is in Vercel's OSS program and likely optimized for their platform. Self-hosting on AWS/GCP may require additional config.
+- [ ] **Background jobs** — Workflow (useworkflow.dev) is a newer durable execution framework. Evaluate its maturity for production workloads.
+
+## Security Notes
+
+- **Environment variables** — never commit `.env` files. The repo uses `.env.example` as a template.
+- **Database credentials** — the default test setup uses `postgres`/`postgres`. Change this in production.
+- **Auth** — Better Auth handles session management. Review its [security documentation](https://www.better-auth.com/docs) before deploying.
+- **AI-generated content** — LLM outputs can contain hallucinations or inappropriate content. Implement content filtering for public-facing deployments.
+- **Dependency auditing** — run `pnpm audit` regularly. The monorepo has many dependencies across workspaces.
+
+## FAQ
+
+**Q: Is Zoonk free to use?**
+**A:** The source code is MIT-licensed and free to self-host. The hosted version at zoonk.com offers a free tier (no credit card required) with paid plans for additional features.
+
+**Q: Can I use Zoonk without AI?**
+**A:** No. Zoonk's core value proposition is AI-generated content. The platform requires LLM API access (OpenAI, Anthropic, etc.) to generate lessons and courses.
+
+**Q: What happened to Uneebee?**
+**A:** Uneebee (the original Elixir/Phoenix project) is no longer maintained. The developer rewrote it as Zoonk with a new tech stack (TypeScript/Next.js) and a shifted focus from course creation to AI-generated learning paths. The Uneebee repo remains on GitHub for archival purposes.
+
+**Q: Can I deploy Zoonk on my own server?**
+**A:** Yes, but it requires Node.js v24 and PostgreSQL v18, which are very recent versions. The project includes a Dockerfile for Fly.io deployment, but Vercel is the recommended platform.
+
+**Q: Does Zoonk support multiple languages?**
+**A:** The platform supports 70 languages for learning (as course content). The UI is internationalized using Next.js i18n with translation files in `apps/main/messages/`.
+
+**Q: How does Zoonk compare to Duolingo?**
+**A:** Duolingo focuses on language learning with gamification. Zoonk is a general-purpose learning platform that can generate courses on any topic, not just languages. The original Uneebee project was explicitly positioned as a "Duolingo for X" creator tool.
+
+## Conclusion
+
+Zoonk represents an interesting evolution in open-source education tools. By combining AI generation with structured learning paths, it moves beyond traditional LMS platforms that require manual course creation. The TypeScript/Next.js stack makes it accessible to a large developer audience, and the Vercel OSS program membership signals production readiness.
+
+However, the bleeding-edge requirements (Node.js v24, PostgreSQL v18) and lack of versioned releases mean this is best suited for early adopters and contributors, not production deployments mission-critical learning infrastructure. If you're building an AI-powered education product or want to experiment with LLM-generated courses, Zoonk's MIT-licensed codebase is worth exploring.
+
+Star the repo on GitHub at [github.com/zoonk/zoonk](https://github.com/zoonk/zoonk) and try the hosted version at [zoonk.com](https://www.zoonk.com).
