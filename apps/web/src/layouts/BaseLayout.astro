@@ -17,6 +17,19 @@ interface Props {
   category?: string;
   author?: string;
   readingTime?: number;
+  /**
+   * Preload hint for the LCP image. Pass the absolute URL of the hero image
+   * (e.g. the post thumbnail). The component emits a `<link rel="preload">`
+   * so the browser starts fetching the LCP candidate before it parses the
+   * article body.
+   */
+  preloadImage?: string;
+  /**
+   * Disable the auto-generated WebSite / WebPage JSON-LD. Set to true on the
+   * homepage where the page already injects its own WebSite + CollectionPage
+   * schema to avoid duplicates.
+   */
+  skipDefaultSchema?: boolean;
   structuredData?: Record<string, any> | Record<string, any>[];
 }
 
@@ -35,6 +48,8 @@ const {
   category,
   author = 'Friday',
   readingTime,
+  preloadImage,
+  skipDefaultSchema = false,
   structuredData = [],
 } = Astro.props;
 
@@ -139,7 +154,11 @@ const orgSchema = {
   url: siteUrl,
   logo: {
     '@type': 'ImageObject',
-    url: `${siteUrl}/favicon.svg`,
+    // Google recommends a raster logo for Organization schema. The 192x192 PNG
+    // is square and renders cleanly in Google knowledge panels.
+    url: `${siteUrl}/favicon-192x192.png`,
+    width: '192',
+    height: '192',
   },
   email: 'friday@runany.dev',
   sameAs: [
@@ -151,6 +170,45 @@ const orgSchema = {
     email: 'friday@runany.dev',
     contactType: 'editorial',
   },
+};
+
+// WebSite schema with a SearchAction. When a site is eligible, Google can
+// surface a sitelinks searchbox using this declaration. We host a /blog/
+// index page that the search targets.
+const webSiteSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: siteName,
+  url: siteUrl,
+  inLanguage: 'en-US',
+  description: metaDescription,
+  publisher: { '@type': 'Organization', name: siteName, url: siteUrl },
+  potentialAction: {
+    '@type': 'SearchAction',
+    target: {
+      '@type': 'EntryPoint',
+      urlTemplate: `${siteUrl}/blog/?q={search_term_string}`,
+    },
+    // The query input is the search term; the SearchAction targets /blog/?q=...
+    'query-input': 'required name=search_term_string',
+  },
+};
+
+// WebPage schema wraps every page. It supplies Google with a stable
+// page-level entity so it can be linked to breadcrumbs and to the publisher.
+const webPageSchema = {
+  '@context': 'https://schema.org',
+  '@type': article ? 'Article' : 'WebPage',
+  '@id': resolvedCanonicalURL,
+  url: resolvedCanonicalURL,
+  name: title,
+  description: metaDescription,
+  inLanguage: 'en-US',
+  isPartOf: { '@id': siteUrl },
+  publisher: { '@type': 'Organization', name: siteName, url: siteUrl },
+  image: imageUrl,
+  datePublished: formatDate(pubDate) || undefined,
+  dateModified: formatDate(updatedDate) || formatDate(pubDate) || undefined,
 };
 ---
 
@@ -169,7 +227,7 @@ const orgSchema = {
   <link rel="sitemap" type="application/xml" title={`${siteName} Sitemap`} href="/sitemap.xml" />
   <link rel="alternate" hreflang="en" href={resolvedCanonicalURL} />
   <link rel="alternate" hreflang="x-default" href={resolvedCanonicalURL} />
-  <link rel="preconnect" href="https://cdn.runany.dev" />
+  <link rel="preconnect" href="https://cdn.runany.dev" crossorigin />
   <link rel="dns-prefetch" href="https://cdn.runany.dev" />
   {hasGa4 && <link rel="preconnect" href="https://www.googletagmanager.com" />}
   {hasGa4 && <link rel="dns-prefetch" href="https://www.googletagmanager.com" />}
@@ -178,6 +236,19 @@ const orgSchema = {
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- IndexNow: instant indexing for Bing, Yandex, DuckDuckGo, Seznam, Naver, Ecosia.
+       Hosted key file is the source of truth — search engines verify via fetch. -->
+  <meta name="indexnow" content="verified" />
+  {preloadImage && (
+    <link
+      rel="preload"
+      as="image"
+      href={preloadImage}
+      fetchpriority="high"
+    />
+  )}
   
   <meta name="theme-color" content="#020617" />
   
@@ -225,7 +296,9 @@ const orgSchema = {
   {techArticleJsonLd && <script type="application/ld+json" set:html={JSON.stringify(techArticleJsonLd)} />}
   {breadcrumbJsonLd && <script type="application/ld+json" set:html={JSON.stringify(breadcrumbJsonLd)} />}
   {extraStructuredData.map(data => <script type="application/ld+json" set:html={JSON.stringify(data)} />)}
-  <script type="application/ld+json" set:html={JSON.stringify(orgSchema)} />
+  {!skipDefaultSchema && <script type="application/ld+json" set:html={JSON.stringify(orgSchema)} />}
+  {!skipDefaultSchema && <script type="application/ld+json" set:html={JSON.stringify(webSiteSchema)} />}
+  {!skipDefaultSchema && <script type="application/ld+json" set:html={JSON.stringify(webPageSchema)} />}
   {hasGa4 && <script async src={`https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`}></script>}
   {hasGa4 && (
     <script is:inline define:vars={{ gaMeasurementId }}>
