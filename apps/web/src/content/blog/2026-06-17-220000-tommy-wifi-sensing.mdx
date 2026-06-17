@@ -1,0 +1,271 @@
+---
+title: "TOMMY - Wi-Fi Presence Sensing for Home Assistant"
+description: "TOMMY turns ESP32 devices into through-wall presence sensors using Wi-Fi CSI. Self-hosted, privacy-focused, integrates with Home Assistant and Matter."
+pubDate: "2026-06-17"
+tags: ["home-automation", "iot", "esp32", "home-assistant", "self-hosted"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tommy-wifi-sensing.webp"
+  alt: "TOMMY Wi-Fi sensing product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** TOMMY uses Wi-Fi Channel State Information (CSI) to detect motion and presence through walls, running entirely on your local network with ESP32 hardware.
+
+## Source and Accuracy Notes
+
+- Project page: [tommysense.com](https://www.tommysense.com)
+- Documentation: [tommysense.com/docs](https://www.tommysense.com/docs)
+- HN launch thread: [news.ycombinator.com/item?id=45684230](https://news.ycombinator.com/item?id=45684230)
+- License: Proprietary (closed-source core, network bounty program for transparency)
+- Source last checked: 2026-06-17
+
+## What Is TOMMY?
+
+TOMMY is a Wi-Fi sensing system that turns ESP32 devices into motion and presence detectors. Unlike traditional PIR sensors that require line-of-sight, TOMMY analyzes Channel State Information (CSI) from Wi-Fi packets to detect occupancy through walls and obstacles.
+
+The system uses a mesh of two or more ESP32 devices that continuously exchange Wi-Fi packets. When a human body enters the zone, it disrupts the signal paths, causing characteristic changes in the CSI that TOMMY's algorithm interprets as motion or presence.
+
+**Key capabilities:**
+
+- **Through-wall sensing**: Devices can be hidden in closets or behind walls
+- **Flexible zones**: Create zones that span entire floors or specific areas
+- **Direction-free setup**: No careful aiming or positioning required
+- **Privacy-focused**: All sensing data stays on your local network
+- **No hub required**: Runs as a Home Assistant app or Docker container
+
+## How Wi-Fi CSI Sensing Works
+
+Wi-Fi signals don't travel in straight lines. They reflect off walls, floors, and objects, creating multiple signal paths between transmitter and receiver. Channel State Information describes how each of these paths behaves.
+
+When a person enters a zone, their body:
+
+1. **Obstructs direct paths** between devices
+2. **Creates new multipath reflections** off their body
+3. **Introduces Doppler shifts** from breathing and micromovements
+4. **Changes scattering patterns** in the environment
+
+TOMMY extracts CSI data from standard 802.11 Wi-Fi packets at 30-100 packets per second per device pair. The server-side algorithm analyzes these changes to determine if the zone is occupied.
+
+**Motion vs. Presence detection:**
+
+- **Motion mode**: Detects any movement (works on all ESP32 variants)
+- **Presence mode**: Detects stationary occupancy via breathing patterns (requires ESP32-C5 or ESP32-C6, plus Performance or High Performance mode)
+
+## Supported Hardware
+
+TOMMY supports multiple ESP32 variants:
+
+**All variants (2.4 GHz):**
+- ESP32
+- ESP32-C3
+- ESP32-S2
+- ESP32-S3
+
+**5 GHz support (optimal for presence detection):**
+- ESP32-C5 (best performance)
+- ESP32-C6 (capable)
+
+**Requirements per zone:**
+- Minimum 2 devices
+- Devices must be at least 1 meter apart
+- All devices in a zone must be on the same Wi-Fi band (2.4 GHz or 5 GHz)
+- Diminishing returns after 4 devices
+
+**Host requirements:**
+- Home Assistant OS (recommended) or
+- Linux host with Docker
+
+## Setup Workflow
+
+### Step 1: Install TOMMY Server
+
+**Home Assistant (recommended):**
+
+1. Open Home Assistant Supervisor
+2. Add the TOMMY repository: `https://github.com/tommy-sense/homeassistant-addon`
+3. Install the TOMMY add-on from the App Store
+4. Start the add-on
+
+**Docker:**
+
+```bash
+docker run -d \
+  --name tommy \
+  --restart unless-stopped \
+  --network host \
+  -v tommy-data:/data \
+  tommysense/tommy:latest
+```
+
+Or with Docker Compose:
+
+```yaml
+version: '3.8'
+services:
+  tommy:
+    image: tommysense/tommy:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - tommy-data:/data
+```
+
+### Step 2: Flash ESP32 Devices
+
+TOMMY provides two flashing methods:
+
+**TOMMY Flasher (browser-based, recommended):**
+
+1. Connect ESP32 via USB
+2. Open the TOMMY dashboard
+3. Click "Flash Device"
+4. Select your Wi-Fi network and enter credentials
+5. Click "Flash" - the tool handles firmware, Wi-Fi provisioning, and OTA setup
+
+**ESPHome (advanced):**
+
+Add the `sensor_tommy` external component to your ESPHome YAML configuration. This method is compatible with all ESP32 variants and gives you full control over the firmware.
+
+### Step 3: Discover Devices
+
+TOMMY supports three device discovery methods:
+
+**Automatic (Online Coordination):**
+
+Devices use TOMMY's coordination service to look up the server's local address via a pairing code. Requires internet access on devices (one-time setup).
+
+**Automatic (mDNS):**
+
+Devices discover the TOMMY server via mDNS (`_tommy._tcp.local`) on the local network. No internet required.
+
+**Manual:**
+
+Specify the TOMMY server IP directly during flashing. Use when automatic discovery isn't available.
+
+### Step 4: Create Zones
+
+1. Open the TOMMY dashboard
+2. Click "Create Zone"
+3. Name your zone (e.g., "Living Room", "Upstairs")
+4. Add the ESP32 devices that cover this area
+5. Configure detection mode:
+   - **Motion**: Detects any movement (all ESP32 variants)
+   - **Presence**: Detects stationary occupancy (ESP32-C5/C6 only)
+6. Set performance mode:
+   - **Conservative**: Low network impact
+   - **Performance**: Balanced sensitivity
+   - **High Performance**: Maximum sensitivity (for presence detection)
+7. Configure boundary mode to control zone isolation:
+   - **Precise**: Strict zone boundaries
+   - **Balanced**: Default behavior
+   - **Sensitive**: Wider detection area
+
+### Step 5: Integrate with Smart Home
+
+**Home Assistant:**
+
+1. Install the TOMMY integration via HACS or manually
+2. Each zone automatically appears as a `binary_sensor` (motion) entity
+3. Use MQTT for communication (configured automatically)
+
+**Matter:**
+
+1. Open the TOMMY dashboard
+2. Click "Matter Setup"
+3. Scan the QR code with your Matter controller (Apple Home, Google Home, SmartThings, or Home Assistant)
+4. Zones appear as Matter Occupancy Sensors
+
+## Practical Evaluation Checklist
+
+Before deploying TOMMY, verify:
+
+- [ ] You have at least 2 compatible ESP32 devices per zone
+- [ ] Devices are on the same Wi-Fi band (2.4 GHz or 5 GHz)
+- [ ] You have a Home Assistant instance or Linux host for the server
+- [ ] ESP32 devices are at least 1 meter apart
+- [ ] You understand the licensing model (free trial vs. Pro)
+- [ ] For presence detection: you have ESP32-C5 or ESP32-C6 devices
+
+**Limitations to consider:**
+
+- Does not filter pets or objects (all movement detected; filtering planned for Q2 2026)
+- Closed-source core (transparent via network bounty program)
+- Requires internet for license verification and optional Online Coordination
+- Commercial use requires a separate license
+
+## Security Notes
+
+TOMMY's privacy model:
+
+- **Local processing**: All sensing data stays on your local network
+- **No cloud telemetry**: CSI data never leaves your network
+- **Internet requirements**:
+  - License verification (periodic)
+  - Online Coordination service (optional, for device discovery)
+- **Network bounty program**: TOMMY rewards anyone who finds undocumented external connections in current releases
+
+The core algorithm is closed-source, but you can verify network behavior via packet inspection. The bounty program incentivizes the community to audit releases for undocumented connections.
+
+**If TOMMY ceases to exist**: Offline activation will be released for all purchased licenses, allowing your installation to work without TOMMY's servers.
+
+## Licensing
+
+**Trial (Free):**
+- 1 zone
+- Unlimited devices
+- Detection pauses 1 minute every 2 minutes
+- Home Assistant and Matter integration
+- Community support
+
+**Pro (One-time purchase):**
+- Uninterrupted detection
+- Choose 1 zone or unlimited zones
+- Unlimited devices
+- All integrations
+- Community support
+
+**Commercial use**: Requires a separate license. Contact info@tommysense.com.
+
+## FAQ
+
+**Q: How is this different from a PIR motion sensor?**
+
+**A:** PIR sensors require line-of-sight and detect heat signatures. TOMMY uses Wi-Fi signals that pass through walls, allowing devices to be hidden. It can also detect stationary presence (breathing) with compatible hardware, which PIR cannot do.
+
+**Q: Does it work with pets?**
+
+**A:** TOMMY detects all movement, including pets. Pet filtering is planned for Q2 2026. Currently, if you have pets, they will trigger motion detection.
+
+**Q: Can I use this for security/alarms?**
+
+**A:** TOMMY is designed for occupancy detection and home automation, not security. It can trigger automations when rooms are occupied or vacant, but it's not a replacement for a security system.
+
+**Q: How many devices do I need for a typical house?**
+
+**A:** Minimum 2 devices per zone. A typical setup might be 2-3 devices for "Upstairs" and 2-3 for "Downstairs" (4-6 total). More devices improve accuracy but have diminishing returns after 4 per zone.
+
+**Q: Does it work with 5 GHz Wi-Fi?**
+
+**A:** Yes, but only ESP32-C5 and ESP32-C6 support 5 GHz. Other variants (ESP32, ESP32-C3, ESP32-S2, ESP32-S3) are 2.4 GHz only. All devices in a zone must be on the same band.
+
+**Q: Is the code open-source?**
+
+**A:** The core (sensing algorithm, firmware, server, dashboard) is closed-source. Some components like the Home Assistant integration are open-source. The closed-source model funds development, and the network bounty program provides transparency.
+
+## Conclusion
+
+TOMMY offers a novel approach to presence detection using Wi-Fi signals instead of cameras or PIR sensors. It's particularly useful if you want:
+
+- Through-wall detection without line-of-sight requirements
+- Stationary presence detection (breathing) with ESP32-C5/C6
+- Privacy-focused operation with all data on your local network
+- Flexible zone coverage that isn't tied to room boundaries
+
+The main trade-offs are the closed-source core and the need for compatible ESP32 hardware. If you're comfortable with those constraints and want a non-camera, non-PIR presence detection solution, TOMMY is worth evaluating.
+
+**Getting started:** Visit [tommysense.com](https://www.tommysense.com) for documentation, or join their [Discord community](https://discord.gg/dKPYKkXQjN) for support.
