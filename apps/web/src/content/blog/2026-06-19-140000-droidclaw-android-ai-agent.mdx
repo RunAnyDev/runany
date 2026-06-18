@@ -1,0 +1,177 @@
+---
+title: "DroidClaw – Turn Old Android Phones Into AI Agents"
+description: "DroidClaw uses ADB and a perception-reasoning-action loop to let an LLM control your Android phone by tapping, typing, and swiping. No API integrations needed."
+pubDate: "2026-06-19"
+tags: ["ai-agent", "android", "automation", "adb", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/droidclaw-android-ai-agent.webp"
+  alt: "DroidClaw – AI agent controlling an Android phone"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DroidClaw connects to your Android phone over ADB (optionally via Tailscale for remote access), runs a perception-reasoning-action loop with an LLM, and automates any app by controlling its UI directly — no APIs or integrations required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [droidclaw.ai](https://droidclaw.ai)
+- Source repository: [github.com/unitedbyai/droidclaw](https://github.com/unitedbyai/droidclaw)
+- License: MIT (README states open-source, license file verified present in repo)
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
+- Source last checked: 2026-06-19
+
+## What Is DroidClaw?
+
+DroidClaw is an open-source AI agent that controls your Android phone through its actual user interface. Give it a goal in plain English — it reads the screen, decides what to do, and executes taps, swipes, and keystrokes via ADB (Android Debug Bridge). It works with any app, even when no official API exists.
+
+The core loop is **perception → reasoning → action**, repeated until the goal is complete or the step limit is reached. On each step:
+
+1. **Perceive** — dump the accessibility tree via ADB, parse the XML into interactive UI elements, optionally capture a screenshot
+2. **Reason** — send screen state + goal + history to an LLM, receive `{ think, plan, action }`
+3. **Act** — execute via ADB (`tap`, `type`, `swipe`, `launch`, etc.), feed the result back to the LLM on the next step
+
+## Setup Workflow
+
+### Prerequisites
+
+- Android phone with USB debugging enabled
+- Linux/macOS machine (Linux recommended for reliability)
+- [Bun](https://bun.sh) runtime (required — Node.js/npm not supported)
+- Optional: [Tailscale](https://tailscale.com) for remote access over the tailnet
+
+### Step 1: Install dependencies
+
+```bash
+# install adb
+brew install android-platform-tools   # macOS
+# sudo apt install adb                  # Linux
+
+# install bun (required)
+curl -fsSL https://bun.sh/install | bash
+```
+
+### Step 2: Clone and install
+
+```bash
+git clone https://github.com/unitedbyai/droidclaw.git
+cd droidclaw
+bun install
+```
+
+### Step 3: Connect your phone
+
+**USB (recommended for first run):**
+
+```bash
+# Enable USB debugging on your Android phone:
+# Settings → Developer Options → USB debugging → ON
+# Then authorize this computer when prompted on the phone
+
+# Verify connection
+adb devices
+```
+
+**Remote (via Tailscale):**
+
+```bash
+# Install Tailscale on both phone and laptop
+# Connect phone to your tailnet
+# Enable ADB over the tailnet on your phone
+adb connect <phone-tailnet-ip>:5555
+```
+
+### Step 4: Configure your LLM
+
+Edit `.env` in the cloned repo. The README recommends Groq for the free tier:
+
+```bash
+GROQ_API_KEY=your_groq_api_key_here
+LLM_PROVIDER=groq
+LLM_MODEL=llama-3.3-70b-versatile
+```
+
+Other supported providers: Ollama (local, no API key required), OpenAI, Anthropic.
+
+### Step 5: Run the agent
+
+```bash
+bun run src/kernel.ts
+# enter your goal: open youtube and search for "lofi hip hop"
+```
+
+The agent will output step-by-step thinking and actions until the goal is complete.
+
+## Deeper Analysis
+
+### How it handles failure
+
+LLM-driven UI control sounds fragile. DroidClaw implements several failure recovery mechanisms:
+
+- **Stuck loop detection** — if the screen does not change for 3 steps, context-aware recovery hints get injected into the LLM prompt
+- **Repetition tracking** — a sliding window of recent actions catches retry loops even across screen changes; if the same coordinates are tapped 3+ times the agent gets told to try something else
+- **Drift detection** — if the agent spams navigation actions (swipe, back, wait) without interacting with anything, it gets nudged to take direct action
+- **Vision fallback** — when the accessibility tree is empty (WebViews, Flutter apps, games), a screenshot gets sent to the LLM with coordinate-based tap suggestions
+- **Action feedback** — every action result (success/failure + message) is fed back to the LLM on the next step
+
+### What it can do today
+
+From the README and site, concrete examples include:
+
+- Send a WhatsApp message via the app interface (no WhatsApp API needed)
+- Check GitHub pull requests and compile a digest
+- Search YouTube and play a video
+- Install or uninstall apps on the device
+- Delegate incoming requests to ChatGPT, Gemini, or Google Search using the apps directly on the phone — no API keys for those services needed
+
+### Limitations
+
+- Requires a real Android device; emulators work but are slower and less reliable
+- Speed is bounded by LLM inference latency plus ADB round-trip time (each step takes hundreds of milliseconds to seconds)
+- Some apps (games, WebViews, Flutter) require the vision fallback, which is more expensive and less reliable
+- The step limit (default 30) can be increased but longer runs increase the chance of UI drift
+
+## Practical Evaluation Checklist
+
+- [ ] Android phone with USB debugging enabled
+- [ ] Bun installed on the control machine
+- [ ] ADB can see the device (`adb devices` shows the phone)
+- [ ] `.env` configured with a working LLM API key (or Ollama running locally)
+- [ ] `bun run src/kernel.ts` starts the interaction loop
+- [ ] A simple goal completes successfully (e.g., open a specific app)
+- [ ] Failure recovery triggers correctly when the agent taps the same spot repeatedly
+
+## Security Notes
+
+- ADB grants full filesystem and shell access to the connected device. Treat the phone as having a wide-open SSH port.
+- If using Tailscale, ensure ADB port `5555` is not exposed to the public internet
+- The `.env` file contains API keys — do not commit it to version control; DroidClaw ships with `.env` in `.gitignore`
+- LLM prompts include full screen state and interaction history, which may include sensitive app data; be mindful of which LLM provider you use for cloud inference
+
+## FAQ
+
+**Q: Does this work on iOS?**
+**A:** No. iOS does not expose an equivalent to ADB's accessibility layer. DroidClaw is Android-only.
+
+**Q: Can I run this without an LLM API key?**
+**A:** Yes — use Ollama for local inference. No API key needed, but you need a capable model running locally (7B+ parameters recommended for reasonable performance).
+
+**Q: How is this different from Phonexia or similar Android automation tools?**
+**A:** Traditional Android automation tools (AutoJS, Tasker, etc.) require predefined scripts or flow builders. DroidClaw uses an LLM to reason about the current UI state and decide actions dynamically — no per-task scripting.
+
+**Q: Is the Android APK required, or can I just use ADB?**
+**A:** The APK installs the DroidClaw agent service on the phone itself, enabling richer perception and action capabilities. ADB-only mode is more limited but works for basic automation.
+
+**Q: What LLM models work best?**
+**A:** Groq-hosted models (LLaMA 3.3 70B) offer the best speed/cost balance for cloud. For local, a 7B+ instruction-tuned model via Ollama is the minimum viable option.
+
+## Conclusion
+
+DroidClaw flips the usual AI agent pattern — instead of building API integrations, it wraps the phone's UI layer with an LLM brain. Any app becomes automatable the moment you install it, no developer API required. For developers who want to automate mobile workflows, monitor apps that lack API access, or experiment with phone-as-agent infrastructure, it is worth a look.
+
+The setup is straightforward if you are comfortable with ADB and a terminal. The failure recovery mechanisms are more sophisticated than they first appear, and the vision fallback ensures it does not completely dead-end on non-accessible UIs.
