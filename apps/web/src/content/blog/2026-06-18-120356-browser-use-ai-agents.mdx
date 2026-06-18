@@ -1,0 +1,214 @@
+---
+title: "Browser Use - AI Agents That Automate Real Web Browsers"
+description: "Browser Use is an open-source AI agent framework with 99K GitHub stars that controls real browsers via Python. This guide covers setup with Cursor and Claude Code, CLI usage, and when to pick open-source vs cloud."
+pubDate: "2026-06-18"
+tags: ["ai-agents", "browser-automation", "python", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/browser-use.webp"
+  alt: "Browser Use - AI browser agent product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Browser Use is an open-source AI agent framework (99K GitHub stars, MIT license) that drives real browsers to automate web tasks. It works with any LLM and can be set up with a Python script, CLI tool, or Claude Code skill.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [browser-use.com](https://browser-use.com)
+- Source repository: [github.com/browser-use/browser-use](https://github.com/browser-use/browser-use)
+- License: [MIT](https://github.com/browser-use/browser-use/blob/main/LICENSE) (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=43173378](https://news.ycombinator.com/item?id=43173378)
+- Docs: [docs.browser-use.com](https://docs.browser-use.com)
+- Stars: 99,361 | Default branch: main | Last pushed: 2026-06-15 (verified via GitHub API)
+
+## What Is Browser Use?
+
+Browser Use is an open-source framework that lets AI agents control real browsers — not just fetch HTML or take screenshots, but actually interact with web pages like a human would: clicking buttons, filling forms, scrolling, and handling multiple domains in a single task.
+
+The project's stated goal: **"Make websites accessible for AI agents."**
+
+It started as a YC W25 startup and has grown to 99,361 GitHub stars, making it one of the most-starred browser automation tools in the AI agent space. The framework uses Playwright under the hood but wraps it in an LLM-friendly action space with recovery loops.
+
+The current major version (0.13) introduced a Rust-powered core agent alongside the original Python API. The Rust agent is described as built for frontier models and handles browser control with persistent tool access and retry logic.
+
+### Key capabilities
+
+- **Multi-step web tasks**: Form filling, grocery shopping, job applications, research scraping
+- **Any LLM**: Works with OpenAI GPT, Anthropic Claude, Google Gemini, or Browser Use's own optimized `bu-*` models via `ChatBrowserUse`
+- **Cloud or self-hosted**: Open-source agent runs anywhere; cloud option adds stealth browsers, proxy rotation, and CAPTCHA handling
+- **CLI tool**: Persistent browser sessions from the command line
+- **Claude Code skill**: Native integration for AI-assisted browser automation inside Claude Code
+- **Template generator**: `uvx browser-use init --template default` scaffolds a ready-to-run project
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.11 or higher
+- `uv` package manager (recommended) or `pip`
+- An LLM API key (OpenAI, Anthropic, Google, or Browser Use Cloud)
+
+### Step 1: Install Browser Use
+
+```bash
+uv add "browser-use[core]"
+# or: pip install "browser-use[core]"
+```
+
+The `[core]` extra installs the native Browser Use runtime for your platform.
+
+### Step 2: Get an API Key
+
+For the easiest setup, get a key from [Browser Use Cloud](https://cloud.browser-use.com/new-api-key):
+
+```bash
+# .env
+BROWSER_USE_API_KEY=your-key
+# GOOGLE_API_KEY=your-key
+# ANTHROPIC_API_KEY=your-key
+```
+
+With a `BROWSER_USE_API_KEY`, `ChatBrowserUse` routes requests to all major providers through a single key — no need to manage separate OpenAI/Anthropic/Google keys.
+
+### Step 3: Run Your First Agent
+
+**Option A — Python Script:**
+
+```python
+from browser_use.beta import Agent, BrowserProfile, ChatBrowserUse
+import asyncio
+
+async def main():
+    agent = Agent(
+        task="Find the number of stars of the browser-use repo",
+        llm=ChatBrowserUse(model='openai/gpt-5.5'),
+        browser_profile=BrowserProfile(
+            headless=False,
+            allowed_domains=["*.github.com"],
+        ),
+    )
+    history = await agent.run()
+    print(history.final_result())
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+**Option B — Template Generator:**
+
+```bash
+uvx browser-use init --template default
+```
+
+This creates a `browser_use_default.py` file with a working example. Available templates: `default`, `advanced`, `tools`.
+
+**Option C — CLI Tool:**
+
+```bash
+browser-use open https://example.com    # Navigate to URL
+browser-use state                       # See clickable elements
+browser-use click 5                     # Click element by index
+browser-use type "Hello"                # Type text
+browser-use screenshot page.png         # Take screenshot
+browser-use close                       # Close browser
+```
+
+The CLI keeps the browser running between commands for fast iteration.
+
+### Step 4: Integrate with Claude Code
+
+For AI-assisted browser automation inside Claude Code:
+
+```bash
+mkdir -p ~/.claude/skills/browser-use
+curl -o ~/.claude/skills/browser-use/SKILL.md \
+  https://raw.githubusercontent.com/browser-use/browser-use/main/skills/browser-use/SKILL.md
+```
+
+Then direct Claude Code to `Agents.md` (the project provides a [full agent prompt](https://docs.browser-use.com/llms-full.txt)) and prompt naturally.
+
+## Deeper Analysis
+
+### Open-Source vs. Cloud
+
+The README is explicit about the tradeoff:
+
+**Open-source agent** is the right choice when you need custom tools, code-level integration, or want to self-host entirely on your own infrastructure. You can pair it with Browser Use's cloud browsers for stealth and scaling, or run everything locally.
+
+**Browser Use Cloud** (fully-hosted) is recommended for complex tasks and production use. It provides proxy rotation, stealth browser fingerprinting, CAPTCHA solving, persistent filesystem and memory, and over 1,000 integrations (Gmail, Slack, Notion, and more).
+
+A benchmark on the README ([browser-use/benchmark](https://github.com/browser-use/benchmark)) shows their cloud agent outperforming open-source on accuracy across 100 real-world browser tasks, with `bu-2-0` their own optimized model leading.
+
+### Architecture
+
+Browser Use 0.13+ has two stacks:
+
+1. **Python API** (`from browser_use import Agent`) — original agent, still supported for existing users
+2. **Rust-powered beta** (`from browser_use.beta import Agent`) — new core, described as built for current frontier models with a Rust browser harness
+
+Both use the same underlying Playwright browser automation, but the beta agent has improved recovery loops inspired by coding agents.
+
+### Model Support
+
+`ChatBrowserUse` accepts provider-prefixed model IDs:
+
+```python
+from browser_use import Agent, ChatBrowserUse
+
+llm = ChatBrowserUse(model='anthropic/claude-sonnet-4-6')  # or 'openai/gpt-5.5', 'google/gemini-3-pro'
+agent = Agent(task='...', llm=llm)
+```
+
+The project recommends their own `bu-*` models for best speed and accuracy. For local models, Ollama is supported.
+
+## Practical Evaluation Checklist
+
+- GitHub stars: 99,361 (verified)
+- License: MIT (verified)
+- Last pushed: 2026-06-15 (verified)
+- Python 3.11+ required
+- Works with OpenAI, Anthropic, Google, or local Ollama
+- CLI tool ships with the package
+- Claude Code skill available
+- Cloud option adds stealth, proxy rotation, CAPTCHA solving
+- MIT licensed (verified)
+
+## Security Notes
+
+- Browser automation runs real browser sessions — use `BrowserProfile(allowed_domains=[...])` to restrict which sites the agent can access
+- API keys in `.env` files only; never hardcode in scripts
+- Browser Use Cloud has separate [Terms of Service](https://browser-use.com/legal/terms-of-service) and [Privacy Policy](https://browser-use.com/privacy/) — the open-source library is MIT, but the cloud service has its own data policy
+- The CLI `browser-use` command keeps a persistent browser open between commands; close it when done with `browser-use close`
+
+## FAQ
+
+**Q: Do I need a separate API key for each provider?**
+**A:** No. `ChatBrowserUse` with a `BROWSER_USE_API_KEY` routes to all major providers through one key. You can also use separate provider keys directly.
+
+**Q: Can I run this locally without any cloud service?**
+**A:** Yes. The open-source agent runs entirely on your own infrastructure with your own LLM API keys or a local Ollama instance.
+
+**Q: What is the difference between the Python agent and the Rust beta agent?**
+**A:** The Rust agent (imported from `browser_use.beta`) is the new preview core built for frontier models with improved recovery loops. Existing users can keep using `from browser_use import Agent`. Both drive Playwright browsers.
+
+**Q: Does it handle CAPTCHAs or anti-bot detection?**
+**A:** The open-source agent uses standard Playwright, which can be detected by sophisticated bot detection. Browser Use Cloud provides stealth browsers with proxy rotation and fingerprinting designed to avoid CAPTCHAs.
+
+## Conclusion
+
+Browser Use fills the gap between simple HTTP scrapers and full browser emulation. By giving AI agents a real browser action space, it can handle web tasks that require JavaScript rendering, session handling, and interactive forms — tasks that break traditional scraping tools.
+
+The open-source MIT package is substantial (99K stars, active development) and the combination of Python API + CLI + Claude Code skill covers most workflows. The cloud option is where Browser Use monetizes: for teams that need production-scale browser automation without managing infrastructure.
+
+If you need AI agents that can actually use the web like a human would, Browser Use is the most production-ready open-source option right now.
+
+- [browser-use.com](https://browser-use.com)
+- [GitHub repository](https://github.com/browser-use/browser-use)
+- [Documentation](https://docs.browser-use.com)
+- [Browser Use Cloud](https://cloud.browser-use.com)
