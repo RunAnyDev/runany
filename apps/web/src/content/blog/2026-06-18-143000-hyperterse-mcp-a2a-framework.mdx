@@ -1,0 +1,175 @@
+---
+title: "Hyperterse – Declarative MCP and A2A Agentic Server Framework"
+description: "Hyperterse packs agents, MCP tools, prompts, and resources into one deployable service with declarative configs, DB adapters, and OpenTelemetry."
+pubDate: "2026-06-18"
+tags: ["mcp", "a2a", "agentic-ai", "self-hosted", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hyperterse.webp"
+  alt: "Hyperterse – agentic server framework"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Hyperterse is an open-source agentic server framework that ships agents (A2A), tools (MCP), prompts, and resources from a single process using declarative config — with built-in DB adapters, auth, caching, and OpenTelemetry.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [hyperterse.com](https://hyperterse.com)
+- Source repository: [github.com/hyperterse/hyperterse](https://github.com/hyperterse/hyperterse)
+- License: Apache-2.0 (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=47142975](https://news.ycombinator.com/item?id=47142975)
+- Documentation: [docs.hyperterse.com](https://docs.hyperterse.com)
+
+## What Is Hyperterse?
+
+Hyperterse describes itself as "the agentic server framework" — one build ships agents, MCP tools, prompts, and resources from a single process. You write declarative config files; the framework compiles and validates them, then exposes both [A2A](https://github.com/a2aproject/a2a-go) agent routes (`/agent/{name}`) and [MCP](https://modelcontextprotocol.io/) Streamable HTTP (`/mcp`) from the same runtime.
+
+From the README: "You declare surfaces in config; the compiler validates and bundles them."
+
+Core capabilities from the README:
+
+- **Agents**: declarative configs, tool-access policies, multi-provider models, per-agent A2A HTTP
+- **Tools**: DB-backed (`use` + `statement`) or script-backed (`handler`) execution
+- **Database adapters**: PostgreSQL, MySQL, SQLite, MongoDB, Redis
+- **Auth**: built-in `allow_all` and `api_key`, plus custom plugins
+- **Caching**: in-memory with global defaults and per-tool overrides
+- **Observability**: OpenTelemetry tracing and metrics, structured logging
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+curl -fsSL https://hyperterse.com/install | bash
+```
+
+### Step 2: Initialize a project
+
+```bash
+hyperterse init
+```
+
+This scaffolds the following structure:
+
+```text
+.
+├── .hyperterse
+├── .agents/
+│   └── skills/
+│       ├── hyperterse-docs/
+│       │   └── SKILL.md
+│       └── hyperterse-agents/
+│           └── SKILL.md
+└── app/
+    └── tools/
+        └── hello-world/
+            ├── config.terse
+            └── handler.ts
+```
+
+### Step 3: Start the server
+
+```bash
+hyperterse start
+```
+
+With live reload during development:
+
+```bash
+hyperterse start --watch
+```
+
+### Step 4: Verify health
+
+```bash
+curl http://localhost:8080/heartbeat
+```
+
+Expected response:
+
+```json
+{ "success": true }
+```
+
+### Step 5: List MCP tools (optional)
+
+```bash
+curl -s -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
+```
+
+## Deeper Analysis
+
+### MCP spec compliance
+
+Hyperterse implements MCP specification **2025-11-25**. Per the README's compliance table:
+
+| Spec component | Status |
+|---|---|
+| Base protocol (JSON-RPC 2.0) | ✅ |
+| Lifecycle (initialize/initialized) | ✅ |
+| Tools (list, call, listChanged) | ✅ |
+| Resources (list, read, subscribe, updated) | ✅ |
+| Prompts (list, get, listChanged) | ✅ |
+| Completion | ✅ |
+| Pagination | ⚠️ partial |
+| Image/audio/resource_link tool results | ⚠️ partial |
+
+### Runtime model
+
+Two transport protocols are served simultaneously:
+
+- **MCP** — Streamable HTTP at `/mcp` (JSON-RPC 2.0) for tools, prompts, resources, completion, and subscriptions
+- **A2A** — JSON-RPC per agent at `/agent/{agentName}` for agent cards, messaging, tasks, and streaming
+
+The execution pipeline runs through: tool resolution → authentication → input transform → execution → output transform → response serialization.
+
+### Project structure
+
+Tools, prompts, and resources all follow the same discover-and-compile model. Each tool lives in `app/tools/{name}/` with a `config.terse` declaration file and optionally a `handler.ts` TypeScript script.
+
+## Practical Evaluation Checklist
+
+- [ ] Install script runs without error on Linux/macOS
+- [ ] `hyperterse init` produces the documented file structure
+- [ ] `hyperterse start` launches on port 8080
+- [ ] `/heartbeat` returns `{ "success": true }`
+- [ ] MCP tools are listed at `/mcp` via JSON-RPC `tools/list`
+- [ ] Database adapter connects (PostgreSQL/MySQL/SQLite/MongoDB/Redis)
+- [ ] OpenTelemetry traces are emitted on startup
+- [ ] Auth plugin (`allow_all` / `api_key`) gates tool access
+
+## Security Notes
+
+- Use `{{ env.VAR_NAME }}` to inject secrets and connection strings — never hardcode them in config files
+- `{{ inputs.field }}` statement substitution is textual; enforce strict input schemas and safe query patterns to prevent injection
+- Configure tool-level auth explicitly for production — do not rely on the default `allow_all`
+
+## FAQ
+
+**Q: How is this different from a raw MCP server?**
+**A:** Hyperterse bundles MCP tools, A2A agents, prompts, and resources into one deployable process with built-in auth, caching, database adapters, and OpenTelemetry — rather than wiring each piece together manually.
+
+**Q: Does it support multiple model providers?**
+**A:** Yes. The README mentions "multi-provider models" under the agents section, with a dedicated [Model providers](https://docs.hyperterse.com/agents/model-providers) doc page.
+
+**Q: Can I use existing MCP clients with Hyperterse?**
+**A:** Yes — the MCP endpoint at `/mcp` uses standard Streamable HTTP JSON-RPC 2.0, which is compatible with any MCP client implementation.
+
+**Q: What databases are supported?**
+**A:** PostgreSQL, MySQL, SQLite, MongoDB, and Redis (verified in the README's core capabilities list).
+
+## Conclusion
+
+Hyperterse fills the gap between wiring up a raw MCP server and building a full agent platform. Its declarative config approach means you define surfaces in config files, the framework handles validation and bundling, and you get A2A agents, MCP tools, prompts, resources, DB adapters, auth, caching, and OpenTelemetry in one process. If you are building an agentic service that needs to expose tools and agents under a single roof, it is worth a look.
+
+- Project page: [hyperterse.com](https://hyperterse.com)
+- Documentation: [docs.hyperterse.com](https://docs.hyperterse.com)
+- GitHub: [github.com/hyperterse/hyperterse](https://github.com/hyperterse/hyperterse)
