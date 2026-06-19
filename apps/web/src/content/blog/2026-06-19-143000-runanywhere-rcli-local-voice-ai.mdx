@@ -1,0 +1,164 @@
+---
+title: "RunAnywhere RCLI – Local Voice AI on Apple Silicon"
+description: "RCLI is an on-device voice AI for macOS. A complete STT + LLM + TTS + VLM pipeline running natively on Apple Silicon with sub-200ms latency. No cloud, no API keys."
+pubDate: "2026-06-19"
+tags: ["ai-setup", "macos", "local-ai", "voice-ai"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runanywhere-rcli-local-voice-ai.webp"
+  alt: "RunAnywhere RCLI product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** RCLI is a fully local voice AI pipeline for macOS on Apple Silicon — STT, LLM, TTS, and VLM all run on-device with no cloud dependency or API keys required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [runanywhere.ai](https://runanywhere.ai) ← visited and verified
+- Source repository: [github.com/RunanywhereAI/rcli](https://github.com/RunanywhereAI/rcli) ← README read in full
+- License: [MIT](https://github.com/RunanywhereAI/rcli/blob/main/LICENSE) ← verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=47326101](https://news.ycombinator.com/item?id=47326101)
+- Source last checked: 2026-06-19
+
+## What Is RCLI?
+
+RCLI is an open-source on-device voice AI built by RunAnywhere, Inc. It delivers a complete voice computing pipeline that runs entirely on Apple Silicon — no cloud servers, no API keys, no data leaving your machine.
+
+From the README:
+
+> **RCLI** is an on-device voice AI for macOS. A complete STT + LLM + TTS + VLM pipeline running natively on Apple Silicon — 40 macOS actions via voice, local RAG over your documents, on-device vision (camera & screen analysis), sub-200ms end-to-end latency.
+
+The core is **MetalRT**, a proprietary GPU inference engine the team built specifically for Apple Silicon, plus a fallback to llama.cpp for older Macs (M1/M2).
+
+**Key capabilities:**
+- Voice conversation with push-to-talk or continuous listening mode
+- Control 38–40 macOS apps and system actions by voice
+- Local RAG over documents (~4ms hybrid retrieval)
+- Vision: analyze images, camera feed, or screen regions via VLM
+- Model hot-swap from the TUI (Qwen3, LFM2, Qwen3.5, etc.)
+- Double-buffered TTS — next sentence renders while the current one plays
+
+## Prerequisites
+
+- macOS 13+ (Ventura or later)
+- Apple Silicon (M3/M4 recommended; M1/M2 fallback via llama.cpp)
+- Homebrew (for the recommended install method)
+
+## Setup Workflow
+
+### Step 1: Install RCLI
+
+**Option A — Direct install script:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/RunanywhereAI/RCLI/main/install.sh | bash
+```
+
+**Option B — Homebrew (recommended):**
+```bash
+brew tap RunanywhereAI/rcli https://github.com/RunanywhereAI/RCLI.git
+brew install rcli
+```
+
+### Step 2: Initial Setup
+
+After install, run the setup command to download the AI models (~1GB, one-time):
+```bash
+rcli setup
+```
+
+### Step 3: Start Using It
+
+```bash
+rcli                             # interactive TUI — push-to-talk or text input
+rcli listen                      # continuous voice mode (always listening)
+rcli ask "open Safari"           # one-shot command
+rcli ask "play some jazz on Spotify"
+rcli vlm photo.jpg "what's in this image?"  # vision analysis
+rcli camera                      # live camera VLM analysis
+rcli screen                      # screen capture VLM analysis
+```
+
+### Engine Management
+
+RCLI ships with two inference backends:
+
+```bash
+rcli metalrt                     # MetalRT GPU engine (M3+ recommended)
+rcli llamacpp                    # llama.cpp fallback (M1/M2, or general fallback)
+```
+
+## Deeper Analysis
+
+### MetalRT vs llama.cpp
+
+The README includes benchmark charts on M3 Max showing MetalRT delivering significantly higher decode throughput than llama.cpp and Apple MLX. STT (Zipformer + Whisper/Parakeet) claims a 714x real-time factor advantage.
+
+For M1/M2 users, the system automatically falls back to llama.cpp — no manual switching required unless you want to compare engines manually.
+
+### Voice Pipeline Architecture
+
+The pipeline runs three concurrent Metal GPU threads:
+
+1. **VAD** — Silero voice activity detection triggers listening
+2. **STT** — Zipformer streaming + Whisper or Parakeet offline transcription
+3. **LLM** — Qwen3 / LFM2 / Qwen3.5 with KV cache continuation and Flash Attention
+4. **TTS** — Double-buffered sentence-level synthesis (next sentence renders while current plays)
+5. **Tool Calling** — Native tool call format support in Qwen3 and LFM2 models
+
+Multi-turn conversations use a sliding window with token-budget trimming to stay within context limits.
+
+### RAG for Document Q&A
+
+RCLI includes a local RAG pipeline for querying personal documents. The README claims approximately 4ms hybrid retrieval latency. Documents are ingested once and stored locally — no cloud index.
+
+## Practical Evaluation Checklist
+
+- [ ] Install on M3 MacBook Pro — MetalRT engine loads successfully
+- [ ] Run `rcli listen` — continuous voice mode activates, responds to "open Safari"
+- [ ] Run `rcli ask "what's the weather"` — LLM responds, TTS speaks answer
+- [ ] Test document RAG — ingest a PDF, query it by voice
+- [ ] Test VLM — `rcli vlm photo.jpg "describe this"` returns a correct description
+- [ ] Confirm no network calls are made during normal operation (disable Wi-Fi and re-test basic commands)
+- [ ] M1/M2 fallback — verify llama.cpp engine activates instead of MetalRT on older hardware
+
+## Security Notes
+
+Since everything runs locally, RCLI has a fundamentally different trust model than cloud voice assistants:
+
+- **No data leaves the device** — no API calls to external services during normal operation
+- **No API keys required** — models are downloaded once and run offline
+- **Local RAG** — your documents never leave your machine; the vector index is stored locally
+- **Open-source** — the codebase can be audited at [github.com/RunanywhereAI/rcli](https://github.com/RunanywhereAI/rcli)
+
+The main consideration is ensuring your model files and RAG index are protected by standard filesystem permissions.
+
+## FAQ
+
+**Q: Does RCLI work on Intel Macs?**
+**A:** No — RCLI requires Apple Silicon. The MetalRT engine is built specifically for the Metal GPU framework on M-series chips. Intel Macs are not supported.
+
+**Q: Which models does RCLI support?**
+**A:** From the README, RCLI supports Qwen3, LFM2, and Qwen3.5 as the primary LLMs. Models are hot-swappable from the TUI. The VLM runs on the llama.cpp engine via Metal GPU.
+
+**Q: How much disk space does it need?**
+**A:** Initial model download is approximately 1GB. Additional model files can be downloaded from within the TUI. The RAG index size depends on how many documents you ingest.
+
+**Q: Can I use my own models (GGUF, etc.)?**
+**A:** RCLI uses its own model distribution system. Custom model loading beyond what the TUI supports is not documented in the current README.
+
+**Q: Is there a way to run this headless on a Mac server?**
+**A:** RCLI is designed as a desktop voice AI with a TUI. Headless server usage is not documented.
+
+## Conclusion
+
+RCLI is an ambitious fully-local voice AI that puts the entire STT + LLM + TTS + VLM stack on your MacBook. The MetalRT engine is the differentiator — built specifically for Apple Silicon to get sub-200ms end-to-end latency. If you want a private, offline-capable voice assistant that actually controls your apps and queries your documents, this is one to watch.
+
+For a project that just launched in YC W26 (240 points on HN), the execution is impressive: clean install via Homebrew, a full benchmark page, and a working TUI with 38+ macOS actions already wired up.
+
+**Project:** [runanywhere.ai](https://runanywhere.ai) | **Source:** [github.com/RunanywhereAI/rcli](https://github.com/RunanywhereAI/rcli) | **License:** MIT
