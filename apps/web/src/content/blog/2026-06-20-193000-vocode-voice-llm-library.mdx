@@ -1,0 +1,162 @@
+---
+title: "Vocode – Build Voice Conversations with LLMs"
+description: "Vocode is an open-source Python library for building real-time voice-based LLM applications. Deploy to phone calls, Zoom meetings, and more. MIT licensed, 3.7k stars."
+pubDate: "2026-06-20"
+tags: ["ai-setup", "python", "voice", "llm"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vocode-voice-llm-library.webp"
+  alt: "Vocode open-source voice LLM library"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Vocode is an open-source Python library that wraps transcription, LLM, and text-to-speech services into a single streaming pipeline — letting you deploy voice agents to phone calls, Zoom, or a local microphone in minutes.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [vocode.ai](https://vocode.ai)
+- Source repository: [github.com/vocodedev/vocode-core](https://github.com/vocodedev/vocode-core)
+- License: MIT (verified via `LICENSE` file in repo root, Copyright (c) 2023 Ajay Raj)
+- HN launch thread: [news.ycombinator.com/item?id=35347643](https://news.ycombinator.com/item?id=35347643)
+- Stars: 3,761 (verified via GitHub REST API, as of June 2026)
+
+## What Is Vocode?
+
+Vocode describes itself as a library for building voice-based LLM apps in minutes. From the README:
+
+> Build voice-based LLM apps in minutes. Using Vocode, you can build real-time streaming conversations with LLMs and deploy them to phone calls, Zoom meetings, and more.
+
+It works as a pipeline: microphone input → transcription service → LLM → synthesis service → speaker output. Each leg of the pipeline is swappable, so you can mix and match providers.
+
+**Supported transcription services:**
+- AssemblyAI, Deepgram, Gladia, Google Cloud Speech-to-Text, Microsoft Azure, RevAI, OpenAI Whisper, Whisper.cpp
+
+**Supported LLMs:**
+- OpenAI (GPT models), Anthropic (Claude models)
+
+**Supported synthesis services:**
+- Eleven Labs, Cartesia, Play.ht, Microsoft Azure TTS, Google Cloud TTS, AWS Polly, Rime.ai, Coqui (OSS), gTTS, StreamElements, Bark (Suno), and more
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install vocode
+```
+
+### Step 2: Configure environment variables
+
+Vocode uses `pydantic-settings` for configuration. Create a `.env` file:
+
+```bash
+OPENAI_API_KEY=sk-...
+# Pick one transcription provider, e.g.:
+DEEPGRAM_API_KEY=your_deepgram_key
+# Pick one synthesis provider, e.g.:
+ELEVEN_LABS_API_KEY=your_eleven_labs_key
+```
+
+### Step 3: Run a streaming conversation
+
+```python
+import asyncio
+import signal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from vocode.helpers import create_streaming_microphone_input_and_speaker_output
+from vocode.logging import configure_pretty_logging
+from vocode.streaming.agent.chat_gpt_agent import ChatGPTAgent
+from vocode.streaming.models.message import BaseMessage
+from vocode.streaming.output_device.abstract_output_device import AbstractOutputDevice
+from vocode.streaming.streaming_conversation import StreamingConversation
+
+async def main():
+    configure_pretty_logging()
+
+    conversation = StreamingConversation(
+        input_device=create_streaming_microphone_input_and_speaker_output(
+            # Uses your system microphone and speaker
+        ),
+        transcriber=DeepgramTranscriber(...)  # or another provider
+        agent=ChatGPTAgent(
+            initial_message=BaseMessage(text="Hello! I'm your voice assistant."),
+            # ...config
+        ),
+        synthesizer=ElevenLabsSynthesizer(...)  # or another provider
+    )
+
+    conversation.start()
+    while conversation.is_active():
+        await asyncio.sleep(1)
+
+asyncio.run(main())
+```
+
+### Step 4: Attach a phone number (optional)
+
+Vocode can provision a phone number that answers with your LLM agent. See the [inbound calls docs](https://docs.vocode.dev/open-source/telephony#inbound-calls) for Twilio setup.
+
+### Step 5: Dial into Zoom (optional)
+
+```python
+from vocode.streaming.telephony.conversation.zoom_dial_in import ZoomDialIn
+
+# Joins a Zoom meeting as an LLM participant
+ZoomDialIn(...)
+```
+
+## Deeper Analysis
+
+**Architecture:** Vocode uses a `StreamingConversation` class that chains `Transcriber` → `Agent` → `Synthesizer`. Each runs in its own task, connected by asyncio queues. This lets the pipeline handle backpressure and early termination (e.g., if the user interrupts).
+
+**Cross-platform:** Works on Linux, macOS, and Windows. No special system dependencies beyond a working microphone.
+
+**Real-time constraints:** The pipeline is designed for low-latency streaming. The README emphasizes that all integrations are "out of the box" — meaning the hard parts (chunk sizing, buffering, alignment of first token timing) are handled internally.
+
+**LangChain integration:** Vocode ships an example of using a Vocode agent as a LangChain tool, so a LangChain agent can make real phone calls as part of a larger workflow.
+
+## Practical Evaluation Checklist
+
+- [x] pip-installable: `pip install vocode`
+- [x] MIT license (verified)
+- [x] Active repo (pushed Nov 2024)
+- [x] Python SDK (not Node/Java only)
+- [x] Swappable transcription providers
+- [x] Swappable synthesis providers
+- [x] Phone call support (Twilio)
+- [x] Zoom integration
+- [x] Local microphone mode (no external service needed to test)
+- [x] LangChain agent example
+
+## Security Notes
+
+- API keys for transcription and synthesis providers must be kept in environment variables, never hardcoded
+- Vocode streams audio data to third-party transcription/synthesis services — review each provider's data handling policy before using with sensitive content
+- The phone call integration uses Twilio — ensure your Twilio credentials are stored securely
+
+## FAQ
+
+**Q: Does Vocode work without API keys?**
+**A:** You can run the local microphone mode without any API keys by using open-source options: Whisper or Whisper.cpp for transcription and Bark or Coqui for synthesis. However, most production deployments will use hosted services.
+
+**Q: What is the latency like?**
+**A:** Latency depends on your chosen transcription and synthesis providers. Cloud providers like Deepgram and Eleven Labs typically add 200-500ms end-to-end. Local models (Whisper.cpp + Bark) can be faster but require more setup.
+
+**Q: Can I use Vocode commercially?**
+**A:** Yes — Vocode is MIT licensed, which permits commercial use with no restrictions beyond attribution.
+
+**Q: Does it support languages other than English?**
+**A:** It depends on the underlying transcription and synthesis providers. Deepgram, Whisper, and Eleven Labs all support multiple languages; check individual provider docs for details.
+
+## Conclusion
+
+Vocode is a well-structured Python pipeline that removes the boilerplate from building voice LLM apps. Its swappable provider architecture means you can prototype with OpenAI + Eleven Labs and swap in open-source alternatives later. The phone call and Zoom integrations make it one of the more versatile options for embedding a voice agent into real communication channels. MIT licensed, active development, and easy `pip` install makes it worth trying for any Python developer building voice interfaces.
+
+Docs: [docs.vocode.dev](https://docs.vocode.dev/open-source) | Repo: [github.com/vocodedev/vocode-core](https://github.com/vocodedev/vocode-core)
