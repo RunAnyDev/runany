@@ -1,0 +1,173 @@
+---
+title: "Moru – Open-Source AI Agent Runtime with Firecracker MicroVMs"
+description: "Moru gives AI agents their own isolated Linux VM using Firecracker microVMs. Open-source, self-hostable, and works with Claude Code and Codex."
+pubDate: "2026-06-20"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/moru.webp"
+  alt: "Moru AI agent runtime product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Moru is an open-source runtime that gives AI agents their own isolated Firecracker microVM with full Linux shell and filesystem access — no more context-window limits or tool-fragmentation headaches.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [moru.io](https://moru.io) ← visited and verified
+- Source repository: [github.com/moru-ai/moru](https://github.com/moru-ai/moru) ← README read end-to-end
+- License: [Apache 2.0](https://github.com/moru-ai/moru/blob/main/LICENSE) ← verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=46635859](https://news.ycombinator.com/item?id=46635859)
+
+## What Is Moru?
+
+From the README:
+
+> Run agent harnesses like Claude Code or Codex in the cloud, giving each session its own isolated microVM with filesystem and shell access.
+
+The core insight is practical: when an AI agent needs to solve complex, multi-step problems, giving it a real Linux environment (filesystem, shell, standard tooling) works better than shoehorning everything into the model's context window. The model already knows how to use shell commands and write code — Moru just gets out of the way.
+
+Moru uses [Firecracker microVMs](https://github.com/firecracker-microvm/firecracker) (the same technology AWS Lambda and Fargate use under the hood) to provide lightweight isolation. Each agent session gets its own VM, spun up in seconds and torn down when done.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux/macOS (CLI), or Node.js / Python for SDK usage
+- An Moru account (free tier available at [moru.io](https://moru.io))
+
+### Step 1: Install the CLI
+
+```bash
+curl -fsSL https://moru.io/cli/install.sh | bash
+```
+
+### Step 2: Authenticate
+
+```bash
+moru auth login
+```
+
+### Step 3: Run Your First Sandbox
+
+```bash
+# Spin up a base sandbox and run a command
+moru sandbox run base echo 'hello world!'
+
+# List active sandboxes
+moru sandbox list
+
+# View logs
+moru sandbox logs <id>
+```
+
+### Step 4: Keep It Alive and Interact
+
+```bash
+# Create a persistent sandbox
+moru sandbox create base
+
+# Execute commands inside
+moru sandbox exec <id> 'sh -c "echo Hello Moru > /tmp/note.txt"'
+moru sandbox exec <id> cat /tmp/note.txt
+
+# Tear it down when done
+moru sandbox kill <id>
+```
+
+### SDK Usage (Node.js / Python)
+
+**Node.js:**
+
+```bash
+npm install @moru-ai/core
+```
+
+```ts
+import Sandbox from '@moru-ai/core'
+
+const sb = await Sandbox.create({ id: 'my-agent' })
+await sb.exec('echo "hello from inside the VM"')
+await sb.destroy()
+```
+
+**Python:**
+
+```bash
+pip install moru
+```
+
+```python
+from moru import Sandbox
+
+sb = Sandbox.create(id="my-agent")
+print(sb.exec("echo 'hello from inside the VM'"))
+sb.destroy()
+```
+
+## Why Firecracker MicroVMs?
+
+Firecracker is designed for serverless workloads — it starts a VM in ~125ms with minimal memory overhead (~5 MB per microVM). Compared to container-based isolation:
+
+- **True isolation** — each agent gets a full kernel, not just a namespace
+- **No shared runtime conflicts** — Python, Node, Rust toolchains don't clash
+- **Hard reset on destroy** — no leftover state between sessions
+
+The tradeoff is slightly slower cold-start than a container (125ms vs ~50ms), but for agent sessions that run minutes to hours, that startup cost is negligible.
+
+## Deeper Analysis
+
+### What Moru Is NOT
+
+Moru is not a model provider. It does not run inference — you bring your own agent harness (Claude Code, Codex, a custom agent) and Moru provides the execution environment.
+
+### Self-Hosting
+
+The repository is fully open source. The `moru.io` service is a hosted option. For self-hosting, you would need a Linux machine with KVM support (for Firecracker). The README and deployment docs are on [moru.io/docs](https://moru.io/docs).
+
+### Pricing
+
+No self-hosted pricing is listed in the README. The hosted service has a free tier — check [moru.io/dashboard](https://moru.io/dashboard) for current rates.
+
+## Practical Evaluation Checklist
+
+- [ ] CLI installs without errors on macOS/Linux
+- [ ] `moru auth login` opens browser or accepts API key
+- [ ] `sandbox run base` spins up in under 5 seconds
+- [ ] `sandbox exec` passes output correctly
+- [ ] `sandbox kill` fully terminates the VM
+- [ ] SDK (Node or Python) installs from official package registry
+- [ ] Multi-session isolation verified (no cross-VM file leakage)
+
+## Security Notes
+
+- Each sandbox is an isolated microVM — no shared kernel with the host
+- Network access from inside the VM is controlled by Moru's cloud configuration (self-hosted deployments manage their own firewall rules)
+- API keys should be stored in environment variables (`MORU_API_KEY`), not committed to source code
+- The host machine needs KVM access (`/dev/kvm`) for Firecracker to work
+
+## FAQ
+
+**Q: How is this different from Docker-based agent frameworks?**
+**A:** Docker shares the host kernel. Firecracker microVMs have their own kernel, providing stronger isolation. If one agent's process crashes the kernel inside a Firecracker VM, the host and other VMs are unaffected.
+
+**Q: Can I self-host Moru?**
+**A:** Yes, the codebase is open source. You need a Linux machine with KVM enabled. Deployment instructions are in the docs at [moru.io/docs](https://moru.io/docs).
+
+**Q: What agent harnesses work with Moru?**
+**A:** Moru runs any agent that can execute shell commands. The README explicitly mentions Claude Code and Codex. Any agent that speaks to a model via API can be run inside a Moru sandbox.
+
+**Q: How fast do sandboxes start?**
+**A:** Firecracker cold-starts are around 125ms for the VM itself, plus ~1–2 seconds for the base image. Interactive use cases feel near-instant.
+
+## Conclusion
+
+Moru solves the "my agent keeps hitting context limits" problem by giving each agent a real Linux VM instead of挤 an ever-growing prompt. Firecracker makes this lightweight enough for production use, and the open-source license means you can self-host if the hosted service doesn't fit your compliance needs.
+
+If you're building agents that do real multi-step work — code generation, file processing, shell automation — worth trying the [quickstart](https://moru.io/docs) to see if a microVM-backed workflow fits your stack.
