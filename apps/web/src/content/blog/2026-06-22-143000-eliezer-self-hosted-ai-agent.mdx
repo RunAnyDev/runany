@@ -1,0 +1,153 @@
+---
+title: "Eliezer – Tiny Self-Hosted AI Agent You Own Completely"
+description: "Eliezer is a ~6K-line TypeScript AI agent that runs locally, edits its own code, and works with any OpenAI-compatible LLM. MIT-licensed."
+pubDate: "2026-06-22"
+tags: ["ai-setup", "self-hosted", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/eliezer.webp"
+  alt: "Eliezer self-hosted AI agent interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Eliezer is a tiny (~6K lines), self-hostable AI agent in TypeScript that can edit its own code, run shell commands, manage tasks, and works with any OpenAI-compatible LLM provider.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [eliezer.app](https://www.eliezer.app) ← verified via direct visit
+- Source repository: [github.com/Eliezer-app/eliezer](https://github.com/Eliezer-app/eliezer) ← README.md read in full
+- License: [MIT](https://github.com/Eliezer-app/eliezer/blob/main/LICENSE) ← verified
+- HN launch thread: pending — candidate ID `47102479` from HN Algolia search
+
+## What Is Eliezer?
+
+Most AI agent frameworks are sprawling codebases with layers of abstraction. Eliezer takes the opposite approach — the entire project is roughly 6,000 lines of TypeScript, small enough to fit in a single context window. The author describes it as "a tiny, self-modifying AI agent" that runs as a persistent background process.
+
+Eliezer communicates through a chat interface, retains memory across sessions, works through task lists while you are away, and can modify its own source code before restarting to pick up where it left off. It ships with no plugin system, no config DSLs, and no abstractions to navigate — just a main loop, a set of tools, and a database.
+
+**Key characteristics (all from README):**
+- Open source under MIT license
+- Self-hosted on your own infrastructure
+- Works with Anthropic, OpenAI, Kimi, Grok, DeepSeek, or any OpenAI-compatible API
+- Built-in tools: shell execution, file read/write/edit, web search via SearXNG, headless Chrome page reading, file downloads with security vetting, scheduled jobs, persistent task lists
+- Memory compaction — summaries old conversations to stay within context limits
+- Sub-agent framework for exploring codebases
+- Self-editing: modifies its own code, restarts, continues
+
+## Setup Workflow
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and `make`
+- An LLM API key (Anthropic, OpenAI, or any OpenAI-compatible provider)
+- SearXNG instance (included via `make dev`)
+
+### Step 1: Clone and Configure
+
+```bash
+git clone https://github.com/Eliezer-app/eliezer.git
+cd eliezer
+cp .env.example .env
+```
+
+Open `.env` and set your provider and API key:
+
+```bash
+LLM_PROVIDER=anthropic        # or "openai"
+LLM_API_KEY=sk-ant-...
+LLM_MODEL=claude-sonnet-4-20250514
+LLM_BASE_URL=                 # leave blank for Anthropic/OpenAI defaults
+CONTEXT_WINDOW=200000         # adjust to your model
+SEARCH_URL=http://localhost:4444  # SearXNG, started automatically
+CHAT_URL=http://localhost:3200    # Eliezer's own server
+USER_TZ=America/New_York
+```
+
+### Step 2: Start Eliezer
+
+```bash
+make dev
+```
+
+This builds the project and starts both SearXNG and Eliezer. The agent listens on port 3200.
+
+### Step 3: Interact
+
+```bash
+make logs    # follow logs
+make status  # memory stats and health
+make shell   # shell into the container
+make stop    # stop everything
+```
+
+### Pair with ClawChat (Optional)
+
+[ClawChat](https://github.com/Eliezer-app/clawchat) is a companion progressive web app that adds a chat UI with push notifications, interactive widgets, and mobile support.
+
+## Deeper Analysis
+
+### Architecture
+
+The codebase is deliberately minimal. Core files (from README):
+
+| File | Purpose |
+|------|---------|
+| `eliezer.mts` | Main loop, tool dispatch |
+| `llm.mts` | LLM providers (Anthropic, OpenAI-compatible) |
+| `tools.mts` | exec, read, write, edit, wget, schedule |
+| `memory.mts` | Conversation storage, context assembly |
+| `compaction.mts` | Memory compaction engine |
+| `agent-tool.mts` | Sub-agent framework |
+| `server.mts` | HTTP API |
+
+Adding a new tool takes roughly 30 lines: extend `ToolBase`, add it to the array in `eliezer.mts`.
+
+### Self-Modification
+
+Eliezer can edit its own source code. When it does, it restarts and picks up the task from where it left off. This is possible because the entire codebase fits in a context window — the agent can read, understand, and modify all of it.
+
+### Memory Compaction
+
+Long conversations are compressed using a separate (cheaper) model configured via `COMPACTION_LLM_*` env vars. This keeps context usage manageable without losing information.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone, configure `.env`, run `make dev` — does it start without errors?
+- [ ] Can you send a task (e.g. "list files in /tmp") and get a correct response?
+- [ ] Does web search return relevant results?
+- [ ] Does the agent remember context across a `make stop && make dev` restart?
+- [ ] Self-edit: ask it to add a comment to `eliezer.mts`, does it restart and continue?
+- [ ] Memory compaction: fill context with a long conversation, does it compress?
+
+## Security Notes
+
+- Runs entirely on your own infrastructure — no external calls except to your LLM provider
+- File download tool includes automatic security vetting (from README)
+- All `.env` vars are required; missing variables crash on startup (no silent fallbacks)
+- No built-in authentication on the chat server — bind to localhost or put behind a reverse proxy if exposing port 3200
+
+## FAQ
+
+**Q: Does Eliezer require a powerful machine?**
+**A:** No specific requirements stated. Since it runs as a Docker container with SearXNG, a modest VPS or local machine should suffice for light workloads.
+
+**Q: Can I use it without an API key?**
+**A:** No. You must provide your own LLM API key. It does not bundle a model.
+
+**Q: How does it compare to OpenHands or AutoGPT?**
+**A:** Eliezer is much smaller (~6K lines vs tens of thousands), fully self-hosted, and explicitly designed to fit in a context window. It has no plugin ecosystem by design.
+
+**Q: Can it run completely offline?**
+**A:** Partially. It needs an LLM API (local or cloud) and optionally SearXNG for search. The agent itself and Docker runtime work offline.
+
+## Conclusion
+
+Eliezer is a refreshingly minimal take on the AI agent concept. At ~6K lines of TypeScript, it is small enough to read in an afternoon, audit completely, and modify freely. If you want an agent that you truly own and understand at the code level — not a black box of plugins and abstractions — it is worth a look.
+
+The setup is straightforward: clone, configure `.env`, run `make dev`. Self-editing and memory compaction are the standout features for power users who need long-running, self-improving agents.
