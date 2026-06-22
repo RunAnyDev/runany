@@ -274,6 +274,8 @@ EOF
 
 **MDX frontmatter:** thumbnail URL goes in `image.url` field. Body should NOT contain `![]()` markdown image tags — PostLayout renders from frontmatter only.
 
+**MDX curly braces pitfall:** MDX parses `{...}` as JSX expressions even inside table cells and inline text. Never use literal `{var}` placeholders in body content — Astro build fails with `ReferenceError: var is not defined`. Use square brackets `[var]`, wrap in a code span `` `{var}` ``, or escape as `&#123;var&#125;`. Code blocks (```fenced```) are safe because MDX doesn't parse expressions inside fences.
+
 **R2 upload via Node.js (wrangler --remote is broken for R2):**
 Use `scripts/r2-upload.mjs` (reads credentials from `.env`, no hardcoded keys):
 ```bash
