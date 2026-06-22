@@ -1,0 +1,182 @@
+---
+title: "SigmaShake - AI Agent Guardrails at Runtime"
+description: "SigmaShake adds deterministic sub-2ms guardrails to Claude Code, Cursor, Gemini CLI, and Copilot - blocking destructive tool calls before they execute."
+pubDate: "2026-06-22"
+tags: ["ai-setup", "dev-tools", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sigmashake-guardrails.webp"
+  alt: "SigmaShake - AI Agent Guardrails"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** SigmaShake gates AI agent tool calls at runtime — sub-2ms deterministic enforcement for Claude Code, Cursor, Gemini CLI, and Copilot, with an optional air-gapped local mode.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [sigmashake.com](https://sigmashake.com)
+- GitHub organization: [github.com/sigmashakeinc](https://github.com/sigmashakeinc)
+- npm package: [@sigmashake/ssg](https://www.npmjs.com/package/@sigmashake/ssg)
+- HN launch thread: [news.ycombinator.com/item?id=47837630](https://news.ycombinator.com/item?id=47837630)
+- License: not publicly verified — no public LICENSE file found in main org repos
+- Source last checked: 2026-06-22
+
+## What Is SigmaShake?
+
+SigmaShake (product name: **ssg**) is a governance rule engine for AI coding agents. It evaluates every tool call an agent makes — `rm -rf`, `curl` to an unknown host, a database write — before the action executes, returning `ALLOW`, `DENY`, or `ASK`.
+
+Unlike a `CLAUDE.md` instruction (a probabilistic nudge the model can ignore under prompt pressure or long context), ssg places a deterministic gate in the execution path. If a rule blocks `rm -rf /`, the command does not land regardless of what the model decided.
+
+### Threat model distinction
+
+From the official docs:
+
+> "Those products filter LLM output — they run after the model responds, checking whether generated text is safe. SigmaShake gates agent tool calls — it runs before the action executes, checking whether the thing the agent is about to do is allowed."
+
+This makes ssg complementary to output-filtering tools like Lakera, Guardrails AI, or NeMo Guardrails.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+**macOS:**
+```bash
+curl -LsSf https://sigmashake.com/install.sh | sh
+```
+
+**Linux:**
+```bash
+curl -LsSf https://sigmashake.com/install.sh | sh
+```
+
+**Windows:**
+```bash
+irm https://sigmashake.com/install.ps1 | iex
+```
+
+Alternatively, install via npm (zero-dependency binary, no npm runtime required at evaluation time):
+```bash
+npm install -g @sigmashake/ssg
+```
+
+### Step 2: Initialize a workspace
+
+```bash
+ssg init
+```
+
+This creates a local configuration directory. No account required for local-only mode.
+
+### Step 3: Integrate with your agent
+
+**Claude Code:**
+```bash
+ssg integrate claude-code
+```
+
+**Cursor:**
+```bash
+ssg integrate cursor
+```
+
+**Gemini CLI:**
+```bash
+ssg integrate gemini-cli
+```
+
+**Copilot:**
+```bash
+ssg integrate copilot
+```
+
+For other agents, use the MCP Server integration:
+```bash
+ssg mcp-server
+```
+
+### Step 4: Write a rule
+
+Rules are plain DSL text files. Example from the official docs — blocking recursive forced deletions:
+```
+deny {
+  tool == "bash"
+  command matches "rm.*-rf.*/"
+}
+```
+
+Load a community rule from the Hub:
+```bash
+ssg pull sigmashake/destructive-filesystem
+```
+
+Rulesets on the Hub are content-hashed and Ed25519-signed before distribution, verified at load time.
+
+## Deeper Analysis
+
+### Sub-2ms evaluation
+
+The evaluation loop is deterministic and LLM-free. The rule engine matches the tool name, parameters, and command string against the active policy, returning a verdict before the system call is made. No model is in the enforcement path.
+
+### Audit log
+
+Every governance event is individually Ed25519-signed and appended to a per-workspace audit log. Fleet-wide policy sync is available on Pro+ plans.
+
+### Offline / air-gapped mode
+
+ssg runs fully offline. The Hub (community rules) and fleet sync are optional. In local-only mode, no network calls are made during evaluation.
+
+### Community Rules Hub
+
+The [Rules Hub](https://sigmashake.com/hub) provides pre-built rulesets covering:
+- Destructive filesystem operations
+- Egress guard (block outbound traffic to unknown hosts)
+- Spending limits
+- Custom policy recipes
+
+### VS Code extension and Desktop app
+
+A VS Code extension and a native Desktop app (Linux, macOS, Windows via Wails/Go) provide GUI-based policy management and a visual audit log.
+
+## Practical Evaluation Checklist
+
+- Zero third-party package dependencies (self-contained binary)
+- Sub-2ms evaluation (no LLM in enforcement path)
+- Supports Claude Code, Cursor, Gemini CLI, Copilot, and generic MCP
+- Community rule library with Ed25519-signed bundles
+- Per-row signed audit log
+- Fleet-wide policy sync (Pro+)
+- Offline/air-gapped mode (no mandatory cloud)
+- macOS, Linux, Windows supported
+
+## Security Notes
+
+- Rulesets are content-hashed and Ed25519-signed before distribution from the Hub
+- The bundle is verified at load time — tampered rulesets do not run
+- Audit log rows are individually signed, providing tamper-evident history
+- Not a sandbox — for adversarial isolation, compose with OS-level sandboxing (Docker, seccomp, Apple Sandbox)
+
+## FAQ
+
+**Q: Cannot an agent just bypass the rules with encoding or whitespace tricks?**
+**A:** A motivated attacker with shell access: yes. An honest agent making a mistake or a misconfigured automation: no. SigmaShake is a guardrail for the 95 percent case — preventing accidental harm. It is not a sandbox.
+
+**Q: How is this different from Lakera, Guardrails AI, or NeMo Guardrails?**
+**A:** Those products filter LLM output after the model responds. SigmaShake gates agent tool calls before the action executes. The threat models are complementary.
+
+**Q: Can I run this without sending anything to the cloud?**
+**A:** Yes. Local-only mode: install via npm, run ssg init, configure your agent hooks or MCP server. No network calls during evaluation. The Hub and fleet sync are optional.
+
+**Q: Is the Hub a supply-chain risk?**
+**A:** Every ruleset is content-hashed and Ed25519-signed before distribution. The bundle is verified at load time. Rulesets are plain DSL text, readable before install.
+
+## Conclusion
+
+SigmaShake fills a specific gap in AI agent toolchains: deterministic, pre-execution enforcement that works regardless of what the model decided. The zero-dependency binary, offline mode, and community rule library make it practical for both individuals and teams. If you run Claude Code, Cursor, or any agentic coding tool in environments where destructive commands are a real concern, ssg is worth a look.
+
+Live demo at [showcase.sigmashake.com](https://showcase.sigmashake.com). Install docs at [docs.sigmashake.com](https://docs.sigmashake.com).
