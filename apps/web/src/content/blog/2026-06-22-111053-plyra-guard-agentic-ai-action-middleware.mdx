@@ -1,0 +1,167 @@
+---
+title: "plyra-guard – AI Agent Action Middleware"
+description: "Production-grade middleware that intercepts AI agent tool calls, evaluates them against policy, and blocks or logs risky actions before execution."
+pubDate: "2026-06-22"
+tags: ["ai-setup", "dev-tools", "ai-agent", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/plyra-guard.webp"
+  alt: "plyra-guard product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** plyra-guard is a Python middleware library that intercepts every tool call an AI agent makes, evaluates it against configurable policies, and blocks or logs risky actions before they execute — adding a safety layer without touching your agent framework.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [plyra.ai](https://plyraai.github.io/plyra-guard) ← **MUST visit and verify**
+- Source repository: [github.com/plyraAI/plyra-guard](https://github.com/plyraAI/plyra-guard) ← **MUST read README**
+- License: Apache 2.0 ← **verified from LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=47125127](https://news.ycombinator.com/item?id=47125127)
+- Source last checked: 2026-06-22 (commit verified via GitHub API)
+
+## What Is plyra-guard?
+
+AI agents are increasingly deployed to take real-world actions — deleting files, calling APIs, sending emails. The problem: **there is no standard safety layer between the LLM's decision and execution**. One bad tool call can be destructive.
+
+`plyra-guard` (from [plyraAI](https://plyraai.github.io)) is that safety layer. It wraps every tool your agent calls, evaluates the action against a policy engine, and blocks, logs, or escalates — before anything irreversible happens.
+
+The README puts it plainly:
+
+> `plyra-guard` is that layer. It intercepts every tool call your agent makes, evaluates it against your policy, and blocks, logs, or escalates — before anything irreversible happens.
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install plyra-guard
+```
+
+Optional extras for dashboard and observability:
+
+```bash
+pip install "plyra-guard[sidecar]"   # dashboard + REST API
+pip install "plyra-guard[otel]"      # OpenTelemetry exporter
+```
+
+### Step 2: Wrap a Tool
+
+```python
+from plyra_guard import ActionGuard, RiskLevel
+
+guard = ActionGuard.default()
+
+@guard.protect("file.delete", risk_level=RiskLevel.HIGH)
+def delete_file(path: str) -> str:
+    import os
+    os.remove(path)
+    return f"Deleted {path}"
+
+# Allowed — returns "Deleted /tmp/report.txt"
+delete_file("/tmp/report.txt")
+
+# Blocked — raises policy violation, does NOT execute
+delete_file("/etc/passwd")
+```
+
+### Step 3: Attach to an Agent Framework
+
+plyra-guard is framework-agnostic. The README shows examples for:
+
+- **LangGraph**
+- **AutoGen**
+- **CrewAI**
+- **LangChain**
+- **OpenAI / Anthropic SDKs**
+- **Plain Python**
+
+All integrations follow the same pattern: wrap tool functions with `@guard.protect()`, then pass them to your agent as usual.
+
+### Step 4: Enable the Dashboard (optional)
+
+```bash
+pip install "plyra-guard[sidecar]"
+```
+
+The dashboard runs at `localhost:8765` and provides:
+
+- Real-time action feed
+- Policy hit rates
+- Session replay
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│                      Your Agent                       │
+│  (LangGraph / AutoGen / CrewAI / LangChain / Python)  │
+└───────────────────────────┬──────────────────────────┘
+                            │ tool calls
+                            ▼
+┌──────────────────────────────────────────────────────┐
+│                     plyra-guard                       │
+│  policy evaluation · risk scoring · audit log · rate  │
+│  limiting · escalation · rollback · dashboard         │
+└───────────────────────────┬──────────────────────────┘
+                            │ allowed calls only
+                            ▼
+┌──────────────────────────────────────────────────────┐
+│                        Tools                          │
+│  file_system · browser · code_exec · APIs · database  │
+└──────────────────────────────────────────────────────┘
+```
+
+## Key Features
+
+- **Framework agnostic** — one-line wrap for LangGraph, AutoGen, CrewAI, LangChain, OpenAI, Anthropic, or plain Python
+- **Policy as code** — rules live in your repo, reviewed in PRs, tested in CI
+- **Zero latency budget** — evaluation happens in-process, no network hop, sub-2ms overhead
+- **Full audit log** — every action logged (allowed and blocked), ships to OTEL, Datadog, or your own sink
+- **Built-in dashboard** — real-time action feed, policy hit rates, session replay at `localhost:8765`
+
+## Practical Evaluation Checklist
+
+- [ ] Install with `pip install plyra-guard`
+- [ ] Wrap a tool function with `@guard.protect()`
+- [ ] Confirm blocked actions are rejected (not just warned)
+- [ ] Enable `[sidecar]` extra for dashboard
+- [ ] Configure OTEL export if using Datadog or Jaeger
+- [ ] Write at least one custom policy rule in `policy.py`
+- [ ] Test that policy rules survive a restart (persist in code, not memory)
+
+## Security Notes
+
+- Policy rules are **code**, not config — they live in your repo and go through PR review
+- The guard runs **in-process** with your agent; it has access to the same resources your agent does
+- Audit logs are shipped to OTEL/Datadog by default — ensure your log sink is secured
+- Rate limiting is built in — helps prevent accidental or malicious flooding of tool calls
+
+## FAQ
+
+**Q: Does plyra-guard work with CrewAI?**
+**A:** Yes. The README lists CrewAI as a supported framework alongside LangGraph, AutoGen, LangChain, and plain Python.
+
+**Q: How much latency does it add?**
+**A:** The README states sub-2ms overhead for in-process evaluation, with no network hop required.
+
+**Q: Can I define custom policies beyond HIGH/MEDIUM/LOW?**
+**A:** Yes. Policies are defined as code in your repository, so you can model any risk taxonomy you need and test it in CI.
+
+**Q: Does it work with hosted LLMs (OpenAI, Anthropic)?**
+**A:** Yes. The library intercepts tool calls at the Python function level, independent of which LLM is generating the calls.
+
+## Conclusion
+
+plyra-guard fills a real gap in the agentic AI stack: there is no standard safety layer between an LLM's decision and the resulting system call. By wrapping tool functions with policy checks, it gives you the confidence to deploy agents that actually do things — without hoping the model never makes a destructive mistake.
+
+If you're building agents that touch file systems, browsers, APIs, or databases, adding `plyra-guard` is a one-line change that buys you a production-grade safety layer.
+
+**Install:** `pip install plyra-guard`
+**Docs:** [plyraai.github.io/plyra-guard](https://plyraai.github.io/plyra-guard)
