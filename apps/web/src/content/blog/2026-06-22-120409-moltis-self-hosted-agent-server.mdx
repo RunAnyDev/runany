@@ -1,0 +1,158 @@
+---
+title: "Moltis – Self-Hosted AI Agent Server in Rust"
+description: "A secure, self-hosted AI agent server in Rust. One binary, sandboxed execution, multi-provider LLMs, voice, memory, Telegram, Discord, MCP tools."
+pubDate: "2026-06-22"
+tags: ["ai-setup", "self-hosted", "rust"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/moltis-self-hosted-agent-server.webp"
+  alt: "Moltis – secure persistent personal agent server in Rust"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Moltis is a self-hosted AI agent server written in Rust. One binary runs on your hardware, sandboxes every tool call, and connects to Telegram, Discord, voice, and MCP — without sending your data to the cloud.
+
+## What Is Moltis?
+
+Moltis is a persistent personal agent server built in Rust. According to the [official site](https://moltis.org), it is "a secure persistent personal agent server in Rust. One binary, sandboxed execution, multi-provider LLMs, voice, memory, Telegram, WhatsApp, Discord, Slack, Matrix, Nostr, Teams, and MCP tools."
+
+The core promise: **your keys never leave your machine**. Every command runs inside a sandboxed container, not on your host operating system.
+
+The project hit the front page of Hacker News in June 2026 and has accumulated 2,700+ stars on GitHub. It is MIT-licensed.
+
+## Installation
+
+Moltis ships as a single Rust binary. No Node.js, no npm, no runtime dependencies.
+
+### Option 1 – Install script (macOS / Linux)
+
+```bash
+curl -fsSL https://www.moltis.org/install.sh | sh
+```
+
+### Option 2 – Homebrew
+
+```bash
+brew install moltis-org/tap/moltis
+```
+
+### Option 3 – Docker
+
+```bash
+docker pull ghcr.io/moltis-org/moltis:latest
+```
+
+### Option 4 – Build from source
+
+```bash
+cargo install moltis --git https://github.com/moltis-org/moltis
+```
+
+The install script and Homebrew are the fastest paths. The Docker image supports both `amd64` and `arm64`.
+
+## Core Architecture
+
+Moltis is organized as a Rust workspace of 59 crates totaling approximately 270K lines of code. The key crates (per the [README](https://github.com/moltis-org/moltis)):
+
+| Crate | Role |
+|-------|------|
+| `moltis-gateway` | HTTP/WS server, RPC, auth |
+| `moltis-tools` | Tool execution, sandboxing, WASM tools |
+| `moltis-providers` | LLM provider implementations |
+| `moltis-agents` | Agent loop, streaming, prompt assembly |
+| `moltis-chat` | Chat engine, agent orchestration |
+| `moltis-memory` | SQLite + FTS + vector memory |
+| `moltis-mcp` | MCP server integration (stdio + HTTP/SSE) |
+
+The gateway server uses the Axum framework for HTTP and WebSocket connections. Tool calls are sandboxed inside Docker containers or Apple Containers, with WASM precompiled for common operations.
+
+## Key Features
+
+### Multi-Provider LLM Support
+
+Moltis connects to OpenAI, GitHub Copilot, and local model backends. The agent loop supports streaming responses, parallel tool execution, and sub-agent delegation. Switching providers is a configuration change, not a code change.
+
+### Built-In Voice I/O
+
+Moltis ships with 8 TTS providers and 7 STT providers for voice input and output. Voice is not a plugin — it is part of the core binary.
+
+### Cross-Session Memory
+
+Memory is backed by SQLite with full-text search (FTS) and vector embeddings. Sessions persist across restarts with automatic compaction. The system also maintains Cursor-compatible project context and scans context files for safety before loading them into the agent.
+
+### Communication Integrations
+
+Built-in integrations include:
+
+- Telegram, Signal, WhatsApp
+- Discord, Microsoft Teams, Slack, Matrix, Nostr
+
+This means you can interact with your agent from any of these platforms without running separate bridge software.
+
+### MCP Server Support
+
+Moltis connects to MCP servers over both stdio and HTTP/SSE. A live tool inventory is available in the web UI under Settings → Tools. The skill system supports 15 lifecycle hook events with a circuit breaker for fault isolation.
+
+### Safer Agent Editing
+
+Before any built-in skill or memory mutation, Moltis creates an automatic checkpoint. You can restore previous states and branch sessions. This protects against unintended edits that a misbehaving agent might make.
+
+## Security Model
+
+The README is explicit about the security architecture:
+
+- **Sandboxed execution** — Docker + Apple Container, per-session isolation
+- **Secret handling** — uses `secrecy::Secret`, memory-zeroed on drop, redacted from tool output
+- **Auth** — password + passkey (WebAuthn), rate-limited, per-IP throttle
+- **SSRF protection** — DNS-resolved, blocks loopback/private/link-local addresses
+- **Origin validation** — rejects cross-origin WebSocket upgrades
+- **Hook gating** — `BeforeToolCall` hooks can inspect or block any tool invocation
+- **Release integrity** — artifact attestations, Sigstore keyless signing, SHA-256/SHA-512 checksums
+
+You can verify a release with:
+
+```bash
+gh attestation verify <artifact> -R moltis-org/moltis
+```
+
+The unsafe code surface is isolated to Swift FFI, local model wrappers, and precompiled WASM boundaries — not the core agent loop.
+
+## Deployment Options
+
+Moltis runs on a Mac Mini, a Raspberry Pi, or any server you own. Cloud deploy guides exist for:
+
+- Fly.io
+- DigitalOcean
+- Tailscale (for remote access without exposing a public port)
+
+For constrained hardware (Raspberry Pi, etc.), use:
+
+```bash
+moltis --no-default-features --features lightweight
+```
+
+## Comparison with Similar Tools
+
+The [README comparison table](https://github.com/moltis-org/moltis#comparison) positions Moltis against OpenClaw. Key differentiators:
+
+| | OpenClaw | **Moltis** |
+|---|---|---|
+| Stack | TypeScript + Swift/Kotlin | **Rust** |
+| Runtime | Node.js + npm | **Single Rust binary** |
+| Local LoC | ~1.1M | **~270K** |
+| Sandbox | browser/node tools | **Docker + Apple Container + WASM** |
+| Voice | voice wake and talk modes | **8 TTS + 7 STT providers built-in** |
+| Memory | plugin-backed | **SQLite + FTS + vector** |
+
+## Source and Accuracy Notes
+
+- Project page: [moltis.org](https://moltis.org)
+- Source repository: [github.com/moltis-org/moltis](https://github.com/moltis-org/moltis)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46993587](https://news.ycombinator.com/item?id=46993587)
+- Stars: 2,700+ (verified via GitHub REST API)
+- Source last checked: 2026-06-22 (README commit `main`)
