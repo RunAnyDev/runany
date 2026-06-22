@@ -1,0 +1,169 @@
+---
+title: "Kikubot - Email-Driven Multi-Agent AI Framework"
+description: "Kikubot turns email inboxes into AI agents. Deploy a multi-agent network where agents poll IMAP, run LLM loops, and reply via SMTP - no UI needed."
+pubDate: "2026-06-22"
+tags: ["ai-setup", "self-hosted", "agent", "multi-agent"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kikubot.webp"
+  alt: "Kikubot product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kikubot turns email inboxes into AI agents. Deploy a multi-agent network where agents poll IMAP, run LLM loops, and reply via SMTP — no UI, no training required.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links verified from actual source.**
+
+- Project page: [kikubot.ai](https://kikubot.ai) — resolves via GitHub redirect (DNS not yet propagated at time of writing)
+- Source repository: [github.com/mxaiorg/kikubot](https://github.com/mxaiorg/kikubot)
+- License: [MIT](https://github.com/mxaiorg/kikubot/blob/main/LICENSE) (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=44183166](https://news.ycombinator.com/item?id=44183166)
+- Source last checked: 2026-06-22 (commit `main`, pushed 2026-06-18)
+
+## What Is Kikubot?
+
+Kikubot is an open-source, email-driven multi-agent framework developed by [mxHERO](https://mxhero.com). Each running container polls one IMAP mailbox, runs every new email through an LLM agentic loop with a configurable tool set, and replies via SMTP. Agents collaborate by emailing each other — a coordinator agent can delegate tasks to specialist agents, fan out work, and snooze pending items.
+
+The core idea: **email is the universal asynchronous message bus**. Humans already use it, every system can send to it, threads carry their own history via `References:` and `In-Reply-To:`, and email accounts give you free per-agent identity, ACLs, and message durability.
+
+The project is written in Go (local dev: Go 1.26) and ships primarily as Docker containers.
+
+## Setup Workflow
+
+### Step 1: Clone and configure
+
+```bash
+git clone https://github.com/mxaiorg/kikubot.git
+cd kikubot
+cp configs/secrets.env.example configs/secrets.env
+```
+
+Edit `configs/secrets.env` with your IMAP/SMTP credentials:
+
+```bash
+KIKU_EMAIL=user@yourdomain.com
+KIKU_EMAIL_PASSWORD="your-app-password"
+KIKU_IMAP_HOST=imap.yourmailserver.com
+KIKU_SMTP_HOST=smtp.yourmailserver.com
+```
+
+### Step 2: Define agents in agents.yaml
+
+```bash
+# configs/agents.yaml
+agents:
+  - id: coordinator
+    email: coordinator@yourdomain.com
+    model: anthropic
+    tools:
+      - message_tool
+      - status_tool
+      - snooze_tool
+  - id: researcher
+    email: researcher@yourdomain.com
+    model: anthropic
+    tools:
+      - tavily_search
+      - message_tool
+```
+
+### Step 3: Run with Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+### Step 4: (Optional) Add a mail server for self-hosted inboxes
+
+```bash
+cd services/dms
+docker compose up -d
+```
+
+## How Agents Communicate
+
+Agents coordinate entirely over email using the `message_tool`. A coordinator agent can:
+
+- **Delegate** a task to a specialist by emailing it
+- **Fan out** to multiple agents simultaneously
+- **Snooze** pending work and receive a reminder at a scheduled time
+
+Each agent maintains per-thread memory as JSON keyed by the thread's root `Message-Id`. Thread history is preserved natively through email's threading headers — no external database needed for conversation context.
+
+## Pluggable Tools and Models
+
+**Built-in tools** (always available):
+- `message_tool` — send emails to other agents or humans
+- `status_tool` — report current agent state
+- `snooze_tool` — schedule follow-up reminders
+- `mailbox_search` — search past emails
+
+**Optional tools** (configure in `agents.yaml`):
+- Tavily web search
+- Salesforce, WordPress, Buffer, Box integrations
+- Apache Tika (PDF/Office doc text extraction)
+- Arbitrary local or HTTP MCP servers
+
+**LLM options:**
+- Anthropic API (default, with prompt caching support)
+- OpenRouter (with automatic backup-model fallback)
+
+## Recurring Tasks via Cron Syntax
+
+Agents understand natural-language scheduling prompts and convert them to cron expressions. Examples from the README:
+
+- *"Send me the social-media metrics every Monday at 9am"* → `0 9 * * 1`
+- *"Remind me about the contract review tomorrow at 2pm"* → one-off with `Once: true`
+- *"Stop the daily standup digest"* → triggers `unsnooze_tool`
+
+The scheduler is file-backed with no external dependencies.
+
+## Deeper Analysis
+
+**Why email as the agent bus?**
+
+Email is everywhere, requires no infrastructure beyond a mail server, carries built-in identity (the from address), and threads automatically via standard headers. For deploying AI agents in organizations where everyone already understands email, this removes the adoption friction of learning a new UI or API.
+
+The observability story is also clean — agent conversations are just email threads you can open in any mail client to inspect what the agent network decided and why.
+
+**Multi-agent coordination without a message broker**
+
+Traditional multi-agent systems need a central message broker (Redis, RabbitMQ, etc.). Kikubot uses SMTP/IMAP as the transport, which means:
+- No broker to operate or monitor
+- Message persistence is handled by the mail server
+- Agents can be geographically distributed, each with their own mail server
+
+**Current limitations**
+
+The README notes that Microsoft/Office 365 email compatibility is not yet fully tested. Agents run in a single process with file-backed scheduling — if you run multiple replicas of the same agent, only one should own the snooze file.
+
+## Security Notes
+
+- Agents run in Docker containers, providing process isolation
+- Tool access is via scoped API keys configured per-agent
+- ACLs control which domains or email addresses an agent will respond to (whitelist or blacklist mode)
+- Agents do not run on end-user machines — they live server-side
+
+## FAQ
+
+**Q: Do I need a mail server to use Kikubot?**
+**A:** Yes, you need IMAP and SMTP access. You can use any provider (Gmail, Fastmail, self-hosted mailserver) as long as the agent can poll via IMAP and send via SMTP.
+
+**Q: Can humans interact with agents?**
+**A:** Yes. Simply email the agent's inbox address and the agent will process the message and reply with the result.
+
+**Q: What LLMs does Kikubot support?**
+**A:** Anthropic API (default, with prompt caching) and OpenRouter (with fallback model support).
+
+**Q: Is this production-ready?**
+**A:** The project is actively developed. Microsoft/Office 365 email compatibility is listed as not yet fully tested.
+
+## Conclusion
+
+Kikubot is a novel approach to multi-agent systems that uses email as the coordination layer instead of a custom message broker. If you already live in email, this gives you a zero-training way to deploy AI agents into your workflow — agents are just inboxes, and collaboration is just sending messages. For self-hosted setups wanting a multi-agent coordinator without Redis or a custom bus, this is worth evaluating.
