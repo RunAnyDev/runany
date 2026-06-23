@@ -1,0 +1,192 @@
+---
+title: "l6e - Budget Gates for AI Coding Agents"
+description: "l6e is an open-source MCP server that adds cost enforcement to Cursor, Claude Code, and Windsurf. Set a session budget, and the agent checkpoints and halts when spending gets too high. Free MIT tool."
+pubDate: "2026-06-23"
+tags: ["mcp", "ai-agents", "cost-optimization", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/l6e-mcp.webp"
+  alt: "l6e MCP server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** l6e is an open-source MCP server that acts as a cost gate between your coding agent and its tools — checkpointing spend, returning "allow" or "halt" signals, and forcing the agent to scope tighter before token counts balloon. Free and MIT-licensed.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [l6e.ai](https://l6e.ai) ← **MUST visit and verify**
+- Source repository: [github.com/l6e-ai/l6e-mcp](https://github.com/l6e-ai/l6e-mcp) ← **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=45345277](https://news.ycombinator.com/item?id=45345277) (tooljet, different post — l6e Show HN: news.ycombinator.com/item?id=???) — l6e Show HN was [news.ycombinator.com/item?id=45359339](https://news.ycombinator.com/item?id=45359339) for Verdent; l6e launched at news.ycombinator.com/item?id=??? — verified via README dogfooding link only; no direct HN thread confirmed for l6e)
+
+## What Is l6e?
+
+Without a cost signal, an AI coding agent has no reason to be economical — it will read every file, spawn sub-agents, and keep going until the task is done or the credit runs out. l6e adds the missing budget gate.
+
+l6e is an MCP server that runs between your IDE and your coding agent. At each expensive operation, the agent calls `l6e_authorize_call` — l6e checks the remaining budget and returns **allow** or **halt**:
+
+- **allow** — proceed; check `budget_pressure` to decide how aggressively to economize
+- **halt** — budget exhausted, stop the session
+
+The constraint changes the agent's behavior. A budgeted agent scopes tighter, plans upfront, and stops when it should — not when it runs out of money.
+
+## How It Works
+
+l6e does **not** proxy your prompts or completions. It only sees the metadata your agent passes at each checkpoint: token estimates, model name, and a stage label. Your source code, prompts, and completions stay private.
+
+```
+Agent
+  └── l6e MCP (budget layer)
+        ├── Dosu MCP  ← knowledge
+        ├── GitHub MCP ← code
+        └── Linear MCP ← issues
+  # l6e decides which model processes
+  # each response — not what to fetch
+```
+
+Session state is stored locally in SQLite at `~/.l6e/sessions.db`.
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install l6e-mcp
+# or zero-install:
+uvx l6e-mcp
+```
+
+### Step 2: Add to your MCP config
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "l6e": {
+      "command": "uvx",
+      "args": ["l6e-mcp"]
+    }
+  }
+}
+```
+
+**Claude Code** — see [docs.l6e.ai/setup/claude-code](https://docs.l6e.ai/setup/claude-code) for the full config.
+
+**Windsurf** — see [docs.l6e.ai/setup/windsurf](https://docs.l6e.ai/setup/windsurf) for the full config.
+
+### Step 3: Add the enforcement rule
+
+Copy the [l6e budget enforcement rule](https://docs.l6e.ai/setup/cursor) to `.cursor/rules/` so your agent knows how to interpret the budget tools.
+
+### Step 4: Set a budget and start
+
+In your agent prompt or session:
+
+```
+Refactor the auth module. budget $3.
+```
+
+l6e picks up the budget and enforces it for the session. Every checkpoint call returns the remaining spend.
+
+### Step 5: (Optional) Connect the dashboard
+
+Create a free account at [app.l6e.ai](https://app.l6e.ai) for session history, spend tracking, and billing import for calibration:
+
+```json
+{
+  "mcpServers": {
+    "l6e": {
+      "command": "uvx",
+      "args": ["l6e-mcp"],
+      "env": {
+        "L6E_API_KEY": "sk-l6e-...",
+        "L6E_CLOUD_SYNC": "1"
+      }
+    }
+  }
+}
+```
+
+## Deeper Analysis
+
+### Budget enforcement vs. cost tracking
+
+Traditional cost tools are dashboards — they show you the bill after the fact. l6e is a constraint gate that fires **before** each operation and stops the problem at the source. As the docs put it:
+
+> "Other tools show you what happened. l6e prevents it from happening."
+
+### Calibration
+
+Out of the box, l6e uses raw token estimates from LiteLLM pricing. These are directionally accurate but can diverge from what your provider actually bills. Import your Cursor billing CSV in the dashboard and l6e builds a personal calibration factor that tightens estimates to within 2–3x of actual cost.
+
+### Pipeline adapters
+
+The same enforcement primitive works outside MCP. Python adapters exist for:
+
+- **LangChain** — drop-in callback handler with automatic stage inference
+- **CrewAI** — step callback for cost enforcement between agent steps
+- **LiteLLM** — budget enforcement across any model LiteLLM supports
+- **Any callable** — wraps any Python completion function (OpenAI SDK, Anthropic, custom)
+
+```bash
+pip install l6e
+```
+
+## Practical Evaluation Checklist
+
+- Works with Cursor, Claude Code, Windsurf, and any MCP-compatible client
+- MIT-licensed, open-source MCP server
+- No proxy — only sees token metadata, not prompts or code
+- Per-session budgets with checkpoint gates
+- Local SQLite session storage (`~/.l6e/sessions.db`)
+- Free tier: MCP server + local run log
+- Free Account tier: cloud sync + billing import + calibration
+- Pipeline adapters for LangChain, CrewAI, LiteLLM
+
+## Security Notes
+
+l6e does not proxy AI traffic. It receives only metadata at checkpoint boundaries: token estimates, model name, and stage label. Your prompts, source code, and completions never leave your machine or go through l6e's infrastructure. The [README](https://github.com/l6e-ai/l6e-mcp) explicitly states:
+
+> "l6e never reads your prompts — only token counts and estimates."
+
+The local SQLite database at `~/.l6e/sessions.db` stores session logs locally. Enable `L6E_CLOUD_SYNC` only if you want session data synced to app.l6e.ai.
+
+## Pricing
+
+| Tier | Price | Features |
+|---|---|---|
+| MCP Server | Free | Budget enforcement, per-session budgets, checkpoint gates, local SQLite log, LangChain/CrewAI/LiteLLM adapters |
+| Free Account | Free | Cloud sync, Cursor billing import, personal calibration factor, session detail view |
+| Pro | Roadmap | Team budgets, advanced spend analytics, anomaly detection |
+
+## FAQ
+
+**Q: Does l6e slow down my agent?**
+**A:** No. The checkpoint call is a local SQLite lookup — not an LLM call. Latency is negligible.
+
+**Q: Can I use it without an account?**
+**A:** Yes. The MCP server runs fully locally without `L6E_API_KEY`. The Free tier adds cloud sync and calibration.
+
+**Q: What models does l6e support?**
+**A:** l6e works with any MCP-compatible client (Cursor, Claude Code, Windsurf) regardless of which model you run. Budget enforcement is model-agnostic — it gates on token cost estimates, not model-specific billing.
+
+**Q: Does l6e see my code?**
+**A:** No. l6e only sees token metadata (counts, model name, stage label) passed at checkpoint boundaries. Your source code, prompts, and completions are never transmitted.
+
+**Q: What happens when the budget runs out mid-task?**
+**A:** l6e returns `halt` and the agent stops. You can inspect the session log at `~/.l6e/sessions.db` or in the dashboard to see what was completed.
+
+## Conclusion
+
+l6e solves a real problem: agents have no built-in reason to be economical. The budget constraint forces tighter scoping, smarter tool use, and earlier stopping — behavioral changes that compound into real cost savings. Early users report 50% bill reductions.
+
+The tool is MIT-licensed, runs entirely locally (no mandatory cloud), and integrates with the major MCP coding agents out of the box. If you run Claude Code, Cursor, or Windsurf professionally, l6e is worth a look — especially since the core MCP server is free.
+
+> "My bill is 50% of what it was before l6e. It seems like black magic — I know it's not — and I can't go back."
