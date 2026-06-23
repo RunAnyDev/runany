@@ -1,0 +1,149 @@
+---
+title: "OpenTrace – AI-Powered Production Debugging via MCP"
+description: "OpenTrace is a self-hosted observability server that connects AI coding agents directly to production logs and errors via MCP — no dashboards, no copy-paste."
+pubDate: "2026-06-23"
+tags: ["observability", "mcp", "self-hosted", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/opentrace-observability-agent.webp"
+  alt: "OpenTrace product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OpenTrace is a self-hosted observability server that connects your AI coding agent to production logs, errors, and Postgres data via MCP — eliminating the manual copy-paste workflow between your app and your chat window.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/adham90/opentrace](https://github.com/adham90/opentrace) — verified
+- Source repository: [github.com/adham90/opentrace](https://github.com/adham90/opentrace) — README read in full (v0.19.4)
+- License: MIT (verified via LICENSE file on GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=47160164](https://news.ycombinator.com/item?id=47160164)
+- Latest release: v0.19.4 (verified via GitHub Releases API, 2026-04-18)
+
+## What Is OpenTrace?
+
+Your AI coding assistant can read your code — but it is **blind to production**. When something breaks, you copy-paste stack traces, dig through log dashboards, and manually feed context into chat. OpenTrace fixes that.
+
+OpenTrace is a self-hosted server that connects your AI agent directly to your production observability data via the Model Context Protocol. No dashboards, no UI — **the agent is the interface**.
+
+```
+You:    "Why is the checkout endpoint throwing 500s?"
+
+Agent:  Error rate on POST /api/checkout spiked from 0.1% to 4.2%
+        starting 8 minutes ago. 23 errors, 12 affected users.
+
+        Root cause: NilPointerError at payments_controller.rb:87
+        — customer.address is nil when charging.
+
+        This started after the latest deploy (commit a1b2c3d by
+        dev@company.com). The commit modified payments_controller.rb
+        lines 82-95.
+
+        Want me to fix it?
+```
+
+OpenTrace exposes **13 MCP tools with 90+ actions**. Each tool returns `suggested_tools` with pre-filled arguments so the agent knows what to call next.
+
+## Setup Workflow
+
+### Step 1: Deploy the server
+
+Pick a VPS (Hetzner, DigitalOcean, any Linux server) and run:
+
+```bash
+ssh root@your-server
+curl -fsSL https://raw.githubusercontent.com/adham90/opentrace/main/scripts/install.sh | bash
+```
+
+The installer downloads the latest binary, initializes the database, sets up a systemd service, and opens the relevant firewall port.
+
+### Step 2: Connect your agent
+
+The install script generates a `.mcp.json` in your project directory. Claude Code and Cursor both read this file automatically and connect to OpenTrace on startup. No client-side install needed beyond the SDK.
+
+### Step 3: Instrument your app
+
+Install the SDK for your language:
+
+```bash
+# Node.js
+npm install opentrace-sdk
+
+# Ruby
+gem install opentrace-sdk
+```
+
+The SDK captures logs, request performance, SQL queries, external API calls, emails, file operations, and audit trails — then sends everything as flat JSON. Your app never blocks or crashes due to OpenTrace.
+
+## Deeper Analysis
+
+### The storage engine
+
+OpenTrace uses a custom **segmented columnar log store** instead of SQLite, Elasticsearch, or ClickHouse:
+
+- **Write path**: SDK sends flat JSON → server appends to binary WAL → fsync. No indexes on write. **200–500K entries/sec**.
+- **Seal**: Every hour, the WAL is sealed into compressed columnar chunks (45 columns, 6 encoding types: dictionary, sparse, delta, bitpack, varint, zstd). **3–5MB peak memory**.
+- **Query**: Parallel column scans across segments plus a custom inverted index for full-text search. Most queries complete in **5–50ms**.
+- **Pruning**: `rm -rf` old segment directories. **Instant** — no DELETE queries, no VACUUM.
+- **Storage**: ~76MB/hour at 1M logs/hr (vs ~500GB with SQLite). **Fits on a $4/month VM**.
+
+### What the MCP tools cover
+
+| Tool | Actions | What it does |
+|------|---------|-------------|
+| Log search | 20+ | Full-text search across all log columns |
+| Error investigation | 15+ | Fingerprinting, grouping, root cause |
+| Slow query analysis | 10+ | Explains Postgres query plans |
+| Deploy risk assessment | 8+ | Correlates errors with recent deploys |
+| PII audit | 5+ | Reports scrubbed sensitive fields |
+
+## Practical Evaluation Checklist
+
+- Self-hosted on a $4/month VPS (no managed cloud dependency)
+- Native MCP integration — no dashboards, agent is the interface
+- Custom columnar storage (not Elasticsearch/ClickHouse)
+- SDKs for Ruby and Node.js available
+- 200–500K entries/sec write throughput
+- 5–50ms query latency
+- PII scrubbing (credit cards, emails, SSNs, phone numbers)
+- Per-user revocable MCP tokens
+- Postgres read-only connection for existing data
+- MIT license
+
+## Security Notes
+
+- **Per-user tokens**: Each developer gets a personal MCP token, stored in their local `.mcp.json`. Revocable independently.
+- **PII scrubbing**: Credit cards, emails, phone numbers, SSNs, and configurable sensitive fields are scrubbed from request bodies before storage.
+- **Network**: MCP over HTTPS (Streamable HTTP and SSE transports).
+- **Storage**: All data stays on your own server. No third-party data transmission.
+
+## FAQ
+
+**Q: Does this require a managed observability service?**
+**A:** No. Everything runs on your own VPS. No external data pipeline, no ClickHouse Cloud, no Elasticsearch cluster.
+
+**Q: What languages are supported?**
+**A:** Ruby and Node.js SDKs are available. The server itself is written in Go.
+
+**Q: What is the minimum hardware to run it?**
+**A:** OpenTrace targets a $4/month VM (1 vCPU, 1GB RAM). The storage engine is designed for minimal disk I/O and memory footprint.
+
+**Q: How does this differ from Grafana + Loki or Elasticsearch?**
+**A:** Traditional observability stacks have a UI that humans read. OpenTrace has no UI — it exposes MCP tools that an AI agent reads and acts on. The agent becomes the interface, not a human reading a dashboard.
+
+**Q: Can it connect to an existing Postgres database?**
+**A:** Yes, in read-only mode. OpenTrace can query your existing Postgres schema for additional context during error investigation.
+
+## Conclusion
+
+OpenTrace solves a specific problem: your AI coding agent is useless when production breaks unless you manually feed it logs and context. By exposing observability data as MCP tools, it closes that loop automatically. The agent investigates errors, correlates them with deploys, and explains root causes — without you switch tabs.
+
+The storage engine is the key technical bet: custom columnar format instead of Elasticsearch means it runs on a $4 VM, not a cluster. For solo developers and small teams who want AI-assisted production debugging without the observability stack overhead, OpenTrace is worth evaluating.
+
+**Source last checked:** 2026-06-23 (commit `main` branch, README, v0.19.4 release)
