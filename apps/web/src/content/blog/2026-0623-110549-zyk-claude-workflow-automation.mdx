@@ -1,0 +1,168 @@
+---
+title: "Zyk – Claude-Native Workflow Automation"
+description: "Talk to Claude to build and manage durable workflows. No node editors, no connectors. Zyk deploys on Hatchet with retries, scheduling, and human-in-the-loop built in."
+pubDate: "2026-06-23"
+tags: ["ai-setup", "workflow-automation", "claude", "mcp"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zyk.webp"
+  alt: "Zyk product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Zyk flips the workflow automation model—instead of dragging nodes in an editor, you talk to Claude and it builds, deploys, and runs durable workflows on Hatchet under the hood.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [zyk.dev](https://zyk.dev) ← **MUST visit and verify**
+- Source repository: [github.com/zyk-hq-dev/zyk](https://github.com/zyk-hq-dev/zyk) ← **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47586452](https://news.ycombinator.com/item?id=47586452)
+- Source last checked: 2026-06-23 (commit `main`, 6 stargazers)
+
+## What Is Zyk?
+
+Most workflow automation tools add AI as an afterthought—bolting a chat box onto an existing node editor. Zyk takes the opposite approach: **Claude is the interface**. You describe what you want in plain language, Claude generates real TypeScript code, and Zyk deploys it on [Hatchet](https://hatchet.run) with durable execution, retries, scheduling, and human-in-the-loop approval all built in.
+
+The key differentiators from the README:
+
+- **No node editor.** No connectors to configure. If a connector does not exist, you're not blocked—Claude writes the HTTP calls directly.
+- **Real TypeScript, not a DSL.** Workflows are plain TypeScript files you own. If you outgrow Zyk, run them on Hatchet directly without changing a line.
+- **Durable execution.** Workflows can pause mid-execution and wait days for a human signal, then resume exactly where they left off. No polling loops, no external state store.
+- **Deploy on Railway in under 10 minutes.** No Docker required locally. One `docker compose up` if you want to run locally.
+
+## Setup Workflow
+
+### Step 1 — Deploy on Railway
+
+Use the one-click Railway deploy. Railway provisions PostgreSQL, Hatchet Engine, and the Zyk MCP Server automatically:
+
+→ [Deploy on Railway](https://railway.com/deploy/zyk)
+
+After deploy, copy two values from the Railway dashboard:
+1. `ZYK_API_KEY` — from the `zyk` service **Variables** tab
+2. Zyk MCP Server URL — from **Settings → Networking → Public URL** (looks like `https://<zyk>.up.railway.app`)
+
+### Step 2 — Connect Claude
+
+**Claude Desktop (recommended for alpha):**
+
+Open **Settings → Developer → Local MCP Servers → Edit Config** and add the `zyk` entry inside `"mcpServers"`:
+
+```json
+{
+  "mcpServers": {
+    "zyk": {
+      "command": "npx",
+      "args": ["-y", "zyk-mcp", "--proxy", "https://<zyk>.up.railway.app/mcp"],
+      "env": {
+        "ZYK_API_KEY": "your-secret-key"
+      }
+    }
+  }
+}
+```
+
+Fully quit and restart Claude after saving. [Node.js](https://nodejs.org) must be installed.
+
+**Claude in browser:** go to **Settings → Connectors → Add custom connector**, paste the Railway URL and API key. No local setup needed.
+
+**Claude Code:** add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "zyk": {
+      "type": "http",
+      "url": "https://<zyk>.up.railway.app/mcp",
+      "headers": {
+        "Authorization": "Bearer your-secret-key"
+      }
+    }
+  }
+}
+```
+
+### Step 3 — Verify It Works
+
+Open the Zyk dashboard (`https://<zyk>.up.railway.app`) and Hatchet UI (`https://<hatchet-lite>.up.railway.app`). Default Hatchet login: `admin@example.com` / `Admin123!!` — change this password after first login.
+
+In Claude, ask: *"List my workflows"*
+
+Expected response:
+
+```
+No workflows registered yet. Use create_workflow to create your first workflow.
+```
+
+Then try the full loop:
+1. *"Create a workflow that asks me what my favourite colour is and logs my answer"*
+2. *"Run it"*
+3. Open the Zyk dashboard **Tasks** tab — a question appears within seconds
+4. Answer it — the run completes and the result appears in the Hatchet UI
+
+## How It Works
+
+```
+You (natural language)
+    |
+Claude
+    |  MCP over HTTP
+Zyk MCP Server  (Railway)
+    |-- /app/workflows/registry.json   workflow registry
+    +-- worker subprocess per workflow
+            |  gRPC
+        Hatchet Engine  (Railway - :8080 UI, :7077 gRPC)
+            |
+        PostgreSQL  (Railway - run history, scheduling, durable state)
+```
+
+**Scheduling:** cron expressions live inside the workflow TypeScript code (`on: { cron: "0 8 * * *" }`). Hatchet owns scheduling entirely.
+
+**Human-in-the-loop:** workflows use `workflow.durableTask()` + `ctx.waitForEvent()` to pause durably in Hatchet's database. Respond via the Zyk dashboard or Slack, and the step resumes exactly where it left off.
+
+**Slack integrations:** set the Slack app's **Interactivity Request URL** to `https://<zyk>.up.railway.app/slack/interactions`.
+
+## Practical Evaluation Checklist
+
+- [ ] One-click Railway deploy succeeds without errors
+- [ ] `ZYK_API_KEY` and MCP Server URL are correctly copied from Railway
+- [ ] Claude Desktop MCP config saves without crashing
+- [ ] "List my workflows" returns the expected empty-state message
+- [ ] Creating and running a simple workflow completes without error
+- [ ] Human-in-the-loop pause and resume works correctly
+- [ ] Hatchet UI shows the workflow run history and diagram
+- [ ] Default Hatchet password is changed after first login
+
+## Security Notes
+
+- Hatchet default credentials (`admin@example.com` / `Admin123!!`) are public knowledge. Change the password immediately after first login.
+- `ZYK_API_KEY` grants full access to your workflows—treat it like a database password, not an environment variable.
+- The Zyk dashboard is public-facing on the Railway public URL; ensure access controls are appropriate for your use case.
+- Workflows run as TypeScript subprocesses—code generation by Claude means inputs to those workflows should be treated as untrusted.
+
+## FAQ
+
+**Q: Is this production-ready?**
+**A:** The README explicitly states alpha is live but not production-ready. Treat it as early-stage software.
+
+**Q: Does it work without Claude?**
+**A:** No. Zyk is designed around Claude as the primary interface. It connects via the MCP protocol.
+
+**Q: Can I self-host without Railway?**
+**A:** Yes. See `CONTRIBUTING.md` in the repo for a local Docker Compose setup. This requires Docker on your machine and a public HTTPS URL for Slack webhooks to work without ngrok.
+
+**Q: How does it compare to Temporal or Inngest?**
+**A:** Zyk builds on Hatchet (a Temporal-like durable execution engine) rather than self-hosting Temporal directly. Hatchet was chosen for its single-Docker-image simplicity—no Kafka or Cassandra dependency.
+
+## Conclusion
+
+Zyk is an interesting flip on the AI workflow tool category: instead of making an existing automation tool slightly smarter, it makes Claude the builder and layers durable execution underneath. The trade-off is tight coupling to Claude, but for teams already living in Claude Desktop, this could replace a separate automation platform entirely. Self-hosting on Railway with zero Docker locally is a genuine ergonomic win.
+
+The alpha status is the main caveat—watch the repo for stability improvements before trusting it with anything important.
