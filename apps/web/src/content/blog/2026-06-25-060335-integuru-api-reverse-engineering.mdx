@@ -1,0 +1,137 @@
+---
+title: "Integuru - Generate APIs from Browser Traffic"
+description: "Reverse-engineer any platforms internal APIs by recording browser traffic with Integuru, an open-source AI agent."
+pubDate: "2026-06-25"
+tags: ["api", "reverse-engineering", "python", "ai-agent", "automation"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/integuru-api-reverse-engineering.webp"
+  alt: "Integuru product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Integuru watches your browser traffic while you perform an action, then reverse-engineers the underlying API calls and outputs runnable Python code to replay them.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [integuru.com](https://www.integuru.com)
+- Source repository: [github.com/Integuru-AI/Integuru](https://github.com/Integuru-AI/Integuru)
+- License: [AGPL-3.0](https://github.com/Integuru-AI/Integuru/blob/main/LICENSE) (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=41983409](https://news.ycombinator.com/item?id=41983409)
+
+## What Is Integuru?
+
+Most platforms with no public API still have working internal endpoints — they have to, since the web UI calls them. Integuru intercepts those calls by recording your browser traffic while you perform the desired action manually, then uses an AI agent to reverse-engineer the dependency graph between requests and emit clean, runnable Python code.
+
+This is not browser automation. There is no Selenium or Playwright running in the background. Integuru reads the HAR file of actual network requests your browser made, analyzes the dependencies between them, and produces code that calls the real endpoints directly.
+
+## Setup Workflow
+
+### Step 1: Install Dependencies
+
+Integuru requires Python 3.12 and uses [Poetry](https://python-poetry.org) for dependency management:
+
+```bash
+git clone https://github.com/Integuru-AI/Integuru.git
+cd Integuru
+poetry install
+poetry shell
+```
+
+### Step 2: Register the Jupyter Kernel
+
+```bash
+poetry run ipython kernel install --user --name=integuru
+```
+
+### Step 3: Capture Browser Traffic
+
+Open your browser and run:
+
+```bash
+poetry run python create_har.py
+```
+
+This spawns a browser window. Log into the target platform and perform the action you want to automate — for example, downloading a utility bill. Integuru records all network requests and cookies.
+
+### Step 4: Generate API Code
+
+Pass the HAR file and a natural-language prompt to the agent:
+
+```bash
+poetry run integuru --prompt "download utility bills" --model gpt-4o
+```
+
+The agent builds a dependency graph of all requests and outputs Python code that can replay the action programmatically.
+
+## How It Works
+
+Integuru builds a dependency graph from the recorded HAR file:
+
+1. **Identify the target request** — the API call that performs the desired action (e.g., `GET /utility-bills?accountId=123&userId=456`).
+2. **Trace dynamic parameters** — detect which parts of the URL or body come from other responses (e.g., `accountId` and `userId` are resolved by earlier requests).
+3. **Build the graph** — map all upstream requests that feed data into the target call.
+4. **Emit code** — traverse the graph from leaf nodes to the root, generating a Python function for each request that handles authentication, parameters, and sequencing.
+
+The dependency graph is the core insight. A single user-facing action might trigger dozens of internal API calls, and getting the order wrong produces broken code. Integuru resolves this automatically.
+
+### CLI Options
+
+```bash
+poetry run integuru --help
+# --model TEXT        LLM to use (default: gpt-4o; o1-preview recommended for code gen)
+# --prompt TEXT       Required. Describe the action you performed in the browser.
+# --har-path TEXT     Path to the HAR file (default: ./network_requests.har)
+# --cookie-path TEXT  Path to cookies JSON (default: ./cookies.json)
+# --max_steps INTEGER Max reasoning steps (default: 20)
+# --generate-code     Output full integration code (not just the graph)
+```
+
+The README recommends `gpt-4o` for graph generation (it supports function calling) and automatically switches to `o1-preview` for code generation if available in your OpenAI account.
+
+## Deeper Analysis
+
+### What Integuru Is Not
+
+- **Not RPA** — there is no browser running during code execution. Integuru produces direct HTTP calls.
+- **Not an OpenAPI generator** — it does not produce `.yaml` specs. It emits runnable Python functions.
+- **Not a scraping tool** — it targets authenticated, internal API calls, not public HTML pages.
+
+### Key Trade-offs
+
+- **Manual interaction required** — you must perform the action in a browser first to capture traffic. This makes it unsuitable for fully automated discovery.
+- **HAR file quality matters** — if the browser misses a request (e.g., due to a slow-loading component), the dependency graph will be incomplete.
+- **LLM cost** — graph generation with `gpt-4o` is relatively cheap; code generation with `o1-preview` can be expensive on complex flows.
+- **2FA support** — Integuru handles two-factor authentication the same way as any other auth step: complete it during the HAR capture, and the resulting cookies are stored for replay.
+
+### Security Notes
+
+- Cookies are written to `cookies.json` locally. Treat this file like a password store.
+- The generated code replays authenticated requests directly. If the platform invalidates sessions aggressively, you may need to re-capture periodically.
+- Integuru is AGPL-3.0. If you embed it in a SaaS product, your derivative code must be open-sourced under the same license.
+
+## FAQ
+
+**Q: Which platforms work with Integuru?**
+**A:** Any platform that uses standard HTTP requests — REST, GraphQL, or otherwise. The more complex the internal API structure (multiple dependent calls, token exchanges), the more value Integuru provides over manual reverse-engineering.
+
+**Q: How is this different from tools like Playwright or Selenium?**
+**A:** Those tools automate the browser itself. Integuru does not run a browser at execution time — it generates code that calls the API endpoints directly, which is faster, more reliable, and easier to embed in a backend service.
+
+**Q: Can it handle 2FA-protected accounts?**
+**A:** Yes. Complete the 2FA challenge during the HAR capture step, then save the resulting session tokens. These are replayed in the generated code.
+
+**Q: Does it work without an OpenAI API key?**
+**A:** No. Integuru requires an OpenAI API key. The README recommends at least `o1-mini` access; `o1-preview` or `gpt-4o` are recommended for best results.
+
+## Conclusion
+
+Integuru fills a specific gap: platforms that have working internal APIs but no public developer access. If you have ever manually used a browser DevTools network tab to figure out what API call a web app makes, Integuru automates that entire reverse-engineering workflow and outputs code you can drop into a real project.
+
+It is not a no-setup tool — you need to perform the action manually to capture traffic, and you need an OpenAI API key. But for the specific problem of "I need to automate something that has no API," it is one of the cleanest open-source solutions available.
