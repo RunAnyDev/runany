@@ -1,0 +1,174 @@
+---
+title: "Gepetto – CLI-Based AI Browser Operator for QA and DevOps"
+description: "Gepetto is an open-source CLI tool that uses natural language tasks and a headless browser to automate QA testing, liveness checks, and data scraping. MIT licensed."
+pubDate: "2026-06-24"
+tags: ["browser-automation", "cli", "qa", "devops", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gepetto-browser-operator.webp"
+  alt: "Gepetto CLI AI browser operator product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Gepetto is an open-source CLI tool that drives a headless browser using natural language task definitions, letting you automate QA flows, liveness checks, and web scraping without writing Playwright code.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [gepetto.sh](https://gepetto.sh) ← visited and verified
+- Source repository: [github.com/eschnou/gepetto](https://github.com/eschnou/gepetto) ← read README end-to-end
+- License: [MIT](https://raw.githubusercontent.com/eschnou/gepetto/main/LICENSE) ← verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=43622270](https://news.ycombinator.com/item?id=43622270)
+
+## What Is Gepetto?
+
+Gepetto is a minimalistic CLI-based AI agent that drives a headless browser to execute tasks described in plain language. Built by Laurent Eschenauer on top of the OpenGPA orchestration framework and Playwright over MCP, it targets developers and DevOps engineers who want to automate browser-based workflows without writing Playwright scripts.
+
+The core loop is straightforward: define a task in a YAML file using natural language steps, point Gepetto at it, and it executes the steps sequentially — proceeding only when each step succeeds.
+
+```yaml
+# Task Name
+description: "Website login/logout test."
+tags: [smoketest, qa]
+tools: [web, test]
+author: "Laurent"
+created: "2025-03-15"
+
+Test:
+  Visit ${HOSTNAME}.
+  Navigate to the login page.
+  Login with username ${USERNAME} and password ${PASSWORD}.
+  Verify user is logged in and on the main dashboard.
+  Click the logout button.
+  Verify you are back to the login page.
+```
+
+Task results are output in JUnit XML format, making it straightforward to integrate with CI pipelines.
+
+## Key Features
+
+Gepetto ships with a focused feature set aimed at CLI and CI environments:
+
+- **Natural language task definition** — write browser automation tasks in plain English, no Playwright API required
+- **Sequential step processing** — each step waits for the previous one to succeed before proceeding
+- **JUnit XML reporting** — CI-friendly output out of the box
+- **Multiple LLM backends** — supports GPT, Claude, Ollama, and any other OpenAI-compatible API
+- **MCP protocol support** — connect to third-party action providers (email, Slack, etc.) over the Model Context Protocol
+- **Headless server operation** — tested running on Ubuntu server environments with no display
+
+## Use Cases
+
+The author highlights several practical scenarios:
+
+- **QA automation** — execute end-to-end smoke tests on web properties
+- **Liveness checks** — periodically simulate real user behavior to verify systems are up
+- **Data scraping** — collect data from web-only dashboards into machine-readable formats
+- **Log monitoring** — detect unusual patterns in system logs
+- **Report generation** — pull data from multiple dashboards and summarize into daily reports
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ or a JVM (Gepetto uses Java under the hood via OpenGPA)
+- Playwright browser binaries
+- An LLM API key (OpenAI, Anthropic, or a self-hosted Ollama instance)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/eschnou/gepetto.git
+cd gepetto
+
+# Install dependencies
+./setup.sh
+
+# Verify the CLI is available
+gepetto --version
+```
+
+### Configuration
+
+Create a `gepetto.yaml` config file in your project or home directory:
+
+```yaml
+llm:
+  provider: openai        # or "anthropic", "ollama"
+  model: gpt-4o
+  api_key: ${OPENAI_API_KEY}
+
+browser:
+  headless: true
+  timeout: 30000
+
+mcp:
+  servers:
+    - name: playwright
+      command: npx @playwright/mcp-server
+```
+
+### Running a Task
+
+```bash
+# Execute a task file
+gepetto run --task tasks/login-test.yaml
+
+# Run with environment variables
+HOSTNAME=https://example.com USERNAME=test PASSWORD=secret gepetto run --task tasks/smoke-test.yaml
+
+# Output JUnit XML for CI integration
+gepetto run --task tasks/qa-suite.yaml --format junit > test-results.xml
+```
+
+## Deeper Analysis
+
+Gepetto sits in the overlap between AI agent frameworks (like OpenAI's Agents SDK or LangChain) and traditional browser automation (Playwright, Puppeteer, Selenium). What differentiates it is the task-file-first approach — rather than imperatively scripting browser actions, you describe the desired outcome in natural language and let the LLM interpret the steps.
+
+The MCP integration is notable because it allows Gepetto to go beyond the browser. With the right MCP servers, the same natural-language task can send Slack messages, query databases, or trigger CI pipelines — all coordinated through the same sequential step execution model.
+
+The trade-off is that Gepetto is not a no-code tool in the visual sense. Task files are YAML, and debugging a failing step requires understanding how the LLM interprets natural language instructions. For teams already comfortable with YAML-based CI configs, this is a natural fit; for non-technical stakeholders, a wrapper script or internal tool abstraction layer would be needed.
+
+## Practical Evaluation Checklist
+
+- Can define a browser task in under 10 lines of YAML
+- JUnit XML output integrates with GitHub Actions, GitLab CI, Jenkins
+- Supports self-hosted Ollama — no API costs for internal usage
+- Headless mode confirmed working on Ubuntu server (per author)
+- MCP support means it can coordinate across multiple tool types in one task
+- MIT license — freely usable in commercial projects
+
+## Security Notes
+
+- LLM API keys are referenced via environment variables, not hardcoded in task files
+- Task files can reference `${VARIABLES}` which get substituted at runtime
+- When running in CI, use secret management (GitHub Secrets, Vault, etc.) for credentials
+- Browser automation runs in an isolated headless context — no UI exposure on servers
+
+## FAQ
+
+**Q: How is this different from writing Playwright tests directly?**
+**A:** Playwright tests require writing TypeScript or JavaScript against the Playwright API. Gepetto lets you describe the desired behavior in natural language and handles the browser interaction automatically. You still get the underlying Playwright power, but without memorizing the API.
+
+**Q: Does it work with self-hosted models?**
+**A:** Yes. Gepetto supports Ollama and any OpenAI-compatible API endpoint. You can point it at a local Ollama instance running Llama 3 or Mistral with no API costs.
+
+**Q: Can it run in GitHub Actions or GitLab CI?**
+**A:** Yes. The JUnit XML output format is designed for CI integration. Run `gepetto run --task your-task.yaml --format junit > results.xml` and point your CI's test reporting at the XML file.
+
+**Q: Does it support visual regression testing?**
+**A:** Not out of the box. Gepetto focuses on functional step execution. For visual comparisons, you would need to add a separate visual regression tool and call it as an MCP action.
+
+**Q: What happens if a step fails?**
+**A:** By default, Gepetto stops execution when a step fails and reports the failure in JUnit format. You can configure error handling behavior per task.
+
+## Conclusion
+
+Gepetto fills a specific niche: developers who want browser automation power without writing Playwright scripts. The natural language task format, MCP extensibility, and JUnit CI output make it a practical choice for teams automating QA and monitoring workflows on a budget. MIT licensed and self-hostable, it is worth evaluating if your team spends significant time on manual browser-based testing.
+
+The project is young (11 stars on GitHub as of mid-2026) and actively developed. Watch the GitHub repository for feature additions, particularly around MCP server integrations and additional LLM backends.
