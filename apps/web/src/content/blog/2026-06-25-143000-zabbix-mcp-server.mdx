@@ -1,0 +1,227 @@
+---
+title: "Zabbix MCP Server – 237 Tools for AI-Powered Infrastructure Monitoring"
+description: "Connect Claude, Codex, and any MCP client to your Zabbix server for host management, problem querying, template ops, PDF reports, and anomaly detection via a self-hosted MCP server."
+pubDate: "2026-06-25"
+tags: ["mcp", "zabbix", "monitoring", "devops", "self-hosted"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zabbix-mcp-server.webp"
+  alt: "Zabbix MCP Server – GitHub repository preview showing MCP server architecture"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The Zabbix MCP Server exposes your entire Zabbix API (237 tools) as MCP endpoints, letting AI assistants like Claude and Codex query hosts, acknowledge events, generate PDF reports, and detect anomalies — all through a self-hosted HTTP service.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/initMAX/zabbix-mcp-server](https://github.com/initMAX/zabbix-mcp-server)
+- Official site: [initmax.com](https://www.initmax.com) (maintainer)
+- License: [AGPL-3.0](https://github.com/initMAX/zabbix-mcp-server/blob/main/LICENSE) (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
+- Source last checked: 2026-06-25 (commit verified against main branch)
+
+## What Is the Zabbix MCP Server?
+
+The [Zabbix MCP Server](https://github.com/initMAX/zabbix-mcp-server) is an open-source MCP (Model Context Protocol) server developed and maintained by [initMAX](https://www.initmax.com). It wraps the full [Zabbix API](https://www.zabbix.com/documentation/current/en/manual/api) — 58 API groups and 223 core methods — as MCP tools, plus 14 extension tools for common monitoring workflows.
+
+In practical terms: instead of logging into the Zabbix web UI or writing scripts to query the API, you open Claude, VS Code Copilot, JetBrains AI, or any MCP-compatible client and ask natural-language questions about your infrastructure:
+
+- "Which hosts are in problem state right now?"
+- "Show me the top 10 items by CPU usage in the last hour."
+- "Generate a PDF report for the Production template."
+- "Detect anomalies in network interface traffic."
+
+The MCP server handles the Zabbix API calls and returns structured, LLM-friendly data.
+
+## Key Features
+
+### Complete Zabbix API Coverage
+
+All 58 Zabbix API groups are exposed as MCP tools: hosts, hostgroups, items, triggers, graphs, templates, users, usergroups, actions, dashboards, maintenance periods, and more. If the Zabbix API can do it, the MCP server has a tool for it.
+
+### 14 Extension Tools
+
+Beyond raw API wrapping, the project ships opinionated composite tools that collapse multiple API calls into a single round-trip:
+
+- `host_status_get` — correlated host health across multiple dimensions
+- `hostgroup_overview_get` — group-level summary in one call
+- `infrastructure_summary_get` — full-stack overview
+- `item_history_summary_get` — historical context without paginating
+- `problem_active_get` — active problems with pre-correlated metadata
+- `graph_render` — exports a PNG graph directly
+- `anomaly_detect` — z-score analysis on item history
+- `capacity_forecast` — linear regression on capacity trends
+- `item_threshold_search` — find items crossing `lastvalue` thresholds
+- `report_generate` — PDF report generation
+- `action_prepare` / `action_confirm` — two-step write approval flow
+- `health_check` — server diagnostics
+- `zabbix_raw_api_call` — admin escape hatch for any unwrapped method
+
+### Admin Web Portal (Port 9090)
+
+A built-in web UI manages tokens, users, servers, templates, and audit logs. Dark/light mode is included. The **Client MCP Wizard (beta)** generates copy-paste config snippets for 14 AI clients including Claude, Codex, Cursor, Cline, VS Code, JetBrains, Goose, Open WebUI, 5ire, Gemini CLI, and n8n.
+
+### Multi-Token Authentication
+
+Named API tokens with per-token scopes, IP restrictions, server binding, and expiry dates. Managed via the admin portal, the CLI (`generate-token`), or the `config.toml` file directly.
+
+### Multi-Server Support
+
+Connect to multiple Zabbix instances (production, staging, DR) with separate tokens per server. The MCP server acts as a unified gateway.
+
+### Token Budget / Tool Filtering
+
+Limit exposed tools by category (`monitoring`, `alerts`, `users`, `extensions`) or individual API prefix. This keeps the tool catalog small enough to fit inside LLM context limits.
+
+### Transport Options
+
+HTTP + SSE (recommended for most clients) and SSE-only for clients like n8n that lack session management.
+
+### Production Hardened
+
+Systemd service unit, logrotate (daily, 30-day retention), Docker support, rate limiting (300 calls/min per client by default), read-only mode per server or per token, and auto-reconnect on session expiry.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux server (or macOS for dev/user-mode install)
+- Python 3.10 or higher
+- Network access to your Zabbix server (5.0 through 8.0 compatible)
+- Zabbix API token — create one at **User settings → API tokens**
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/initMAX/zabbix-mcp-server.git
+cd zabbix-mcp-server
+sudo ./deploy/install.sh
+```
+
+The install script (run as root) performs these steps automatically:
+
+1. Creates a dedicated system user `zabbix-mcp` with no login shell
+2. Creates a Python virtual environment at `/opt/zabbix-mcp/venv`
+3. Installs the server and all dependencies
+4. Copies the example config to `/etc/zabbix-mcp/config.toml`
+5. Installs the systemd service unit (`zabbix-mcp-server`)
+6. Configures logrotate for `/var/log/zabbix-mcp/*.log` (daily, 30 days)
+7. Verifies file permissions and offers to fix any issues
+
+### Step 2: Configure
+
+Edit the config file:
+
+```bash
+sudo nano /etc/zabbix-mcp/config.toml
+```
+
+At minimum, set your Zabbix URL and API token:
+
+```toml
+[[servers]]
+name = "production"
+url = "https://zabbix.example.com"
+token = "your_zabbix_api_token_here"
+```
+
+The config also supports OAuth 2.1, IP restrictions, per-token read/write mode, rate limiting, and TLS/HTTPS. See the [configuration reference](https://github.com/initMAX/zabbix-mcp-server#configuration-reference) in the README for the full schema.
+
+### Step 3: Start the Service
+
+```bash
+sudo systemctl start zabbix-mcp-server
+sudo systemctl enable zabbix-mcp-server
+```
+
+The server listens on `http://127.0.0.1:8080/mcp` by default. The admin portal is at `http://127.0.0.1:9090`.
+
+### Step 4: Connect an AI Client
+
+Open the **Client MCP Wizard** in the admin portal (port 9090) and select your AI client. It generates a ready-to-paste JSON config snippet. For Claude Desktop, add this to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "zabbix": {
+      "url": "http://127.0.0.1:8080/mcp"
+    }
+  }
+}
+```
+
+### User-Mode Install (No Root)
+
+For local development or laptop use without root:
+
+```bash
+./deploy/install-user.sh
+```
+
+On macOS this creates a LaunchAgent; on Linux a systemd `--user` unit. No root required.
+
+Upgrade with:
+
+```bash
+./deploy/install-user.sh update
+```
+
+## Deeper Analysis
+
+### What Makes This Different from a Direct Zabbix API Script?
+
+A raw Zabbix API script requires you to handle authentication, pagination, rate limiting, and error handling yourself — and every query is a bespoke coding task. The MCP server normalizes all of this: symbolic enum names instead of integer codes, auto-filled defaults, preprocessed cleanup, and timestamp conversion. The 14 extension tools alone would take dozens of API calls to replicate.
+
+### Zabbix Version Compatibility
+
+The README confirms Zabbix 5.0 through 8.0 are supported. The AGPL-3.0 license means derivative works must be open-sourced if distributed — relevant if you're embedding this in a commercial product.
+
+### Security Posture
+
+The project ships with per-token IP restriction, server binding, expiry dates, and read-only mode. Rate limiting (300/min per client) protects the Zabbix server from accidental flooding. The [SafeSkill scan](https://safeskill.dev/scan/initmax-zabbix-mcp-server) reports 100/100 verified safe. That said, the server runs as a network service with direct Zabbix API write access — treat it like any other privileged monitoring component: firewall it to trusted networks, do not expose port 8080 publicly, and prefer read-only tokens unless write operations are needed.
+
+## Practical Evaluation Checklist
+
+- [ ] Zabbix 5.0–8.0 API compatibility confirmed
+- [ ] 237 tools total (223 API + 14 extensions) — matches README
+- [ ] AGPL-3.0 license — verified via GitHub API `license.spdx_id`
+- [ ] systemd service, logrotate, Docker support documented
+- [ ] OAuth 2.1 + bearer token auth both supported
+- [ ] Multi-server, multi-token architecture confirmed
+- [ ] Client MCP Wizard generates configs for 14 AI clients
+
+## Security Notes
+
+- **Network exposure:** The MCP server should not be exposed to the public internet. Bind to `127.0.0.1` or a trusted internal network. Use TLS (Let's Encrypt or a reverse proxy) if accessing across network segments.
+- **Token scope:** Prefer read-only tokens by default. Enable write operations only for the specific tokens that need them.
+- **Rate limiting:** The 300 calls/min default per client is a guard against accidental flooding, not a hard security boundary. Monitor `/var/log/zabbix-mcp/` for suspicious activity.
+- **User-mode install:** The macOS LaunchAgent runs under your user session. It survives logout via `KeepAlive` + `loginctl enable-linger`.
+
+## FAQ
+
+**Q: Does this work with Zabbix Cloud (SaaS)?**
+**A:** Yes, if your Zabbix Cloud instance is reachable from the server. Set the `url` to your Zabbix Cloud URL and use a Cloud API token.
+
+**Q: Can I use this with ChatGPT?**
+**A:** Yes. The MCP protocol is supported by ChatGPT via the [MCPO](https://github.com/modelcontextprotocol) bridge or directly by ChatGPT's MCP integration. The Client MCP Wizard in the admin portal generates configs for ChatGPT as well.
+
+**Q: How is this different from the Zabbix MCP Server maintained by Atomic-React?**
+**A:** That project (`atomic-react/zabbix-mcp-server`) exposes a smaller subset of the Zabbix API. The initMAX version covers all 58 API groups, adds 14 composite extension tools, an admin web portal, multi-token auth, and production features like rate limiting and logrotate.
+
+**Q: Does it support TLS/HTTPS?**
+**A:** Yes. You can configure TLS directly in `config.toml` or place the server behind a reverse proxy (nginx, Caddy). The README has a dedicated TLS/HTTPS section.
+
+**Q: How do I update the server after a git pull?**
+**A:** Run `sudo systemctl restart zabbix-mcp-server` after pulling. For user-mode installs: `./deploy/install-user.sh update` handles git pull, pip upgrade, and service restart in one step.
+
+## Conclusion
+
+The Zabbix MCP Server turns Zabbix into a fully queryable, AI-assisted monitoring environment. If you already run Zabbix for infrastructure monitoring, this closes the loop between your monitoring data and your AI workflow — without rebuilding anything. Deploy it on a low-cost VPS or a local machine, point your AI client at it, and start asking your infrastructure questions in plain language.
+
+If you're evaluating it for a team: the AGPL-3.0 license means you can use it freely in open-source projects and internal tooling. For commercial redistribution as part of a product, review the license obligations.
