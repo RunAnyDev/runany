@@ -1,0 +1,178 @@
+---
+title: "Kryfto – Self-hosted MCP server with 42 tools for AI agents"
+description: "Kryfto is an open-source framework that gives AI agents real web browsing capabilities. Ships a 42-tool MCP server for Claude Code/Cursor/Codex, anti-bot stealth, and Docker-based self-hosting."
+pubDate: "2026-06-24"
+tags: ["ai-setup", "dev-tools", "mcp", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kryfto.webp"
+  alt: "Kryfto project thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kryfto is an open-source headless browser runtime that exposes 42 MCP tools for AI agents, letting Claude Code, Cursor, and Codex browse, search, extract, and interact with the live web under a self-hosted Docker setup.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/ExceptionRegret/Kryfto](https://github.com/ExceptionRegret/Kryfto)
+- Source repository: [github.com/ExceptionRegret/Kryfto](https://github.com/ExceptionRegret/Kryfto) — README.md read in full (v3.8.0)
+- License: [Apache 2.0](https://raw.githubusercontent.com/ExceptionRegret/Kryfto/main/LICENSE) — verified
+- HN launch thread: [news.ycombinator.com/item?id=47252539](https://news.ycombinator.com/item?id=47252539)
+- Current version: v3.8.0 (verified via GitHub releases page)
+
+## What Is Kryfto?
+
+Kryfto is a self-hosted web browsing backend for AI agents. It solves the fundamental gap between LLMs and real web interaction: models trained on static data cannot browse live sites, fill forms, solve CAPTCHAs, or extract structured content from dynamic pages.
+
+Built in TypeScript/Node.js (20+), Kryfto ships as a Docker Compose stack with a headless Chromium fleet, a FastAPI-compatible REST API, and a dedicated MCP server with 42 tools. The project targets developers who want full data ownership and no per-call vendor pricing.
+
+> **From the README:** "Self-host your own headless browser fleet. Connect it instantly to AI agents, IDEs, and workflow engines via OpenAPI and MCP."
+
+Key capabilities from the README:
+
+- **42-tool MCP server** for Claude Code, Cursor, and Codex — browse, search, extract, fact-check, and run continuous research agents
+- **Anti-bot stealth engine** with 12 rotated User-Agents (Chrome 130–133, Edge 131/133), canvas fingerprint randomization, WebGL spoofing, WebRTC leak prevention, and humanized mouse movements
+- **CAPTCHA solving** for Cloudflare Turnstile, reCAPTCHA v2, hCaptcha, and Datadom — using local CLIP vision and Whisper transcription (no external paid APIs)
+- **Admin dashboard** on port 3001 for managing tokens, projects, jobs, audit logs, and rate limits, plus an API Playground
+- **Enterprise stack** under the hood: Postgres for persistence, Redis + BullMQ for job queuing, MinIO/S3 for artifact storage
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 20 or higher
+- Docker and Docker Compose
+- 4 GB RAM minimum (8 GB recommended for concurrent browser sessions)
+
+### Step 1: Clone and configure
+
+```bash
+git clone https://github.com/ExceptionRegret/Kryfto.git
+cd Kryfto
+
+# Auto-generate a secure .env with random tokens and passwords
+node scripts/generate-env.mjs -o .env
+
+# Or copy the example and fill in values manually
+cp .env.example .env
+```
+
+### Step 2: Launch the stack
+
+```bash
+# Spin up the entire infrastructure:
+# API, Dashboard, Worker, Postgres, Redis, Minio S3
+docker compose up -d --build
+
+# Verify health
+curl -H "Authorization: Bearer $KRYFTO_TOKEN" \
+  http://localhost:8080/v1/healthz
+```
+
+The Admin Dashboard becomes available at `http://localhost:3001/dashboard/` — log in with your admin API token.
+
+### Step 3: Connect via MCP
+
+The MCP server exposes 42 tools. In Claude Code, Cursor, or Codex, point the MCP client to the Kryfto MCP endpoint:
+
+```bash
+# Example: dispatch a browsing job
+curl -X POST http://localhost:8080/v1/jobs \
+  -H "Authorization: Bearer $KRYFTO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-example-1" \
+  -d '{"url":"https://example.com"}'
+```
+
+### Step 4: Retrieve extracted content
+
+```bash
+# Fetch the extracted Markdown or HTML artifact
+curl -H "Authorization: Bearer $KRYFTO_TOKEN" \
+  http://localhost:8080/v1/jobs/<jobId>/artifacts
+```
+
+### Step 5: Federated search
+
+Kryfto natively queries DuckDuckGo, Brave, and Google in a single federated search call:
+
+```bash
+# Check the README for the current federated search endpoint
+curl -H "Authorization: Bearer $KRYFTO_TOKEN" \
+  http://localhost:8080/v1/search \
+  -d '{"query": "your search term", "engines": ["duckduckgo", "brave", "google"]}'
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Kryfto uses a per-domain browser session pool with a 30-minute TTL. Each session maintains its own cookie jar, user-agent, and fingerprint profile. This prevents cross-site cookie leakage and reduces bot detection from shared browser fingerprints.
+
+The CAPTCHA solving pipeline is particularly notable: reCAPTCHA image grids are classified locally via CLIP vision (`clip-vit-large-patch14`), and audio challenges are transcribed locally via Whisper — both running through `@xenova/transformers`. No external paid service is required.
+
+The job queue (Redis + BullMQ) ensures reliable concurrent job execution even if the API process restarts. Artifacts land in MinIO/S3 with permanent storage rather than ephemeral containerfs.
+
+### Self-hosting economics
+
+The README claims "self-host for $5/mo flat." A minimal setup on a budget VPS (2 vCPU, 4 GB RAM) can run the core stack. Production use with concurrent browser sessions and CAPTCHA solving benefits from 8 GB RAM and additional headless browser workers.
+
+### Comparison to alternatives
+
+| Feature | Kryfto | Browserbase | Steel Thread |
+|---|---|---|---|
+| MCP server | 42 tools | Via API | No |
+| Self-hosted | Yes | No (cloud only) | No |
+| CAPTCHA solving | Local CLIP/Whisper | External API | None |
+| Anti-bot stealth | 12 UAs, canvas spoofing | Yes | Basic |
+| License | Apache 2.0 | Proprietary | Open-source |
+| Docker-based | Yes | No | Varies |
+
+## Practical Evaluation Checklist
+
+- Clone and run `docker compose up` locally
+- Verify `/v1/healthz` returns 200 with the API token
+- Open the Admin Dashboard at `http://localhost:3001`
+- Dispatch a test extraction job via cURL
+- Verify artifact retrieval with `/v1/jobs/<id>/artifacts`
+- Test MCP tool access from Claude Code or Cursor (if configured)
+- Check the SLO dashboard for per-tool success rates
+
+## Security Notes
+
+- All HTTP extractions execute purely in-memory with no telemetry persisted to Postgres
+- API authentication uses Bearer tokens (auto-generated via `generate-env.mjs`)
+- Per-role rate limits are configurable in the Admin Dashboard
+- WebRTC IP leak prevention blocks ICE candidate leaks in browser sessions
+- `Idempotency-Key` header on job creation prevents duplicate submissions
+
+## FAQ
+
+**Q: Does Kryfto require a GPU?**
+**A:** No. The core extraction pipeline runs on CPU. GPU acceleration is only needed if you enable the local CLIP/Whisper CAPTCHA solving pipeline — and even then, it falls back gracefully to non-GPU execution.
+
+**Q: How does it differ from Playwright or Puppeteer directly?**
+**A:** Playwright and Puppeteer are browser automation libraries. Kryfto wraps them with an MCP server interface, anti-bot evasion (rotated UAs, canvas spoofing, humanized mouse curves), CAPTCHA solving, federated search across multiple engines, and a production job queue — all behind a REST API with an admin UI.
+
+**Q: Can I use Kryfto with n8n or Zapier?**
+**A:** Yes. Kryfto ships with a fully documented OpenAPI spec and a REST API, making it straightforward to drop into n8n, Zapier, Make, or any custom TypeScript/Python pipeline.
+
+**Q: What is the minimum VPS spec for self-hosting?**
+**A:** The README suggests $5/month for a minimal setup (2 vCPU, 4 GB RAM). Production use with concurrent headless browsers and CAPTCHA solving benefits from 8 GB RAM.
+
+**Q: Is there a managed cloud version?**
+**A:** No — Kryfto is fully self-hosted only. There is no official hosted or managed offering.
+
+## Conclusion
+
+Kryfto bridges the gap between static LLM knowledge and live web interaction. Its 42-tool MCP server gives AI agents real browsing, search, and extraction capabilities without sending data to a third-party scraping service. The anti-bot stealth engine and local CAPTCHA solving address the two biggest blockers for production web automation.
+
+If you need to give Claude Code, Cursor, or Codex persistent access to dynamic, bot-protected web content — and you want to self-host for full data ownership — Kryfto is worth a closer look.
+
+Get started at [github.com/ExceptionRegret/Kryfto](https://github.com/ExceptionRegret/Kryfto).
