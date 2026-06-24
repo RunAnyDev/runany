@@ -2,6 +2,7 @@
 import PostLayout from '@/layouts/PostLayout.astro';
 import { getCollection, render } from 'astro:content';
 import { getIndexableTags } from '@/utils/tags';
+import { buildSoftwareApplicationJsonLd } from '@/utils/seo-schema';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
@@ -132,6 +133,19 @@ const faqStructuredData = faqItems.length > 0
     }
   : undefined;
 
+// L4 fix: emit SoftwareApplication JSON-LD for product review posts.
+// Review posts are tagged with category: 'review' and use the "Product – Tagline"
+// title convention. The schema generator extracts the product name and builds
+// a minimal but valid SoftwareApplication block.
+const siteUrl = 'https://runany.dev';
+const postSlug = getSlug(post.id);
+const reviewSchema = post.data.category === 'review'
+  ? buildSoftwareApplicationJsonLd(post.data, { siteUrl, postSlug })
+  : undefined;
+
+// Combine all structured data — BaseLayout accepts an array.
+const combinedStructuredData = [faqStructuredData, reviewSchema].filter(Boolean);
+
 // Calculate reading time
 const wordCount = post.body.split(/\s+/).length;
 const readingTime = Math.ceil(wordCount / 200);
@@ -168,7 +182,7 @@ const normalizeDate = (d: any): Date => {
   readingTime={readingTime}
   headings={headings}
   slug={getSlug(post.id)}
-  structuredData={faqStructuredData}
+  structuredData={combinedStructuredData}
 >
   <Content />
   
