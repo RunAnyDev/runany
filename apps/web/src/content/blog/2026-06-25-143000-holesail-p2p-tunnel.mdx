@@ -1,0 +1,139 @@
+---
+title: "Holesail – P2P tunnels that bypass firewalls and NAT"
+description: "Holesail creates peer-to-peer tunnels to expose local servers without port forwarding, DDNS, or a central proxy. Open source, npm-installed, no config."
+pubDate: "2026-06-25"
+tags: ["dev-tools", "self-hosted", "networking"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/holesail.webp"
+  alt: "Holesail P2P Reverse Proxy product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Holesail is an open-source P2P tunneling tool that lets you share any local port with anyone over the internet — no port forwarding, no DDNS, no server required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [holesail.io](https://holesail.io)
+- Source repository: [github.com/holesail/holesail](https://github.com/holesail/holesail)
+- License: AGPL-3.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46172495](https://news.ycombinator.com/item?id=46172495)
+- Source last checked: 2026-06-25 (commit `main` branch, pushed 2026-04-05)
+
+## What Is Holesail?
+
+Holesail is a peer-to-peer reverse proxy written in JavaScript (Node.js). The core pitch from the [README](https://github.com/holesail/holesail):
+
+> Holesail is a truly peer-to-peer network tunneling and reverse proxy software that supports both TCP and UDP protocols. Holesail lets you share any locally running application on a specific port with third parties securely and with a single command. No static IP or port forwarding required.
+
+Unlike ngrok, cloudflared, or SSH reverse tunnels, Holesail uses a direct P2P connection — no relay server in the middle (unless UDP hole-punching fails, in which case it falls back to a relay). The project was featured on HN as "Show HN: Holesail – open-source peer-to-peer tunnels."
+
+## Setup Workflow
+
+### Step 1: Install
+
+Node.js is the only prerequisite.
+
+```bash
+npm i holesail -g
+```
+
+### Step 2: Start a Holesail server (the side sharing a port)
+
+```bash
+holesail --live <port>
+```
+
+Replace `<port>` with the local port you want to expose. The command outputs a connection string.
+
+### Step 3: Connect from anywhere
+
+On the remote side, run:
+
+```bash
+holesail <connection-string>
+```
+
+That's it — the remote client can now reach your local service through the P2P tunnel.
+
+### Step 4: VS Code extension (Liveports)
+
+Holesail also ships a VS Code extension called [Liveports](https://marketplace.visualstudio.com/items?itemName=holesail.holesail-liveports) for sharing local services running inside and outside VS Code. Install it from the VS Code marketplace and the UI shows your active tunnels directly in the editor.
+
+## How P2P Tunneling Works
+
+Traditional reverse proxies (ngrok, cloudflared) relay traffic through a cloud server. Holesail tries to establish a direct P2P connection using UDP hole-punching:
+
+1. Both sides bootstrap via a public relay node to exchange NAT-mapping info.
+2. Each client punches through its own NAT/firewall using STUN-style techniques.
+3. If both sides can reach each other directly, traffic flows peer-to-peer with no relay in the path.
+4. If symmetric NAT or firewall rules make direct punch-through impossible, the relay acts as a fallback — still functional, but slower.
+
+This makes Holesail particularly useful for:
+- Sharing a local webhook endpoint with an external service during development
+- Demoing a locally-running web app to a client without deploying
+- Accessing a home lab server from a mobile network without router admin access
+
+## Deeper Analysis
+
+### Protocol support
+
+Holesail handles both TCP and UDP, unlike most tunnel tools that only support HTTP-over-TCP. This means you can tunnel game servers, SSH, DNS queries, or any non-HTTP protocol.
+
+### Privacy model
+
+Traffic on the P2P leg is end-to-end encrypted between the two peers. The relay (if used) only sees encrypted payloads. The project description says "securely" but the exact crypto primitives should be verified from the source code before using it for high-stakes connections.
+
+### Self-hosting the relay
+
+The repository contains separate packages for the client and server components:
+- `holesail` — the main CLI tool
+- `holesail-server` — the relay server component
+- `holesail-client` — the client-side reverse proxy component
+
+You can run your own relay instead of relying on the default public bootstrap nodes, which matters if you need guaranteed uptime or want to avoid third-party relay infrastructure.
+
+## Practical Evaluation Checklist
+
+- [x] Works on Linux, macOS, Windows (Node.js)
+- [x] TCP and UDP support
+- [x] No account or API key required
+- [x] Open source (AGPL-3.0)
+- [x] VS Code extension available
+- [x] Can self-host relay server
+- [ ] Binary releases available (npm-only today — requires Node.js installed)
+- [ ] Official mobile or browser-based client
+
+## Security Notes
+
+- All traffic is encrypted in the P2P leg, but the README does not specify which cipher suite or key exchange is used. For production use behind a corporate firewall, verify the crypto implementation in the source code.
+- The relay fallback is encrypted but passes through a relay node you don't control (unless you self-host).
+- No authentication mechanism is built into the tunnel itself — sharing the connection string grants full access to the exposed port. Treat it like a password.
+
+## FAQ
+
+**Q: Does Holesail work behind corporate proxies that block outbound UDP?**
+**A:** If UDP is blocked entirely, the direct P2P path will fail and Holesail falls back to the relay. If both sides are on very restrictive networks, a traditional VPN or SSH tunnel may be more reliable.
+
+**Q: How does this compare to SSH reverse tunneling?**
+**A:** SSH reverse tunneling (`ssh -R`) requires an external server with a public IP and SSH access. Holesail needs neither — it punches through NATs P2P. The tradeoff is that Holesail is newer and less battle-tested than OpenSSH.
+
+**Q: Can I use this to tunnel HTTPS websites?**
+**A:** Yes, TCP support means you can tunnel any port, including one running an HTTPS server. The remote client will reach your local cert, so the browser will show a certificate warning unless you handle that separately.
+
+**Q: Is there a persistent URL or custom subdomain?**
+**A:** No — Holesail gives a raw connection string per session, like `holesail <connection-string>`. There is no persistent public URL or subdomain feature like ngrok's free tier offers.
+
+## Conclusion
+
+Holesail fills a specific gap: sharing a local port with someone without configuring router ports, paying for a relay service, or setting up DDNS. The P2P approach is technically clean and the tool is genuinely one command to run. The AGPL license and self-hostable relay mean you can own the infrastructure end-to-end.
+
+The main tradeoffs are that it's npm-only (requires Node.js) and lacks the persistent URLs and access controls that commercial tunnel services provide. For developers who want full control over their tunneling infrastructure and don't mind the P2P complexity, it's a solid open-source option.
+
+If you want something with a web dashboard and persistent URLs out of the box, ngrok or cloudflared are still more convenient — but Holesail is worth knowing about when you need a self-hosted, zero-config alternative.
