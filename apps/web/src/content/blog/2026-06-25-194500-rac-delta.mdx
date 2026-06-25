@@ -1,0 +1,170 @@
+---
+title: "Rac-delta - Open Protocol for Differential Directory Sync"
+description: "Rac-delta is an open delta-patching protocol and dual SDK (Rust and Node.js) for efficiently syncing app or game builds. Supports any storage backend, Blake3 hashing, and streaming. MIT licensed."
+pubDate: "2026-06-25"
+tags: ["dev-tools", "open-source", "sync", "rust", "node"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rac-delta.webp"
+  alt: "Rac-delta open protocol for differential directory sync"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rac-delta is an open delta-patching protocol with Rust and Node.js SDKs that syncs application or game builds efficiently using any storage backend — S3, SSH, Azure, and more.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [raccreative.github.io/rac-delta-docs](https://raccreative.github.io/rac-delta-docs/)
+- Source repositories:
+  - [github.com/raccreative/rac-delta-js](https://github.com/raccreative/rac-delta-js) — Node.js SDK (MIT, 4 stars, `master` branch, pushed 2026-04-02)
+  - [github.com/raccreative/rac-delta-rs](https://github.com/raccreative/rac-delta-rs) — Rust SDK (MIT, 5 stars, `main` branch, pushed 2026-01-08)
+- License: MIT (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=47674776](https://news.ycombinator.com/item?id=47674776)
+
+## What Is Rac-delta?
+
+Rac-delta is an open differential syncing protocol built by [Raccreative Games](https://raccreativegames.com/en/home). Rather than re-uploading an entire application or game build folder on every release, rac-delta calculates the difference (delta) between the old and new build and only transfers what actually changed.
+
+The project ships two official SDKs:
+
+- **`rac-delta-js`** — Node.js implementation with streaming support and file reconstruction
+- **`rac-delta-rs`** — Rust implementation for high-performance server-side use
+
+The protocol is **backend agnostic** — it does not tie you to any specific cloud provider. The README shows an SSH adapter example, but the modular adapter system means you can plug in S3, Azure Blob Storage, signed URLs, or any custom backend.
+
+## Core Features
+
+Rac-delta is built around a single index archive (`rdindex.json`) that centralizes all metadata for a build repository. Key properties:
+
+- **Backend agnostic** — works with any storage via adapters (SSH, S3, Azure, etc.)
+- **Modular adapters** — swap storage backends without changing application logic
+- **Blake3 hashing** — fast, secure hash computation for change detection
+- **Streaming support** — process large builds without loading everything into memory
+- **Concurrency control** — configurable parallelism for upload/download pipelines
+- **Storage agnostic index** — `rdindex.json` works with any remote system
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ (for the JS SDK) or Rust 1.70+ (for the Rust SDK)
+- A remote storage endpoint (SSH server, S3 bucket, etc.)
+
+### Install the Node.js SDK
+
+```bash
+npm install rac-delta
+```
+
+### Basic Usage
+
+```ts
+import { RacDeltaClient } from 'rac-delta';
+
+const racDeltaClient = await RacDeltaClient.create({
+  chunkSize: 1024 * 1024,       // 1 MB chunks
+  maxConcurrency: 6,             // parallel transfers
+  storage: {
+    type: 'ssh',
+    host: 'localhost',
+    pathPrefix: '/root/upload',
+    port: 2222,
+    credentials: {
+      username: 'root',
+      password: 'password',
+    },
+  },
+});
+```
+
+Upload a build directory:
+
+```ts
+const remoteIndexToUse = undefined;
+
+await racDeltaClient.pipelines.upload.execute('path/to/build', remoteIndexToUse, {
+  requireRemoteIndex: false,
+  force: false,
+  ignorePatterns: undefined,
+  onStateChange: (state) => {
+    console.log(state);
+  },
+  onProgress: (type, progress, speed) => {
+    console.log(type, progress.toFixed(1), speed?.toFixed(1));
+  },
+});
+```
+
+## Deeper Analysis
+
+### When to Use Rac-delta
+
+Rac-delta shines in scenarios where:
+
+1. **Game or app updates** — players or users download incremental patches instead of full reinstalls
+2. **Frequent CI/CD deployments** — only changed artifacts are pushed to storage, reducing bandwidth costs
+3. **Multi-region replication** — push deltas to CDN edge nodes, which reconstruct locally
+4. **Large monorepos** — build outputs can be tens of gigabytes; delta sync keeps releases lean
+
+### How the Delta Protocol Works
+
+The protocol operates in three phases:
+
+1. **Indexing** — scan the local build directory, compute Blake3 hashes for each chunk
+2. **Delta calculation** — compare local index against the remote index, identify missing and changed chunks
+3. **Transfer** — upload only the delta (new/changed chunks) to the remote storage adapter
+
+The remote side reconstructs the new build from the base + delta, without needing the full new archive.
+
+### Comparison with Alternatives
+
+| Feature | Rac-delta | rsync | AWS CodeDeploy |
+|---|---|---|---|
+| Open protocol | ✅ | ✅ (GPL) | ❌ |
+| Any storage backend | ✅ | ❌ | ❌ |
+| Streaming support | ✅ | ✅ | Partial |
+| Blake3 hashing | ✅ | ❌ (md5/ssh) | ❌ |
+| Node.js SDK | ✅ | ❌ | ❌ |
+| Rust SDK | ✅ | ✅ (via绑定) | ❌ |
+
+## Practical Evaluation Checklist
+
+- [ ] Install `rac-delta` via npm or cargo
+- [ ] Configure an SSH or S3 adapter
+- [ ] Run initial full upload to generate the remote index
+- [ ] Make a small change to a build artifact
+- [ ] Run delta upload and observe only changed chunks transferred
+- [ ] Verify the reconstructed build matches the source
+- [ ] Check `rdindex.json` for correctness after reconstruction
+
+## Security Notes
+
+- Credentials (SSH password, API keys) should be injected via environment variables, not hardcoded in the adapter config
+- Blake3 provides fast collision-resistant hashing — suitable for integrity verification
+- The protocol does not currently handle encrypted delta blobs; if you need E2E encryption, layer it above the storage adapter
+
+## FAQ
+
+**Q: Does rac-delta require a specific server-side component?**
+**A:** No. The protocol is client-side only — the server just stores blobs and the `rdindex.json` file. Any storage that can host static files (S3, SSH, GCS, a plain HTTP server) works.
+
+**Q: Can I use this for real-time continuous synchronization?**
+**A:** Rac-delta is designed for discrete release snapshots, not live file watching. For live sync, consider a tool like `rsync` or `unison` instead.
+
+**Q: What happens if the remote index is corrupted?**
+**A:** You can force a full re-upload with `force: true` in the upload options. The client will regenerate the index locally and push a fresh snapshot.
+
+**Q: Does it support binary diffs or just file-level?**
+**A:** The protocol operates at the chunk level (configurable size, default 1 MB). Within a chunk, it is a full chunk replacement — not a binary diff within the chunk itself. For large files that change slightly, a smaller chunk size reduces wasted transfer.
+
+## Conclusion
+
+Rac-delta fills a specific niche: efficient, backend-agnostic delta syncing for build artifacts and application releases. With both Rust and Node.js SDKs under an MIT license, it is easy to integrate into game engines, CI/CD pipelines, or self-hosted update servers. If you are currently shipping full builds on every release and your users are paying the bandwidth cost, rac-delta is worth evaluating.
+
+For full documentation, visit [raccreative.github.io/rac-delta-docs](https://raccreative.github.io/rac-delta-docs/).
