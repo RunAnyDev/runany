@@ -1,0 +1,167 @@
+---
+title: "Soma - Open-Source AI Agent Runtime with Next.js-Style DX"
+description: "Soma is a Rust-based AI agent and workflow runtime with a TypeScript SDK that brings resumability, MCP integration, and A2A protocol support to your existing AI stack."
+pubDate: "2026-06-25"
+tags: ["ai-setup", "dev-tools", "self-hosted", "mcp", "typescript"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/soma-ai-agent-runtime.webp"
+  alt: "Soma AI Agent Runtime product thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Soma is an open-source, self-hostable AI agent runtime written in Rust with a TypeScript SDK. It sits underneath your existing AI framework (LangChain, Vercel AI SDK, OpenAI Agents SDK) and adds fault-tolerant resumable execution, built-in MCP server with credential encryption, and A2A/OpenAI-compatible API endpoints — all in a single binary.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [trysoma.ai](https://trysoma.ai)
+- Documentation: [docs.trysoma.ai](https://docs.trysoma.ai)
+- Source repository: [github.com/trysoma](https://github.com/trysoma) (18 open-source repos including SDK templates)
+- License: Open-source (specific license per repo — e.g. Apache 2.0 for `typescript-ai-sdk-template`)
+- HN launch thread: [news.ycombinator.com/item?id=46122882](https://news.ycombinator.com/item?id=46122882) — "Show HN: I built an open-source Rust/TS AI agent runtime with a Next.js-style DX"
+- Source last checked: 2026-06-25 (via docs.trysoma.ai quickstart and deployment pages)
+
+## What Is Soma?
+
+Soma is an **AI agent and workflow runtime** built in Rust, designed to sit beneath whatever agent or tooling code you already write. From the [HN announcement](https://news.ycombinator.com/item?id=46122882):
+
+> "It's not a framework; it's meant to sit underneath whatever agent/tooling code you already write (Vercel AI SDK, LangChain, custom code, etc.). It provides features around your framework + a better DX for building agents."
+
+The core insight: most AI agent frameworks give you either a good developer experience OR production-grade reliability — not both. Soma tries to deliver both by being the runtime layer that handles the hard production problems (resumability, credential management, observability) while letting you keep your preferred SDK.
+
+**Key features from the docs:**
+
+- **Define MCP functions and AI agents in regular code** — TypeScript supported, Python coming soon
+- **Bring your own framework** — works with LangChain, Vercel AI SDK, OpenAI Agents SDK, or custom code
+- **Fault-tolerant and resumable execution** — crash or suspend at any point, resume from where you left off (via [Resstate](https://resstate.dev))
+- **A2A (Agent2Agent) and OpenAI Streaming-compatible API endpoints** out of the box
+- **Integrated MCP server** with pre-built connectors for third-party SaaS providers, handling credential encryption and rotation
+- **Debug UI** for tracing agent executions and configuring MCP provider credentials
+- **Single binary deployment** to desktop or cloud
+
+**Under the hood:** Soma uses [Turso](https://turso.tech) (SQLite) for data storage and supports local, AWS KMS, or GCP KMS encryption for secrets management.
+
+## Platform Support
+
+| Platform | Status |
+|---|---|
+| macOS x86 | Supported |
+| macOS ARM (Apple Silicon) | Supported |
+| Linux x86 | Supported |
+| Linux ARM | Supported |
+| Windows | Not supported (depends on Unix domain sockets) |
+
+## Quickstart
+
+Install the Soma binary and run your first agent in minutes:
+
+```bash
+curl -sSL https://trysoma.ai/install.sh | sh
+```
+
+Then set up a TypeScript project (using the [official template](https://github.com/trysoma/typescript-ai-sdk-template)):
+
+```bash
+# Clone the template
+git clone https://github.com/trysoma/typescript-ai-sdk-template my-agent
+cd my-agent
+
+# Install dependencies
+pnpm install
+
+# Start the dev server (clean slate)
+soma dev --clean
+```
+
+### Configure a Secret Encryption Key
+
+Soma encrypts secrets, MCP credentials, and auth configuration. Generate a local key for development:
+
+```bash
+soma enc-key add local --file-name master.bin
+```
+
+For production, use AWS KMS:
+
+```bash
+soma enc-key add aws --arn arn:aws:kms:eu-west-2:xxx:key/xxx --region eu-west-2
+```
+
+### Set Up Your Model API Key
+
+```bash
+soma secret set OPENAI_API_KEY your_key_here
+```
+
+### Configure MCP Functions
+
+Open `http://localhost:3000` in your browser, navigate to **Bridge MCP functions** → **Enable functions**, and configure your providers.
+
+### Debug Your Agent
+
+Open `http://localhost:3000` → **Agent 2 Agent** → **Chat**. Send a message and watch the execution trace.
+
+## How Soma Compares
+
+Soma occupies a specific niche: **runtime underneath your framework**, not a framework itself. Here's how that plays out:
+
+| Tool | Role | Best for |
+|---|---|---|
+| **Soma** | Runtime / infrastructure layer | Production agents needing resumability, MCP, A2A, and credential management |
+| **LangChain** | Python/JS framework | Rapid prototyping of agent logic |
+| **Vercel AI SDK** | Provider abstraction | Streaming UI with model portability |
+| **OpenAI Agents SDK** | Python framework | Multi-agent orchestration |
+
+If you've ever thought "I like the DX of Vercel AI SDK but need production-grade resumability and MCP integrations," Soma is worth a look.
+
+## Self-Hosting in Production
+
+Deploy Soma to a containerized environment:
+
+1. Install the soma binary via the install script in your Dockerfile
+2. Install SDK system dependencies (Node.js, Python, etc.)
+3. Install SDK project dependencies
+4. Set the entrypoint to `soma start`
+5. Configure AWS KMS access for production secrets
+6. Set environment variables via your container host platform
+
+```bash
+# Production start with external services
+soma start \
+  --db-conn-string "$DB_CONN_STRING" \
+  --db-auth-token "$DB_AUTH_TOKEN" \
+  --restate-admin-url "$RESTATE_ADMIN_URL" \
+  --restate-ingress-url "$RESTATE_INGRESS_URL" \
+  --restate-admin-token "$RESTATE_ADMIN_TOKEN"
+```
+
+Soma embeds its runtime dependencies (Turso, Resstate) into the binary for ease of use. For production, the docs advise following best practices for these tools or using their managed cloud services.
+
+## FAQ
+
+**Q: Does Soma support Python?**
+**A:** Python SDK is listed as "coming soon" per the docs. TypeScript is currently the primary SDK.
+
+**Q: How does resumability work?**
+**A:** Soma uses [Resstate](https://resstate.dev) under the hood. Execution can be suspended or crash at any point, and the runtime resumes from the last checkpoint on restart.
+
+**Q: Can I use Soma without an existing framework?**
+**A:** Yes — you can write agents using plain TypeScript. The docs provide chat and turn-based agent templates. But Soma shines when integrated with existing frameworks like Vercel AI SDK or LangChain.
+
+**Q: What is the A2A protocol?**
+**A:** Agent2Agent (A2A) is a protocol for inter-agent communication. Soma provides an A2A-compatible API endpoint alongside its OpenAI Streaming-compatible endpoint, making it compatible with a broader agent ecosystem.
+
+**Q: Is there a cloud/hosted version?**
+**A:** Soma is currently focused on self-hosting. The project is preparing source code and documentation for its first release (per the docs banner at time of writing).
+
+## Conclusion
+
+Soma fills a real gap in the AI agent tooling landscape: the gap between "prototype in LangChain" and "production system with fault tolerance." Its Rust-based single-binary deployment, built-in MCP server, resumable execution, and A2A compatibility make it a compelling runtime for teams that want to keep their preferred AI SDK while getting production infrastructure for free.
+
+If you are building agents with Vercel AI SDK, LangChain, or custom code and need resumability, encrypted credential management, or a debug UI — Soma is worth evaluating. Watch the [HN thread](https://news.ycombinator.com/item?id=46122882) and the [GitHub org](https://github.com/trysoma) for the open-source release.
