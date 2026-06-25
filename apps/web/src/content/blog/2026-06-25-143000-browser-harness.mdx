@@ -1,0 +1,132 @@
+---
+title: "Browser Harness – Self-Healing Browser Automation for AI Agents"
+description: "Browser Harness connects an LLM directly to your Chrome browser via CDP, letting the agent write its own helper code when tasks require custom logic."
+pubDate: "2026-06-25"
+tags: ["browser-automation", "ai-agents", "cdp", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/browser-harness.webp"
+  alt: "Browser Harness – Self-healing browser automation for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Browser Harness is a thin CDP harness that connects an LLM directly to your Chrome browser, letting the agent write and edit its own helper code mid-run to handle tasks the harness does not anticipate.
+
+## What Is Browser Harness?
+
+Browser Harness is an open-source tool from the team behind [Browser Use](https://browser-use.com) that bridges an LLM coding agent (Claude Code, Codex, or any CDP-compatible agent) directly to a Chrome or Chromium instance via the Chrome DevTools Protocol. Unlike traditional browser automation tools that ship with a fixed set of actions, Browser Harness deliberately leaves helper functions incomplete — the agent fills in the blanks during execution.
+
+The core loop is:
+1. Agent encounters a task requiring a browser action (e.g., upload a file)
+2. The harness reports a missing helper at `agent-workspace/agent_helpers.py`
+3. The agent writes the helper code and continues
+4. Next run reuses the edited helper — the harness "learns"
+
+This self-healing design means Browser Harness handles edge cases without pre-programmed support for every site or workflow.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.12+
+- Chrome or Chromium installed (any modern version)
+- An LLM coding agent: Claude Code, Codex, or similar
+
+### Step 1: Install Browser Harness
+
+Install or upgrade via `uv`:
+
+```bash
+uv tool install browser-harness
+```
+
+### Step 2: Register the Skill
+
+Register the Browser Harness skill with your coding agent:
+
+```bash
+browser-harness skill
+```
+
+### Step 3: Configure Chrome for Remote Debugging
+
+Open Chrome and navigate to `chrome://inspect/#remote-debugging`. Check the **Discover network targets** checkbox. Click **Allow** when the per-attach popup appears (Chrome 144+).
+
+Alternatively, launch Chrome manually with remote debugging enabled:
+
+```bash
+chrome --remote-debugging-port=9222
+```
+
+### Step 4: Connect and Run
+
+Paste the setup prompt into your coding agent:
+
+```
+Install or upgrade browser-harness to the latest stable version with uv using Python 3.12, register the skill from `browser-harness skill`, and connect it to my browser. Follow https://github.com/browser-use/browser-harness/blob/main/install.md if setup or connection fails.
+```
+
+The agent will detect your Chrome instance via CDP and begin executing browser tasks.
+
+## Architecture
+
+Browser Harness is approximately 1,000 lines across four core files:
+
+- `install.md` — first-time install and browser bootstrap
+- `SKILL.md` — day-to-day usage guide
+- `src/browser_harness/` — protected core package
+- `~/.config/browser-harness/agent-workspace/agent_helpers.py` — helper code the agent edits
+
+The `${XDG_CONFIG_HOME:-~/.config}/browser-harness/agent-workspace/domain-skills/` directory stores reusable site-specific skills the agent develops over time.
+
+## Self-Healing in Practice
+
+The most distinctive behavior is how Browser Harness handles missing capabilities. When the agent needs a function that does not exist, the harness reports the missing symbol and the agent writes it on the spot. For example:
+
+```
+● agent: wants to upload a file
+│
+● agent-workspace/agent_helpers.py → helper missing
+│
+● agent writes it                         agent_helpers.py
+│                                                       + custom helper
+✓ file uploaded
+```
+
+This means the harness improves itself with every run — tasks that failed initially may succeed on the second attempt because the agent populated the missing helper.
+
+## Free Browser Use Cloud
+
+If you prefer not to run Chrome locally, Browser Use offers a free cloud tier:
+
+- **3 concurrent browsers** at no cost
+- Stealth browser profiles, sub-agents, and proxy support
+- No credit card required
+
+Sign up at [cloud.browser-use.com/new-api-key](https://cloud.browser-use.com/new-api-key).
+
+## FAQ
+
+**Q: Does Browser Harness work with any LLM?**
+**A:** Any coding agent that can execute Python and connect to a CDP endpoint. Claude Code and Codex are the primary targets, but any agent that follows the setup prompt can use it.
+
+**Q: How does this differ from Playwright or Puppeteer?**
+**A:** Playwright and Puppeteer are hard-coded automation libraries. Browser Harness is a harness that gives the LLM full freedom to write and modify browser interaction code mid-run, including writing helpers that did not exist when the harness was built.
+
+**Q: Is the agent editing my browser or just my local helper files?**
+**A:** Only the local helper files at `~/.config/browser-harness/agent-workspace/`. The harness itself and your Chrome instance remain untouched.
+
+**Q: Does this require a GPU or powerful hardware?**
+**A:** No. The harness runs entirely locally and does not require a GPU. It drives the browser you already have open.
+
+## Source and Accuracy Notes
+
+- Project page: [browser-use.com](https://browser-use.com)
+- Source repository: [github.com/browser-use/browser-harness](https://github.com/browser-use/browser-harness)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47890841](https://news.ycombinator.com/item?id=47890841)
+- Source last checked: 2026-06-25 (commit `15d4e21`, 15,332 stars)
