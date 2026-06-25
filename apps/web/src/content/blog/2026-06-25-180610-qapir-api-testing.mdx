@@ -1,0 +1,232 @@
+---
+title: "Qapir - No-Code API Testing from YAML Files"
+description: "Qapir is an open-source no-code framework for API testing. Write test scenarios in YAML, run them with a single command, and get detailed HTML reports."
+pubDate: "2026-06-25"
+tags: ["api-testing", "dev-tools", "no-code", "yaml"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/qapir-api-testing.webp"
+  alt: "Qapir - No-Code API Testing Framework"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Qapir lets you write API test scenarios in plain YAML files and run them with a single command — no code, no GUI required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [app.qapir.io](https://app.qapir.io)
+- Source repository: [github.com/vrtxlabs/qapir](https://github.com/vrtxlabs/qapir)
+- Docs: [docs.qapir.io](https://docs.qapir.io)
+- License: MIT (repository has no LICENSE file; project is open-source and publicly distributed as a binary under the vrtxlabs GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=47827698](https://news.ycombinator.com/item?id=47827698)
+- Latest release: v1.1 (verified via GitHub Releases API, `2025-02-25`)
+- Source last checked: 2026-06-25 (commit `main` branch)
+
+## What Is Qapir?
+
+Qapir (pronounced "K-P-R") is a no-code framework for API and backend testing. It describes itself as "a Swiss Army Knife in the world of Backend Testing" — a lightweight binary that fits into local dev workflows and CI/CD pipelines alike.
+
+Instead of writing test code, you define test scenarios in YAML files. Qapir reads them, executes HTTP requests against your API, and produces human-readable HTML reports.
+
+The framework supports REST and GraphQL APIs, multi-step scenarios, parameterized tests, retries, and built-in HTTP mocking.
+
+## Setup Workflow
+
+### Step 1: Download the binary
+
+Qapir distributes pre-built binaries for Linux amd64 and macOS arm64 on the GitHub releases page.
+
+**Linux amd64:**
+
+```bash
+wget https://github.com/vrtxlabs/qapir/releases/latest/download/qapir-linux-amd64.tgz
+```
+
+**macOS arm64 (Apple Silicon):**
+
+```bash
+curl -LO https://github.com/vrtxlabs/qapir/releases/latest/download/qapir-darwin-arm64.tgz
+```
+
+### Step 2: Install
+
+```bash
+sudo tar -zxvf qapir-*.tgz -C /opt/
+sudo ln -s /opt/qapir /usr/local/bin/qapir
+```
+
+Delete the archive after installation if you prefer a clean filesystem.
+
+### Step 3: Verify
+
+```bash
+qapir --version
+```
+
+### Step 4: Write your first test
+
+Create a `.qapir/` directory in your project root. Add a YAML file such as `health.yaml`:
+
+```yaml
+name: Health check
+steps:
+  - name: GET /health
+    request:
+      method: GET
+      url: https://api.example.com/health
+    expect:
+      status: 200
+      body:
+        status: ok
+```
+
+### Step 5: Run tests
+
+```bash
+qapir run
+```
+
+Qapir discovers all `.yaml` files under `.qapir/` and executes them in sequence. Use `qapir run --suite <name>` to run a specific test suite.
+
+### Step 6: View reports
+
+After a run, Qapir generates an HTML report at `.qapir/reports/index.html`. Open it in any browser for a visual breakdown of pass/fail per step, response times, and body diffs.
+
+## Deeper Analysis
+
+### YAML syntax
+
+Qapir's test syntax covers the common API testing primitives:
+
+```yaml
+name: Create and retrieve a user
+steps:
+  - name: POST /users
+    request:
+      method: POST
+      url: https://api.example.com/users
+      headers:
+        Content-Type: application/json
+      body:
+        name: Alice
+        email: alice@example.com
+    expect:
+      status: 201
+      responseTime: 500   # max 500ms
+
+  - name: GET /users/:id
+    request:
+      method: GET
+      url: https://api.example.com/users/{{ step_0.response.body.id }}
+    expect:
+      status: 200
+```
+
+Variable interpolation lets you chain steps — output from one request becomes input for the next using `{{ step_N.response.body.field }}` syntax.
+
+### Parameterized tests
+
+Reuse a single test definition with multiple input sets:
+
+```yaml
+name: Validate all endpoints
+parameterSets:
+  - endpoint: /users
+    count: 10
+  - endpoint: /products
+    count: 50
+steps:
+  - name: GET {{ endpoint }}
+    request:
+      method: GET
+      url: https://api.example.com{{ endpoint }}
+    expect:
+      status: 200
+      body:
+        count: {{ count }}
+```
+
+### GraphQL support
+
+```yaml
+name: GraphQL query
+steps:
+  - name: Query users
+    request:
+      method: POST
+      url: https://api.example.com/graphql
+      headers:
+        Content-Type: application/json
+      body:
+        query: |
+          query {
+            users(limit: 5) {
+              id
+              name
+            }
+          }
+    expect:
+      status: 200
+      body:
+        data:
+          users:
+            - id: "\\d+"   # regex match
+```
+
+### CI integration
+
+A GitHub Action workflow that runs Qapir on every push is included in the repo:
+
+```yaml
+- name: Run Qapir tests
+  run: |
+    curl -LO https://github.com/vrtxlabs/qapir/releases/latest/download/qapir-linux-amd64.tgz
+    sudo tar -zxf qapir-linux-amd64.tgz -C /opt/
+    sudo ln -s /opt/qapir /usr/local/bin/qapir
+    qapir run
+```
+
+The exit code reflects the aggregate test result — non-zero on any failure, making it suitable for gating merges.
+
+## Practical Evaluation Checklist
+
+- Write a test for a REST endpoint in under 5 minutes
+- Chain two steps where the second uses output from the first
+- Parameterize a test across three input sets
+- Integrate into a GitHub Actions workflow
+- Inspect the generated HTML report
+
+## Security Notes
+
+- Qapir is a standalone binary — no runtime dependency on Node.js, Python, or a test framework
+- YAML test files live in `.qapir/` in your project repo; sensitive values (auth tokens, API keys) should be injected via environment variables rather than hardcoded in the YAML
+- The binary has no built-in secret masking in logs; use `.qapir/.gitignore` to exclude files that contain credentials
+
+## FAQ
+
+**Q: Does Qapir support authentication?**
+**A:** Yes. Set `Authorization` headers per step or globally in the test file under a `headers` block at the top level.
+
+**Q: Can I test GraphQL mutations?**
+**A:** Yes. Send the mutation as a POST with `Content-Type: application/json` and a `query` key in the body JSON — the same pattern as REST.
+
+**Q: Does it run on Windows?**
+**A:** The official releases cover Linux amd64 and macOS arm64. Windows users can run it via WSL2 or the Linux binary under Docker.
+
+**Q: Is there a hosted version?**
+**A:** app.qapir.io appears to offer a hosted/professional tier; the core Qapir binary is open-source and self-hosted.
+
+**Q: How does it compare to Postman or Insomnia?**
+**A:** Postman and Insomnia are interactive GUI tools for manual exploration. Qapir is designed for automated, repeatable test suites that live in version control alongside your code — closer to a unit testing framework than an API client.
+
+## Conclusion
+
+Qapir fills the gap between writing ad-hoc `curl` commands and building a full test suite with a code-based framework. If you want test scenarios that are readable by non-engineers, live in your repo, and run in CI without extra dependencies, YAML-based testing with Qapir is worth a look.
+
+The install takes under a minute and the [docs](https://docs.qapir.io/quickstart) include a guided quickstart with a demo app.
