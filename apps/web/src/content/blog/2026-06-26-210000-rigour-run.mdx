@@ -1,0 +1,160 @@
+---
+title: "Rigour – Open-Source Quality Gates for AI Coding Agents"
+description: "Rigour is an open-source governance layer for AI coding agents that scans for secrets, enforces code quality, and controls agent memory in real time."
+pubDate: "2026-06-26"
+tags: ["ai-setup", "dev-tools", "security", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rigour-run.webp"
+  alt: "Rigour AI Agent Governance dashboard showing quality gates and DLP checks"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rigour is an open-source governance layer for AI coding agents — it blocks credential leaks, enforces code quality gates, and controls what agents can write to memory, all in real time with no telemetry.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [rigour.run](https://rigour.run) ← **MUST visit and verify**
+- Source repository: [github.com/rigour-labs/rigour](https://github.com/rigour-labs/rigour) ← **MUST read README**
+- License: MIT (verified via `LICENSE` file on GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=47102656](https://news.ycombinator.com/item?id=47102656)
+- Source last checked: 2026-06-26 (commit `main`, pushed `2026-04-27T14:13:10Z`)
+
+## What Is Rigour?
+
+Rigour describes itself as "the immune system for AI coding agents." It acts as a governance middleware between an AI agent (Claude, Cursor, Cline, Windsurf, Copilot, and others) and the files it writes to disk.
+
+The core insight: AI coding agents are becoming prolific contributors to codebases, but they have no built-in enforcement layer. They will happily commit AWS keys, write infinitely nested functions, or silently persist sensitive context to memory files between sessions. Rigour closes that gap.
+
+It ships as:
+- A CLI tool (`npx rigour-scan`) for one-off audits
+- An MCP server (`@rigour-labs/mcp`) for real-time governance in any MCP-compatible IDE or agent
+- A live dashboard overlay in supported editors
+
+The project is MIT licensed, 100% local, and explicitly states no telemetry.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ (for `npx` commands)
+- Any of: Claude Desktop, VS Code Copilot, Cursor, Cline, Windsurf, Codex, Goose, or ChatGPT (with MCP support)
+- Git repository (for `rigour-scan`)
+
+### Option 1 — One-off audit (no install)
+
+```bash
+npx rigour-scan
+```
+
+This runs a zero-config scan on the current repo, outputting a score and violation report to the terminal. Works on any language in the supported set.
+
+### Option 2 — MCP server for real-time governance
+
+Add to your MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "rigour": {
+      "command": "npx",
+      "args": ["-y", "@rigour-labs/mcp"]
+    }
+  }
+}
+```
+
+Restart your IDE. Rigour's governance dashboard appears automatically when the agent calls Rigour tools.
+
+### Option 3 — Homebrew (macOS/Linux)
+
+```bash
+brew tap rigour-labs/tap && brew install rigour
+```
+
+## Deeper Analysis
+
+### Three Layers of Protection
+
+**Input DLP — Block credential leaks before they happen**
+
+29 credential patterns are scanned in every agent input. This covers AWS keys, API tokens, database URLs, private keys, and more. Shannon entropy detection catches encoded secrets that pattern matching misses. Unicode normalization defeats zero-width character bypasses.
+
+The README claims OWASP LLM 10/10 compliance coverage.
+
+**Quality Gates — Enforce standards on every file write**
+
+Real-time hooks fire on every file write across all agents. Gates are deterministic PASS/FAIL for:
+- File size limits
+- Cyclomatic complexity thresholds
+- Security patterns (SQL injection, XSS, CSRF, prototype pollution)
+- Hallucinated imports (referencing APIs that do not exist)
+- AI context drift
+
+The README lists AST-level analysis across **6 languages**: TypeScript, JavaScript, Python, Go, Ruby, C#, Java, Kotlin, and Rust.
+
+**Memory Governance — Control what agents remember**
+
+Agents like Cursor and Cline persist memory files between sessions (`.cursorrules`, `CLAUDE.md`, `.clinerules`). Rigour blocks direct writes to these files and forces all persistence through governed channels with DLP scanning. This prevents an agent from, for example, storing a leaked API key in its own instruction file.
+
+### The OpenClaw Audit
+
+The Rigour team published a proof-of-concept audit of OpenClaw, a project with 180,000 stars that was acqui-hired by OpenAI. The scan ran in 3.9 seconds across the codebase and found:
+
+- **2,080 violations** across 847 files
+- **7 security vectors**
+- Score: 0/100
+
+This is presented as evidence that without governance, even highly-starred, actively-maintained agent projects accumulate significant technical debt and security surface area.
+
+### AST-Based Analysis
+
+Rigour's quality gates are AST-based, not heuristic-based. This means it parses actual code structure rather than matching text patterns, which makes it resistant to basic obfuscation or refactoring that would evade regex-based tools.
+
+## Practical Evaluation Checklist
+
+- [ ] Run `npx rigour-scan` on a personal project — observe score and violation categories
+- [ ] Add MCP server to Cursor or Claude Desktop config — verify dashboard appears
+- [ ] Intentionally write a hardcoded AWS key in a source file — confirm DLP blocks it
+- [ ] Trigger a file write that exceeds complexity thresholds — confirm gate fails
+- [ ] Check memory path blocking by inspecting `.cursorrules` after an agent session
+
+## Security Notes
+
+- All processing is local. Code never leaves your machine.
+- No telemetry, no signup required.
+- Memory governance enforces DLP on agent recall, not just on writes.
+- Unicode normalization addresses a known bypass vector in secret scanners.
+
+## FAQ
+
+**Q: Does Rigour send my code to any server?**
+**A:** No. The README explicitly states 100% local, no telemetry. All scanning and governance happens on your machine.
+
+**Q: Which IDEs and agents are supported?**
+**A:** Claude Desktop, VS Code Copilot, ChatGPT, Goose, Claude Code, Cursor, Cline, Windsurf, and Codex. Coverage differs slightly — live dashboard requires MCP App; logging is available across all.
+
+**Q: How does it detect encoded secrets?**
+**A:** Shannon entropy detection combined with 29 credential patterns. Entropy detects high-randomness strings that look like keys even if they don't match a known pattern.
+
+**Q: Can I customize the quality gates?**
+**A:** Yes. Gates are configurable via YAML. You can override thresholds for file size, complexity, and which categories to enforce.
+
+**Q: What's the difference between the CLI scan and the MCP server?**
+**A:** `rigour-scan` (CLI) is a one-off audit. The MCP server provides real-time, continuous governance as the agent works — each file write is checked before it lands.
+
+## Conclusion
+
+Rigour addresses a real gap in the AI coding agent ecosystem: agents that write code unsupervised, without governance. The combination of Input DLP, quality gates, and memory governance covers three distinct failure modes that are already appearing in production codebases.
+
+The OpenClaw audit is a compelling signal — a project with 180K stars still scored 0/100 when scanned. That suggests the problem is systemic, not edge-case.
+
+If you run AI coding agents in your workflow, adding Rigour as an MCP governance layer takes under a minute and provides coverage across the most common failure categories: secret leaks, code quality drift, and uncontrolled memory persistence.
+
+Try it: `npx rigour-scan` on your current project.
