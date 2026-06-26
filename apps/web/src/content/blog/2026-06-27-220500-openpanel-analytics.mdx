@@ -1,0 +1,162 @@
+---
+title: "OpenPanel – Self-Hosted Mixpanel Alternative"
+description: "OpenPanel is an open-source analytics platform with funnels, session replay, A/B testing, and an MCP server for querying data with AI tools."
+pubDate: "2026-06-27"
+tags: ["analytics", "self-hosted", "open-source", "product-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openpanel-analytics.webp"
+  alt: "OpenPanel analytics dashboard showing funnel and cohort analysis"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OpenPanel is an open-source, self-hosted alternative to Mixpanel with 6,000 GitHub stars, featuring funnels, session replay, A/B testing, and an MCP server for querying analytics with AI tools.
+
+## Source and Accuracy Notes
+
+- Project page: [openpanel.dev](https://openpanel.dev)
+- Source repository: [github.com/Openpanel-dev/openpanel](https://github.com/Openpanel-dev/openpanel)
+- License: AGPL-3.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=40432213](https://news.ycombinator.com/item?id=40432213)
+- Docs: [openpanel.dev/docs](https://openpanel.dev/docs)
+
+## What Is OpenPanel?
+
+OpenPanel is an open-source web and product analytics platform that positions itself as a self-hostable alternative to Mixpanel. It combines advanced analytics features — funnels, cohorts, session replay, and A/B testing — with privacy-first, cookieless tracking and transparent self-hosted pricing.
+
+The project was launched on Hacker News in early 2025 and has grown to over 6,000 GitHub stars on the main repository. It is built with Next.js for the dashboard, Fastify for the event API, PostgreSQL for structural data, and ClickHouse for event storage. Redis acts as the cache and queue layer via BullMQ.
+
+### Key Differentiators
+
+The feature table in the README draws direct comparisons with Mixpanel, GA4, and Plausible. Notable differentiators:
+
+- **Self-hosted**: Unlike Mixpanel or GA4, you run OpenPanel on your own infrastructure. The self-hosted deployment uses Docker Compose.
+- **MCP server**: The project ships a built-in MCP server that exposes 38 tools, allowing AI clients like Claude or Cursor to query analytics data directly — a feature none of the commercial alternatives offer.
+- **Cookieless by default**: GDPR-compliant tracking without cookie banners.
+- **No session replay limits**: Mixpanel caps replay at 5,000 sessions/month on free and 20,000 on paid. OpenPanel has no stated limit.
+- **Revenue tracking**: Built-in monitoring for purchases, subscriptions, and LTV alongside product events.
+
+## Setup Workflow
+
+### Option 1: Cloud Dashboard (Hosted)
+
+The hosted option at [dashboard.openpanel.dev](https://dashboard.openpanel.dev) requires no installation. Create an account, add the JavaScript snippet to your site, and start collecting data immediately.
+
+### Option 2: Self-Hosted (Docker Compose)
+
+The self-hosted setup uses Docker Compose with Postgres, ClickHouse, and Redis.
+
+```bash
+git clone https://github.com/Openpanel-dev/openpanel.git
+cd openpanel
+cp .env.example .env
+# Edit .env with your domain and credentials
+docker-compose up -d
+```
+
+The [self-hosting documentation](https://openpanel.dev/docs/self-hosting) covers environment variables, ClickHouse schema initialization, and reverse proxy configuration.
+
+### Installing the SDK
+
+**Web (JavaScript):**
+
+```bash
+npm install @openpanel/browser
+```
+
+```javascript
+import OpenPanel from '@openpanel/browser';
+
+const op = OpenPanel({
+  clientId: 'YOUR_CLIENT_ID',
+  trackScreenViews: true,
+  trackOutgoingLinks: true,
+});
+
+export default op;
+```
+
+**iOS (Swift):**
+
+```bash
+npm install @openpanel/swift
+```
+
+OpenPanel also ships SDKs for Android (Kotlin), React Native, and server-side tracking.
+
+## Deeper Analysis
+
+### Architecture
+
+OpenPanel's backend is split across three concerns:
+
+1. **Event API** (Fastify) — receives and validates tracking events, writes to ClickHouse.
+2. **Dashboard** (Next.js) — renders the UI, queries ClickHouse via the API.
+3. **Queue workers** (BullMQ + Redis) — handles background tasks like session processing and email notifications.
+
+This separation means the event ingestion path stays lean under high traffic while the dashboard can query large event datasets without blocking the write path.
+
+### MCP Server
+
+The MCP server is a standout feature for developer workflows. It exposes 38 tools including `getFunnel`, `getUsers`, `getEvents`, and `getSessions`. After configuring the MCP server in your AI client, you can ask questions like "What is the conversion rate from signup to first purchase?" and get a structured answer backed by live analytics data.
+
+```json
+{
+  "mcpServers": {
+    "openpanel": {
+      "command": "npx",
+      "args": ["-y", "@openpanel/mcp"]
+    }
+  }
+}
+```
+
+### Session Replay
+
+Session replay records user interactions on your site and stores them for playback in the dashboard. OpenPanel applies automatic PII masking for input fields, and administrators can configure additional privacy rules. This is a paid feature in Mixpanel but included in the self-hosted deployment.
+
+### A/B Testing
+
+The built-in variant testing lets you define experiments, assign user buckets, and measure statistical significance directly in the dashboard — without needing a separate tool like Optimizely or LaunchDarkly.
+
+## Practical Evaluation Checklist
+
+- [ ] Self-hosted with Docker Compose on a VPS
+- [ ] JavaScript SDK integrated on a test site
+- [ ] Session replay enabled and privacy rules configured
+- [ ] A/B test created and user bucket assignment verified
+- [ ] MCP server connected to Claude or Cursor
+- [ ] ClickHouse queries perform acceptably at 1M+ events
+
+## Security Notes
+
+- ClickHouse should not be exposed publicly; restrict access to the app subnet.
+- The self-hosted setup requires managing your own SSL certificates and domain credentials.
+- Session replay recordings are stored in ClickHouse; ensure retention policies align with your privacy policy.
+- The MCP server grants query access to analytics data — treat the MCP credentials with the same sensitivity as your analytics API keys.
+
+## FAQ
+
+**Q: How does OpenPanel compare to Plausible?**
+**A:** Plausible is simpler and focused on lightweight, privacy-first pageview analytics. OpenPanel targets product teams that need funnels, cohort analysis, session replay, and A/B testing — features Plausible does not offer. OpenPanel's stack (ClickHouse, Next.js, Fastify) is also significantly more complex to self-host compared to Plausible's single binary.
+
+**Q: Is there a managed cloud option?**
+**A:** Yes, [dashboard.openpanel.dev](https://dashboard.openpanel.dev) offers a hosted version. Self-hosting is available for teams that want full data ownership.
+
+**Q: What is the storagebackend for events?**
+**A:** ClickHouse stores all event data. PostgreSQL stores users, organizations, and structural configuration. Redis handles caching and BullMQ handles job queues.
+
+**Q: Does it work without cookies?**
+**A:** Yes. OpenPanel uses a cookieless tracking model by default, making it GDPR-compliant without requiring consent banners for basic analytics.
+
+## Conclusion
+
+OpenPanel fills the gap between simple privacy-first tools like Plausible and enterprise analytics platforms like Mixpanel. The self-hosted deployment is the primary draw — full data ownership, no per-seat pricing, and an integrated feature set that would cost hundreds of dollars/month in equivalent commercial tools.
+
+The MCP server is the most forward-looking aspect. As AI coding tools become the primary interface for developers, having analytics data queryable through the same tools is a natural evolution. If you are already using Claude, Cursor, or another MCP-capable client, the integration removes the context-switch between your analytics dashboard and your development workflow.
+
+For teams evaluating analytics infrastructure in 2026, OpenPanel is worth a serious look — particularly if self-hosting and data privacy are non-negotiable.
