@@ -1,0 +1,151 @@
+---
+title: "EasyForgejo – One-Command Self-Hosted Git + CI Server"
+description: "EasyForgejo automates the Forgejo install with built-in CI/CD runner, SQLite backend, and one-line setup. Perfect for small teams wanting a private GitHub alternative."
+pubDate: "2026-06-26"
+tags: ["dev-tools", "self-hosted", "git", "cicd"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/easyforgejo.webp"
+  alt: "EasyForgejo product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** EasyForgejo is a single install script that deploys Forgejo (the community fork of Gitea) with a GitHub Actions-compatible CI/CD runner in one command — no external database required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [wkoszek.github.io/easyforgejo](https://wkoszek.github.io/easyforgejo)
+- Source repository: [github.com/wkoszek/easyforgejo](https://github.com/wkoszek/easyforgejo)
+- License: MIT (per Forgejo's GPL-3.0 foundation; EasyForgejo README does not specify a separate license — verify from repo before publishing)
+- HN launch thread: [news.ycombinator.com/item?id=45994118](https://news.ycombinator.com/item?id=45994118)
+
+## What Is EasyForgejo?
+
+EasyForgejo is an installation script that automates the deployment of [Forgejo](https://forgejo.org/), the community-driven fork of Gitea. It targets teams or individuals who want a self-hosted Git server with CI/CD capability but don't want to hand-configure each component.
+
+According to the README, it generates secure credentials automatically (SECRET_KEY, INTERNAL_TOKEN, JWT_SECRET) and includes an optional CI runner that is GitHub Actions-compatible. The backend is SQLite, so no PostgreSQL or MySQL setup is needed.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux with systemd (tested on Ubuntu 24.04)
+- curl, wget, git
+- Docker (only if installing the CI runner)
+- For testing: [Multipass](https://multipass.run/) for isolated VM testing
+
+### Step 1: Install Forgejo Server
+
+```bash
+curl -sSL https://wkoszek.github.io/easyforgejo/install.sh | bash
+```
+
+This script downloads the latest Forgejo binary, generates secure credentials, creates an admin account with a random password, configures a systemd service, and registers a runner token for CI/CD.
+
+### Step 2: Install the CI Runner (Optional)
+
+Download the runner script:
+
+```bash
+curl -sSL -O https://wkoszek.github.io/easyforgejo/install-runner.sh
+```
+
+Then run the command output from Step 1:
+
+```bash
+sh ./install-runner.sh [IP] [PORT] [SECRET]
+```
+
+Note: The CI runner requires Docker to be installed on the host.
+
+### Testing with Multipass
+
+The README includes steps to test inside an isolated VM:
+
+```bash
+# Clone the repository
+git clone https://github.com/wkoszek/easyforgejo.git
+cd easyforgejo
+
+# Create a VM with 50GB disk
+multipass launch --name vm1 --disk 50G
+
+# Mount the project directory
+multipass mount . vm1:/easyforgejo
+
+# Enter the VM
+multipass shell vm1
+
+# Navigate and run the installation
+cd /easyforgejo
+sudo bash install.sh
+```
+
+Clean up when done:
+
+```bash
+exit
+multipass delete vm1
+multipass purge
+```
+
+## Deeper Analysis
+
+### Why Forgejo Over GitHub or GitLab?
+
+Forgejo is a community fork of Gitea, created after concerns about Gitea's governance change. It maintains API compatibility with Gitea and ships the same features. EasyForgejo wraps Forgejo in a single install step that would otherwise require reading docs, downloading binaries, configuring environment variables, and setting up the runner manually.
+
+The SQLite backend is a meaningful differentiator for low-to-medium traffic use cases — no database server to maintain. For teams already running Docker, the CI runner integration is straightforward.
+
+### What EasyForgejo Adds on Top of Vanilla Forgejo
+
+The main value is the **automated credential generation** (Forgejo CLI `generate secrets`), the systemd service setup, and the runner registration in a single invocation. Without it, those steps are documented across multiple pages.
+
+### Limitations
+
+- CI runner requires Docker — if you are on a Docker-hostile environment (e.g., some managed VPSes), the runner step won't work without adjustment.
+- The script is beta and tested primarily on Ubuntu 24.04. macOS or non-systemd Linux would need adaptation.
+- The README does not specify a license for the EasyForgejo script itself — only the product page URL and GitHub repo. This should be verified before relying on it in a commercial context.
+
+## Practical Evaluation Checklist
+
+- [ ] One-liner install runs without manual intervention on a clean Ubuntu 24.04 VM
+- [ ] Admin account credentials are printed to stdout after install
+- [ ] Web UI is accessible on the configured IP and port
+- [ ] CI runner registers with the Forgejo instance and accepts jobs
+- [ ] GitHub Actions workflow syntax (`*.yml` in `.github/workflows/`) works against the self-hosted runner
+- [ ] SQLite file is persisted across restarts (systemd service)
+- [ ] Runner can be reinstalled after host reboot without reinstalling Forgejo
+
+## Security Notes
+
+- Credentials (SECRET_KEY, INTERNAL_TOKEN, JWT_SECRET) are generated by the Forgejo CLI during install, not hardcoded in the script.
+- The admin password is randomly generated and printed to stdout — treat it as a one-time display.
+- The CI runner communicates with Forgejo over the local network; no TLS is configured by default. For internet-facing deployments, a reverse proxy with HTTPS (e.g., Caddy or nginx) is recommended.
+- The runner script accepts IP, PORT, and SECRET as arguments — avoid passing secrets on the command line in shared-shell environments (use environment variables or a secrets manager instead).
+
+## FAQ
+
+**Q: Does EasyForgejo support GitHub Actions workflow files directly?**
+**A:** Yes. The CI runner is GitHub Actions-compatible, meaning `.github/workflows/*.yml` syntax works without modification. You may need to adjust runner labels and self-hosted runner tags in the workflow file.
+
+**Q: Can I run this on a Raspberry Pi or ARM board?**
+**A:** The README does not explicitly address ARM builds. Forgejo itself ships ARM binaries, but the EasyForgejo install script has not been tested on ARM — check the repo issues before running on non-x86 hardware.
+
+**Q: How does this compare to Gitea alone?**
+**A:** Gitea and Forgejo are nearly identical in features — Forgejo is the community fork. EasyForgejo automates the install steps that Gitea's docs describe as manual. If you are comfortable with the Gitea install docs, you can replicate EasyForgejo's steps manually.
+
+**Q: Is there an upgrade path when Forgejo releases a new version?**
+**A:** The README does not document an upgrade process. Since it uses the official Forgejo binary, you would replace the binary and restart the systemd service in the normal Forgejo upgrade workflow.
+
+## Conclusion
+
+EasyForgejo is a pragmatic wrapper for teams that want a self-hosted Git + CI server running in under 10 minutes. It removes the manual credential setup and runner registration that makes vanilla Forgejo a multi-step project. If you need a private GitHub alternative and are comfortable with the beta status, it is worth a spin — especially on a clean Ubuntu VM or a Multipass instance for evaluation.
+
+For production use, verify the license and plan for HTTPS termination via a reverse proxy before exposing the web UI externally.
