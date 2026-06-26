@@ -1,0 +1,203 @@
+---
+title: "Ethereum Package – Private Testnet with MEV Infra in One Command"
+description: "Spin up a full private Ethereum devnet with all EL/CL clients, Flashbots mev-boost, Grafana, and blob analytics using a single kurtosis run command."
+pubDate: "2026-06-26"
+tags: ["ethereum", "dev-tools", "blockchain", "docker", "kurtosis"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ethereum-package-setup-guide-open-source-starlark-ai-tool.webp"
+  alt: "Ethereum Package by ethPandaOps – private testnet setup"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The Ethereum Package from ethPandaOps lets you spin up a complete private Ethereum testnet — all EL/CL clients, mev-boost infrastructure, Grafana dashboards, and blob analytics — with a single `kurtosis run` command.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/ethpandaops/ethereum-package](https://github.com/ethpandaops/ethereum-package)
+- Official docs: [docs.kurtosis.com](https://docs.kurtosis.com/how-to-full-mev-with-ethereum-package/)
+- License: MIT (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=38073039](https://news.ycombinator.com/item?id=38073039)
+- Source last checked: 2026-06-26 (README verified via raw.githubusercontent.com)
+
+## What Is the Ethereum Package?
+
+The Ethereum Package is a [Kurtosis](https://github.com/kurtosis-tech/kurtosis) package built by [ethPandaOps](https://github.com/ethpandaops) — the same team behind Ethereum Foundation infrastructure tooling. It deploys a complete, reproducible private Ethereum devnet over Docker or Kubernetes with:
+
+- **Multi-client EL/CL support** — Geth, Reth, Lighthouse, and more
+- **Full Flashbots MEV infrastructure** — mev-boost with relayer, builder, and proposer separation
+- **Transaction spammer** — generates fake traffic for realistic testing
+- **Grafana + Prometheus** — real-time network observability
+- **Blobscan** — EIP-4844 blob transaction analytics
+- **TrueBlocks** — serves a REST API (`/blocks`, `/list`, `/chunks`) on port 8080
+- **JSON RPC Snooper** — logs EL/CL engine API exchanges
+- **OpenTelemetry traces** — ships traces to a shared ClickHouse instance
+
+The package is parameterized via YAML, so you can override network type (mainnet, Sepolia, Hoodi shadowfork), client types, volume sizes, and which optional services start.
+
+## Setup Workflow
+
+### Step 1: Install Docker
+
+Docker is the prerequisite. If you do not have it:
+
+```bash
+# macOS
+brew install --cask docker
+
+# Ubuntu/Debian
+sudo apt-get update && sudo apt-get install -y docker.io
+sudo systemctl start docker
+```
+
+Start the Docker daemon before proceeding.
+
+### Step 2: Install the Kurtosis CLI
+
+The Kurtosis CLI is a one-line install:
+
+```bash
+# macOS/Linux
+curl -fsSL https://kurtosis.com/install.sh | sh
+
+# Verify
+kurtosis --version
+```
+
+For full installation instructions, see the [official Kurtosis CLI docs](https://docs.kurtosis.com/cli/updating-the-cli).
+
+### Step 3: Spin Up the Default Devnet
+
+```bash
+kurtosis run --enclave my-testnet github.com/ethpandaops/ethereum-package
+```
+
+This launches a private devnet with all EL/CL clients, the transaction spammer, Grafana, Prometheus, and Blobscan. The command blocks until the beacon chain finalizes an epoch.
+
+### Step 4: Run with Custom Configuration
+
+To override defaults (network type, client selection, additional services), create a `network_params.yaml`:
+
+```yaml
+network_params:
+  network: "hoodi-shadowfork"
+  persistent: true
+  el_volume_size: "200G"
+  cl_volume_size: "100G"
+additional_services:
+  - "mev-boost"
+  - "otel"
+```
+
+Then pass it at runtime:
+
+```bash
+kurtosis run --enclave my-testnet github.com/ethpandaops/ethereum-package --args-file network_params.yaml
+```
+
+### Step 5: Enable MEV Boost Infrastructure
+
+The package supports multiple MEV relay implementations. To enable Flashbots-style PBS:
+
+```yaml
+network_params:
+  mev_type: "flashbots"  # options: flashbots | helix | mev-rs | commit-boost | mock
+```
+
+Or enable via CLI flag:
+
+```bash
+kurtosis run --enclave my-mev-testnet github.com/ethpandaops/ethereum-package '{"mev_type": "flashbots"}'
+```
+
+### Step 6: Access Observability Tools
+
+After the enclave starts, Kurtosis prints service URLs. Key endpoints:
+
+| Service | Default Port | Purpose |
+|---|---|---|
+| Prometheus | 9091 | Metrics collection |
+| Grafana | 3000 | Dashboards (admin/admin) |
+| Blobscan | 8080 | Blob transaction explorer |
+| TrueBlocks API | 8080 | REST API (`/blocks`, `/status`) |
+| Beacon chain explorer | varies | Chain explorer UI |
+
+## Deeper Analysis
+
+### Why This Is Different from `geth --dev`
+
+A bare `geth --dev` chain gives you a single EL client with no consensus layer, no MEV simulation, and no observability. The Ethereum Package is what ethPandaOps actually uses to test protocol changes before they touch public testnets. It simulates the full post-merge stack — EL + CL + mev-boost — in a self-contained enclave.
+
+### Running on Kubernetes
+
+Kurtosis packages are identical over Docker and Kubernetes. For cloud-based scale testing:
+
+```bash
+# Set up Kubernetes context
+kubectl config use-context your-cluster
+
+# Run with cloud-optimized storage
+kurtosis run --enclave perf-test github.com/ethpandaops/ethereum-package \
+  --args-file cloud_params.yaml
+```
+
+See the [Kurtosis Kubernetes docs](https://docs.kurtosis.com/k8s) for persistent storage tuning.
+
+### Shadowforking a Public Testnet
+
+To shadowfork Hoodi (Ethereum's integration testnet):
+
+```yaml
+network_params:
+  network: "hoodi-shadowfork"
+  persistent: true
+```
+
+Shadowforks inherit the state of the target network but run in isolation — useful for testing protocol upgrades against real network conditions without touching public infrastructure.
+
+## Practical Evaluation Checklist
+
+- Docker daemon running and Kurtosis CLI installed
+- Default devnet starts without errors (`kurtosis run` exits cleanly)
+- Grafana accessible on the printed port (default Grafana credentials: admin/admin)
+- Blobscan shows blob transactions after a few minutes of the spammer running
+- MEV boost services start when `mev_type` is configured
+- TrueBlocks API responds on port 8080 (`curl localhost:8080/status`)
+- Kubernetes run produces the same result as Docker run (Kurtosis reproducibility guarantee)
+
+## Security Notes
+
+- The private devnet is fully isolated — no Mainnet or public testnet funds at risk
+- The transaction spammer generates fake traffic; do not use it on public networks
+- Kurtosis enclaves are sandboxed containers; network access depends on your Docker/Kubernetes network policy
+- MEV boost infrastructure (relay, builder) is emulated for testing — not a production relay
+
+## FAQ
+
+**Q: What Ethereum networks does this support?**
+**A:** The package supports private devnets, public testnets (Sepolia, Hoodi), and shadowforks of either. It cannot connect to Mainnet.
+
+**Q: Which EL and CL clients are supported?**
+**A:** The README lists Geth, Reth (execution), and Lighthouse (consensus) among supported clients. Configuration is via the `network_params` YAML — exact supported client matrix is in the [package reference](https://docs.kurtosis.com/packages}).
+
+**Q: Do I need Kubernetes to use this?**
+**A:** No. Docker alone works for local development and most testing. Kubernetes is only required for scale testing with multiple nodes.
+
+**Q: Is this production infrastructure?**
+**A:** No. The README explicitly states the package is for testing, validation, and development — not production use.
+
+## Conclusion
+
+The Ethereum Package is the most complete open-source tool for spinning up a realistic private Ethereum testnet. Whether you are testing a共识 layer change, validating MEV behavior, or benchmarking client implementations, a single `kurtosis run` command gets you a full multi-client network with observability built in. It replaces a maze of Docker Compose files and manual setup with a reproducible, parameterized package maintained by the people who build Ethereum infrastructure at scale.
+
+To get started: install Docker, install the Kurtosis CLI, and run:
+
+```bash
+kurtosis run --enclave my-testnet github.com/ethpandaops/ethereum-package
+```
