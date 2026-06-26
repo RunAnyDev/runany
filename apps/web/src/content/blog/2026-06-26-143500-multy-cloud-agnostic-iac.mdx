@@ -1,0 +1,185 @@
+---
+title: "Multy – Multi-Cloud Deployment with Terraform"
+description: "Write cloud-agnostic config once, deploy to AWS and Azure. Multy is an open-source tool with a Terraform provider and Apache 2.0 license."
+pubDate: "2026-06-26"
+tags: ["dev-tools", "infrastructure", "terraform", "aws", "azure"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/multy.webp"
+  alt: "Multy multi-cloud infrastructure deployment tool"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Multy lets you write infrastructure-as-code once and deploy it to AWS, Azure, and other clouds — without rewriting for provider-specific quirks.
+
+## Source and Accuracy Notes
+
+- Project page: [multy.dev](https://multy.dev)
+- Source repository: [github.com/multycloud/multy](https://github.com/multycloud/multy)
+- Terraform Provider: [github.com/multycloud/terraform-provider-multy](https://github.com/multycloud/terraform-provider-multy)
+- License: Apache 2.0 (verified via README)
+- HN launch thread: [news.ycombinator.com/item?id=32238362](https://news.ycombinator.com/item?id=32238362)
+
+## What Is Multy?
+
+Multy is an open-source infrastructure-as-code tool that abstracts away cloud provider differences so you write your configuration once and deploy it to any supported cloud.
+
+> "Multy is the easiest way to deploy multi cloud infrastructure."
+
+The core problem it solves: AWS and Azure share the same conceptual resources (virtual networks, VMs, subnets), but the implementation details differ enough that a single Terraform script cannot target both without significant refactoring. Multy provides a cloud-agnostic API that shields you from those differences.
+
+Key capabilities from the README:
+- **Cloud-agnostic configuration** — write once, deploy to any supported cloud
+- **Terraform Provider** — use familiar `.tf` syntax with the Multy provider
+- **Managed service option** — free hosted API key available at multy.dev
+- **Export to Terraform** — if you want to leave Multy later, you can export your config as standard Terraform
+
+Supported clouds (as of current main branch): AWS and Azure. The project roadmap tracks additional cloud providers.
+
+## Setup Workflow
+
+### Step 1: Install Terraform
+
+Multy works through the official Terraform provider. Install Terraform first:
+
+```bash
+# macOS
+brew install terraform
+
+# Linux/macOS via tfenv
+tfenv install latest
+tfenv use latest
+```
+
+### Step 2: Add the Multy Terraform Provider
+
+Create a `providers.tf` file:
+
+```hcl
+terraform {
+  required_providers {
+    multy = {
+      source  = "multycloud/multy"
+      version = "~> 0.1"
+    }
+  }
+}
+
+provider "multy" {}
+```
+
+Then run:
+
+```bash
+terraform init
+```
+
+### Step 3: Write Cloud-Agnostic Infrastructure
+
+Create a `main.tf` with a virtual network and VM targeting multiple clouds:
+
+```hcl
+variable "clouds" {
+  type    = set(string)
+  default = ["aws", "azure"]
+}
+
+resource "multy_virtual_network" "vn" {
+  for_each = var.clouds
+  cloud    = each.key
+
+  name       = "multy_vn"
+  cidr_block = "10.0.0.0/16"
+  location   = "eu_west_1"
+}
+
+resource "multy_subnet" "subnet" {
+  for_each = var.clouds
+
+  name               = "multy_subnet"
+  cidr_block         = "10.0.10.0/24"
+  virtual_network_id = multy_virtual_network.vn[each.key].id
+}
+
+resource "multy_virtual_machine" "vm" {
+  for_each = var.clouds
+
+  name = "test_vm"
+  size = "general_micro"
+  image_reference = {
+    os      = "ubuntu"
+    version = "20.04"
+  }
+  subnet_id = multy_subnet.subnet[each.key].id
+  cloud     = each.key
+  location  = "eu_west_1"
+}
+```
+
+### Step 4: Apply
+
+```bash
+terraform plan
+terraform apply
+```
+
+To destroy:
+
+```bash
+terraform destroy
+```
+
+## Deeper Analysis
+
+### Why Not Just Use Terraform Directly?
+
+Terraform's cloud-specific providers give you maximum flexibility, but that flexibility becomes a burden when targeting multiple clouds simultaneously. Every resource attribute that differs between AWS and Azure requires a conditional or separate configuration block.
+
+Multy's abstraction means you express intent (create a VM with this OS and size) and Multy handles the provider-specific mapping. The tradeoff: Multy only supports a curated set of common resources. If you need provider-specific features not in the abstraction layer, you still can.
+
+### Export Capability
+
+One practical concern with any abstraction tool is lock-in. Multy addresses this by allowing export of your configuration to raw Terraform. This means you are never truly trapped — if the project is abandoned or your needs outgrow it, you can migrate to standard Terraform without rewriting from scratch.
+
+### License
+
+Multy is Apache 2.0. The Terraform provider is MPL-2.0. Both are permissive open-source licenses suitable for personal and commercial use.
+
+## Practical Evaluation Checklist
+
+- [ ] `terraform init` succeeds with Multy provider
+- [ ] `terraform plan` shows resources for two different clouds without conditional logic
+- [ ] `terraform apply` creates resources in AWS
+- [ ] `terraform apply` creates resources in Azure
+- [ ] `terraform destroy` cleans up both
+- [ ] Can export config to raw Terraform
+
+## Security Notes
+
+- The managed Multy API key (requested at multy.dev) should be stored in environment variables or a secrets manager, not hardcoded in Terraform files
+- Infrastructure state files (`terraform.tfstate`) should be stored in a remote backend (S3, Azure Blob, etc.) for production use
+- Multy's managed service is currently free, but check the pricing page before large-scale production use
+
+## FAQ
+
+**Q: Does Multy support GCP?**
+**A:** As of the current main branch, only AWS and Azure are supported. GCP is on the roadmap — check the [public roadmap](https://github.com/orgs/multycloud/projects/4) for status.
+
+**Q: Can I use Multy for existing infrastructure?**
+**A:** Multy is primarily designed for new infrastructure. Importing existing AWS/Azure resources is not documented as a core feature.
+
+**Q: What happens if a cloud provider changes an API?**
+**A:** The Multy team updates the provider to handle cloud API changes. You should keep the Terraform provider version updated.
+
+**Q: Is the managed service production-ready?**
+**A:** The managed Multy is offered as a free service. Review multy.dev for any usage limits or SLA commitments before heavy production use.
+
+## Conclusion
+
+Multy solves a real pain point for teams operating across multiple clouds. By abstracting provider-specific details into a single configuration, it reduces the operational burden of keeping infrastructure-as-code DRY when targeting AWS and Azure simultaneously.
+
+The Apache 2.0 license and export-to-Terraform escape hatch make it a low-risk addition to your IaC toolkit. Check the [GitHub repo](https://github.com/multycloud/multy) and the [official docs](https://docs.multy.dev/getting-started) to see if your required resources are supported.
