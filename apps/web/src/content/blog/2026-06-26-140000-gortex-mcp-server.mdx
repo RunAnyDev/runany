@@ -1,0 +1,165 @@
+---
+title: "Gortex – MCP server for cross-repo code intelligence"
+description: "Gortex indexes code into a graph and exposes 175 MCP tools for AI agents. Supports 257 languages, 17 coding agents, and delivers up to 50x fewer tokens per response."
+pubDate: "2026-06-26"
+tags: ["mcp-server", "code-analysis", "developer-tools", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gortex.webp"
+  alt: "Gortex MCP server for code intelligence"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Gortex is an open-source code-intelligence MCP server that indexes multiple repositories into a graph, giving AI coding agents symbol lookup, call chains, blast-radius analysis, and cross-repo contract detection with up to 50× fewer tokens per response.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [get.gortex.dev](https://get.gortex.dev)
+- Source repository: [github.com/zzet/gortex](https://github.com/zzet/gortex)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47795300](https://news.ycombinator.com/item?id=47795300) — Show HN
+- Source last checked: 2026-06-26 (commit `main`, README `wall.svg` hero confirmed present)
+
+## What Is Gortex?
+
+Gortex is a high-performance code-intelligence engine that parses repositories into a persistent, provenance-tiered knowledge graph and exposes it via an MCP server, CLI, and web UI.
+
+Rather than having an AI agent blast-read every file in a repo (wasting context tokens), Gortex lets agents ask precise graph queries — "what calls this function?", "what breaks if I change this API?", "show me the blast radius of this refactor" — and get back just the relevant nodes.
+
+The project's README makes a strong claim: **up to 50× fewer tokens per response** compared to naive file reads. This comes from graph-native lookups that return only the symbols and edges an agent actually needs, not surrounding noise.
+
+Key claims from the README:
+
+- **175 MCP tools** across symbol lookup, call chains, blast radius, dataflow, clone detection, refactoring, and code actions
+- **257 languages/grammars** via tree-sitter AST analysis
+- **17 AI coding agents** supported out of the box: Claude Code, Kiro, Cursor, Windsurf, VS Code/Copilot, Continue.dev, Cline, OpenCode, Antigravity, Codex CLI, Gemini CLI, Zed, Aider, Kilo Code, OpenClaw, Hermes, and Oh My Pi
+- **Cross-repo by default** — N repos in one graph; contracts, references, and call chains span repo boundaries
+- **Single static binary** — no dependency chain for macOS, Linux, and Windows
+- **Zero external dependencies** — everything in-process, no network required to get started
+- **GCX1 wire format** — a published, round-trippable binary format that cuts an additional 27% tokens vs JSON at the same fidelity
+
+## Setup Workflow
+
+### Step 1: Install Gortex
+
+```bash
+# macOS / Linux
+curl -fsSL https://get.gortex.dev | sh
+
+# Windows (PowerShell)
+irm https://get.gortex.dev/install.ps1 | iex
+```
+
+The install script detects your OS and architecture, verifies SHA256 and cosign signatures, and places the binary on your PATH. Re-run to upgrade.
+
+Additional install methods available: Homebrew, `.deb`/`.rpm`/`.apk` packages, scoop, and signed binaries. From-source builds are also documented in the repo.
+
+### Step 2: Initialize machine and start daemon
+
+```bash
+gortex install                          # one-time machine setup (MCP, skills, slash commands)
+gortex daemon start --detach           # background daemon
+```
+
+### Step 3: Track and index repositories
+
+```bash
+gortex track ~/projects/myapp           # add a repo to the graph
+cd ~/projects/myapp && gortex init      # per-repo: .mcp.json, hooks, community routing
+```
+
+### Step 4: Verify integration with your AI agent
+
+After `gortex init`, the tool auto-detects which coding agents are installed on your machine and configures them to use graph queries. Check the agents list:
+
+```bash
+gortex agents list
+```
+
+Supported agents (from `docs/agents.md`): Claude Code, Kiro, Cursor, Windsurf, VS Code/Copilot, Continue.dev, Cline, OpenCode, Antigravity, Codex CLI, Gemini CLI, Zed, Aider, Kilo Code, OpenClaw, Hermes, Oh My Pi.
+
+### Step 5: Query via MCP or CLI
+
+```bash
+# CLI example: find all callers of a function
+gortex call-chains --symbol myFunction --depth 3
+
+# MCP tool (for AI agents): blast_radius, contracts, clone_detection, etc.
+```
+
+## Deeper Analysis
+
+### Graph-native vs. naive file reads
+
+The token-efficiency claim deserves scrutiny. Naive RAG or context-injection strategies dump entire files into context — even when the agent only needs to understand a single function signature or call site. Gortex replaces this with graph traversals that return only the relevant nodes and edges.
+
+The 50× figure is backed by reproducible benchmarks in `BENCHMARK.md` in the repo.
+
+### Cross-repo contract detection
+
+Gortex auto-detects API contracts across repository boundaries:
+
+| Contract type | Detection method | Example |
+|---|---|---|
+| HTTP routes | Framework annotations (gin, Express, FastAPI, Spring…) | Route handler vs. HTTP client calls |
+| gRPC | Proto service definitions | Service RPC vs. client stub calls |
+| GraphQL | Schema type/field definitions | Schema vs. query strings |
+| Message topics | Kafka/RabbitMQ/NATS/Redis pub/sub | Publish calls vs. subscribe calls |
+| WebSocket | Event emit/listen patterns | `emit()` vs. `on()` |
+| Env vars | `os.Getenv`, `process.env`, `.env` files | `Setenv` vs. `Getenv` |
+
+### Languages and grammar coverage
+
+Gortex supports 257 languages via tree-sitter AST analysis, augmented with compiler-grade resolution for Python, TypeScript/JavaScript, PHP, C#, Go, C, C++, Java, Kotlin, Swift, Zig, Rust, Ruby, Elixir, OCaml, and Haskell. A three-tier approach (bespoke tree-sitter, regex, forest-backed signatures) plus Jupyter and Databricks notebook support ensures broad coverage.
+
+### Security and telemetry
+
+Telemetry is **off by default**. When enabled, only anonymized tool/command counts are transmitted — no code, paths, names, or exact counts. The `DO_NOT_TRACK` environment variable is respected.
+
+SLSA Level 3 supply-chain attestation, Sigstore signing for releases, and VirusTotal scanning of binaries are all documented in the repo.
+
+## Practical Evaluation Checklist
+
+- [ ] Install completes without dependency errors
+- [ ] `gortex daemon start --detach` starts successfully
+- [ ] `gortex track ~/your-repo` indexes without errors
+- [ ] `gortex agents list` shows your installed agent
+- [ ] MCP tools respond correctly (test `call-chains`, `blast-radius`)
+- [ ] Cross-repo tracking works when multiple repos are added
+- [ ] Telemetry stays off by default (verify with `gortex telemetry status`)
+
+## Security Notes
+
+- Telemetry off by default — verify before enabling
+- SHA256 + cosign verification on install script
+- SLSA Level 3 supply chain attestation for releases
+- Single static binary — no runtime dependencies that could be tampered with
+- Code never leaves your machine unless you explicitly configure an endpoint
+
+## FAQ
+
+**Q: Does it work with local-only repositories with no internet?**
+**A:** Yes. Gortex is a single static binary with everything in-process. No network access is required to index or query repositories.
+
+**Q: Which AI coding agents are actually supported?**
+**A:** The README lists 17: Claude Code, Kiro, Cursor, Windsurf, VS Code/Copilot, Continue.dev, Cline, OpenCode, Antigravity, Codex CLI, Gemini CLI, Zed, Aider, Kilo Code, OpenClaw, Hermes, and Oh My Pi. Run `gortex agents list` to see what was auto-detected on your machine.
+
+**Q: How does it compare to GitHub Copilot or Cursor's built-in code intelligence?**
+**A:** Gortex is an MCP server that supplements (not replaces) IDE-level code intelligence. It focuses on graph-native cross-repo queries — blast radius, call chains, contract detection — that general IDE tools don't handle well. The 50× token claim specifically applies to how much context an agent uses per query compared to dumping full files.
+
+**Q: Is the 50× token reduction real?**
+**A:** The README links to reproducible benchmarks in `BENCHMARK.md`. The claim applies to graph-native lookups vs. naive file reads — your mileage varies depending on query type.
+
+## Conclusion
+
+Gortex solves the context-window bloat problem for AI coding agents by replacing naive file reads with precise graph queries. The MCP server interface means it works with any agent that supports MCP — and with 17 agents auto-detected out of the box, setup is minimal.
+
+If you regularly work across multiple repositories, maintain large codebases, or find your agents burning tokens reading entire files just to answer a single question, Gortex is worth evaluating. The cross-repo contract detection alone is a unique capability that most alternatives don't offer.
+
+Install it in under a minute with the one-liner above, or read the full onboarding guide at [docs/onboarding.md](https://github.com/zzet/gortex/blob/main/docs/onboarding.md).
