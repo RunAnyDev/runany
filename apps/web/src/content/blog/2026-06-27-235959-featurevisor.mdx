@@ -1,0 +1,207 @@
+---
+title: "Featurevisor - Git-Native Feature Flags and Remote Config"
+description: "Manage feature flags, A/B experiments, and remote config declaratively using Git. Featurevisor builds static datafiles for your CDN, with SDKs for JS, Python, Go, and more."
+pubDate: "2026-06-27"
+tags: ["feature-flags", "gitops", "open-source", "dev-tools", "experimentation"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/featurevisor.webp"
+  alt: "Featurevisor - Git-Native Feature Management"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Featurevisor lets you manage feature flags, A/B experiments, and remote configuration declaratively from a Git repository, generating static datafiles for your CDN with SDKs for JavaScript, Python, Go, and more.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [featurevisor.com](https://featurevisor.com)
+- Source repository: [github.com/featurevisor/featurevisor](https://github.com/featurevisor/featurevisor)
+- License: [MIT](https://github.com/featurevisor/featurevisor) (verified via GitHub API `license.spdx_id`)
+- Current version: v2.27.0 (verified via CHANGELOG, 2026-05-19)
+- HN launch thread: [Show HN: Featurevisor v2.0 – declarative feature flags management with Git](https://news.ycombinator.com/item?id=44652672)
+
+## What Is Featurevisor?
+
+Featurevisor is an open-source tool for managing feature flags, A/B test variations, and remote configuration variables through version-controlled configuration files. Instead of using a SaaS dashboard to toggle flags, you define everything in YAML files inside a Git repository, then run a CLI to generate static JSON "datafiles" that get uploaded to your CDN or custom server.
+
+At runtime, your application fetches these datafiles via lightweight SDKs and evaluates flags, variations, or variables against a provided context (e.g., user ID, country, plan tier). Because the datafiles are static JSON, evaluation is fast and requires no external calls to a flag service during request handling.
+
+The core workflow:
+
+1. Define your project in a Git repository using YAML (attributes, segments, features)
+2. Run `npx @featurevisor/cli` to build and upload datafiles to your CDN
+3. Integrate an SDK in your application to fetch and evaluate against context
+
+## Core Concepts
+
+### Attributes
+
+Attributes are typed building blocks for targeting conditions. Example from the docs:
+
+```yaml
+# attributes/userId.yml
+type: string
+description: User ID
+```
+
+### Segments
+
+Segments are reusable targeting rules built from attributes:
+
+```yaml
+# segments/germany.yml
+description: Users from Germany
+conditions:
+  - attribute: country
+    operator: equals
+    value: de
+```
+
+### Features
+
+Features combine attributes and segments to define flags, variations, and variables:
+
+```yaml
+# features/myFeature.yml
+description: My feature flag
+variations:
+  - key: control
+    weight: 50
+  - key: treatment
+    weight: 50
+segments:
+  - segment: germany
+    variation: treatment
+```
+
+### Variables
+
+Variables let you ship remote configuration alongside your flags:
+
+```yaml
+variables:
+  - key: welcome_message
+    type: string
+    defaultValue: "Hello!"
+```
+
+## SDKs
+
+Featurevisor maintains official SDKs for a wide range of platforms:
+
+- JavaScript (Node.js and browser)
+- React and React Native
+- Next.js
+- Vue.js
+- Go
+- Python
+- PHP
+- Ruby
+- Java
+- Swift
+
+Third-party and community SDKs also exist for additional languages.
+
+## Quick Start
+
+```bash
+# Create a new project
+mkdir my-featurevisor-project && cd my-featurevisor-project
+
+# Initialize with the CLI
+npx @featurevisor/cli init
+
+# Install dependencies
+npm install
+```
+
+This creates a `featurevisor.config.js` file with your project configuration:
+
+```javascript
+module.exports = {
+  tags: ['all'],
+  environments: ['staging', 'production'],
+};
+```
+
+From there, you add attributes, segments, and features as YAML files. When ready, run the build command to generate datafiles for your CDN:
+
+```bash
+npx @featurevisor/cli build
+```
+
+Then deploy the output to your CDN and wire up your application with an SDK:
+
+```javascript
+import { createFeaturevisor } from '@featurevisor/sdk';
+
+const sdk = createFeaturevisor({ datafileUrl: 'https://cdn.example.com/datafile.json' });
+
+// Evaluate a flag
+const isEnabled = sdk.isEnabled('myFeature', { userId: 'user-123' });
+```
+
+## Deeper Analysis
+
+### Git as the Source of Truth
+
+The key differentiator is treating Git as the flag management interface. Pull requests become the review process for flag changes. Rollbacks are `git revert`. Audit logs are `git log`. This fits naturally into a GitOps workflow and keeps flag changes adjacent to the code they affect.
+
+### Datafiles Architecture
+
+Featurevisor generates static JSON datafiles containing all flag states, variations, and variables for a given environment. Your application fetches this file at startup or on a timer. There is no runtime API call to a flag service — evaluation is entirely local to the SDK. This makes flag lookups fast and your infrastructure less dependent.
+
+### CI/CD Integration
+
+The [GitHub Actions integration](https://featurevisor.com/docs/integrations/github-actions/) automatically rebuilds datafiles when you push to a branch or merge a PR. You can configure which environments get updated on which events, enabling staged rollouts across staging and production from a single Git workflow.
+
+### When Not to Use Featurevisor
+
+- If you need real-time flag propagation without a CDN redeploy (consider LaunchDarkly or Unleash)
+- If your team is entirely non-technical and needs a visual flag management UI without Git workflows
+- If you need advanced experimentation statistics (you would integrate with a dedicated A/B analysis tool regardless)
+
+## Practical Evaluation Checklist
+
+- [ ] Ran `npx @featurevisor/cli init` in a test project
+- [ ] Defined an attribute, a segment, and a feature in YAML
+- [ ] Built datafiles with `npx @featurevisor/cli build`
+- [ ] Integrated the JavaScript SDK and verified flag evaluation
+- [ ] Reviewed GitHub Actions integration docs
+- [ ] Confirmed MIT license on GitHub
+
+## Security Notes
+
+- Datafiles are static JSON served from your CDN — CDN access controls apply
+- SDKs evaluate flags locally with no outbound calls after the initial datafile fetch
+- Sensitive targeting rules (e.g., internal user segments) live in your Git repo, not a third-party service
+- As with any flag management system, limit write access to flag configs to prevent unauthorized feature toggling in production
+
+## FAQ
+
+**Q: Do I need a CDN to use Featurevisor?**
+**A:** Yes, Featurevisor generates static datafiles that need to be served from a CDN or static file server. This is a deliberate design choice that keeps evaluation fast and your infrastructure simple.
+
+**Q: Can I self-host everything?**
+**A:** The flag evaluation is fully self-hosted (SDKs run in your application). The only hosted component is the CDN for serving datafiles, which you control. There is no SaaS backend required.
+
+**Q: How does this compare to LaunchDarkly or Unleash?**
+**A:** Featurevisor trades a live flag service for a Git-based, static-file workflow. Flag evaluation is local and fast (no network round-trip), but flag changes require rebuilding and redeploying datafiles to CDN rather than propagating instantly via an API.
+
+**Q: Does it support A/B testing?**
+**A:** Yes. Features can have multiple variations with traffic allocation weights, and you can target specific segments (e.g., premium users) to specific variations. Analysis of results would be done in an external analytics tool.
+
+**Q: What is the current version?**
+**A:** v2.27.0, released 2026-05-19.
+
+## Conclusion
+
+Featurevisor is a solid choice for teams already practicing GitOps who want feature flags and remote configuration without introducing a third-party SaaS dependency. The static datafile approach means fast, reliable flag evaluation at the cost of not having instant flag propagation. With SDKs spanning JavaScript, Go, Python, and mobile platforms, it covers a wide range of application architectures.
+
+If you want to keep your flag management close to your code and your infrastructure minimal, it is worth a look at [featurevisor.com](https://featurevisor.com) and the [quick start guide](https://featurevisor.com/docs/quick-start).
