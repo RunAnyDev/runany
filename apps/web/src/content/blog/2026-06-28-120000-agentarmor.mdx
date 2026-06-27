@@ -1,0 +1,210 @@
+---
+title: "AgentArmor – 8-Layer Security Framework for AI Agents"
+description: "AgentArmor is an open-source Python framework providing 8-layer defense-in-depth security for AI agents, from input ingestion to identity management."
+pubDate: "2026-06-28"
+tags: ["ai-security", "python", "open-source", "agent-framework"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agentarmor.webp"
+  alt: "AgentArmor GitHub tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AgentArmor is an open-source Python security framework that wraps AI agents with 8 defense-in-depth layers — from input scanning and encrypted storage through execution control and agent identity — covering the full OWASP Top 10 for Agentic Applications.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [agentarmor.io](https://agentarmor.io) ← verified
+- Source repository: [github.com/Agastya910/agentarmor](https://github.com/Agastya910/agentarmor) ← README read end-to-end
+- License: Apache 2.0 (verified via README badge and LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=47374958](https://news.ycombinator.com/item?id=47374958)
+- PyPI package: [pypi.org/project/agentarmor-core](https://pypi.org/project/agentarmor-core)
+- Source last checked: 2026-06-28 (README commit verified via raw GitHub)
+
+## What Is AgentArmor?
+
+Most AI security tools solve one problem in isolation — an output validator here, a prompt injection scanner there. AgentArmor is the first unified framework that secures the entire agentic architecture end-to-end, covering every point in the data flow where data is at rest, in transit, or in use.
+
+Built to address the [OWASP Top 10 for Agentic Applications (2026)](https://owasp.org/www-project-top-10-for-agentic-security-and-integrity/), it provides 8 security layers:
+
+| Layer | Name | What It Protects |
+|:-----:|------|-----------------|
+| L1 | **Ingestion** | Input scanning, prompt injection detection, source verification |
+| L2 | **Storage** | AES-256-GCM encryption at rest, HMAC integrity, tamper detection |
+| L3 | **Context** | GoalLock anchoring, multi-canary injection, template injection stripping |
+| L4 | **Planning** | Action chain tracking, semantic risk scoring, multi-step attack detection |
+| L5 | **Execution** | DNS rebinding protection, rate limiting, circuit breakers, resource budgets |
+| L6 | **Output** | Credential redaction, PII scanning, harmful content blocking, exfiltration detection |
+| L7 | **Inter-Agent** | Mutual auth (HMAC), trust scoring with time decay, delegation depth control |
+| L8 | **Identity** | Agent identity, JIT permissions, credential rotation |
+
+Version 0.5.0 "Hardened Security Layers" upgraded L3–L6 from basic implementations to production-grade, adversarially-tested enforcement engines, validated against 139 combined adversarial test cases.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10 or later
+- [uv](https://github.com/astral-sh/uv) package manager (recommended)
+
+### Step 1: Install
+
+```bash
+# Using uv (recommended)
+uv add agentarmor-core
+
+# With MCP server support (for Claude Code, OpenClaw, etc.)
+uv add "agentarmor-core[mcp]"
+
+# With PII detection
+uv add "agentarmor-core[pii]"
+
+# With all optional features
+uv add "agentarmor-core[all]"
+
+# Available extras: proxy, pii, otel, mcp, oauth, all, dev
+```
+
+For development from source:
+
+```bash
+git clone https://github.com/Agastya910/agentarmor.git
+cd agentarmor
+uv sync --all-extras --dev
+```
+
+### Step 2: Basic Usage
+
+```python
+import asyncio
+from agentarmor import AgentArmor, ArmorConfig
+
+async def main():
+    config = ArmorConfig(
+        enable_all_layers=True,
+        strict_mode=True
+    )
+    armor = AgentArmor(config)
+    # Wrap your agent
+    secured_agent = armor.wrap(agent)
+    response = await secured_agent.run(user_input)
+
+asyncio.run(main())
+```
+
+### Step 3: Configure Layers Individually
+
+```python
+from agentarmor import AgentArmor, ArmorConfig
+from agentarmor.layers import L3ContextConfig, L6OutputConfig
+
+config = ArmorConfig(
+    enable_l1_ingestion=True,
+    enable_l2_storage={"encryption": "AES-256-GCM"},
+    enable_l3_context=L3ContextConfig(goal_lock=True, canary_vault=True),
+    enable_l5_execution={"rate_limit": True, "dns_rebinding_protection": True},
+    enable_l6_output=L6OutputConfig(
+        credential_scanner=True,
+        pii_scanner=True,
+        harmful_content_detector=True
+    ),
+)
+```
+
+## Deeper Analysis
+
+### The 8-Layer Defense Model
+
+**L1: Ingestion** — Every input to the agent is scanned before it enters the system. This includes prompt injection detection, source verification, and malicious payload screening. L1 is the first gatekeeper.
+
+**L2: Storage** — All data at rest in SQLite is AES-256-GCM encrypted with HMAC-based MAC signatures for tamper detection. If an attacker gains read access to the database file, they cannot read the contents without the key.
+
+**L3: Context Assembly (Hardened in v0.5.0)** — The most critical layer for multi-turn attacks. GoalLock anchors the conversation goal so it cannot be redirected mid-session. CanaryVault injects multiple unique canary tokens per session — if a token is exfiltrated, that signals an attack in progress. Tiered context assembly strips template injection before it reaches the LLM. Validated against 48 adversarial test cases.
+
+**L4: Planning and Reasoning (Hardened in v0.5.0)** — Monitors the agent's planning chain for multi-step attack patterns: reconnaissance followed by escalation followed by exfiltration. Semantic risk scoring evaluates the *intent* of actions, not just the verbs used. This catches attacks that use legitimate-seeming language to obscure malicious intent. Validated against 40 adversarial test cases.
+
+**L5: Execution Control (Hardened in v0.5.0)** — Five enforcement domains gate what the agent can actually do:
+- Network Policy: DNS rebinding protection and SSRF protection
+- Rate Limiting: token bucket and circuit breaker patterns
+- Resource Budget: timeout and size limits prevent resource exhaustion
+- Output Sanitizer: UTF-8 validation and binary stripping
+- Side-Effect Auditor: immutable execution records for audit trails
+
+**L6: Output Security (Hardened in v0.5.0)** — Five-scanner pipeline runs on every output:
+- Credential Scanner: 13+ patterns, zero false positives on test set
+- PII Scanner: confidence-gated Presidio integration
+- Harmful Content Detector: jailbreak and system prompt leak detection
+- Semantic Exfiltration Detector: cross-response tracking to catch slow-burn data theft
+- Schema Validation: ensures output conforms to expected structure
+
+Supports both streaming and non-streaming responses. Validated against 12 adversarial test cases.
+
+**L7: Inter-Agent Communication** — When multiple agents coordinate, L7 enforces mutual authentication via HMAC, trust scoring with time decay (trust degrades if an agent goes silent), and delegation depth control to prevent "action amplification" attacks where a chain of delegated actions exceeds the original intent.
+
+**L8: Identity and Permissions** — Agent identity management with just-in-time permission elevation and automatic credential rotation. Permissions are granted at call time and revoked immediately after, reducing the blast radius of a compromised agent.
+
+### Comparison with Point Solutions
+
+| Capability | AgentArmor | Typical Output Scanner | Typical Prompt Injector |
+|:-----------|:----------:|:----------------------:|:-----------------------:|
+| 8 security layers unified | Yes | No | No |
+| Encrypted storage | Yes | No | No |
+| Goal hijacking protection | Yes | No | No |
+| Multi-step attack chain detection | Yes | No | No |
+| Credential redaction | Yes | Partial | No |
+| PII scanning | Yes | No | No |
+| Inter-agent auth | Yes | No | No |
+| JIT permissions | Yes | No | No |
+
+## Practical Evaluation Checklist
+
+Use this checklist when evaluating AgentArmor for a production deployment:
+
+- [ ] **Threat model documented** — Know which of the 8 layers matter most for your use case
+- [ ] **uv installed** — AgentArmor uses uv for dependency management; pip support exists but uv is the reference path
+- [ ] **MCP server extras added** — If using Claude Code, OpenClaw, or other MCP-compatible tools: `uv add "agentarmor-core[mcp]"`
+- [ ] **Strict mode enabled** — `ArmorConfig(strict_mode=True)` fails closed on ambiguous inputs
+- [ ] **L3 GoalLock tested** — Verify goal anchoring works in your specific conversation patterns
+- [ ] **L5 network policies configured** — DNS rebinding protection is off by default; enable explicitly
+- [ ] **L6 credential patterns reviewed** — The 13 credential patterns may need tuning for your internal secret formats
+- [ ] **Audit log destination set** — L5 Side-Effect Auditor produces immutable logs; configure a sink
+- [ ] **EU AI Act compliance checked** — Design is compliant (per README), but verify against your specific deployment context
+
+## Security Notes
+
+- AgentArmor is Apache 2.0 licensed — commercial use is permitted without attribution beyond the license
+- The 127 adversarial test cases cover the OWASP Top 10 for Agentic Applications (2026); as threats evolve, test coverage will expand
+- L7 Inter-Agent auth uses HMAC — shared secrets must be distributed securely (Vault, KMS, etc.)
+- L2 encrypted storage uses a per-instance key — if the key is lost, encrypted data is irrecoverable
+- L8 JIT permissions reduce blast radius but do not eliminate it — defense in depth across all 8 layers is the design intent
+
+## FAQ
+
+**Q: Does AgentArmor work with LangChain, AutoGPT, or other agent frameworks?**
+**A:** Yes. The core `AgentArmor.wrap()` interface is framework-agnostic. MCP extras specifically support Claude Code and OpenClaw. Check the [GitHub repo](https://github.com/Agastya910/agentarmor) for framework-specific examples.
+
+**Q: What is the performance overhead?**
+**A:** Overhead depends on which layers are enabled and the traffic profile. L1–L2 and L5–L6 are the most computationally intensive. L3 GoalLock and L4 ActionChainTracker add latency proportional to context length. The README does not publish benchmark numbers; run your own profiling against your workload.
+
+**Q: How is this different from a Web Application Firewall?**
+**A:** A WAF operates at the HTTP layer. AgentArmor operates inside the agent's decision loop — it sees the parsed intent, the context assembly, the planning chain, and the output before it leaves the agent. WAFs cannot detect goal hijacking or semantic exfiltration inside a conversation.
+
+**Q: Is the source code audited?**
+**A:** The repo contains 127+ adversarial test cases. The README does not mention a third-party security audit. For production deployments with sensitive data, consider a private audit.
+
+**Q: Does it support non-Python agents?**
+**A:** The primary implementation is Python. MCP server support (via `agentarmor-core[mcp]`) allows non-Python agents to interact with AgentArmor's security layer over the MCP protocol.
+
+## Conclusion
+
+AgentArmor addresses a real gap in the AI agent security landscape: most tools focus on one attack surface, leaving the others exposed. The 8-layer model covers ingestion, storage, context, planning, execution, output, inter-agent communication, and identity — a cohesive defense architecture rather than a collection of point solutions.
+
+The v0.5.0 hardening pass (L3–L6) is the most significant update, upgrading those layers from basic implementations to production-grade enforcement engines with adversarial validation. If you are building or operating AI agents in production, this framework is worth evaluating as a security foundation layer.
+
+Start with `uv add agentarmor-core` and enable layers incrementally based on your threat model.
