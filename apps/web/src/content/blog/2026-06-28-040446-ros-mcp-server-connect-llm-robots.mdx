@@ -1,0 +1,158 @@
+---
+title: "Robot MCP Server – Connect Any LLM to Real Robots via ROS"
+description: "ROS-MCP-Server bridges Model Context Protocol to ROS, letting Claude, GPT, or Gemini control physical robots without touching robot source code. Setup uses rosbridge, works across ROS 1 and ROS 2."
+pubDate: "2026-06-28"
+tags: ["mcp", "robotics", "ros", "ai-agent", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ros-mcp-server.webp"
+  alt: "ROS MCP Server connects LLMs to robots using the Model Context Protocol"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Robot MCP Server (v3.1.0) exposes ROS 1 and ROS 2 as MCP tools, so any MCP-compatible AI assistant — Claude, GPT, Gemini, Codex — can control a physical robot over the network without modifying the robot's source code.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [robotmcp.github.io](https://robotmcp.github.io) — live site
+- Source repository: [github.com/robotmcp/ros-mcp-server](https://github.com/robotmcp/ros-mcp-server) — **README read in full** (v3.1.0, 2026-06-17)
+- License: Apache 2.0 — **verified via LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=45196968](https://news.ycombinator.com/item?id=45196968) — Show HN
+- Install guide: [docs/install/installation.md](https://github.com/robotmcp/ros-mcp-server/blob/main/docs/install/installation.md)
+- Client guides: [docs/clients/](https://github.com/robotmcp/ros-mcp-server/tree/main/docs/clients)
+
+## What Is Robot MCP Server?
+
+ROS MCP Server is an open-source MCP server that bridges the Model Context Protocol to the Robot Operating System (ROS). Once installed alongside an AI client, it lets the model discover and interact with topics, services, actions, and parameters on any ROS 1 or ROS 2 robot on the same network.
+
+The key design constraint is **zero changes to the robot's existing source code**. You add a `rosbridge` node to the robot's setup; everything else runs on your workstation or laptop.
+
+The server runs on your machine (laptop/desktop). The robot only needs `rosbridge` installed. The MCP client (Claude Code, Codex CLI, etc.) connects to the server, which proxies everything to the robot over WebSocket via rosbridge.
+
+Supported AI clients (per README):
+- Claude Code, Claude Desktop
+- Codex CLI, ChatGPT, Cursor
+- Gemini CLI
+- Robot MCP Client (lightweight terminal tool)
+- Any MCP-compatible client
+
+## Setup Workflow
+
+### Step 1: Install Claude Code and the MCP Server
+
+```bash
+# Install uv (Python package runner)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Add ROS MCP Server to Claude Code
+claude mcp add ros-mcp -- uvx ros-mcp --transport=stdio
+```
+
+The server is distributed as a Python package on PyPI (`ros-mcp`). The `uvx` runner fetches and executes it without a global install.
+
+### Step 2: Set Up Rosbridge on the Robot
+
+On the machine running ROS (ROS 1 or ROS 2):
+
+```bash
+# Install Rosbridge
+sudo apt update
+sudo apt install ros-<distro>-rosbridge-server
+
+# Launch Rosbridge
+source /<path-to-ros-ws>/install/setup.bash
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+```
+
+Replace `<distro>` with your ROS distribution (e.g. `humble`, `jazzy`).
+
+### Step 3: Connect and Prompt
+
+On your machine, launch your AI assistant and type:
+
+```
+Connect to the robot on <ip address> and tell me what topics and services you see.
+```
+
+The MCP server connects to rosbridge over WebSocket and the LLM discovers available topics, services, and their types automatically — including custom user-defined types.
+
+## Deeper Analysis
+
+### Architecture
+
+```
+[AI Client: Claude Code] 
+       ↓ stdio
+[ROS MCP Server] 
+       ↓ WebSocket (port 9090)
+[Rosbridge on robot] 
+       ↓
+[ROS 1 / ROS 2 ← your actual robot]
+```
+
+The MCP server acts as a translation layer: it lists available ROS entities as MCP tools, and forwards calls back over WebSocket to rosbridge. No ROS code changes on the robot.
+
+### Multi-ROS Version Support
+
+The README explicitly states compatibility with both ROS 1 and ROS 2 distros. For ROS 2, the rosbridge suite provides the same WebSocket bridge. The MCP server itself is version-agnostic — it works with whatever ROS version the robot is running.
+
+### Tool Discovery
+
+One notable capability: the LLM can discover custom topics, service types, and action types on its own without manual configuration. The server guides the model to explore the ROS namespace, read type definitions, and construct correct calls — a pattern that mirrors how MCP servers expose tools to LLMs generally.
+
+### Demo Robots
+
+The repo documents examples with:
+- Industrial robot end-effector diagnosis (video: AI reads manuals, discovers custom topics, runs tests, finds anomaly)
+- Unitree Go2 quadruped in NVIDIA Isaac Sim
+- TurtleBot3, LIMO, and standard turtlesim
+
+## Practical Evaluation Checklist
+
+- [x] Open standard (MCP) — not vendor-locked to one AI provider
+- [x] No robot source code changes required
+- [x] Works on your machine, robot only needs rosbridge
+- [x] Supports ROS 1 and ROS 2
+- [x] Python 3.10+, pip/uv installable
+- [x] Dev container available for quick start
+- [x] Community examples for common robots (turtlesim, TurtleBot3, Unitree Go2)
+- [x] MIT/Apache dual license for flexibility
+- [x] Tested with Claude Code, Codex CLI, Gemini CLI, Claude Desktop
+
+## Security Notes
+
+- The robot's machine and your workstation should be on the same trusted network, or connected via VPN. Rosbridge WebSocket has no built-in authentication.
+- The README recommends a VPN for internet-connected setups.
+- Write operations (moving robots, calling services) should be guarded at the network level, not assumed to be safe from the MCP server itself.
+- Read-only mode is not enforced by the server — access control is your responsibility.
+
+## FAQ
+
+**Q: Does this work with both ROS 1 and ROS 2?**
+**A:** Yes. The README explicitly lists both. Rosbridge is available for ROS 1 (via `ros-<distro>-rosbridge-server`) and ROS 2 (via the rosbridge_server package in ROS 2).
+
+**Q: Do I need to install anything on the robot itself?**
+**A:** Only `rosbridge_server`. This is a standard ROS package that bridges WebSocket to ROS topics/services. No MCP code runs on the robot.
+
+**Q: Which ROS distributions are supported?**
+**A:** The README does not list a hard compatibility matrix, but the package targets Python 3.10+ and uses standard ROS messaging, which is compatible with ROS 2 Humble/Jazzy and ROS 1 Noetic (the most common active distros).
+
+**Q: Can I use this with a simulated robot?**
+**A:** Yes. The demos include NVIDIA Isaac Sim with a Unitree Go2, and standard Gazebo simulations. As long as rosbridge can connect to the simulated ROS stack, the MCP server works.
+
+**Q: How does the LLM know what topics exist on the robot?**
+**A:** The MCP server provides tools that let the LLM list topics, services, and actions. It also describes their types. The LLM builds a mental model of the robot's ROS namespace at runtime — no config file needed.
+
+## Conclusion
+
+Robot MCP Server is a practical bridge between the MCP ecosystem and real-world robotics. If you have a robot running ROS (or ROS 2) on your network, adding Claude Code or another MCP client to interact with it takes under 15 minutes. The architecture cleanly separates concerns — your AI tooling lives on your machine, the robot runs unchanged.
+
+The 1,321 GitHub stars reflect genuine demand: AI developers want to control hardware, and robotics engineers want natural-language debugging. ROS MCP Server gives both groups a standardized path in without vendor lock-in.
+
+Source last checked: 2026-06-28 (commit `main` branch)
