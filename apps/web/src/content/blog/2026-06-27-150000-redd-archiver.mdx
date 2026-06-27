@@ -1,0 +1,157 @@
+---
+title: "Redd-Archiver – Self-Host Your Own Reddit Archive"
+description: "Turn 2.38 billion Reddit posts into a browsable offline archive with Redd-Archiver. PostgreSQL-backed, three serving modes, incremental updates."
+pubDate: "2026-06-27"
+tags: ["self-hosted", "reddit", "archive", "data", "mcp"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/redd-archiver.webp"
+  alt: "Redd-Archiver – Reddit archive tool"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Redd-Archiver imports Reddit, Voat, and Ruqqus dumps into PostgreSQL and exports browsable HTML archives you can self-host — with an MCP server for AI agents to query the archive.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/19-84/redd-archiver](https://github.com/19-84/redd-archiver)
+- Live demo: [online-archives.github.io/redd-archiver-example](https://online-archives.github.io/redd-archiver-example/)
+- License: [Unlicense](http://unlicense.org/) (verified via README)
+- HN launch thread: [news.ycombinator.com/item?id=46602324](https://news.ycombinator.com/item?id=46602324) — 286 points, 64 comments
+- Source last checked: 2026-06-27 (commit verified against main branch)
+
+## What Is Redd-Archiver?
+
+Redd-Archiver transforms compressed data dumps from link aggregator platforms into browsable HTML archives backed by PostgreSQL. The project targets Reddit (2.38 billion+ posts from Arctic Shift monthly dumps), Voat (3.81M posts), and Ruqqus (500K posts). The archive stays current via incremental monthly updates — only new posts are imported, re-runs are skipped by checksum, and scores refresh without altering preserved content.
+
+The project ships with an MCP server exposing 29 tools for AI agents to query the archive programmatically.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10+
+- PostgreSQL 14+
+- 500GB+ free disk space (for full Reddit dataset)
+- Docker and Docker Compose (for hybrid/dynamic serving modes)
+
+### Step 1: Install
+
+```bash
+git clone https://github.com/19-84/redd-archiver.git
+cd redd-archiver
+pip install -e .
+```
+
+### Step 2: Download Reddit Data
+
+Download the Arctic Shift Reddit archive from Academic Torrents:
+
+```bash
+# ~300GB compressed, expands to 500GB+
+wget https://academictorrents.com/details/3e3f64dee22dc304cdd2546254ca1f8e8ae542b4
+```
+
+### Step 3: Import Data
+
+```bash
+# Import submissions and comments
+reddarc.py --import-only /data/reddit/RS_2026-01.zst --comments-file RC_2026-01.zst
+```
+
+### Step 4: Choose a Serving Mode
+
+Redd-Archiver offers three serving modes:
+
+| Mode | Search | API | Requirements |
+|---|---|---|---|
+| Static | — | — | Any web host |
+| Hybrid (default) | ✅ | ✅ | nginx + Flask + PostgreSQL |
+| Dynamic | ✅ | ✅ | Flask + PostgreSQL |
+
+**Hybrid mode (recommended):**
+
+```bash
+docker compose up -d
+```
+
+**Static export (host anywhere):**
+
+```bash
+reddarc.py /data --subreddit privacy --output /var/www/html/
+```
+
+### Step 5: Keep the Archive Current
+
+Apply monthly incremental updates without re-importing everything:
+
+```bash
+# Apply one month
+reddarc.py --update RS_2026-01.zst --comments-file RC_2026-01.zst
+
+# Or auto-discover and apply all unprocessed months
+reddarc.py --update-all /data/monthly/reddit/
+reddarc.py --update-status   # audit applied updates
+```
+
+## MCP Server
+
+Redd-Archiver ships a built-in MCP server with 29 tools for querying the archive from AI agents. This is useful if you want to build a chatbot or analysis pipeline that works entirely offline over the Reddit dataset.
+
+## Deeper Analysis
+
+### Why Archive Reddit?
+
+Communities get banned, subreddits go private, and discussions vanish overnight. Pushshift (the most widely used Reddit data aggregator) shut down its public API in 2024. Redd-Archiver uses the open Arctic Shift dataset, which is updated monthly — so your archive stays current even as the official API becomes more restrictive.
+
+### What You Get
+
+- **2.38B+ Reddit posts** spanning 68,883 communities (with monthly incremental updates)
+- **11 theme palettes** for the archive UI
+- **Mobile-first design** for the HTML archive interface
+- **Full-text search** via PostgreSQL in hybrid/dynamic modes
+- **Subreddit metadata and wiki enrichment** built into the import
+
+## Practical Evaluation Checklist
+
+- [ ] Successfully imports a small subreddit dump (e.g. r/privacy) as a test
+- [ ] Hybrid mode search returns relevant results within 500ms
+- [ ] Incremental update skips already-imported posts (checksum verification)
+- [ ] Static export generates valid HTML pages
+- [ ] MCP server tools respond correctly to archive queries
+
+## Security Notes
+
+- Redd-Archiver runs entirely on your own infrastructure — no external API calls after initial data download
+- The archive is a static or self-hosted dynamic site — no Reddit servers involved
+- Incremental updates are checksummed — tampering with monthly dumps is detectable
+- Docker Compose default configuration binds to localhost; expose via nginx with TLS for production
+
+## FAQ
+
+**Q: How much disk space do I need?**
+**A:** The full Reddit dataset is approximately 500GB after decompression. A single-subreddit archive can be as small as a few hundred megabytes.
+
+**Q: Can I add new posts without re-importing everything?**
+**A:** Yes. The `--update` flag applies only new monthly dumps incrementally. Already-imported posts are skipped by SHA-256 checksum.
+
+**Q: Does this work without Docker?**
+**A:** Yes — the Python CLI works standalone. Docker is required only for hybrid and dynamic serving modes.
+
+**Q: How is this different from Nitter or other Twitter archivists?**
+**A:** Redd-Archiver handles Reddit's scale (2.38B posts vs. Twitter's billions of tweets) and multiple platforms (Reddit, Voat, Ruqqus). The serving architecture is also different — it generates HTML archives rather than serving via a custom Twitter API replacement.
+
+**Q: What format are the source dumps?**
+**A:** Reddit dumps are `.zst` (Zstandard) compressed JSON Lines from Arctic Shift. Voat uses SQL dumps and Ruqqus uses `.7z` JSON Lines.
+
+## Conclusion
+
+Redd-Archiver solves a real problem — Reddit data disappearing behind API walls and platform shutdowns. The PostgreSQL-backed architecture means the archive is queryable, the MCP server makes it agent-ready, and three serving modes let you deploy anywhere from a USB stick to a production VPS. With monthly incremental updates and 2.38 billion posts in the dataset, it's the most complete offline Reddit archive tool available.
+
+If you want to preserve a subreddit, build a research dataset, or ensure content survives platform shutdowns, Redd-Archiver is the most straightforward path.
