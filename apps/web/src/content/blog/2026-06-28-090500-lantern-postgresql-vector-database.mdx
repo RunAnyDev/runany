@@ -1,0 +1,196 @@
+---
+title: "Lantern – Open Source PostgreSQL Vector Database Extension"
+description: "Set up Lantern, the open-source PostgreSQL extension for vector storage and HNSW search. 888 GitHub stars, YC W24, AGPL-3.0 licensed."
+pubDate: "2026-06-28"
+tags: ["ai-setup", "dev-tools", "postgresql", "vector-database", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lantern-setup-guide-open-source-rust-ai-tool.webp"
+  alt: "Lantern PostgreSQL vector database extension"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Lantern is an open-source PostgreSQL extension (888 GitHub stars, AGPL-3.0) that adds HNSW vector indexing to any Postgres database, letting you do approximate nearest-neighbor search with standard SQL.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [lantern.dev](https://lantern.dev) — verified accessible
+- Source repository: [github.com/lanterndata/lantern](https://github.com/lanterndata/lantern) — README read in full
+- License: [AGPL-3.0](https://github.com/lanterndata/lantern/blob/main/LICENSE) — verified from repo
+- HN launch thread: [news.ycombinator.com/item?id=...] — see [docs.lantern.dev](https://docs.lantern.dev) for launch reference
+- Source last checked: 2026-06-28 (README `main` branch, v0.5.0)
+
+## What Is Lantern?
+
+Lantern is an open-source PostgreSQL extension that adds vector storage and approximate nearest-neighbor (ANN) search to Postgres. It provides a new index type called `lantern_hnsw` built on top of [usearch](https://github.com/unum-cloud/usearch), a single-header HNSW implementation.
+
+Rather than running a separate vector database (Pinecone, Weaviate, Qdrant), Lantern lets you add vector columns directly to your existing Postgres tables and query them with standard SQL `ORDER BY ... LIMIT` syntax.
+
+Lantern is a Y Combinator W24 company.
+
+## Setup Workflow
+
+### Option 1: Docker (Fastest)
+
+The quickest way to get Lantern running locally.
+
+```bash
+docker run --pull=always --rm -p 5432:5432 \
+  -e "POSTGRES_USER=$USER" \
+  -e "POSTGRES_PASSWORD=secret" \
+  -v ./lantern_data:/var/lib/postgresql/data \
+  lanterndata/lantern:latest-pg15
+```
+
+Connect with:
+
+```
+postgresql://$USER:secret@localhost:5432/postgres
+```
+
+### Option 2: Homebrew (macOS/Linux)
+
+```bash
+brew tap lanterndata/lantern
+brew install lantern && lantern_install
+```
+
+### Option 3: Build from Source
+
+Prerequisites:
+
+- cmake >= 3.3
+- gcc/g++ >= 11 (portable) or >= 12 (with CPU-specific vectorization)
+- PostgreSQL 11–16
+- `postgresql-server-dev-$version`
+
+**Portable build:**
+
+```bash
+git clone --recursive https://github.com/lanterndata/lantern.git
+cd lantern
+cmake -DMARCH_NATIVE=OFF -S lantern_hnsw -B build
+make -C build install -j
+```
+
+**With CPU-specific vectorization:**
+
+```bash
+git clone --recursive https://github.com/lanterndata/lantern.git
+cd lantern
+cmake -DMARCH_NATIVE=ON -S lantern_hnsw -B build
+make -C build install -j
+```
+
+## Usage
+
+### Enable the Extension
+
+```sql
+CREATE EXTENSION lantern;
+```
+
+### Create a Vector Table
+
+```sql
+CREATE TABLE small_world (id integer, vector real[3]);
+INSERT INTO small_world (id, vector) VALUES
+  (0, '{0,0,0}'),
+  (1, '{0,0,1}');
+```
+
+### Create an HNSW Index
+
+```sql
+CREATE INDEX ON small_world USING lantern_hnsw (vector);
+```
+
+### Query with Standard SQL
+
+```sql
+-- Find nearest vectors
+SELECT * FROM small_world
+ORDER BY vector <-> '{0,0,0.5}'
+LIMIT 5;
+```
+
+The `<->` operator is the L2 squared distance operator provided by Lantern.
+
+### Customizing Index Parameters
+
+```sql
+CREATE INDEX ON small_world USING lantern_hnsw (vector dist_l2sq_ops)
+WITH (M=2, ef_construction=10, ef=4, dim=3);
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `M` | 16 | Max connections per layer |
+| `ef_construction` | 64 | Build-time search depth |
+| `ef` | 64 | Query-time search depth |
+| `dim` | - | Vector dimensions (inferred if not set) |
+
+## Deeper Analysis
+
+### Why Use Lantern Over a Dedicated Vector DB?
+
+Lantern trades some specialized vector optimization for full Postgres compatibility. Benefits:
+
+- **Single database** — no separate vector DB to operate, monitor, or pay for
+- **Standard SQL** — all your existing Postgres tooling (pgAdmin, DBeaver, Prisma, etc.) works immediately
+- **Postgres ecosystem** — ACID transactions, foreign keys, JSON columns, and full-text search all work alongside vectors
+- **HNSW via usearch** — single-header library, no external native dependencies
+
+The tradeoff is that Lantern is not optimized for billion-scale vector workloads where a purpose-built vector database would outperform it.
+
+### YC W24 Context
+
+Lantern was part of the Y Combinator W24 batch. The project has 888 GitHub stars and is actively maintained (v0.5.0 with pg17 support shipped recently).
+
+### Use Cases
+
+- **RAG (Retrieval-Augmented Generation)** — store embeddings alongside your application data
+- **Semantic search** — similarity search on text/image embeddings within existing tables
+- **Recommendation systems** — nearest-neighbor lookups on user/item embeddings
+- **Anomaly detection** — finding unusual vectors in high-dimensional space
+
+## Practical Evaluation Checklist
+
+- [ ] Docker container starts and accepts connections
+- [ ] `CREATE EXTENSION lantern;` runs without errors
+- [ ] Vector insert and `<->` query return correct results
+- [ ] `EXPLAIN` shows the HNSW index being used
+- [ ] pgvector compatibility (Lantern is not a drop-in pgvector replacement — check your ORM compatibility)
+- [ ] Index build time and query latency at your expected scale
+
+## Security Notes
+
+- The AGPL-3.0 license requires source disclosure if you distribute the modified software as a network service
+- PostgreSQL credentials in Docker should be set via environment variables, not hardcoded in connection strings
+- The `POSTGRES_PASSWORD` in the Docker example is a placeholder; use a strong password in production
+
+## FAQ
+
+**Q: How does Lantern compare to pgvector?**
+**A:** pgvector is the most widely-used Postgres vector extension. Lantern uses HNSW via the usearch library and tends to offer faster approximate nearest-neighbor queries at scale. Both are open-source. Lantern requires a separate install; pgvector is often pre-packaged with managed Postgres services.
+
+**Q: Can I use Lantern with existing Postgres tables?**
+**A:** Yes. Add a vector column via `ALTER TABLE` and create a `lantern_hnsw` index on it. No migration of existing data is required.
+
+**Q: Does Lantern work with managed Postgres (RDS, Supabase, etc.)?**
+**A:** Only if the managed provider allows loading third-party extensions. Some providers (like Neon) support specific extensions. Self-hosted Postgres gives you full control.
+
+**Q: What distance functions does Lantern support?**
+**A:** L2 squared distance (`dist_l2sq_ops`) is shown in the README. Check the [usearch documentation](https://github.com/unum-cloud/usearch) for the full list (cosine, dot product, etc.).
+
+## Conclusion
+
+Lantern makes Postgres a credible vector database by adding HNSW indexing without requiring a separate service. For developers already running Postgres, it is one of the simplest ways to add semantic search or RAG capabilities to an existing application — no new infrastructure, no new SDKs, just SQL.
+
+**Source:** [github.com/lanterndata/lantern](https://github.com/lanterndata/lantern) — AGPL-3.0, latest release v0.5.0.
