@@ -1,0 +1,153 @@
+---
+title: "Hyperbrowser MCP Server – AI Agent Web Automation"
+description: "Connect AI agents to the web through browsers. Hyperbrowser MCP Server lets Claude, CUA, and other agents scrape, crawl, and extract structured data at scale."
+pubDate: "2026-06-28"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hyperbrowser-mcp-server.webp"
+  alt: "Hyperbrowser MCP Server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Hyperbrowser MCP Server connects AI agents to real browsers via the Model Context Protocol, letting Claude, CUA, and browser-use agents scrape, crawl, and extract structured data from any webpage.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [hyperbrowser.ai](https://www.hyperbrowser.ai) ← verified Jun 2026
+- Source repository: [github.com/hyperbrowserai/mcp](https://github.com/hyperbrowserai/mcp) ← README read Jun 2026
+- License: [MIT](https://github.com/hyperbrowserai/mcp/blob/main/LICENSE) ← verified via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=43425767](https://news.ycombinator.com/item?id=43425767)
+- Docs: [docs.hyperbrowser.ai](https://docs.hyperbrowser.ai/)
+
+## What Is Hyperbrowser MCP Server?
+
+Hyperbrowser MCP Server is an open-source Model Context Protocol server that gives AI agents programmatic access to cloud browsers. Rather than relying on screenshots or APIs, agents connect through a standardized MCP interface to control real Chrome/Firefox sessions, extract structured data, and crawl sites at scale.
+
+The MCP protocol lets any compatible AI client use the same set of tools without custom integration code. As of June 2026, it supports OpenAI's CUA, Anthropic's Claude Computer Use, and Browser Use as built-in agent backends.
+
+**Core tools exposed:**
+
+- `scrape` — fetch and parse a single page's HTML/DOM
+- `crawl` — follow links and build a site map with configurable depth
+- `extract` — pull structured data from pages using CSS selectors or AI-assisted extraction
+- `browser-agent` — launch a headless browser session controlled by a specified AI agent backend
+
+```bash
+npx hyperbrowser-mcp <YOUR-HYPERBROWSER-API-KEY>
+```
+
+## Setup Workflow
+
+### Step 1: Get an API Key
+
+Sign up at [hyperbrowser.ai](https://www.hyperbrowser.ai) to obtain an API key. The free tier includes a limited number of browser sessions per month.
+
+### Step 2: Install the MCP Server
+
+The fastest way to run the server is via `npx`:
+
+```bash
+npx -y hyperbrowser-mcp <YOUR-HYPERBROWSER-API-KEY>
+```
+
+The server starts on `stdio` by default, making it compatible with any MCP client that reads from stdin.
+
+### Step 3: Configure in Your AI Editor
+
+**Cursor** — add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "hyperbrowser": {
+      "command": "npx",
+      "args": ["-y", "hyperbrowser-mcp"],
+      "env": {
+        "HYPERBROWSER_API_KEY": "YOUR-API-KEY"
+      }
+    }
+  }
+}
+```
+
+**Windsurf** — add to `./codeium/windsurf/model_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "hyperbrowser": {
+      "command": "npx",
+      "args": ["-y", "hyperbrowser-mcp"],
+      "env": {
+        "HYPERBROWSER_API_KEY": "YOUR-API-KEY"
+      }
+    }
+  }
+}
+```
+
+### Step 4: Run from Source
+
+```bash
+git clone git@github.com:hyperbrowserai/mcp.git hyperbrowser-mcp
+cd hyperbrowser-mcp
+npm install
+npm run build
+```
+
+## Deeper Analysis
+
+**How the MCP interface works:** The server exposes a JSON-RPC 2.0 interface over stdio. Each tool call (`scrape`, `crawl`, `extract`, `browser-agent`) maps to an MCP tool definition. The client sends a `tools/call` request, Hyperbrowser executes the browser operation in its cloud infrastructure, and returns the result as a structured JSON response.
+
+**Browser agent backends:** Rather than implementing a custom agent loop, Hyperbrowser delegates to existing agent runtimes. The `browser-agent` tool accepts a `backend` parameter:
+
+- `openai/cua` — OpenAI's CUA model for computer use
+- `anthropic/claude-computer-use` — Anthropic's Claude direct computer use
+- `browser-use` — the Browser Use open-source agent
+
+This means you get the latest model improvements from OpenAI and Anthropic without the Hyperbrowser project having to maintain its own agent logic.
+
+**Crawl depth and politeness:** The `crawl` tool respects `robots.txt` by default and lets you set a maximum depth and crawl delay between requests. This makes it suitable for aggregating content from documentation sites or product listings without hammering the target server.
+
+## Practical Evaluation Checklist
+
+- [ ] API key obtained from hyperbrowser.ai
+- [ ] Server starts with `npx hyperbrowser-mcp` without errors
+- [ ] MCP client (Cursor/Windsurf) detects the server and lists available tools
+- [ ] `scrape` returns clean HTML or DOM for a test URL
+- [ ] `extract` pulls structured fields from a known page structure
+- [ ] `crawl` respects robots.txt and respects the depth limit
+- [ ] `browser-agent` launches a headless browser session with the chosen backend
+
+## Security Notes
+
+- **API key required** — the server will not start without a valid Hyperbrowser API key. Store it in environment variables, not in config files committed to version control.
+- **Browser runs in Hyperbrowser's cloud** — pages rendered and interactions executed are not on your local machine. Audit Hyperbrowser's data retention policy before scraping sensitive sites.
+- **MCP stdio is local** — the JSON-RPC traffic between your editor and the server stays on your machine; only the browser operations go to Hyperbrowser's infrastructure.
+
+## FAQ
+
+**Q: Is there a free tier?**
+**A:** Yes, Hyperbrowser offers a free tier with limited monthly browser sessions. Paid plans scale the number of concurrent sessions and page credits.
+
+**Q: Can I self-host the browser infrastructure?**
+**A:** The Hyperbrowser MCP server is designed to work with Hyperbrowser's cloud browsers. There is no official self-hosted option as of June 2026. For fully local browser automation, consider Playwright MCP or Puppeteer.
+
+**Q: How is this different from the Browser Use project?**
+**A:** Browser Use is an open-source agent that you run locally, driving a browser through its own logic. Hyperbrowser MCP Server is a protocol bridge — it exposes browser control as MCP tools and delegates agent reasoning to external backends like CUA or Claude Computer Use. You can actually use Browser Use as a backend for Hyperbrowser's MCP server.
+
+**Q: Does this work with Claude Desktop?**
+**A:** Yes, any MCP-compatible client can connect. Claude Desktop uses the same `mcp.json` configuration approach as Cursor and Windsurf.
+
+## Conclusion
+
+Hyperbrowser MCP Server fills the gap between AI agent frameworks and real browser interactions. By exposing browser control as standardized MCP tools, it removes the need for custom Playwright or Selenium integrations every time you want an agent to interact with a live site. The ability to swap agent backends (CUA, Claude Computer Use, Browser Use) without changing the tool interface is the key differentiator — you pick the best reasoning model for your task while keeping the same scraping and crawl logic.
+
+If you are building AI agents that need to read pages, fill forms, or navigate multi-step web workflows, this is worth evaluating. The setup takes under five minutes with an API key.
