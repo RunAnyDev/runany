@@ -1,0 +1,169 @@
+---
+title: "FlexLlama – Run Multiple Local LLMs with a Dashboard"
+description: "A lightweight self-hosted tool that runs multiple llama.cpp server instances simultaneously, with OpenAI v1 API compatibility and a real-time GPU dashboard."
+pubDate: "2026-06-29"
+tags: ["ai-setup", "self-hosted", "llm", "local-ai"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/flexllama.webp"
+  alt: "FlexLlama dashboard showing multi-GPU LLM management"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** FlexLlama is a self-hosted dashboard for running multiple llama.cpp instances at once — distribute models across GPUs, switch between them dynamically, and query any model via an OpenAI v1-compatible API.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/yazon/flexllama](https://github.com/yazon/flexllama)
+- License: BSD-3-Clause (verified via GitHub API)
+- Stars: 59 (as of 2026-06-29)
+- HN launch: not confirmed — no launch thread in results
+
+## What Is FlexLlama?
+
+FlexLlama is a lightweight Python tool that manages multiple `llama-server` instances simultaneously. Instead of manually starting separate processes for each model, FlexLlama gives you a web dashboard where you can:
+
+- **Start/stop individual model runners** on demand
+- **Distribute models across multiple GPUs** automatically
+- **Monitor GPU usage and token throughput** per model in real time
+- **Query any loaded model** via an OpenAI v1-compatible endpoint
+
+The README describes it as a tool for local AI development and deployment that makes running several llama.cpp servers as simple as managing one.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10 or later
+- One or more GPUs with sufficient VRAM for your model sizes
+- `llama-server` binary (bundled with llama.cpp builds)
+- Model files in `.gguf` format
+
+### Step 1: Install FlexLlama
+
+Install directly from GitHub using pip:
+
+```bash
+pip install git+https://github.com/yazon/flexllama.git
+```
+
+Or from a local clone:
+
+```bash
+git clone https://github.com/yazon/flexllama.git
+cd flexllama
+pip install .
+```
+
+### Step 2: Configure Models
+
+Copy the example config and edit it with your `llama-server` path and model locations:
+
+```bash
+cp config_example.json config.json
+```
+
+Open `config.json` and set the path to your `llama-server` binary and your `.gguf` model files:
+
+```json
+{
+  "llama_server_path": "/path/to/llama-server",
+  "runners": [
+    {
+      "name": "qwen3-4b",
+      "model_path": "/models/qwen3-4b.Q4_K_M.gguf",
+      "gpu": 0
+    }
+  ]
+}
+```
+
+### Step 3: Start the Dashboard
+
+```bash
+flexllama config.json
+```
+
+Or with Python directly:
+
+```bash
+python main.py config.json
+```
+
+The web dashboard becomes available at `http://localhost:8080` by default.
+
+### Step 4: Query via OpenAI-Compatible API
+
+Once models are loaded, FlexLlama exposes an OpenAI v1-compatible endpoint. Send requests to:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-4b",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+You can switch models by changing the `model` field in the request body.
+
+## Deeper Analysis
+
+### Multi-GPU Model Distribution
+
+FlexLlama supports distributing models across different GPUs. Each runner in the config can target a specific GPU index. This is useful when you have multiple GPUs and want to run several medium-sized models in parallel rather than one large model on a single card.
+
+### Auto-Start and Idle Unload
+
+FlexLlama can automatically start default runners on launch and unload models after a configurable idle timeout. This saves VRAM when models are not in use.
+
+### MCP Proxy
+
+An optional Model Context Protocol (MCP) endpoint routes requests to models tagged with `mcp` in the config. This lets you integrate FlexLlama with MCP-compatible clients.
+
+### Audio Endpoints
+
+The tool proxies speech-to-text and text-to-speech requests to models like Voxtral and Qwen3-Omni, though these require additional model files beyond standard text models.
+
+## Practical Evaluation Checklist
+
+- **Single machine, multiple models:** Yes — run 2+ llama.cpp instances from one dashboard
+- **OpenAI API compatibility:** Yes — drop-in replacement for most `/v1/chat/completions` calls
+- **Multi-GPU:** Yes — assign runners to specific GPUs via config
+- **Real-time monitoring:** Yes — dashboard shows GPU telemetry and token throughput
+- **Embeddings and reranking:** Yes — dedicated model roles supported
+- **Audio models:** Yes — STT and TTS endpoints proxied
+- **Auto-start:** Yes — configurable in config.json
+- **Idle unload:** Yes — configurable timeout per runner
+
+## Security Notes
+
+- FlexLlama runs entirely on your local machine or VPS — no data leaves your infrastructure
+- The API has no built-in authentication by default — use a reverse proxy (nginx, Caddy) if exposing it over a network
+- Model files (.gguf) are loaded into GPU memory — ensure your system has adequate VRAM per model
+
+## FAQ
+
+**Q: Does FlexLlama come with llama.cpp included?**
+**A:** No — you need to provide your own `llama-server` binary and `.gguf` model files. The README links to the quickstart guide for a Docker-based setup with Qwen3-4B.
+
+**Q: Can I run it without GPUs?**
+**A:** CPU-only inference is possible with small models but is not the primary use case. The multi-GPU features require CUDA-compatible hardware.
+
+**Q: How does it compare to Ollama?**
+**A:** Ollama is a higher-level abstraction with its own model format and management CLI. FlexLlama is closer to llama.cpp's native server mode — you manage `.gguf` files directly and get a dashboard plus multi-instance orchestration on top.
+
+**Q: Is there a Docker setup?**
+**A:** Yes — the quickstart guide includes a Docker Compose setup that runs the Qwen3-4B model in about five minutes.
+
+## Conclusion
+
+FlexLlama fills a specific niche: if you already have `.gguf` model files and want to run multiple llama.cpp servers with a dashboard instead of juggling terminal processes, it is a straightforward solution. The OpenAI v1 API compatibility means most AI tooling can point at it without changes. Multi-GPU support and real-time telemetry are the main differentiators from running `llama-server` manually in the background.
+
+If you want a hands-off experience with model management, Ollama or Jan are more opinionated choices. If you want fine-grained control over llama.cpp instances with a lightweight UI on top, FlexLlama is worth a look.
