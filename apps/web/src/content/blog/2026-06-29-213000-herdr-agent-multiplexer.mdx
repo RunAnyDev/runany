@@ -1,0 +1,203 @@
+---
+title: "Herdr – terminal agent multiplexer for AI workflows"
+description: "Herdr is a terminal-based agent multiplexer for running and orchestrating multiple AI agents. Workspaces, panes, real terminal views, remote SSH, and mouse-native UI. No Electron, no GUI app."
+pubDate: "2026-06-29"
+tags: ["dev-tools", "ai-setup", "cli"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/herdr-agent-multiplexer.webp"
+  alt: "Herdr terminal agent multiplexer"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Herdr is a terminal-native agent multiplexer that gives you tmux-style session persistence with AI agent awareness — run multiple agents in workspaces and panes, attach and detach over SSH, and monitor their states from a sidebar.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [herdr.dev](https://herdr.dev) ← **MUST visit and verify**
+- Source repository: [github.com/ogulcancelik/herdr](https://github.com/ogulcancelik/herdr) ← **MUST read README**
+- License: AGPL-3.0-or-later (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=48714802](https://news.ycombinator.com/item?id=48714802) — 118 points on 2026-06-29
+
+## What Is Herdr?
+
+Herdr is an open-source terminal multiplexer built specifically for AI agent workflows. It was built to solve the problem that tmux and terminal multiplexers predate AI agents entirely — they have no concept of agent state, blocked tasks, or orchestration.
+
+The core premise from the README: *"agent multiplexer that lives in your terminal. workspaces, tabs, panes. mouse-native: click, drag, split. every agent at a glance: blocked, working, done. detach and reattach, agents keep running."*
+
+Unlike GUI-based agent dashboards, Herdr shows the **actual terminal output** of each agent, not a rewritten view. You get real terminal panes with full ANSI color support and interactive input.
+
+### How It Compares
+
+| | tmux | GUI managers | Herdr |
+|---|---|---|---|
+| persistent sessions | yes | no | yes |
+| detach and reattach | yes | no | yes |
+| panes, tabs, workspaces | yes | yes | yes |
+| agent awareness | no | yes | yes |
+| lives in your terminal | yes | no | yes |
+| real terminal views | yes | no | yes |
+| mouse-native | no | yes | yes |
+| lightweight binary | yes | no | yes |
+| agents can orchestrate | unknown | unknown | yes |
+
+## Setup Workflow
+
+### Step 1: Install Herdr
+
+**Linux and macOS (curl installer):**
+
+```bash
+curl -fsSL https://herdr.dev/install.sh | sh
+```
+
+**macOS via Homebrew:**
+
+```bash
+brew install herdr
+```
+
+**Windows PowerShell (preview beta):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"
+```
+
+**Via mise:**
+
+```bash
+mise use -g herdr
+```
+
+You can also download stable binaries for Linux and macOS directly from the [GitHub releases page](https://github.com/ogulcancelik/herdr/releases).
+
+### Step 2: Start a Session
+
+Run Herdr in any directory where you want your work to live:
+
+```bash
+herdr
+```
+
+Herdr starts or attaches to a background session server. When a session has no workspaces, it opens one automatically.
+
+### Step 3: Navigate and Manage Panes
+
+Herdr uses explicit keybinding strings. `prefix+n` means press your configured prefix key (default: `ctrl+b`), then `n`.
+
+- `prefix+n` — new workspace
+- `prefix+v` or `prefix+minus` — split horizontally (create a new pane)
+- `prefix+c` — new tab
+- `prefix+w` — switch workspaces
+- `prefix+q` — detach the client (server and panes keep running)
+- `prefix+[` — keyboard copy mode (move with `h/j/k/l`, select with `v`, copy with `y`)
+
+### Step 4: Attach to a Remote Host
+
+Herdr works over standard SSH. On the remote host, run `herdr` as normal, detach, then attach from your local machine:
+
+```bash
+herdr --remote ssh://you@yourserver:2222
+```
+
+You can also attach individual agents or terminal panes from remote hosts without opening an interactive shell first:
+
+```bash
+herdr agent attach <target>
+herdr terminal attach <terminal_id>
+```
+
+## Deeper Analysis
+
+### Agent Awareness
+
+The sidebar shows which agents are blocked, working, done, or idle. This is not a synthetic state — Herdr reads actual process names and terminal output. Official integrations with specific agents can add native session identity, semantic state reports, or both for more accurate detection.
+
+### Session Persistence
+
+Herdr's server runs independently of any terminal session. Detaching the client (`prefix+q`) leaves the server and all pane processes running. Run `herdr` again from any terminal to reattach to the same session.
+
+Named sessions provide fully isolated namespaces:
+
+```bash
+herdr session attach work
+herdr session list
+herdr session stop work
+```
+
+### Update and Restore
+
+Herdr notifies you when a new version is available. Run `herdr update` to install it. The running server keeps the old binary until you stop it:
+
+```bash
+herdr server stop
+herdr   # restart with new version
+```
+
+For named sessions:
+
+```bash
+herdr session stop <name>
+herdr session attach <name>
+```
+
+The `herdr update --handoff` flag is experimental and can move live panes (including foreground processes like dev servers) from the old server to the new one.
+
+### Update Channels
+
+Direct installs (non-Homebrew, non-mise) can switch between stable and preview channels:
+
+```bash
+herdr channel set preview   # test builds from master
+herdr channel set stable    # return to stable releases
+```
+
+Changing channels also downloads the latest binary for that channel. Homebrew, mise, and Nix installs always use stable and update through their respective package managers.
+
+## Practical Evaluation Checklist
+
+- [ ] Install via curl installer or Homebrew
+- [ ] Start `herdr` in a working directory
+- [ ] Create a workspace with `prefix+n`
+- [ ] Split panes with `prefix+v` and `prefix+minus`
+- [ ] Run an agent in each pane
+- [ ] Observe sidebar agent state changes
+- [ ] Detach with `prefix+q` and reattach from another terminal
+- [ ] Try remote attach over SSH
+- [ ] Test named sessions with `herdr session attach <name>`
+
+## Security Notes
+
+Herdr's server runs as a local background process on your machine. Agents communicate with Herdr through standard stdin and stdout pipes. Remote connections work over SSH with SSH config support. As with any terminal tool that spawns subprocesses, review the source code and your own workflow before using it with sensitive credentials. The project is AGPL-3.0 licensed — the source is publicly auditable.
+
+## FAQ
+
+**Q: How is Herdr different from tmux?**
+
+**A:** tmux was designed before AI agents existed. It has no concept of agent state, blocked tasks, or orchestration. Herdr gives you the same persistent sessions and terminal panes, plus a sidebar that shows the real state of each agent. It is purpose-built for running and monitoring multiple AI agents simultaneously.
+
+**Q: Does Herdr require a specific AI agent or LLM provider?**
+
+**A:** No. Herdr is agent-agnostic — it multiplexes any terminal-based agent. Official integrations exist for popular agents, and the sidebar can detect agent state from process names and terminal output by default.
+
+**Q: What platforms does Herdr support?**
+
+**A:** Linux, macOS, and Windows (preview beta). On Linux and macOS, both direct binary installs and package managers (Homebrew, mise, Nix) are supported. Windows currently ships as a preview beta.
+
+**Q: Can I use Herdr over SSH?**
+
+**A:** Yes. Run Herdr on the remote host, detach, and reattach from your local machine. You can also use direct attach mode to connect to a remote agent or terminal without opening an interactive shell.
+
+## Conclusion
+
+Herdr fills a real gap in the AI agent tooling landscape. If you run multiple agents simultaneously — for research, coding, or DevOps tasks — Herdr gives you a structured way to organize them in workspaces and panes while keeping all their terminal outputs visible in one place. The ability to detach and reattach over SSH without losing state makes it practical for server-side workflows too.
+
+It is actively maintained (8,359 GitHub stars, pushed today) and has a clean, focused feature set. If you have been patching together terminal windows and tmux sessions to manage agents, Herdr is worth a look.
+
+**Source and accuracy:** This post was written from the [official README](https://github.com/ogulcancelik/herdr) and the [herdr.dev](https://herdr.dev) website. All install commands were copy-pasted verbatim. The GitHub star count and launch date were verified via the GitHub API.
