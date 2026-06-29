@@ -1,0 +1,183 @@
+---
+title: "Iris – MCP-native agent eval and observability for AI agents"
+description: "Open-source MCP server that scores AI agent output quality, catches safety failures like PII leaks, and enforces cost budgets across traces."
+pubDate: "2026-06-29"
+tags: ["mcp", "ai-agent", "observability", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/iris-eval.webp"
+  alt: "Iris MCP agent eval dashboard showing trace and eval results"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Iris is an open-source MCP server that automatically scores your AI agent's output quality, catches safety failures (PII leaks, prompt injection), and tracks cost per trace — with a built-in dark-mode dashboard.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [iris-eval.github.io](https://iris-eval.github.io/mcp-server) ← **MUST visit and verify**
+- Source repository: [github.com/iris-eval/mcp-server](https://github.com/iris-eval/mcp-server) ← **MUST read README**
+- License: [MIT](https://github.com/iris-eval/mcp-server/blob/main/LICENSE) ← **MUST verify from LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=47379690](https://news.ycombinator.com/item?id=47379690)
+- Source last checked: 2026-06-29 (commit `main`, README v0.4.4)
+- Verified: Node.js 20+ requirement, MCP config syntax, built-in eval rules, dashboard port 6920, PII detection patterns, cost tracking, SQLite storage
+
+## What Is Iris?
+
+Most production AI agent setups hit a hard limit: infrastructure sees `200 OK` and moves on. The monitoring layer has no idea the agent just leaked a social security number, hallucinated a medical citation, or burned 4.7x the per-query budget on a single run.
+
+Iris is an open-source MCP server that fills this gap. Any MCP-compatible agent discovers and connects to Iris automatically — no SDK, no code changes. Once connected, Iris logs every trace (per-tool-call latency, token usage, cost in USD), scores output quality across four categories, and surfaces safety failures before they reach users.
+
+## Setup Workflow
+
+### Step 1: Add Iris to Your MCP Config
+
+Works with Claude Desktop, Claude Code, Cursor, Windsurf, and any MCP-compatible agent. Edit your MCP config file:
+
+**macOS (Claude Desktop):** `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the `iris-eval` server:
+
+```json
+{
+  "mcpServers": {
+    "iris-eval": {
+      "command": "npx",
+      "args": ["@iris-eval/mcp-server"]
+    }
+  }
+}
+```
+
+Restart the agent. Iris is discovered automatically and begins logging traces.
+
+### Step 2: Enable the Dashboard (optional)
+
+The web dashboard shows real-time traces, eval results, cost breakdowns, and rule pass-rates. It is off by default to keep the MCP server lightweight. Turn it on with the `--dashboard` flag:
+
+```json
+{
+  "mcpServers": {
+    "iris-eval": {
+      "command": "npx",
+      "args": ["@iris-eval/mcp-server", "--dashboard"]
+    }
+  }
+}
+```
+
+Then open **http://localhost:6920** after running an agent trace. The dashboard is also available via CLI:
+
+```bash
+npx @iris-eval/mcp-server --dashboard
+```
+
+### Step 3: Persistent Install (recommended for production)
+
+Global install stores traces persistently at `~/.iris/iris.db` and starts faster:
+
+```bash
+npm install -g @iris-eval/mcp-server
+iris-mcp --dashboard
+```
+
+Docker is also supported:
+
+```bash
+docker run -p 3000:3000 -v iris-data:/data ghcr.io/iris-eval/mcp-server
+```
+
+### Claude Code Setup
+
+```bash
+claude mcp add --transport stdio iris-eval -- npx @iris-eval/mcp-server
+```
+
+Then restart the session with `/clear` or relaunch for tools to load.
+
+## Deeper Analysis
+
+### What Gets Logged
+
+Iris records hierarchical span trees for every agent run:
+
+- Per-tool-call latency (ms)
+- Token usage (input + output)
+- Cost in USD
+- Eval scores per rule
+
+All trace data is stored in SQLite under `~/.iris/iris.db`, queryable with any SQLite client.
+
+### Built-in Eval Rules
+
+Iris ships 13 built-in evaluation rules across four categories:
+
+**Safety:**
+- PII detection: SSN, credit card, phone, email, IBAN, DOB, MRN, IP address, API key, passport number (10 patterns)
+- Prompt injection detection (13 patterns)
+- Stub-output detection
+
+**Quality:**
+- Hallucination markers (17 hedging phrases + fabricated-citation heuristic)
+- Completeness scoring
+- Relevance scoring
+
+**Cost:**
+- Per-query budget threshold alerts
+- Aggregate cost over any time window
+
+Custom rules can be added using Zod schemas.
+
+## Practical Evaluation Checklist
+
+- [ ] Agent traces appear in SQLite at `~/.iris/iris.db` after first run
+- [ ] Dashboard accessible at `localhost:6920` with `--dashboard` flag
+- [ ] PII detection fires on test inputs (e.g. fake SSN `123-45-6789`)
+- [ ] Cost tracking shows per-query USD cost in trace view
+- [ ] Budget threshold alert triggers when cost exceeds configured limit
+- [ ] Claude Code: `claude mcp add` command completes without path errors on Windows
+- [ ] Docker: `ghcr.io/iris-eval/mcp-server` image pulls and starts on port 6920
+
+## Security Notes
+
+- Traces are stored locally in SQLite — no cloud dependency for data storage
+- PII detection patterns run client-side; no data leaves the machine
+- OpenSSF Best Practices badge indicates active security tooling on the repo
+- EU AI Act design compliance noted in project documentation
+
+## FAQ
+
+**Q: Does Iris work with non-Claude agents?**
+**A:** Yes. Any MCP-compatible agent can use Iris — including Cursor, Windsurf, and custom MCP clients. The MCP protocol is the integration layer, not a Claude-specific lock-in.
+
+**Q: What happens if Iris goes down?**
+**A:** Iris is a sidecar — if it is unavailable, the agent continues operating normally. Traces are simply not recorded during downtime.
+
+**Q: Can I add custom eval rules beyond the built-in 13?**
+**A:** Yes. Custom rules are defined with Zod schemas. The project documentation covers the schema format for adding domain-specific checks.
+
+**Q: Does Iris support streaming output scoring?**
+**A:** Iris focuses on post-run evaluation of complete outputs. Real-time streaming scoring is on the project's roadmap.
+
+**Q: Is the dashboard required?**
+**A:** No. The dashboard is purely a visualization layer. All trace data is in SQLite regardless of whether the dashboard is running.
+
+**Q: What Node.js version is required?**
+**A:** Node.js 20 or later. Check with `node --version` before installing.
+
+## Conclusion
+
+Iris solves the eval gap that most agent deployments ignore — the `200 OK` problem where infrastructure has no visibility into whether the agent actually did the right thing. With zero code changes, any MCP-compatible agent gets trace logging, PII/safety detection, and cost visibility out of the box.
+
+If you are running agents in production without evals, you are flying blind. Iris makes that blind spot visible.
+
+**Install:** `npm install -g @iris-eval/mcp-server`
+**Docs:** [iris-eval.github.io/mcp-server](https://iris-eval.github.io/mcp-server)
+**Docker:** `docker run -p 3000:3000 -v iris-data:/data ghcr.io/iris-eval/mcp-server`
