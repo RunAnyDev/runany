@@ -1,0 +1,168 @@
+---
+title: "AgentLair – AI Agent Identity, Email, and Credential Vault"
+description: "AgentLair gives AI agents a persistent email identity, encrypted credential storage, and namespace isolation via a single API — no OAuth, no human in the loop."
+pubDate: "2026-06-30"
+tags: ["ai-agent", "security", "developer-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agentlair-agent-identity-vault.webp"
+  alt: "AgentLair product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AgentLair provides AI agents with a persistent email identity, encrypted vault for credentials, and pod-based namespace isolation — all via a single API call with no OAuth or human intervention required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [agentlair.dev](https://agentlair.dev) — verified via direct fetch (returns `application/agent+json` manifest)
+- Source repository: No public GitHub repo found — the HN post states no GitHub link
+- License: Proprietary (free tier + paid plans) — not open source
+- HN launch thread: [news.ycombinator.com/item?id=47573245](https://news.ycombinator.com/item?id=47573245)
+- Source last checked: 2026-06-30
+
+## What Is AgentLair?
+
+AgentLair is an infrastructure layer for AI agents — giving them a real identity that persists across sessions. Unlike a simple email address, an agent identity in AgentLair bundles three things:
+
+1. **Email** — claim an `@agentlair.dev` address. Send and receive mail programmatically with one curl call.
+2. **Vault** — encrypted credential storage. Your agent stores API keys at registration and fetches them at runtime. AgentLair stores opaque blobs — you encrypt client-side before storing.
+3. **Pods** — multi-tenant namespace isolation. Run multiple agents under one account; each pod only sees its own resources.
+
+The core problem AgentLair solves is the broken MCP authentication story. When Agent A delegates to Agent B, no identity verification happens between them. A compromised agent inherits the trust of every agent it communicates with. AgentLair is the identity layer underneath: persistent email address plus credential vault plus isolation.
+
+## Setup Workflow
+
+### Step 1: Register an Agent Identity
+
+One curl call creates the agent identity and returns an API key:
+
+```bash
+curl -X POST https://agentlair.dev/v1/auth/agent-register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-research-agent"}'
+
+# Response:
+# {
+#   "api_key": "al_live_...",
+#   "email_address": "my-research-agent@agentlair.dev",
+#   "account_id": "..."
+# }
+```
+
+No OAuth. No human in the loop. The agent is self-registered.
+
+### Step 2: Claim an Email Address
+
+```bash
+curl -X POST https://agentlair.dev/v1/email/claim \
+  -H "Authorization: Bearer $AGENTLAIR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"address": "my-agent@agentlair.dev"}'
+```
+
+You can optionally pass an X25519 public key for end-to-end encryption. If you skip it, emails are stored with server-side encryption (AgentLair does not hold your encryption keys either way).
+
+### Step 3: Send an Email
+
+```bash
+curl -X POST https://agentlair.dev/v1/email/send \
+  -H "Authorization: Bearer $AGENTLAIR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "user@example.com",
+    "from": "my-agent@agentlair.dev",
+    "subject": "Research complete",
+    "text": "Here is the summary..."
+  }'
+```
+
+### Step 4: Read Inbox
+
+```bash
+curl "https://agentlair.dev/v1/email/inbox?address=my-agent@agentlair.dev&limit=20" \
+  -H "Authorization: Bearer $AGENTLAIR_API_KEY"
+```
+
+### Step 5: Store Credentials in the Vault
+
+```bash
+# Store a secret
+curl -X PUT https://agentlair.dev/v1/vault/openai-api-key \
+  -H "Authorization: Bearer $AGENTLAIR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"value": "sk-..."}'
+
+# Retrieve at runtime — the credential is never in the environment
+curl https://agentlair.dev/v1/vault/openai-api-key \
+  -H "Authorization: Bearer $AGENTLAIR_API_KEY"
+```
+
+The key architectural benefit: credentials are never exposed as environment variables. A supply chain attack (like the LiteLLM compromise) cannot exfiltrate what is not there.
+
+### Step 6: Connect via MCP
+
+```bash
+npx @agentlair/mcp@latest
+```
+
+The MCP server exposes 9 tools covering email and vault operations. It works with Claude, Cursor, or any MCP-compatible client.
+
+## Deeper Analysis
+
+### Why Email as Identity?
+
+Email is the universal protocol for internet identity — it is how agents announce themselves, receive webhooks, and communicate with humans and other agents. AgentMail (which raised $6M) solves the email problem alone. AgentLair bundles email with credential vault and namespace isolation, so the identity is more than just an address.
+
+### The Credential Vault vs. Environment Variables
+
+Storing API keys in environment variables puts them in the attack surface of every dependency your agent loads. The Vault stores opaque encrypted blobs. Your agent fetches credentials at runtime from the Vault API — they are never in the process environment.
+
+### Pods for Multi-Agent SaaS
+
+If you are building a SaaS product powered by agents, pods provide namespace isolation. Each customer gets their own pod; agents within a pod share resources but cannot see other pods' data.
+
+## Practical Evaluation Checklist
+
+- Self-registration works with a single curl call — no OAuth, no human in the loop
+- Free tier: 100 requests per day
+- Paid plans: Starter at $29/month, Pro at $149/month
+- MCP server available via `npx @agentlair/mcp@latest`
+- 9 MCP tools covering email (send, read inbox, read message) and vault (store, get, list, delete)
+- E2E encryption supported via X25519 public key on email claim
+- No public GitHub repository — proprietary software
+
+## Security Notes
+
+AgentLair's architecture separates credential storage from the agent's runtime environment. Credentials live in the Vault API as encrypted blobs and are fetched on demand — they never populate environment variables where a compromised dependency could read them.
+
+End-to-end encrypted emails are supported: pass your X25519 public key when claiming an address, and the server stores ciphertext that only your private key can decrypt. AgentLair cannot read your encrypted email content.
+
+However, note that AgentLair is a hosted proprietary service. Your agent's API key, email metadata, and non-encrypted content reside on their servers. For full self-hosted control, you would need to run your own equivalent stack.
+
+## FAQ
+
+**Q: Is AgentLair open source?**
+**A:** No. It is a proprietary hosted service with a free tier and paid plans (Starter $29/month, Pro $149/month).
+
+**Q: How does it compare to AgentMail?**
+**A:** AgentMail (raised $6M) focuses on the email problem. AgentLair bundles email with encrypted credential vault and pod-based namespace isolation. Both solve the agent identity problem from different angles.
+
+**Q: Does it work with Claude Desktop?**
+**A:** Yes. The MCP server (`npx @agentlair/mcp@latest`) is compatible with any MCP-compatible client including Claude, Cursor, and Windsurf.
+
+**Q: Can I self-host AgentLair?**
+**A:** No. AgentLair is a hosted API. There is no self-hosted option documented.
+
+## Conclusion
+
+AgentLair fills a real gap in the AI agent stack: the missing identity layer. Before AgentLair, giving an agent a persistent identity meant cobbling together email accounts, secret managers, and IAM policies. With AgentLair, one curl call gives you all three.
+
+The security angle is the most compelling part — credentials that never live in environment variables cannot be exfiltrated by supply chain attacks. If you are building multi-agent systems or running agents in production, the credential vault alone is worth the setup.
+
+Try the free tier at [agentlair.dev](https://agentlair.dev) or connect via MCP with `npx @agentlair/mcp@latest`.
