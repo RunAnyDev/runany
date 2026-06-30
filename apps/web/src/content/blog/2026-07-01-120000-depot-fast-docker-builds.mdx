@@ -1,0 +1,153 @@
+---
+title: "Depot CLI - Up to 40x Faster Docker Builds"
+description: "Depot provides cloud-hosted container builders with managed caching. This guide covers installation, depot build, depot bake, and CI integration."
+pubDate: "2026-07-01"
+tags: ["docker", "dev-tools", "ci-cd"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/depot-fast-docker-builds.webp"
+  alt: "Depot product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Depot CLI replaces local Docker builds with cloud-hosted remote builders that claim up to 40x speedup, with zero-config caching and multi-platform support.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [depot.dev](https://depot.dev) ← verified
+- Source repository: [github.com/depot/cli](https://github.com/depot/cli) ← verified README, MIT license
+- License: MIT (verified via README `LICENSE` section)
+- HN launch thread: [news.ycombinator.com/item?id=33011072](https://news.ycombinator.com/item?id=33011072) ← verified via Algolia API
+
+## What Is Depot?
+
+Depot is a build infrastructure platform that provides cloud-hosted container builder machines. Instead of running `docker build` on your local machine or CI runner, you offload it to Depot's remote builders, which run on native hardware with fully managed build caching.
+
+The product claim from the website (schema-verified): **"Remote Docker builds up to 40x faster"**.
+
+The Depot CLI (`depot/cli` on GitHub, MIT license, ~197 stars) is the official command-line client. It exposes commands for building, baking, pushing, and pulling Docker images through Depot's remote infrastructure.
+
+## Installation
+
+Install the Depot CLI on macOS via Homebrew:
+
+```bash
+brew install depot/tap/depot
+```
+
+On Linux, use the official install script:
+
+```bash
+# Install the latest version
+curl -L https://depot.dev/install-cli.sh | sh
+
+# Install a specific version (example: 2.17.0)
+curl -L https://depot.dev/install-cli.sh | sh -s 2.17.0
+```
+
+For other platforms (Windows, direct binary), download from the [latest GitHub release](https://github.com/depot/cli/releases).
+
+## Quick Start
+
+```bash
+# 1. Authenticate with your Depot account
+depot login
+
+# 2. Link the current directory to a Depot project
+depot init
+
+# 3. Build a Docker image using remote builders
+depot build -t repo/image:tag .
+```
+
+Running `depot init` creates a `depot.json` file in your project directory that maps it to a Depot project ID.
+
+## Core Commands
+
+### depot build
+
+Build a single Docker image on Depot's remote builders:
+
+```bash
+depot build -t example/app:latest .
+```
+
+By default, the built image stays in the remote builder cache. Use `--load` to pull it into your local Docker daemon, or `--push` to push directly to a registry.
+
+### depot bake
+
+`depot bake` mirrors Docker's `docker buildx bake` but runs on remote Depot builders. It reads HCL, JSON, or Compose files defining multi-target builds:
+
+```hcl
+group "default" {
+  targets = ["app", "db"]
+}
+
+target "app" {
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  tags       = ["example/app:latest"]
+}
+
+target "db" {
+  dockerfile = "Dockerfile.db"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  tags       = ["example/db:latest"]
+}
+```
+
+```bash
+depot bake
+```
+
+The project ID can be provided via `--project` flag, the `DEPOT_PROJECT_ID` environment variable, `depot.json`, or the `x-depot` Compose extension field.
+
+### depot push / depot pull
+
+Push a built image to a remote registry:
+
+```bash
+depot push --tag example/app:latest <BUILD_ID>
+```
+
+Or pull a previously built image to your local Docker daemon:
+
+```bash
+depot pull --tag example/app:latest <BUILD_ID>
+```
+
+Registry credentials are sourced from your existing `docker login` config, or you can pass them via `DEPOT_PUSH_REGISTRY_USERNAME` and `DEPOT_PUSH_REGISTRY_PASSWORD` environment variables.
+
+## Pricing
+
+Depot offers a free tier with pay-as-you-go beyond that. From the pricing page: **"Get started for free. Build Docker images faster, only paying for what you use."**
+
+The platform bills by build minutes or data processed — exact rates require sign-up. A free trial is available without a credit card.
+
+## CI/CD Integration
+
+Depot integrates with GitHub Actions via the official `depot/build-push-action` ([github.com/depot/build-push-action](https://github.com/depot/build-push-action)). The GitHub Action handles authentication and project routing automatically, making it straightforward to replace local Docker builds in CI pipelines.
+
+## FAQ
+
+**Q: How does caching work?**
+**A:** Depot manages build caching automatically with no extra configuration. Layer caching is shared across builds within your project, so repeated builds hit the cache without any `docker buildx --cache-from` flags.
+
+**Q: What platforms are supported?**
+**A:** Both `linux/amd64` (Intel) and `linux/arm64` (Apple Silicon / ARM) are supported in a single build via `--platform` or the `platforms` field in bake files.
+
+**Q: Can I self-host Depot?**
+**A:** Depot is a hosted service. There is no self-hosted option documented in the current public offering.
+
+**Q: What happens to images after the build?**
+**A:** By default, images remain in Depot's remote cache. Use `depot pull` to download to your local Docker daemon, or `depot push` to send to a registry of your choice.
+
+## Conclusion
+
+Depot CLI is a drop-in replacement for local Docker builds that routes work to cloud-hosted builders with managed caching. If your Docker builds are a CI bottleneck, the CLI and GitHub Action make the switch straightforward. The free tier lets you evaluate whether the speedup justifies the cost for your workflow.
