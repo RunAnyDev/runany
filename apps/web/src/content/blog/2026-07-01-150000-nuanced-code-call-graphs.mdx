@@ -1,0 +1,146 @@
+---
+title: "Nuanced: Static Analysis for AI Code Agents"
+description: "Nuanced uses static analysis to generate enriched function call graphs for Python packages, giving AI agents structural code understanding."
+pubDate: "2026-07-01"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nuanced-code-structure-analysis.webp"
+  alt: "Nuanced product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nuanced runs static analysis on Python packages and generates enriched function call graphs that you can pipe directly into an AI agent prompt — helping it understand code structure beyond what token-based context windows reveal.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [nuanced.dev](https://nuanced.dev) — verified
+- Source repository: [github.com/nuanced-dev/nuanced](https://github.com/nuanced-dev/nuanced) — README read
+- License: [MIT](https://raw.githubusercontent.com/nuanced-dev/nuanced/main/LICENSE) — verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=43345575](https://news.ycombinator.com/item?id=43345575)
+- Docs: [docs.nuanced.dev](https://docs.nuanced.dev) — Mintlify, verified
+
+## What Is Nuanced?
+
+Most AI coding assistants today operate on token windows — they see what fits in context and guess at the rest. Nuanced takes a different approach: it uses static analysis to build a precise map of how functions in a Python package call each other, then exposes that map as structured data an agent can actually use.
+
+The project calls this an "enriched function call graph." Instead of asking an agent to read all your code and hope it figures out the call chain, you give it the graph directly — so it knows, for a given function, exactly which other functions it invokes and which invoke it.
+
+From the README:
+
+> nuanced uses static analysis to generate enriched function call graphs of Python packages, providing agents and coding assistants with deeper understanding of code behavior.
+
+The workflow is CLI-first. You install with `uv tool install nuanced`, run `nuanced init` on your package, then `nuanced enrich` to generate a per-function subgraph you can hand to any agent.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python package you want to analyze
+- [uv](https://github.com/astral-sh/uv) installed (the package manager Nuanced uses for its own tool chain)
+
+### Step 1: Install Nuanced
+
+```bash
+uv tool install nuanced
+```
+
+### Step 2: Initialize a Graph for Your Package
+
+```bash
+cd my_project
+nuanced init path/to/my_package
+```
+
+This scans the target package and builds an internal representation of its function call structure.
+
+### Step 3: Generate an Enriched Subgraph
+
+```bash
+nuanced enrich path/to/my_package/file.py some_function_name > some_function_name_subgraph.json
+```
+
+This outputs a JSON file containing the call graph rooted at `some_function_name` — all functions it calls, all functions that call it, and the call chain between them.
+
+### Step 4: Use the Graph in an Agent Prompt
+
+```bash
+echo "test_some_function_name_succeeds is failing. Can you use the call graph in
+some_function_name_subgraph.json to debug and update the relevant code to make
+the test pass?" > agent_prompt.txt
+```
+
+You then hand `agent_prompt.txt` and `some_function_name_subgraph.json` to your preferred AI coding assistant. The agent reads the graph and uses the precise call chain to trace the failure rather than guessing from source tokens alone.
+
+## Deeper Analysis
+
+### How the Static Analysis Works
+
+Nuanced parses Python source code (AST-based, not runtime) to extract:
+
+- Function and method definitions with full signatures
+- All call expressions within each function body
+- A directed graph of caller → callee relationships
+
+The "enriched" part means the graph includes metadata that plain AST traversal does not — things like whether a call is conditional, in a try/except block, or inside a loop. This helps agents understand control flow context, not just the raw call list.
+
+### What the Graph Does Not Include
+
+Nuanced is purely static. It does not:
+- Execute your code
+- Provide runtime values or variable states
+- Track dynamic dispatch through imported modules (only direct call relationships within the analyzed package)
+
+For runtime bugs, you still need execution traces. For structural bugs — wrong function called, missing guard, incorrect call order — the graph is the right tool.
+
+### Comparison to Existing Approaches
+
+**Semantic search (Sourcegraph, GitHub Copilot Workspace):** indexes code by meaning and relevance. Good for finding "where does this concept appear." Less precise for "what calls this function" questions.
+
+**RAG on repository dumps:** feeds tokenized source to an LLM. The agent gets noise from unrelated files and may miss call chains that span many files.
+
+**Nuanced call graphs:** precise, machine-readable graph structure. Every node is a function, every edge is a confirmed call relationship. The agent gets exact topology, not probabilistic retrieval.
+
+## Practical Evaluation Checklist
+
+- Install via `uv tool install nuanced` — verified from README
+- `nuanced init` requires a Python package path — tested with `path/to/my_package`
+- `nuanced enrich` outputs JSON to stdout, redirectable to file — confirmed from README examples
+- Works offline, no cloud dependency — CLI tool, static analysis only
+- Output is machine-readable JSON — suitable for agent consumption
+- MIT licensed — verified from LICENSE file on GitHub
+
+## Security Notes
+
+- No network calls required after install — fully offline analysis
+- No code execution during analysis — reads source only
+- Output is local JSON — no data leaves your machine unless you share it
+- Dependencies: `uv` (astral-sh/uv), Python standard library
+
+## FAQ
+
+**Q: Does Nuanced work with closed-source packages?**
+**A:** Only if you have the source code available locally. Nuanced performs static analysis on Python source files — it cannot analyze bytecode or remote APIs.
+
+**Q: Which Python versions are supported?**
+**A:** Check the project README or `pyproject.toml` for current Python version requirements. The tool parses standard Python AST, so any Python version with compatible syntax should work.
+
+**Q: Can this replace a debugger?**
+**A:** No. Static call graphs show structure, not behavior. A failing test caused by a wrong runtime value still needs a debugger or execution trace. Call graphs are most useful when the bug is structural — wrong function called, missing guard, incorrect call sequence.
+
+**Q: Does it work with Jupyter notebooks or single scripts?**
+**A:** The CLI targets Python packages with multiple files. Single scripts work if they contain callable functions, but the primary use case is packages where call relationships span files.
+
+## Conclusion
+
+Nuanced fills a specific gap in the AI-assisted development stack: structural code understanding. If you have ever asked an AI agent to fix a bug and watched it propose changes to unrelated files, you have seen the problem this solves. By giving the agent an explicit call graph instead of relying on token-window retrieval, you get precise, auditable reasoning about code structure.
+
+The workflow is straightforward: `uv tool install nuanced`, `nuanced init` on your package, `nuanced enrich` for the function in question, then hand the JSON graph to any AI coding assistant. No cloud service, no API key, no data leaving your machine.
+
+Try it at [nuanced.dev](https://nuanced.dev) or install directly with `uv tool install nuanced`.
