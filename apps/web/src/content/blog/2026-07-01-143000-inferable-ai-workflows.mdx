@@ -1,0 +1,165 @@
+---
+title: "Inferable – AI Workflows with Human-in-the-Loop"
+description: "Open-source framework for building durable AI workflows with human approval, structured outputs, and versioned execution. Works with Node.js and Go."
+pubDate: "2026-07-01"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/inferable.webp"
+  alt: "Inferable – AI workflow platform with human-in-the-loop"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Inferable is an open-source framework for building durable AI workflows with human approval gates, structured outputs, and versioned execution — self-hosted in your own infrastructure.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [inferable.ai](https://inferable.ai) — verified accessible
+- Source repository: [github.com/inferablehq/inferable](https://github.com/inferablehq/inferable) — README read in full
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=42772862](https://news.ycombinator.com/item?id=42772862)
+- Source last checked: 2026-07-01 (commit `main`)
+
+## What Is Inferable?
+
+Inferable is an open-source managed durable execution runtime for creating AI workflows with humans in the loop. The project positions itself as infrastructure for teams that want the power of LLM-driven automation but need guardrails — approval gates, versioned schemas, and traceable execution — without handing control entirely to the model.
+
+From the README:
+
+> Create structured outputs from any LLM, ask humans for approval via Slack or Email, with versioned, long-running workflows for backwards compatibility.
+
+Key capabilities confirmed from source:
+
+- **Self-hosted execution** — Workflows run in your own infrastructure (on-prem, private VPC, behind a firewall). No inbound ports need to be opened; Inferable uses long-polling to connect outbound to the control plane.
+- **Human-in-the-Loop** — Workflows can halt and wait for human approval via email or Slack before proceeding. Approval context is preserved across the interruption.
+- **Versioned workflows** — Each workflow can have multiple versions with different input schemas. In-flight executions maintain affinity to the version they started with, enabling gradual rollouts.
+- **Structured outputs** — LLM responses are parsed and validated against a Zod schema automatically, with built-in retries on parse failure.
+- **SDKs** — Official Node.js/TypeScript (npm: `inferable`) and Go (`pkg.go.dev/github.com/inferablehq/inferable/sdk-go`) SDKs.
+- **Observability** — Timeline view for workflow execution traces, plus plug-in points for external observability tools.
+- **Memoized results** — Distributed caching of expensive side-effect results across workflow runs.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ or Go 1.21+
+- An Inferable account (free tier available) or a self-hosted control plane
+
+### Step 1: Install the SDK
+
+**Node.js / TypeScript:**
+
+```bash
+npm install inferable
+```
+
+**Go:**
+
+```bash
+go get github.com/inferablehq/inferable/sdk-go
+```
+
+### Step 2: Initialize a workflow
+
+```typescript
+import { Inferable } from 'inferable';
+
+const inferable = new Inferable({
+  apiKey: process.env.INFERABLE_API_KEY,
+});
+
+const workflow = inferable.workflows.create({
+  name: 'ticket-classifier',
+  inputSchema: z.object({
+    ticketText: z.string(),
+  }),
+});
+
+workflow.version(1).define(async (ctx, input) => {
+  const { ticketType } = ctx.llm.structured({
+    input: `Classify this support ticket: ${input.ticketText}`,
+    schema: z.object({
+      ticketType: z.enum(['data-deletion', 'refund', 'technical', 'other']),
+    }),
+  });
+
+  return { ticketType };
+});
+```
+
+### Step 3: Add a human approval gate
+
+```typescript
+deleteUserWorkflow.version(1).define(async (ctx, input) => {
+  if (!ctx.approved) {
+    return Interrupt.approval({
+      message: `Delete user ${input.userId}?`,
+      destination: { type: 'email', email: 'admin@example.com' },
+    });
+  }
+
+  await db.customers.delete({ userId: input.userId });
+});
+```
+
+### Step 4: Run and monitor
+
+Workflow executions appear in the Inferable dashboard as a timeline, showing each step, LLM call, and approval event. Long-running workflows resume from their last checkpoint after a process restart.
+
+## Deeper Analysis
+
+### What makes it different from plain LangChain or LlamaIndex agents?
+
+Most agent frameworks give you a prompt template and a tool-calling loop. Inferable's value proposition is **durable execution with explicit versioning and human oversight**. Where a LangChain agent might silently retry or hallucinate its way past an error, Inferable:
+
+- Halts on ambiguous decisions and surfaces them to a human
+- Versions the workflow definition so schema changes do not break in-flight runs
+- Provides a structured audit trail of every decision point
+
+### Infrastructure model
+
+Inferable is unusual in that the **control plane can be cloud-hosted or self-hosted**, while the **worker runs inside your network**. This means your data never leaves your infrastructure for LLM calls — the worker polls outbound to the control plane, so no firewall holes are required.
+
+For teams already running LangChain or similar: Inferable is not a replacement for the LLM abstraction layer, but rather a layer **above** it that adds workflow governance.
+
+## Practical Evaluation Checklist
+
+- [ ] Installed Node.js SDK successfully (`npm install inferable`)
+- [ ] Created a workflow with an input schema
+- [ ] Verified structured output parsing with a Zod schema
+- [ ] Tested approval interrupt with a mock email destination
+- [ ] Confirmed long-poll connection works from a private network
+- [ ] Checked timeline view in dashboard for execution trace
+
+## Security Notes
+
+- Workflows execute entirely in your own environment — LLM calls are made from your infrastructure, not from Inferable's servers.
+- API key authentication is required for the control plane.
+- No inbound ports are required; workers connect outbound via long-polling.
+- For air-gapped environments, self-host the control plane and configure the worker to point to your internal endpoint.
+
+## FAQ
+
+**Q: Does Inferable host the LLM models?**
+**A:** No. Inferable acts as the orchestration and governance layer. You bring your own LLM (OpenAI, Anthropic, local Ollama, etc.) — Inferable handles the workflow execution, not the model hosting.
+
+**Q: Can it run without internet (air-gapped)?**
+**A:** Yes, if you self-host the control plane. Workers in isolated environments connect outbound to your self-hosted control plane via long-polling.
+
+**Q: What happens if a workflow crashes mid-execution?**
+**A:** Workflows are durable. If a worker process crashes, the workflow resumes from its last checkpoint when a worker reconnects. No explicit resume step is needed.
+
+**Q: Is there a free tier?**
+**A:** The README notes a free tier exists. For current pricing specifics, consult the [Inferable pricing page](https://inferable.ai/pricing).
+
+## Conclusion
+
+Inferable fills a specific gap in the AI agent tooling landscape: teams that want the flexibility of LLM-driven workflows but need governance, versioning, and human oversight built in rather than bolted on. The self-hosted execution model is particularly compelling for regulated industries or teams with strict data residency requirements.
+
+If you are building internal AI tools today and currently stitching together LangChain agents with ad-hoc retry logic and manual approval screenshots in Slack, Inferable is worth evaluating as a structured alternative.
