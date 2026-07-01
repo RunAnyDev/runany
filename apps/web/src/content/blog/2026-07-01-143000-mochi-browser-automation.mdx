@@ -1,0 +1,168 @@
+---
+title: "Mochi.js – Bun-native browser automation with real Chrome fingerprints"
+description: "Mochi.js is a Bun-native browser automation library that generates deterministic Chrome fingerprints, routes all traffic through Chromium itself, and uses biomechanical models for human-like input."
+pubDate: "2026-07-01"
+tags: ["browser-automation", "bun", "dev-tools", "fingerprinting"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mochi-browser-automation.webp"
+  alt: "Mochi.js browser automation library product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Mochi.js is a Bun-native browser automation library that generates deterministic Chrome fingerprints from a `(profile, seed)` matrix, routes all HTTP traffic through Chromium itself, and simulates human-like input with biomechanical models.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [mochijs.com](https://mochijs.com) — visited and verified
+- Source repository: [github.com/0xchasercat/mochi](https://github.com/0xchasercat/mochi) — README read end-to-end
+- License: MIT — verified via `LICENSE` file in repo
+- npm package: [`@mochi.js/core`](https://www.npmjs.com/package/@mochi.js/core) v0.9.5
+- HN launch thread: [news.ycombinator.com/item?id=48075059](https://news.ycombinator.com/item?id=48075059) — 47 points
+
+## What Is Mochi.js?
+
+Most browser automation libraries — patchright, puppeteer-real-browser, nodriver, undetected-chromedriver — randomize fingerprint surfaces independently. Pick a UA, pick `hardwareConcurrency`, pick a WebGL renderer, hope nothing cross-references. A single probe comparing two surfaces breaks the spoof. They also route HTTP traffic through the runtime's stock TLS stack, so JA4 reveals the spoofed Chrome is not a Chrome.
+
+Mochi.js takes a different approach. Every fingerprint surface derives from one `(profile, seed)` pair through a 48-rule deterministic DAG. A Mac UA never lands next to Linux WebGL. All network traffic — `page.goto`, in-page fetch, and `session.fetch` — routes through Chromium itself, so JA4/JA3/H2 are real Chrome by construction. There is no parallel HTTP layer.
+
+The library ships as a native Bun package (`@mochi.js/core` and `@mochi.js/cli`) and requires Bun 1.1 or higher.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Bun 1.1 or higher
+- Chromium-for-Testing (installed via `mochi browsers install`)
+
+### Step 1: Install the package
+
+```bash
+bun add @mochi.js/core @mochi.js/cli
+```
+
+### Step 2: Install Chromium browsers
+
+```bash
+bunx mochi browsers install
+```
+
+### Step 3: Write your first automation script
+
+```ts
+import { Mochi } from "@mochi.js/core";
+
+const browser = await Mochi.launch({
+  profile: "desktop",       // or "mobile", "tablet"
+  seed: 42,                // deterministic output for this (profile, seed) pair
+  headless: false,
+});
+
+const page = await browser.newPage();
+await page.goto("https://example.com");
+await page.humanClick("#submit-button");
+await page.humanType("input[name='q']", "browser automation");
+await page.close();
+```
+
+The `profile` chooses a device class (desktop/mobile/tablet). The `seed` makes the fingerprint deterministic — the same `(profile, seed)` always produces the same fingerprint matrix. This is useful for reproducible tests and for targeting specific fingerprint configurations.
+
+### Step 4: Understand the fingerprint matrix
+
+Each `(profile, seed)` pair drives 48 rules that produce:
+
+- User-Agent string
+- `navigator.hardwareConcurrency`
+- WebGL renderer and vendor
+- Canvas hash
+- Audio fingerprint
+- JA4 TLS fingerprint (real Chromium JA4, not spoofed)
+
+```ts
+const matrix = await browser.fingerprintMatrix();
+// matrix.platform       → "MacIntel"
+// matrix.webgl.renderer → "Apple GPU"
+// matrix.ja4            → "t13d2108h2_..."  (real Chromium JA4)
+```
+
+## Deeper Analysis
+
+### How the fingerprint DAG works
+
+The 48-rule deterministic DAG means every surface is derived from the same seed. If a Mac profile is selected, WebGL will be an Apple GPU, the platform string will be Mac, and the UA will be a Mac Safari/Chrome variant — all consistent by construction, never cross-referencing incorrectly.
+
+Most libraries patch the Chromium UA after launch. Mochi instead synthesizes a coherent `(profile, seed)` matrix upfront and verifies it against a Probe-Manifest harness as part of CI. If a future Chromium update breaks a fingerprint rule, the CI gate catches it.
+
+### Human-like input model
+
+```ts
+await page.humanClick("#button");
+// Uses Bezier curves + Fitts's Law + lognormal digraph model
+// Parameterized off the matrix's `behavior` block
+
+await page.humanType("input", "hello world");
+// Simulates keystroke timing with human variance
+
+await page.humanScroll();
+// Lognormal-distributed scroll with momentum
+```
+
+This contrasts with "mouse helper" approaches in other libraries, which only add jitter to clicks. Mochi's model is biomechanically parameterized.
+
+### session.fetch vs plain fetch
+
+```ts
+// This routes through Chromium — JA4 is real Chrome
+const resp = await page.session.fetch("https://api.example.com/data", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ query: "test" }),
+});
+```
+
+Because the request originates from inside Chromium's HTTP stack, the TLS handshake JA4 fingerprint is that of real Chrome — not the runtime's HTTP library.
+
+## Practical Evaluation Checklist
+
+- Bun 1.1 or higher installed: `bun --version`
+- `@mochi.js/core` installed: `bun pm ls | grep mochi`
+- Chromium installed: `bunx mochi browsers install`
+- Run script with `bun run script.ts` (not `node`)
+- Headless mode: set `headless: true` in `Mochi.launch()`
+- Fingerprint inspection: `console.log(await browser.fingerprintMatrix())`
+
+## Security Notes
+
+- The deterministic fingerprint matrix is reproducible — if you use a fixed `seed`, the same `(profile, seed)` always generates identical fingerprints across runs
+- JA4 verification: since all traffic routes through Chromium, external services see real Chrome JA4 fingerprints
+- No third-party HTTP layers — all network I/O goes through Chromium's own stack
+- The Probe-Manifest CI gate verifies fingerprint consistency on each PR
+
+## FAQ
+
+**Q: How does Mochi differ from Playwright or Puppeteer?**
+**A:** Playwright and Puppeteer use the stock Chromium fingerprint. Mochi synthesizes a deterministic fingerprint matrix from a `(profile, seed)` pair and routes all traffic through Chromium to produce authentic JA4/JA3/H2 fingerprints. Playwright does not offer this level of fingerprint control.
+
+**Q: Does Mochi work with Node.js or Deno?**
+**A:** Mochi is designed for Bun. Node.js and Deno are not tested targets. The README explicitly requires `bun >= 1.1`.
+
+**Q: Can I target a specific browser fingerprint?**
+**A:** Yes. By selecting a `profile` (desktop/mobile/tablet) and a `seed` number, you get a deterministic fingerprint matrix. The same `(profile, seed)` always produces the same output.
+
+**Q: What is the Probe-Manifest CI gate?**
+**A:** A CI harness that verifies fingerprint surfaces against a known-good manifest on every PR. If a Chromium update changes a fingerprint rule unexpectedly, the CI fails.
+
+**Q: Is Mochi actively maintained?**
+**A:** The latest commit as of June 2026 was May 12, 2026 (commit `main`). npm package v0.9.5 is recent.
+
+## Conclusion
+
+Mochi.js solves the core weakness of existing browser automation libraries: inconsistent fingerprint surfaces and detectable non-Chrome HTTP stacks. By deriving every surface from a single `(profile, seed)` DAG and routing all traffic through Chromium itself, it produces fingerprints that are deterministic, coherent, and genuinely Chrome-authentic. For developers building anti-detection pipelines, reproducible test environments, or high-fidelity browser simulation, Mochi is worth evaluating.
+
+If you need a tool that Playwright and Puppeteer cannot provide — deterministic, probe-verified Chrome fingerprints with human-like input — Mochi is purpose-built for exactly that.
