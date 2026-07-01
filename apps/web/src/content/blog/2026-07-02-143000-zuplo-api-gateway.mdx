@@ -1,0 +1,160 @@
+---
+title: "Zuplo – Programmable API Gateway for Developers"
+description: "Zuplo is a fully-managed API gateway you configure with code. Add rate limiting, authentication, an AI gateway, MCP server, and developer portal — deploy to the edge in minutes."
+pubDate: "2026-07-02"
+tags: ["api-gateway", "dev-tools", "self-hosted", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zuplo-api-gateway.webp"
+  alt: "Zuplo API Management product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Zuplo is a fully-managed, programmable API gateway you configure with code. It ships with rate limiting, authentication, an AI gateway, an MCP server, and a developer portal — deployable to the edge in minutes via Git-based workflows.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [zuplo.com](https://zuplo.com) ← verified product landing page
+- Source repository: [github.com/zuplo/zuplo](https://github.com/zuplo/zuplo) ← verified GitHub monorepo
+- License: **Not clearly declared** — no LICENSE file found in the repo; no SPDX ID in GitHub API response. Confirm license before production use.
+- HN launch thread: No verified HN thread found for zuplo.com
+
+## What Is Zuplo?
+
+Zuplo is a developer-facing API management platform built around a programmable request pipeline. Unlike traditional API gateways that rely on declarative YAML or GUI-only controls, Zuplo lets you define gateway behavior in TypeScript — giving you the full expressiveness of a programming language inside the request lifecycle.
+
+The product covers four core areas:
+
+- **API Management** — Rate limiting, authentication (API keys, JWT, OAuth, mTLS), request validation, and 60+ pre-built policy handlers
+- **AI Gateway** — Route requests across multiple AI providers (OpenAI, Anthropic, Google AI) through a single API with observability and cost controls
+- **MCP Server** — Connect your APIs to AI assistants using the Model Context Protocol, with 50+ starter kits covering HR, Finance, Sales, and other verticals
+- **Developer Portal** — Interactive API documentation with built-in testing and self-serve API key management
+
+The gateway runs on Cloudflare Workers at the edge by default, though managed dedicated and self-hosted options are available.
+
+## Setup Workflow
+
+### Step 1: Create a Gateway in the Portal
+
+Sign up at [portal.zuplo.com](https://portal.zuplo.com) and create a new gateway. Zuplo will provision an edge-deployed gateway URL in seconds.
+
+### Step 2: Add Rate Limiting
+
+From the docs, the recommended approach uses a built-in policy:
+
+1. Navigate to **Policies** in the Zuplo portal
+2. Add the **Rate Limiting** policy to your route
+3. Configure the limit (e.g., 100 requests per minute per API key)
+
+The policy runs at the edge before your upstream API is called, so rate limit decisions add zero latency to your origin.
+
+### Step 3: Add API Key Authentication
+
+1. Add the **API Key Auth** policy to a route
+2. Zuplo auto-generates a key and stores it in the key manager
+3. Clients pass the key in the `x-api-key` header
+
+```bash
+curl -H "x-api-key: your_key_here" https://your-gateway.zuplo.dev/v1/your-route
+```
+
+### Step 4: Deploy with Git-Based Workflows
+
+Zuplo integrates with GitHub, GitLab, Bitbucket, and Azure DevOps. Each push to your config repo triggers an automatic deployment to the edge.
+
+```bash
+# Clone the starter kit
+git clone https://github.com/zuplo/zuplo-starter-kit.git
+cd zuplo-starter-kit
+# Edit routes.ts, policies, etc.
+git commit -m "add rate limiting policy"
+git push
+# Zuplo auto-deploys on push
+```
+
+## Deeper Analysis
+
+### Programmable Pipeline Model
+
+Every request flowing through Zuplo passes through a typed TypeScript pipeline. Each stage of the pipeline is a policy — a self-contained function that can inspect, transform, or reject the request. The `RequestLifecycle` docs describe this as a series of `before` and `after` hooks around your upstream call.
+
+```typescript
+// Example: custom policy that logs request duration
+export default async function(request, env) {
+  const start = Date.now();
+  const response = await request.next();
+  console.log(`Request took ${Date.now() - start}ms`);
+  return response;
+}
+```
+
+This is meaningfully different from Kong, Tyk, or AWS API Gateway, where plugin authoring requires learning a plugin SDK specific to that gateway. In Zuplo, you write standard TypeScript.
+
+### AI Gateway
+
+The AI Gateway feature lets you aggregate multiple AI providers behind a single API endpoint. Features include:
+
+- **Single API surface** — clients call one endpoint; Zuplo routes to OpenAI, Anthropic, or others based on routing rules
+- **Cost tracking** — per-model, per-key cost aggregation
+- **Fallback routing** — if one provider is down, route to a backup
+
+The MCP Server aspect is distinct: Zuplo can expose your REST API as an MCP tool, letting AI assistants (Claude, GPT, etc.) call your internal APIs with proper schema definitions. The docs note 718 MCP tools registered across their 50 starter kits.
+
+### Developer Portal
+
+Every Zuplo gateway ships with an auto-generated developer portal. This includes:
+
+- Interactive API docs with a "try it" console (powered by the same request pipeline)
+- Self-serve API key creation and rotation
+- Usage analytics per key and per endpoint
+
+## Practical Evaluation Checklist
+
+- Can you deploy a basic gateway with rate limiting in under 10 minutes?
+  - Yes — portal-based setup takes under 5 minutes; local CLI setup is also documented
+- Does it support self-hosted deployment if you cannot use Cloudflare Workers?
+  - Yes — self-hosted deployment is listed as an option in the hosting docs
+- Can you extend the gateway with custom TypeScript logic?
+  - Yes — the programmable API is a first-class feature
+- Is there a free tier for evaluation?
+  - The docs show a "Start for Free" button; pricing details require sign-up
+- Does it integrate with existing CI/CD systems?
+  - Yes — GitHub, GitLab, Bitbucket, and Azure DevOps are supported
+
+## Security Notes
+
+- API keys are stored in the Zuplo key manager, not in your upstream service
+- HMAC-SHA256 signing is available for webhook verification
+- mTLS is supported for high-security upstream connections
+- Self-hosted deployment option for teams with strict data residency requirements
+
+**⚠️ Caveat:** The license is not clearly declared. Before using Zuplo in production, confirm the license terms directly with the vendor or check for a LICENSE file in the repo.
+
+## FAQ
+
+**Q: How is Zuplo different from Kong or Tyk?**
+**A:** Kong and Tyk are declarative gateways configured via YAML or GUI. Zuplo uses TypeScript throughout, making it more programmable. Kong requires learning its plugin SDK; Zuplo uses standard TypeScript. Kong has a larger ecosystem and more deployment flexibility; Zuplo leans on Cloudflare Workers for edge deployment.
+
+**Q: Can I self-host Zuplo?**
+**A:** Yes. The docs list managed edge (Cloudflare Workers), managed dedicated, and self-hosted as three hosting options.
+
+**Q: What authentication methods are supported?**
+**A:** API keys, JWT, OAuth 2.0, and mTLS are listed as supported methods. Over 60 pre-built policy handlers cover common auth patterns.
+
+**Q: Does it work with MCP (Model Context Protocol)?**
+**A:** Yes. The MCP Server product exposes your APIs as MCP tools with schema definitions, enabling AI assistants to call them directly. The starter kits include 50 forkable API + MCP server combinations.
+
+**Q: Is there an open-source option?**
+**A:** The GitHub repo (`github.com/zuplo/zuplo`) exists with 37 stars but has no declared license. Confirm licensing before production use.
+
+## Conclusion
+
+Zuplo is a pragmatic choice for teams that want API gateway capabilities (rate limiting, auth, observability) without abandoning code-based workflows. The TypeScript pipeline model is genuinely more flexible than declarative YAML, and the built-in AI gateway and MCP server integrations address two real pain points for developer teams integrating LLMs into their products.
+
+The lack of a declared open-source license is the main caveat — evaluate the licensing model before committing. If the commercial/hosted model works for your team, the "portal quickstart" gets you from zero to a production gateway in under 10 minutes.
