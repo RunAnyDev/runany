@@ -1,0 +1,149 @@
+---
+title: "FlowScript – Agent Memory Using Typed Reasoning Notation"
+description: "FlowScript is an open-source TypeScript SDK and query engine for AI agent reasoning. 21 typed markers encode decisions, tradeoffs, and causal chains — D3 web editor, no network dependency."
+pubDate: "2026-07-01"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/flowscript-structured-reasoning-ai.webp"
+  alt: "FlowScript typed reasoning notation web editor"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** FlowScript is an MIT-licensed TypeScript SDK and web editor that gives AI agents structured, queryable memory through a 21-marker semantic notation — encoding not just *what* happened but *why* decisions were made, what tensions existed, and what alternatives were weighed.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [flowscript.org](https://flowscript.org) ← **MUST visit and verify**
+- Source repository: [github.com/phillipclapham/flowscript](https://github.com/phillipclapham/flowscript) ← **MUST read README**
+- License: MIT (verified via README badge and LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=47516792](https://news.ycombinator.com/item?id=47516792)
+- npm package: [npmjs.com/package/flowscript-core](https://www.npmjs.com/package/flowscript-core)
+
+## What Is FlowScript?
+
+Most AI memory systems are retrieval-based: they store chunks of text and retrieve similar ones. FlowScript takes a different approach. It encodes the *structure* of reasoning itself — decisions, tensions, blockers, alternatives, and causal chains — as a typed notation that both humans and AI can parse natively.
+
+The project describes it as "a semantic notation for structured reasoning" sitting "between natural language (ambiguous, verbose) and formal logic (precise, unreadable)." It ships as a TypeScript SDK, a web editor, and an MCP server.
+
+The core distinction from vector memory: vector stores answer *what* happened. FlowScript answers *why* it happened and *what would need to change* for a different outcome.
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+```bash
+npm install flowscript-core
+```
+
+The package is published to npm as [`flowscript-core`](https://www.npmjs.com/package/flowscript-core).
+
+### Step 2: Create a reasoning graph
+
+```typescript
+import { Memory } from 'flowscript-core';
+
+const mem = Memory.loadOrCreate('./agent-memory.json');
+
+// Build a structured decision
+const q = mem.question("Which database for agent memory?");
+mem.alternative(q, "Redis").decide({ rationale: "speed critical" });
+mem.alternative(q, "SQLite").block({ reason: "no concurrent writes" });
+mem.tension(mem.thought("sub-ms reads"), mem.thought("$200/mo cluster"), "performance vs cost");
+```
+
+### Step 3: Query the reasoning graph
+
+FlowScript exposes six typed queries — each answering a different reasoning question:
+
+```typescript
+mem.query.tensions();             // tradeoffs with named axes
+mem.query.blocked();              // what's stuck + downstream impact
+mem.query.why(nodeId);           // causal chain backward
+mem.query.whatIf(nodeId);        // what breaks if this changes
+mem.query.alternatives(nodeId);  // what was considered + decided
+mem.query.counterfactual(nodeId); // what would need to change
+```
+
+### Step 4: Run the web editor
+
+The web editor at [flowscript.org](https://flowscript.org) provides a browser-based environment with:
+
+- CodeMirror 6 with custom FlowScript language mode and syntax highlighting
+- D3 force-directed graph visualization of reasoning nodes
+- Live query panel — run tensions, blocked, and why queries against your graph
+
+No server required; everything runs client-side.
+
+## The 21 Markers
+
+The notation is built from typed markers. Three core markers get you started:
+
+- `->` — creates a causal or directional link
+- `><` — creates a tension between two thoughts with a named axis
+- `{ }` — wraps a decision context with question, alternatives, and outcome
+
+Additional markers cover causality, temporal graduation, immune-system dynamics, and citation-validated patterns. The [full spec](https://flowscript.org/learn) and formal EBNF grammar in the repository define all 21.
+
+## Deeper Analysis
+
+### Why this matters for AI agents
+
+LLM-based agents generate long context windows of reasoning traces, but the structure is lost after the response. FlowScript's marker system lets an agent (or developer) encode the *shape* of a decision — which alternatives existed, which tradeoffs were explicit, what blocked execution — in a form that can be queried after the fact.
+
+This is particularly relevant for multi-agent systems where one agent needs to understand *why* another agent made a particular decision.
+
+### No network dependency
+
+The query engine is described as sub-millisecond graph traversal with no embeddings, no LLM calls, and no network dependency. The entire reasoning graph lives in a local JSON file. This makes it viable for self-hosted agent deployments where external API calls are undesirable.
+
+### MCP server
+
+FlowScript ships as an MCP server, making it compatible with any MCP-compatible agent framework. The [MCP server implementation](https://github.com/phillipclapham/flowscript) exposes the six query types as tools.
+
+### Evolution note
+
+The README notes that the core concepts (typed reasoning, temporal graduation, immune system patterns) have *evolved* into [anneal-memory](https://github.com/phillipclapham/anneal-memory), a two-layer memory system. FlowScript (this repo) remains maintained as a reference implementation and notation playground.
+
+## Practical Evaluation Checklist
+
+- [ ] Installed via `npm install flowscript-core` without errors
+- [ ] Created a reasoning graph with question, alternatives, tension, and decision
+- [ ] Ran each of the six typed queries against the graph
+- [ ] Verified the web editor loads and renders the D3 graph visualization
+- [ ] Tested the MCP server connection in a compatible agent framework
+- [ ] Verified the JSON audit trail persists and reloads correctly
+
+## Security Notes
+
+FlowScript reasoning graphs are stored as local JSON files. No data leaves the local environment unless explicitly shared. The audit trail is hash-chained, providing tamper-evident logging of reasoning changes over time.
+
+For multi-agent deployments, consider access controls on the JSON storage file since it may contain sensitive architectural decisions.
+
+## FAQ
+
+**Q: How is this different from a vector database for agent memory?**
+**A:** Vector databases retrieve semantically similar text chunks. FlowScript encodes the *structure* of reasoning — why a decision was made, what tensions existed, what alternatives were rejected — and lets you query that structure. They serve complementary purposes.
+
+**Q: Does it require an LLM to parse the notation?**
+**A:** No. The TypeScript SDK parses the notation into an intermediate representation (IR) and traverses the graph without LLM calls. Queries run entirely locally in sub-millisecond time.
+
+**Q: Can I use this with existing agent frameworks?**
+**A:** Yes. FlowScript ships as an MCP server, which makes it compatible with any MCP-compatible framework. The TypeScript SDK can also be used directly in custom agent code.
+
+**Q: Is the notation human-readable?**
+**A:** Yes. The FlowScript notation (the `.fs` syntax) is designed to be readable by both humans and AI without special tooling. The web editor provides syntax highlighting, but plain text works too.
+
+## Conclusion
+
+FlowScript addresses a real gap in AI agent tooling: the inability to query *why* an agent made a decision after the fact. Its typed notation approach is unique — most agent memory systems are retrieval-based, not structural. The no-network, no-embeddings design is a strong fit for self-hosted or privacy-sensitive deployments.
+
+If you're building multi-agent systems or need audit-trail reasoning for an AI agent, FlowScript is worth evaluating. Start with the [web editor](https://flowscript.org) to get a feel for the notation, then integrate the SDK into your agent loop.
+
+**Project:** [flowscript.org](https://flowscript.org) | [GitHub](https://github.com/phillipclapham/flowscript) | [npm](https://www.npmjs.com/package/flowscript-core)
