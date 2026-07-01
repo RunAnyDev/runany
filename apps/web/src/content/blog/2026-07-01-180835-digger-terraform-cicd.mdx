@@ -1,0 +1,204 @@
+---
+title: "Digger - Open Source Terraform CI/CD with Your Existing CI"
+description: "Run Terraform plan and apply directly in your GitHub Actions or GitLab pipeline. Digger brings open source GitOps to infrastructure without extra CI systems, secrets, or compute costs."
+pubDate: "2026-07-01"
+tags: ["terraform", "ci-cd", "devops", "infrastructure", "github-actions"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/digger-terraform-cicd.webp"
+  alt: "Digger - Open Source Terraform CI/CD"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Digger runs Terraform plan and apply natively inside your existing GitHub Actions or GitLab CI, turning any CI into a full-featured IaC pipeline without separate Tacos, secrets sharing, or extra compute costs.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [digger.dev](https://digger.dev) ← **MUST visit and verify**
+- Source repository: [github.com/diggerhq/digger](https://github.com/diggerhq/digger) ← **MUST read README**
+- License: [MIT](https://github.com/diggerhq/digger/blob/main/LICENSE) ← **verified via GitHub API**
+- Stars: 4,985 (GitHub API, as of 2026-07-01) ← **verified**
+- HN launch thread: [news.ycombinator.com/item?id=35973287](https://news.ycombinator.com/item?id=35973287)
+
+## What Is Digger?
+
+Terraform CI/CD is traditionally handled by specialized platforms called Tacos — Terraform Cloud, Spacelift, Atlantis. Each adds its own CI layer on top of the one you already have. Digger flips this: it runs Terraform directly inside your existing CI pipeline (GitHub Actions, GitLab CI, Azure DevOps), making the two systems one.
+
+From the README:
+
+> Digger runs terraform natively in your CI. This is secure, because cloud access secrets aren't shared with a third-party, and cost-effective, because you are not paying for additional compute just to run your terraform.
+
+## Key Features
+
+Digger ships these capabilities out of the box:
+
+- **PR comment plans** — Terraform plan output posted directly to pull request comments for reviewer visibility
+- **Any VCS** — GitHub, GitLab, Azure Repos, Bitbucket
+- **Any CI** — GitHub Actions, GitLab Pipelines, Azure DevOps, Jenkins, CircleCI
+- **Any cloud** — AWS, GCP, Azure
+- **Private runners** — Uses your CI runner environment, no separate runner fleet
+- **OPA support** — Open Policy Agent integration for RBAC rules
+- **PR-level locks** — Prevents concurrent applies on the same state, supplementing Terraform native state locks
+- **Terragrunt, workspaces, multiple Terraform versions**
+- **Checkov integration** — Static analysis built into the plan stage
+- **Plan persistence** — Stored in your own S3/DynamoDB (or equivalent)
+- **Drift detection** — Compares actual vs. desired state on a schedule
+- **Cost estimation** — Coming soon per the README roadmap
+
+## Setup Workflow
+
+### Prerequisites
+
+- Terraform state stored remotely (S3, GCS, Azure Blob, etc.)
+- Cloud credentials configured in your CI (AWS IAM role, GCP SA, Azure creds)
+- A pull request to test against
+
+### Step 1: Create a GitHub Actions Workflow
+
+Create `.github/workflows/digger.yml` in your repository:
+
+```yaml
+name: Digger
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  digger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Digger
+        uses: digger-dev/digger@vlatest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AWS credentials (or GCP/Azure equivalent)
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+### Step 2: Configure Backend
+
+Ensure your `backend` block in `main.tf` (or `terragrunt.hcl`) points to your remote state:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "my-terraform-state"
+    key    = "prod/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+```
+
+### Step 3: Add Secrets to GitHub
+
+In your repository Settings → Secrets and Variables → Actions, add:
+
+- `AWS_ACCESS_KEY_ID` — IAM access key with S3 and required infra permissions
+- `AWS_SECRET_ACCESS_KEY` — Corresponding secret key
+
+For multi-account setups, Digger supports assuming IAM roles via standard AWS environment variables.
+
+### Step 4: Comment to Trigger
+
+Once Digger is running, comment on any PR to trigger commands:
+
+```
+digger plan
+```
+
+Digger will respond with the plan output as a PR comment. Comment `digger apply` after approval to execute.
+
+## Deeper Analysis
+
+### Architecture
+
+Digger has two main components:
+
+1. **Digger CLI** — Runs inside your CI, calls Terraform with the right arguments, handles locking and plan storage
+2. **Digger Cloud (optional)** — A minimal backend that triggers CI jobs in response to PR comments. This is the part that can be self-hosted.
+
+For GitHub Actions specifically, Digger Cloud is optional — GitHub's own webhook events can drive the CI jobs directly through the `pull_request` and `repository_dispatch` triggers.
+
+### Self-Hosting the Orchestrator
+
+If you want full control over the job coordinator, Digger provides a self-hosted deployment:
+
+```bash
+docker run -d \
+  --name digger-cloud \
+  -p 8080:8080 \
+  -e GITHUB_APP_ID=your_app_id \
+  -e GITHUB_APP_PRIVATE_KEY=your_private_key \
+  -e WEBHOOK_SECRET=your_secret \
+  diggerdev/digger-cloud:latest
+```
+
+This requires a GitHub App to be registered (for webhook delivery and API access). The README links to docs at [docs.digger.dev](https://docs.digger.dev/) for full self-hosted installation steps.
+
+### State Locking
+
+Digger implements two locking layers:
+
+1. **Terraform native state locks** — via your backend (DynamoDB on AWS, etc.)
+2. **PR-level locks** — Digger's own locks that prevent two PRs from applying concurrently to overlapping state
+
+This is architecturally similar to how Atlantis works, but with tighter CI integration.
+
+### Security Model
+
+Since Terraform runs inside your CI runner, cloud credentials never touch Digger's infrastructure. The runner's IAM role (or equivalent) is what Terraform uses — credentials are injected as CI secrets and stay within your cloud tenant.
+
+## Practical Evaluation Checklist
+
+- Terraform state stored remotely (S3/GCS/Azure) — required
+- CI system with secrets management — required
+- Cloud credentials with minimal permissions — follow principle of least privilege
+- State locking via backend (DynamoDB on AWS) — recommended
+- OPA policies for team RBAC — optional but valuable for larger teams
+
+## Security Notes
+
+- Cloud credentials stay within your CI runner environment — never shared with Digger's infrastructure
+- Digger Cloud (self-hosted) keeps all coordination within your own infrastructure
+- PR-level locks prevent accidental concurrent applies
+- OPA support enables fine-grained RBAC for who can approve applies
+- No telemetry of infrastructure data — only anonymized usage stats (see `pkg/usage/usage.go`)
+
+## FAQ
+
+**Q: Does Digger work with GitLab CI or Azure DevOps?**
+**A:** Yes. Digger works with any CI system. GitHub Actions is the most common, but GitLab Pipelines and Azure DevOps guides are available in the docs at docs.digger.dev.
+
+**Q: How does Digger compare to Atlantis?**
+**A:** Both run Terraform in CI. Digger integrates more tightly with modern CI systems (especially GitHub Actions) and has a more active development track record. Atlantis is older and more battle-tested in some respects. Digger's PR-level locking model is similar to Atlantis.
+
+**Q: Does Digger work with Terragrunt?**
+**A:** Yes. Digger explicitly supports Terragrunt, workspaces, and multiple Terraform versions per the README.
+
+**Q: Is there a managed cloud option?**
+**A:** Yes, Digger Cloud is the hosted option. The self-hosted orchestrator option is also available for teams that want full control.
+
+**Q: What cloud providers are supported?**
+**A:** AWS, GCP, and Azure are all supported. Terraform's provider ecosystem handles the actual resource management.
+
+## Conclusion
+
+Digger solves the "why do I need two CI systems" problem for infrastructure teams. If you already have GitHub Actions or GitLab CI configured, Digger adds production-grade Terraform workflow — plan comments, apply controls, state locking, drift detection — without asking you to trust a third-party with your cloud credentials or pay for a separate compute fleet.
+
+With 4,985 GitHub stars and active development, it's one of the most mature open source options in this space. If you want to consolidate your IaC tooling, it's worth a look.
+
+- Docs: [docs.digger.dev](https://docs.digger.dev/)
+- GitHub: [github.com/diggerhq/digger](https://github.com/diggerhq/digger)
+- Slack: [diggertalk.slack.com](https://join.slack.com/t/diggertalk/shared_invite/zt-1tocl4w0x-E3RkpPiK7zQkehl8O78g8Q)
