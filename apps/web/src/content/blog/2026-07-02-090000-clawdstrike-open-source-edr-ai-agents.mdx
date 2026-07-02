@@ -1,0 +1,143 @@
+---
+title: "Clawdstrike - Open-Source EDR for AI Agent Swarms"
+description: "Policy engine, EDR, and signed audit chain in one binary for securing AI agent tool calls, file access, and network egress."
+pubDate: "2026-07-02"
+tags: ["ai-security", "agents", "cybersecurity", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/clawdstrike.webp"
+  alt: "Clawdstrike project thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Clawdstrike is an open-source EDR and policy engine that evaluates AI agent actions (tool calls, file access, network flows) against signed rulesets and emits an Ed25519-verified audit chain.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [clawdstrike.com](https://clawdstrike.com) (or GitHub)
+- Source repository: [github.com/backbay-labs/clawdstrike](https://github.com/backbay-labs/clawdstrike)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46875842](https://news.ycombinator.com/item?id=46875842)
+
+## What Is Clawdstrike?
+
+AI agent swarms run tool calls at machine speed — `shell_exec`, `file_write`, `egress`, `dylib_load`. Traditional EDRs were not built for this event taxonomy. Clawdstrike fills the gap by treating an agent's `tool_call` as a first-class event alongside kernel-level signals.
+
+Clawdstrike ships as:
+
+- **Rust crate** — embed the policy engine directly
+- **TypeScript SDK** (`@clawdstrike/sdk`) — agent-side guardrails
+- **Python package** (`clawdstrike`) — Python-based AI stacks
+- **Go module** — Golang agents and services
+- **CLI + daemon** — macOS (Endpoint Security + Network Extension) and Linux (Tetragon + Hubble)
+- **Desktop EDR agent** — full endpoint protection for workstations
+
+The core of Clawdstrike is a policy engine that evaluates all actions against configurable rulesets. Every evaluation produces an Ed25519-signed causal graph, creating an immutable audit trail. The defaults **fail closed** — any action not explicitly allowed is denied.
+
+## Quick Start
+
+### Install
+
+```bash
+brew install backbay-labs/tap/clawdstrike   # macOS, Linux
+npm  install @clawdstrike/sdk               # TypeScript
+pip  install clawdstrike                    # Python
+cargo add clawdstrike                       # Rust
+go   get github.com/backbay-labs/clawdstrike-go
+```
+
+### Initialize
+
+```bash
+clawdstrike init --keygen
+# writes policy.yaml, config.toml, keys/clawdstrike.key{,.pub}
+```
+
+### Start the daemon
+
+```bash
+clawdstrike daemon start && clawdstrike daemon status
+# Status: healthy | Version: 0.2.7 | Uptime: 2s
+```
+
+### Block a sensitive file access
+
+```bash
+clawdstrike check --action-type file --ruleset strict ~/.ssh/id_rsa
+# BLOCKED [Critical]: Access to forbidden path: ~/.ssh/id_rsa
+```
+
+### Block egress to an LLM API endpoint
+
+```bash
+clawdstrike check --action-type egress --ruleset strict api.openai.com:443
+# BLOCKED [Error]: Egress to api.openai.com blocked by policy
+```
+
+### Block a dangerous MCP tool
+
+```bash
+clawdstrike check --action-type mcp --ruleset strict shell_exec
+# BLOCKED [Error]: Tool 'shell_exec' is blocked by policy
+```
+
+## Architecture
+
+Clawdstrike unifies three components that are normally separate products:
+
+1. **Policy engine** — evaluates actions (file, egress, MCP, process, dylib) against rulesets
+2. **EDR agent** — macOS Endpoint Security / Linux Tetragon for real-time telemetry
+3. **Signed audit chain** — Ed25519 causal graph recording every decision
+
+The policy language is declarative. A `strict` ruleset might look like:
+
+```yaml
+rules:
+  - action: deny
+    resource: ~/.ssh/*
+  - action: deny
+    resource: egress:api.openai.com:443
+  - action: allow
+    resource: tool:mcp:read_only_fs
+```
+
+## Practical Evaluation Checklist
+
+- [ ] Install CLI via `brew install backbay-labs/tap/clawdstrike`
+- [ ] Run `clawdstrike init --keygen` and inspect the generated `policy.yaml`
+- [ ] Start daemon and run a `check` command against a test path
+- [ ] Verify signed audit entries in the log output
+- [ ] Try the TypeScript SDK in a simple agent loop
+- [ ] Inspect the Rust crate API surface (`cargo doc --open`)
+
+## Security Notes
+
+Clawdstrike's fail-closed default means that without explicit allow rules, no action succeeds. The Ed25519 audit chain provides post-incident forensics — every denied (or allowed) action is signed and timestamped. The keys are generated locally during `init --keygen`; the private key never leaves the host.
+
+For multi-agent deployments, each agent carries its own keypair. The audit chain can be aggregated at a central control plane for enterprise visibility.
+
+## FAQ
+
+**Q: Does Clawdstrike replace a traditional EDR?**
+**A:** For AI agent workloads, yes — it understands the agent event taxonomy (tool calls, MCP invocations) that traditional EDRs miss. It runs alongside existing endpoint protection.
+
+**Q: How is the policy language structured?**
+**A:** Policies are YAML files with `action` (allow/deny), `resource` (path, host, tool name), and optional conditions. The README ships example rulesets for common AI agent scenarios.
+
+**Q: Does it support Windows?**
+**A:** Windows is not in scope for the initial 1.0 release. macOS and Linux are supported.
+
+**Q: Is the audit chain exportable?**
+**A:** Yes. Each daemon writes signed JSON entries. An enterprise control plane can aggregate and verify chains from multiple agents.
+
+## Conclusion
+
+Clawdstrike tackles the unsolved problem of AI agent endpoint security. By treating tool calls, file access, and network flows as first-class policy objects with a cryptographically verified audit chain, it gives security teams visibility and control they cannot get from traditional EDR. The multi-language SDK surface (Rust, TypeScript, Python, Go) means it integrates into any agent stack without rewrites.
+
+Try it with `brew install backbay-labs/tap/clawdstrike` or `npm install @clawdstrike/sdk` — the daemon starts in seconds and the first policy check takes under a second.
