@@ -1,0 +1,160 @@
+---
+title: "MCP Auth – Self-Hostable OAuth 2.0 for MCP Servers"
+description: "Self-hostable OAuth 2.0 server for Model Context Protocol. Secure your MCP apps with full control—no separate auth server, works with Next.js, Express, Prisma, and Drizzle."
+pubDate: "2026-07-06"
+tags: ["mcp", "oauth", "self-hosted", "authentication", "developer-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mcpauth.webp"
+  alt: "MCP Auth product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** MCP Auth is an open-source, self-hostable OAuth 2.0 server purpose-built for the Model Context Protocol. It lets you add production-ready authentication to any MCP server without a separate authorization service.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [mcp-auth.dev](https://mcp-auth.dev) — verified 2026-07-06
+- Source repository: [github.com/mcpauth/mcpauth](https://github.com/mcpauth/mcpauth) — verified 2026-07-06
+- License: [ISC](https://github.com/mcpauth/mcpauth/blob/main/README.md) — verified
+- HN launch thread: [news.ycombinator.com/item?id=44388932](https://news.ycombinator.com/item?id=44388932) — verified
+- GitHub metadata: 113 stars, default branch `main`, last pushed 2025-12-30
+
+## What Is MCP Auth?
+
+The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an emerging standard for connecting AI assistants to external tools and data sources. As MCP adoption grows, so does the need for a proper authentication layer — but spinning up a full OAuth 2.0 authorization server is non-trivial work.
+
+MCP Auth (`@mcpauth/auth`) solves this by packaging a complete, self-hostable OAuth 2.0 server specifically for MCP contexts. You run it alongside your MCP server, not as a separate managed service.
+
+The README describes it as:
+
+> "A full-featured, self-hostable OAuth 2.0 server designed for the Modern AI-era and the Model-Context-Protocol (MCP)."
+
+Key properties:
+
+- **Self-hosted** — you run the server, you own the data. No vendor lock-in.
+- **Provider-agnostic** — works with any existing authentication logic (session cookies, bearer tokens, external systems).
+- **Framework adapters** — officially supports **Next.js** and **Express**.
+- **Database adapters** — supports **Prisma** and **Drizzle** for OAuth entity storage.
+- **ChatGPT Deep Research compatible** — includes specific support for OpenAI's ChatGPT Deep Research Custom Connector.
+
+## Why MCP Auth Matters
+
+Major MCP clients — most notably OpenAI's ChatGPT — require OAuth 2.0 to authenticate users and authorize access to tools and resources. MCP Auth provides the compliant server needed to integrate with these clients without handing auth off to a third-party service.
+
+The core value proposition is eliminating the "build your own OAuth server" burden. Instead of reading RFC 6749 for weeks and wiring up token exchange flows, you plug in your existing user session and get a compliant MCP OAuth layer in a few lines of code.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18 or later
+- An existing MCP server using the [MCP SDK](https://modelcontextprotocol.io/)
+- One of: Next.js (App Router), Express, or a compatible framework
+
+### Step 1: Install the Package
+
+```bash
+npm install @mcpauth/auth
+```
+
+### Step 2: Configure the Adapter
+
+Pass your existing authentication logic via `authenticateUser`. This function receives the incoming HTTP request and returns the user object (or `null` if unauthenticated).
+
+For example, with `@auth/express`:
+
+```typescript
+import { authenticateUser } from '@mcpauth/auth';
+
+const authConfig = {
+  authenticateUser: async (request: Request) => {
+    // Grab the user's existing session from a cookie
+    const session = await getSession(request, authConfig);
+    // Return the user object if authenticated, or null if not
+    return (session?.user as OAuthUser) ?? null;
+  },
+};
+```
+
+### Step 3: Start the Server
+
+```bash
+npx @mcpauth/auth
+```
+
+The server starts on port 3000 by default and exposes the OAuth 2.0 authorization endpoints at `/oauth/authorize`, `/oauth/token`, and `/oauth/userinfo`.
+
+### Step 4: Register with an MCP Client
+
+Register your MCP Auth server URL with your MCP client (e.g., ChatGPT's Deep Research connector). The client will redirect unauthenticated users to your server's authorization flow.
+
+For the full integration guide, consult the [project README](https://github.com/mcpauth/mcpauth).
+
+## Supported Stacks
+
+| Component   | Supported                  | Notes                                      |
+| :---------- | :------------------------- | :----------------------------------------- |
+| Framework   | **Next.js**, **Express**   | Adapters for seamless Node.js integration  |
+| Database    | **Prisma**, **Drizzle**    | Stores handle all OAuth entity interactions|
+
+Community adapter requests can be filed via [GitHub Issues](https://github.com/mcpauth/mcpauth/issues/new?assignees=&labels=enhancement,adapter-request&template=feature_request.md&title=Feature%20Request:%20New%20Adapter/Store%20for%20[Framework/Database]).
+
+## Deeper Analysis
+
+### The "No Vendor Lock-in" Claim
+
+Unlike managed auth services (Clerk, Auth0, etc.), MCP Auth runs on your own infrastructure. Your OAuth tokens, user sessions, and authorization data never leave your environment. This is particularly relevant for:
+
+- Enterprise deployments with strict data residency requirements
+- MCP servers handling sensitive tool access (database queries, file operations, internal APIs)
+- Teams that want to own their authentication stack end-to-end
+
+### ChatGPT Deep Research Compatibility
+
+OpenAI's ChatGPT Deep Research Custom Connector requires an OAuth 2.0 server. The MCP Auth README explicitly calls out compatibility with this feature, noting that some schema validation errors ("This connector does not implement our schema") may appear after initial setup and typically resolve on page refresh.
+
+### Security Considerations
+
+As with any OAuth 2.0 deployment:
+
+- Always use HTTPS in production
+- Keep access tokens short-lived; prefer refresh token rotation
+- Validate redirect URIs strictly server-side
+- Review the ISC license for your compliance needs
+
+## Practical Evaluation Checklist
+
+- [ ] README fully read and verified
+- [ ] OAuth 2.0 endpoints match RFC 6749 (authorization code flow)
+- [ ] Framework adapter installs without peer dependency conflicts
+- [ ] Database adapter handles all required OAuth entities (clients, tokens, users)
+- [ ] ISC license verified — suitable for commercial MCP server projects
+- [ ] ChatGPT Deep Research connector tested end-to-end
+- [ ] HTTPS enforced in deployment configuration
+
+## FAQ
+
+**Q: Does MCP Auth work with MCP servers built on non-Node.js runtimes?**
+**A:** The officially supported adapters are Node.js-based (Next.js, Express). For other runtimes, the underlying OAuth 2.0 server is framework-agnostic, but you'll need to write a custom adapter.
+
+**Q: Is this production-ready?**
+**A:** The project is open source with an ISC license. "Production-ready" depends on your validation — test token rotation, rate limiting, and session expiry in your specific deployment before relying on it for critical infrastructure.
+
+**Q: What's the difference between MCP Auth and a general OAuth 2.0 server like Keycloak?**
+**A:** MCP Auth is purpose-built for the MCP context, with explicit ChatGPT Deep Research connector support and MCP-specific session management. General OAuth servers are more feature-rich but require more configuration for the MCP use case.
+
+**Q: Does it support SSO with external identity providers?**
+**A:** The `authenticateUser` function is pluggable — you can integrate any external SSO logic (SAML, OIDC, etc.) as long as you can resolve it to a user object from the HTTP request.
+
+## Conclusion
+
+MCP Auth fills a real gap in the emerging MCP ecosystem: a self-contained, standards-compliant OAuth 2.0 server that doesn't require running a separate authorization service. With adapters for Next.js, Express, Prisma, and Drizzle, it slots into existing Node.js stacks with minimal friction.
+
+If you're building an MCP server and need authentication — particularly for ChatGPT integration or enterprise deployments — `@mcpauth/auth` is worth evaluating. The source is on GitHub and the setup contract is straightforward: install, wire up your existing session logic, and run.
