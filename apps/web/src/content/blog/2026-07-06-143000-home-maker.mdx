@@ -1,0 +1,186 @@
+---
+title: "Home Maker – Declare Your Dev Tools in a Makefile"
+description: "Track every CLI tool you install and never forget how to reinstall them. Home Maker uses a single Makefile to declare packages across apt, cargo, uv, go, and npm – with a fuzzy-search frontend."
+pubDate: "2026-07-06"
+tags: ["dev-tools", "bash", "makefile", "productivity"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/home-maker.webp"
+  alt: "Home Maker – GNU Make + Bash dev tool installer"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Home Maker replaces scattered shell history with a single Makefile that declares every dev tool you care about, grouped by package manager, installable with one command.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [thottingal.in/blog/2026/03/29/home-maker](https://thottingal.in/blog/2026/03/29/home-maker/) — **MUST visit and verify**
+- Source repository: [github.com/santhoshtr/hm](https://github.com/santhoshtr/hm) — **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47560959](https://news.ycombinator.com/item?id=47560959)
+
+## What Is Home Maker?
+
+A developer's machine accumulates tools from five or more package managers over time. Each uses a different syntax:
+
+```bash
+sudo apt-get install -y ripgrep
+cargo install eza
+uv tool install ruff
+go install golang.org/x/tools/gopls@latest
+sudo npm i -g prettier
+curl -L https://example.com/tool | sh
+```
+
+Three months later you remember nothing. Home Maker solves this with a **single Makefile** you already understand. You record the tools instead of just running them.
+
+From the project's own description:
+
+> A single Makefile that installs and upgrades every tool on your dev machine — CLI utilities, language toolchains, desktop apps — grouped by purpose, with a fuzzy-search frontend to run anything with a keystroke.
+
+## Setup
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/santhoshtr/hm.git
+cd hm
+```
+
+### Add Your Tools
+
+Each `.mk` file under `dev/` declares packages for one package manager using simple `+=` appends:
+
+```makefile
+# dev/cli.mk
+APT   += ripgrep jq bat fzf htop tmux
+CARGO += eza zoxide fd
+
+# dev/python.mk
+UV += ruff black isort pyright
+
+# dev/go.mk
+GO += gopls golangci-lint
+PKG_gopls         := golang.org/x/tools/gopls
+PKG_golangci-lint := github.com/golangci/golangci-lint/cmd/golangci-lint
+```
+
+Five variables cover all major package managers: `APT`, `CARGO`, `UV`, `GO`, and `NPM`.
+
+### Install a Tool
+
+```bash
+# Install one package
+make ripgrep
+
+# Install one group
+make cli
+
+# Install everything
+make all
+```
+
+### Pin a Version
+
+Use `name@version` syntax to pin a specific version:
+
+```makefile
+UV += black@24.2.0
+```
+
+The Makefile generator macro translates this to `uv tool install black==24.2.0`.
+
+### Interactive Fuzzy Search
+
+When you have 50 packages across 10 files, run the interactive installer:
+
+```bash
+./hm.sh
+```
+
+This shell script calls `make -pn` (dry-run print database), parses every target, and presents them in `fzf`. Tab-select multiple targets, Enter installs them. The preview pane shows the exact command that will run via `make -n`.
+
+### Symlink Into Your PATH
+
+```bash
+ln -s "$(pwd)/hm.sh" ~/bin/hm
+```
+
+Now `hm` works from any directory.
+
+## How the Makefile Works
+
+The Makefile does three things:
+
+1. **Include** all `.mk` files with `include dev/cli.mk`
+2. **Define** install command templates and helper functions
+3. **Expand** every package list into `.PHONY` targets
+
+```makefile
+# Helper functions
+pkg-name    = $(firstword $(subst @, ,$(1)))
+pkg-version = $(word 2,$(subst @, ,$(1)))
+pkg-pkgname = $(or $(PKG_$(call pkg-name,$(1))),$(call pkg-name,$(1)))
+
+# Generator macro example
+define gen-apt
+.PHONY: $(call pkg-name,$(1))
+$(call pkg-name,$(1)):
+	@echo "installing/upgrading $@..."
+	@$(APT_INSTALL) $(call pkg-pkgname,$(1))
+endef
+
+# Expand every package into a target
+$(foreach p,$(APT),$(eval $(call gen-apt,$(p))))
+```
+
+No generated files, no YAML, no DSL. `make` evaluates everything at runtime.
+
+## Why Not Nix or Ansible?
+
+Nix solves a real reproducibility problem but asks you to learn a functional language and a parallel package universe. The learning curve is weeks for "install ripgrep."
+
+Ansible wants an inventory, YAML playbooks, a Python runtime, and SSH connections. A single laptop is not a fleet.
+
+Home Maker uses **make and bash** — tools every Linux developer already knows. No daemon, no hidden state, no lock-in.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone repo and add one tool to a `.mk` file
+- [ ] Run `make <tool>` to install it
+- [ ] Run `./hm.sh` and search for a package
+- [ ] Pin a version with `name@version` syntax
+- [ ] Add a custom curl-based install target
+- [ ] Run `make clean` to purge all caches
+
+## Security Notes
+
+- The Makefile runs package manager install commands directly — review each command before running if you add custom install scripts
+- No daemon runs in the background; it is purely a declaration file
+- Use `make -n <target>` to preview any command before execution
+
+## FAQ
+
+**Q: Does it check if a tool is already installed before reinstalling?**
+**A:** No — and that is intentional. The Makefile delegates that decision to each package manager. `apt-get` skips if present, `cargo install` upgrades if a newer version exists, and `uv tool install` re-installs. This keeps the Makefile logic simple.
+
+**Q: Can I use this for desktop applications too?**
+**A:** Yes. The `desktop/apps.mk` file is designed for GUI applications. Custom install scripts handle tools that are not in any package manager.
+
+**Q: What if a package name differs from the target name?**
+**A:** Use the `PKG_` override. For example, `CARGO += fd` with `PKG_fd := fd-find` lets you run `make fd` while `cargo install fd-find` runs under the hood.
+
+**Q: How is this different from a dotfiles repo?**
+**A:** Home Maker only handles tool installation, not configuration. The author uses GNU Stow with a separate private repo for dotfiles and editor settings.
+
+## Conclusion
+
+Home Maker trades Nix's hermetic reproducibility for simplicity: a text file you already understand. Add one line to declare a tool, run `make <name>` to install it. When you get a new machine, clone the repo and run `make all`.
+
+Repository: [github.com/santhoshtr/hm](https://github.com/santhoshtr/hm)
