@@ -1,0 +1,159 @@
+---
+title: "Velda – Run GPU Batch Jobs Without Docker or Manifests"
+description: "Velda turns any dev environment command into a cloud batch job. No Dockerfiles, no image registries, no Kubernetes manifests — just prefix with vrun and scale."
+pubDate: "2026-07-06"
+tags: ["ai-setup", "dev-tools", "gpu", "batch-jobs"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/velda-serverless-gpu.webp"
+  alt: "Velda serverless GPU batch job platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Velda lets you run GPU batch jobs on cloud compute directly from your dev environment — no Docker images, no Kubernetes manifests, just prefix your command with `vrun`.
+
+## What Is Velda?
+
+Velda is an open-source compute orchestration tool that eliminates the gap between local development and cloud batch execution. The core problem it solves: running GPU training or batch inference jobs requires building container images, pushing to registries, writing Kubernetes manifests, and waiting for redeploys every time you change code.
+
+Velda takes a different approach — you keep coding locally with your exact environment (dependencies, data paths, configs), then prefix any command with `vrun` to execute it on cloud resources:
+
+```bash
+vrun -P gpu-h200-8 python train.py --epochs 100
+```
+
+Velda handles distributing the job across cloud GPUs, managing the execution environment, and returning results — without you ever touching a Dockerfile.
+
+The project is published on GitHub under the Apache 2.0 license.
+
+## Source and Accuracy Notes
+
+- Project page: [velda.io](https://velda.io)
+- Source repository: [github.com/velda-io/velda](https://github.com/velda-io/velda)
+- License: Apache 2.0 (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=48140339](https://news.ycombinator.com/item?id=48140339)
+- Docs: [docs.velda.io](https://docs.velda.io/)
+- Source last checked: 2026-07-06
+
+## Setup Workflow
+
+### Step 1: Deploy a Velda Cluster
+
+Velda can be self-hosted or used as a managed service. For self-hosting:
+
+```bash
+# Clone the repo
+git clone https://github.com/velda-io/velda.git
+cd velda
+
+# Follow deployment docs at https://docs.velda.io/deployment/overview/
+```
+
+The managed option at velda.io provides VSCode integration plus free monthly GPU credits for individuals and small teams.
+
+### Step 2: Connect Your Dev Environment
+
+Connect to your Velda instance via SSH or the Velda CLI:
+
+```bash
+# Install the CLI
+pip install velda
+
+# Authenticate
+velda login --instance https://your-instance.velda.io
+```
+
+### Step 3: Run a Job with vrun
+
+Prefix any command with `vrun` to execute it on cloud GPUs:
+
+```bash
+# Run a training job on 8 H200 GPUs
+vrun -P gpu-h200-8 python train.py --epochs 100 --batch-size 256
+
+# Run batch inference at scale
+vrun -P gpu-a100-4 python inference.py --input ./data/ --output ./results/
+```
+
+The job inherits your local environment — same Python packages, same data paths, same configs — because Velda does not isolate your command in a container image. It streams output back to your terminal as if you were running locally.
+
+### Step 4: Onboard Your Team
+
+Velda supports cloning from existing job templates, so new team members can run established workloads without re-configuring their environment from scratch.
+
+## Deeper Analysis
+
+### Why Velda Exists
+
+The standard path for GPU batch jobs in 2026 still looks like this:
+
+1. Write a Dockerfile with your Python environment
+2. Build the image (10-30 minutes for ML workloads with many dependencies)
+3. Push to a container registry
+4. Write a Kubernetes Job or Slurm script
+5. Submit and wait
+6. Debug — discover a code change is needed
+7. Repeat from step 1
+
+Velda's authors frame the problem directly: **containers made apps scalable but broke the developer workflow**. Every code change requires a full rebuild. Dependency drift between local and production is common. Registry bloat compounds over time.
+
+Velda sidesteps this by treating the dev environment as the canonical runtime environment. It captures your local execution context (Python packages, environment variables, data mounts) and re-creates it on cloud compute at job launch time — without packaging it into an image first.
+
+### Architecture
+
+Velda uses a two-command interface:
+
+- `vrun` — execute a single command on cloud resources with a prefix, streaming output back locally
+- `vbatch` — orchestrate multi-step pipelines or parametric sweeps
+
+The underlying cluster can run on any cloud (AWS, GCP, Azure) and schedules jobs across available GPU nodes. The README mentions it is designed for ML engineers iterating on training and evaluation, data engineers running ad-hoc or scheduled batch jobs, and infra teams tired of rebuilding containers for every code change.
+
+### Pricing
+
+Velda's managed service offers a free tier with monthly GPU credits, suitable for individual developers and small teams. Beyond that, pricing is usage-based. Self-hosted deployment is free and open source.
+
+## Practical Evaluation Checklist
+
+**Use Velda when:**
+- You iterate rapidly on GPU training jobs and want zero rebuild overhead
+- Your batch inference jobs need to run on fresh code without a CI/CD pipeline
+- You want to let ML engineers run jobs without requiring Kubernetes expertise
+- You need a Slurm alternative with a simpler UX and cloud-native footprint
+
+**Stick with existing tooling if:**
+- Your organization has a mature container-based deployment pipeline you must use
+- You need GPU sharing or multi-tenant resource scheduling
+- Your jobs require specific container images certified for compliance
+
+## Security Notes
+
+- Velda executes commands on cloud resources in your own cloud account — no third-party executes your code
+- The self-hosted option keeps all data and compute within your infrastructure
+- The managed service handles cluster operations; review velda.io privacy policy for data handling details
+- The CLI authenticates via an instance login — store credentials securely, do not commit to source control
+
+## FAQ
+
+**Q: How is this different from running a Jupyter notebook on a cloud GPU?**
+**A:** Jupyter notebooks are interactive and suited for exploration. Velda is designed for batch jobs — you submit a command, Velda executes it at scale and streams output. It is closer to a cloud-native Slurm than to a hosted notebook.
+
+**Q: Does Velda work without Docker installed locally?**
+**A:** Yes. Velda does not require Docker or containers on the client side. It captures your local execution context and provisions the appropriate environment on cloud nodes.
+
+**Q: Can Velda run on AMD or CPU-only nodes?**
+**A:** The README focuses on GPU workloads, but the architecture is cloud-provider-agnostic. Check the docs for CPU and AMD GPU support in your target cloud.
+
+**Q: How does it compare to Modal?**
+**A:** Modal also lets you run serverless GPU functions without managing infrastructure. Velda distinguishes itself by using `vrun` as a direct command prefix rather than a Python SDK — if you can run it locally, you can `vrun` it on cloud GPUs. Velda also does not require wrapping functions in a Python decorator.
+
+## Conclusion
+
+Velda solves the "last mile" problem of GPU compute: turning a working local experiment into a cloud batch job without any of the containerization overhead. The `vrun` prefix model is elegant — if your command runs locally, it runs on Velda's cloud compute with the same environment.
+
+For ML teams that iterate daily, this removes the rebuild-and-redeploy tax that slows down experimentation cycles. It is also a practical self-hosted option for teams that want Slurm-like semantics without the HPC cluster management burden.
+
+Check out the [GitHub repo](https://github.com/velda-io/velda) and [docs](https://docs.velda.io/) to get started.
