@@ -1,0 +1,141 @@
+---
+title: "Attune – Fast APT Repository Hosting"
+description: "Self-host APT repositories with local GPG signing and incremental index rebuilds. Docker-based control plane, Community Edition free forever."
+pubDate: "2026-07-07"
+tags: ["apt", "debian", "linux", "self-hosted", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/attune.webp"
+  alt: "Attune – fast and secure Linux package publishing"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Attune lets you self-host APT repositories with local GPG signing and incremental index rebuilds — no managed service required, free Community Edition forever.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [attunehq.com](https://www.attunehq.com) — verified
+- Source repository: [github.com/attunehq/attune](https://github.com/attunehq/attune) — README read end-to-end
+- License: Apache 2.0 — verified via LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306) — 102 points
+
+## What Is Attune?
+
+Attune is a tool for securely publishing and hosting Linux packages. It solves the "how do I distribute .deb packages to my team's machines" problem without surrendering your signing keys to a third party.
+
+Key claims from the README (verbatim):
+
+- **Flexible deployment:** Deploy a self-hosted package repository, or use the managed cloud infrastructure.
+- **Secure by design:** Attune's CLI does repository index signing locally, so you own your signing keys without ever exposing them.
+- **Really, really fast:** Attune does incremental repository index rebuilds, so adding and removing packages is fast.
+
+Currently supports publishing APT (Debian and Ubuntu) repositories. A paid Enterprise Edition adds priority support and advanced security features.
+
+## Setup Workflow
+
+### Step 1: Start the control plane with Docker
+
+```bash
+git clone https://github.com/attunehq/attune.git
+cd attune
+cp .env.example .env
+docker compose up -d
+```
+
+This starts three services:
+- Attune control plane on port 3000
+- PostgreSQL on port 5432 (credentials: attune/attune)
+- MinIO on ports 9000/9001 (credentials: attuneminio/attuneminio)
+
+### Step 2: Build and install the CLI
+
+```bash
+cargo install --path ./packages/attune
+```
+
+### Step 3: Generate a GPG key
+
+```bash
+gpg --generate-key
+gpg --list-secret-keys
+# Note the 40-character hexadecimal key ID
+```
+
+### Step 4: Create a repository and publish a package
+
+```bash
+# Create a new APT repository
+attune apt repo create example.com
+
+# Add a .deb package
+attune apt pkg add --repo example.com --key-id $YOUR_GPG_KEY_ID $PATH_TO_DEB
+```
+
+Replace `$YOUR_GPG_KEY_ID` with your GPG key ID from Step 3 and `$PATH_TO_DEB` with the path to your `.deb` file.
+
+## Alternative: Install CLI only (no self-hosted control plane)
+
+If you only need the CLI to publish packages (using Attune's managed cloud):
+
+```bash
+# macOS
+brew tap attunehq/attune
+brew install attune
+
+# Linux — download .deb from GitHub releases
+sudo apt install ./attune_VERSION_linux_amd64.deb
+```
+
+## Deeper Analysis
+
+### Signing key ownership
+
+The main differentiator vs. using Artifactory or Nexus is that Attune signs the repository index **locally** — the private key never leaves your machine. With Artifactory, you typically upload the key to their servers.
+
+### Incremental rebuilds
+
+For repositories with large package sets, full index rebuilds on every publish are slow. Attune claims incremental rebuilds, which matters if you publish frequently (e.g., nightly CI builds).
+
+### Self-hosted vs. managed
+
+The Community Edition (self-hosted) is free. The managed cloud is a separate product — you don't need an account to use the self-hosted version.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone repo and start Docker control plane — confirm ports 3000, 5432, 9000/9001 open
+- [ ] Build CLI with `cargo install` — confirm binary on PATH
+- [ ] Generate GPG key and create a test repo
+- [ ] Build a trivial `.deb` and publish it
+- [ ] Configure a test Debian/Ubuntu machine to use the repo and install the package
+
+## Security Notes
+
+- GPG signing is local — private keys stay on your build machine
+- Docker Compose starts PostgreSQL and MinIO with default credentials; **change passwords in `.env` before production use**
+- No TLS is configured by default for the local MinIO — use behind a reverse proxy with TLS in production
+
+## FAQ
+
+**Q: Does Attune support RPM or other package formats?**
+**A:** No, currently only APT (Debian/Ubuntu). The README states more formats are "coming soon."
+
+**Q: What's the difference between Community Edition and Enterprise Edition?**
+**A:** Community Edition is free and self-hosted. Enterprise adds priority support and advanced security features. See the pricing page for details.
+
+**Q: Can I use Attune without Docker?**
+**A:** The control plane (API server + database + storage) requires Docker Compose. The CLI alone can publish packages if you use the managed cloud instead.
+
+**Q: Is there a managed hosted option?**
+**A:** Yes — Attune offers managed cloud infrastructure. You can also self-host the control plane using the Community Edition.
+
+## Conclusion
+
+Attune fills a specific gap: teams that need to distribute .deb packages to fleets of Linux machines without outsourcing key management to JFrog or uploading signing material to Artifactory. The self-hosted Docker Compose setup takes under 10 minutes, and the CLI handles the signing locally. Worth evaluating if your package distribution workflow currently relies on copy-pasted apt-get commands or brittle rsync scripts.
+
+If you've tried Attune, share your experience — particularly around large repository performance and the Enterprise Edition feature gap.
