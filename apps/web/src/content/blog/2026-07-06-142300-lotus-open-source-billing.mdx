@@ -1,0 +1,161 @@
+---
+title: "Lotus – Self-Hosted Billing Engine for SaaS"
+description: "Lotus is an open-source billing and pricing engine for SaaS companies that need usage-based plans, experimentation tools, and full infrastructure control."
+pubDate: "2026-07-06"
+tags: ["billing", "saas", "self-hosted", "open-source", "pricing"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lotus.webp"
+  alt: "Lotus open-source billing infrastructure"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Lotus is an open-source pricing and billing engine that runs on your own infrastructure, supporting usage-based, per-seat, and hybrid pricing models with built-in experimentation tools.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [uselotus.io](https://uselotus.io) ← verified via README
+- Source repository: [github.com/uselotus/lotus](https://github.com/uselotus/lotus) ← README read in full
+- License: MIT (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=33494284](https://news.ycombinator.com/item?id=33494284)
+- Docs: [docs.uselotus.io](https://docs.uselotus.io)
+- Source last checked: 2026-07-06 (commit `main`, last pushed 2026-06-28)
+
+## What Is Lotus?
+
+Lotus is a self-hosted pricing and billing engine built for SaaS companies that want full control over their monetization stack. Rather than routing usage data through a third-party provider, Lotus runs on your own infrastructure alongside your existing payments, customer management, and data systems.
+
+The official project description reads:
+
+> "Lotus is a pricing and billing engine that enables SaaS companies to deploy, monitor, and experiment with custom subscriptions and complex models like usage-based pricing."
+
+Key capabilities from the README:
+
+- **Usage-Based Pricing** — Create custom pricing schemes for SaaS, PaaS, IaaS, or any business model. Fully extensible framework for custom schemes.
+- **Plan Management** — Handles subscriptions, plan versioning, and deployments so your team focuses on product.
+- **Pricing Experimentation** — Built-in suite for backtests, A/B tests, and forecasts on pricing changes.
+- **Integration-First** — REST API and webhooks to integrate with Stripe, payment processors, and any external system.
+- **Self-Hosted** — Runs entirely on your own infrastructure. No vendor lock-in.
+
+Tech stack: React TypeScript (frontend), Python Django (backend), PostgreSQL with TimescaleDB, Redis, Redpanda, Celery, and Go microservices.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker Desktop running locally
+- 4GB+ RAM recommended
+- Linux, macOS, or Windows with WSL2
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/uselotus/lotus.git && cd lotus
+```
+
+### Step 2: Run the Self-Host Script
+
+```bash
+chmod 755 ./scripts/self-host.sh
+./scripts/self-host.sh
+```
+
+The script starts all required services (PostgreSQL, Redis, Celery, Go microservices) in Docker containers.
+
+### Step 3: Access the Dashboard
+
+Once running, open [localhost/](http://localhost/) and sign in with the admin credentials you defined during setup, or the default:
+
+```text
+username: change_me
+password: change_me
+```
+
+### Step 4: Configure Environment Variables
+
+Environment variables are in `env/.env.prod`. Key variables to review:
+
+```bash
+DATABASE_URL=postgres://lotus:password@localhost:5432/lotus
+REDIS_URL=redis://localhost:6379/0
+SECRET_KEY=your-secret-key-here
+ADMIN_USERNAME=your_admin_user
+ADMIN_PASSWORD=your_secure_password
+```
+
+Refer to the [self-hosting docs](https://docs.uselotus.io/docs/overview/self-hosting) for the full list of configuration options.
+
+## Deeper Analysis
+
+### Where Lotus Fits in the Stack
+
+Lotus occupies the pricing intelligence layer between your product's usage data and your payment processor. It tracks metered usage, computes billing amounts across complex proration rules, and surfaces pricing experiments — all via API. Your frontend calls Lotus to get a customer's current plan, usage metrics, and recommended pricing; Lotus then coordinates with Stripe or another payment provider for actual collection.
+
+This is distinct from Stripe Billing or Chargebee, which are primarily payment collection wrappers. Lotus is a pricing engine first: it focuses on the complexity of defining, experimenting with, and iterating on pricing models, rather than just invoicing and subscriptions.
+
+### Pricing Model Support
+
+Out of the box, Lotus supports:
+
+- **Flat per-seat** — fixed price per user per period
+- **Usage-based** — price per unit consumed (API calls, records processed, etc.)
+- **Tiered (volume) pricing** — lower per-unit cost at higher usage thresholds
+- **Hybrid** — base fee plus usage-based overage
+
+The extensible framework means custom models (graduated tiers, entitlement-based blocks, etc.) can be added without forking the core.
+
+### Experimentation Tools
+
+The README specifically calls out a "suite of tools" for pricing experimentation: backtests (simulate how historical customers would have been billed under a new model), A/B tests (deploy different pricing to different customers), and forecasts (project revenue impact before committing). These are significant differentiators for a self-hosted tool — most open-source billing systems handle invoicing but not pricing analytics.
+
+### Self-Hosting Tradeoffs
+
+Self-hosting Lotus gives you complete data ownership and avoids per-transaction fees, but it also means operating the underlying infrastructure: PostgreSQL with TimescaleDB for time-series billing data, Redis for session/caching, Celery for async jobs, and Redpanda for event streaming. The Docker-based install handles all of this, but you are responsible for backups, monitoring, and upgrades.
+
+## Practical Evaluation Checklist
+
+- Clone and run the self-host script: `./scripts/self-host.sh`
+- Sign in to the dashboard at `localhost:8000`
+- Create a test plan with usage-based pricing
+- Emit a test metering event via the API
+- Verify billing calculation in the dashboard
+- Review environment variables in `env/.env.prod`
+- Check the integrations docs for Stripe webhook setup
+- Review the pricing experiment documentation
+
+## Security Notes
+
+- Change default `change_me` credentials immediately on first login
+- The self-hosted setup binds to localhost by default; do not expose the dashboard port directly to the internet without a reverse proxy (nginx, Cloudflare Tunnel)
+- Use environment variables for secrets rather than hardcoding in `env/.env.prod`
+- Database backups are handled by your own infrastructure — configure pgBackRest or a similar tool for production deployments
+- The Go microservices communicate internally over a private network within the Docker compose stack
+
+## FAQ
+
+**Q: Does Lotus replace Stripe?**
+**A:** No. Lotus is a pricing engine that computes what to charge. It integrates with Stripe (or other payment processors) via webhooks for actual payment collection. You still need a payment processor for card processing and invoicing.
+
+**Q: What database does Lotus use?**
+**A:** PostgreSQL with the TimescaleDB extension for time-series billing data. TimescaleDB is automatically provisioned via the Docker self-host script.
+
+**Q: Can I run Lotus in production on a VPS?**
+**A:** Yes. The Docker compose stack works on any Linux server. For production, configure a proper reverse proxy (nginx or Caddy), enable TLS, set up database backups, and use a process manager like systemd or Supervisor.
+
+**Q: Is there a managed/hosted version?**
+**A:** Currently the only version is self-hosted. There is no managed cloud offering.
+
+**Q: How active is the project?**
+**A:** Last commit was 2026-06-28 (within the last week at time of writing). The repo has 1,828 stars on GitHub.
+
+## Conclusion
+
+Lotus fills a specific gap in the self-hosted SaaS tooling landscape: a pricing intelligence engine that handles usage tracking, plan management, proration, and pricing experiments — without routing your billing data through a third-party service. It is MIT-licensed, Docker-based, and actively maintained.
+
+If you are building a SaaS product with non-trivial pricing logic and want full infrastructure control, Lotus is worth evaluating. The self-host script gets you a running instance in minutes; production hardening (TLS, backups, monitoring) is your responsibility after that.
