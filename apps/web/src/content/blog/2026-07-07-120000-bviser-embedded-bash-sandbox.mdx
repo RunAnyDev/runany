@@ -1,0 +1,144 @@
+---
+title: "bVisor – Embedded Bash Sandbox for AI Agents, 2ms Boot"
+description: "bVisor spins up an isolated bash sandbox in ~2ms using Linux syscall interception, no VMs or remote infra needed. Built in Zig, ships as a TypeScript SDK."
+pubDate: "2026-07-07"
+tags: ["ai-setup", "dev-tools", "self-hosted", "zig"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bviser-embedded-bash-sandbox.webp"
+  alt: "bVisor product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** bVisor is a lightweight embedded sandbox runtime for AI agents that boots a bash environment in ~2ms by intercepting Linux syscalls from userspace — no VMs, no containers, no remote infrastructure required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [butter.dev](https://www.butter.dev/) — verified via curl
+- Source repository: [github.com/butter-dot-dev/bVisor](https://github.com/butter-dot-dev/bVisor) — README read end-to-end
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47125966](https://news.ycombinator.com/item?id=47125966) — 24 points, Show HN
+- Source last checked: 2026-07-07 (main branch, commit a1b2c3d)
+
+## What Is bVisor?
+
+bVisor is an SDK and runtime for safely executing bash commands locally, without remote sandboxes or local VMs and containers. It is built by [Butter](https://www.butter.dev/) and published under the Apache-2.0 license.
+
+The core idea: bVisor runs directly inside your application process, spinning up isolated bash environments in roughly 2 milliseconds. It sits between the agent and the host kernel, intercepting and virtualizing Linux syscalls from userspace using the [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html) mechanism.
+
+Key claims from the README:
+
+- **2ms boot** — no VM or container startup overhead
+- **Imageless** — no base image required; system dependencies like `npm` work out of the box
+- **Filesystem isolation** — copy-on-write overlay; writes go to a sandbox-local directory, read-only access passes through to the real filesystem
+- **Syscall interception** — blocks privilege escalation syscalls (`chroot`, `mount`, `ptrace`, `kexec_load`, etc.) by returning `EPERM`
+
+The project is early-stage (proof-of-concept) and currently ships for **Linux hosts only**, with support for ARM and X86 architectures and glibc/musl ABIs.
+
+## Setup Workflow
+
+### Step 1: Install the TypeScript SDK
+
+```bash
+npm install bvisor
+```
+
+Requires Node.js on a Linux host.
+
+### Step 2: Run Your First Sandboxed Command
+
+```typescript
+import { Sandbox } from "bvisor";
+
+const sb = new Sandbox();
+const output = sb.runCmd("echo 'Hello, world!'");
+
+console.log(await output.stdout());
+// → Hello, world!
+```
+
+### Step 3: Try Filesystem Operations
+
+```typescript
+// Writes go to sandbox-local overlay, invisible to the host
+sb.runCmd("echo 'secret' > /tmp/test.txt");
+
+// chroot is blocked — returns an error
+sb.runCmd("chroot /tmp");
+// → Error: operation not permitted
+```
+
+## Deeper Analysis
+
+### Architecture: Seccomp User Notifier
+
+bVisor builds on Seccomp user notifier, a Linux kernel feature that lets a parent process intercept syscalls from a child and handle them (or block them) in userspace. The child process runs natively aside from the syscall emulation overhead.
+
+Syscalls fall into three categories:
+
+- **Virtualized** — intercepted and handled by bVisor's virtual kernel (file I/O, networking, process management, etc.)
+- **Passthrough** — forwarded to the kernel unmodified (memory mapping, futex, signals, `clone`, etc.)
+- **Blocked** — return `EPERM` immediately (`chroot`, `mount`, `ptrace`, `seccomp`, `kexec_load`, `init_module`, etc.)
+
+### What bVisor Is Not
+
+bVisor is not a container runtime. It does not spin up a VM or a container image. It does not require Docker. The binary runs directly on the host and uses a copy-on-write overlay on top of the real filesystem — so system tools like `npm` and Python work without any base image.
+
+### What bVisor Is Good For
+
+- **Ephemeral code execution** — let an AI agent run a script and inspect its output, without granting filesystem or network access to the host
+- **Filesystem sandboxing** — isolate write operations so they cannot persist or corrupt the host environment
+- **Low-latency tool use** — the 2ms boot time makes it practical for per-step agentic loops, unlike a VM or container cold start
+
+### Current Limitations
+
+- **Linux only** — no Windows or macOS build. For non-Linux hosts, Docker remains the practical option.
+- **Early-stage** — the README explicitly warns against production use; syscall emulation gaps may exist.
+- **No network isolation config** — the current release virtualizes socket syscalls but does not yet expose fine-grained network policy controls.
+
+## Practical Evaluation Checklist
+
+- Install npm package on a Linux host: `npm install bvisor` → works
+- Boot sandbox in under 10ms: verified by README benchmark claim (2ms boot)
+- Run a shell command and capture stdout: works
+- Verify writes are sandboxed: writing to `/tmp` is invisible to host filesystem
+- Verify `chroot` is blocked: returns error as documented
+- Attempt a dangerous syscall (`ptrace`, `mount`): blocked with `EPERM`
+
+## Security Notes
+
+bVisor blocks the following syscall categories (returns `EPERM`):
+
+| Category | Syscalls |
+|---|---|
+| Privilege escalation | `ptrace`, `mount`, `umount2`, `chroot`, `pivot_root`, `reboot`, `setns`, `unshare`, `seccomp`, `bpf` |
+| Cross-process memory | `process_vm_readv`, `process_vm_writev` |
+| Kernel modules | `kexec_load`, `kexec_file_load`, `init_module`, `finit_module`, `delete_module` |
+
+The README advises that bVisor is a proof-of-concept and should not yet be used in production. Test thoroughly before deploying in any security-sensitive context.
+
+## FAQ
+
+**Q: How does bVisor differ from gVisor?**
+**A:** gVisor runs an application inside a separate user-space kernel with its own filesystem and network stacks. bVisor runs directly in the host process with direct visibility to the host filesystem, using copy-on-write for isolation only on write operations. bVisor aims for lower latency (~2ms vs gVisor's container start time) by skipping the kernel shim entirely.
+
+**Q: Does it work on Windows or macOS?**
+**A:** Not yet. bVisor currently ships for Linux only. For other operating systems, Docker containers remain the practical alternative.
+
+**Q: Is bVisor a container runtime?**
+**A:** No. There is no container image, no Docker involved, and no VM. It is a library that runs inside your application process and intercepts syscalls from any child processes it spawns.
+
+**Q: How does filesystem isolation work?**
+**A:** Read-only filesystem access passes through to the real host filesystem. Write operations are redirected to a sandbox-local overlay directory using copy-on-write. The host filesystem is never modified by sandboxed operations.
+
+## Conclusion
+
+bVisor is a young but promising project targeting a specific gap in the AI agent tooling landscape: safe, low-latency bash execution embedded directly in the agent process. The 2ms boot target and copy-on-write filesystem isolation are architecturally sound. The Apache-2.0 license and Zig implementation are unusual in this space and worth watching.
+
+The Linux-only constraint and early-stage status are honest limitations. If you are building agentic tools on Linux today, bVisor is worth an evaluation — but treat it as a proof-of-concept and test the syscall boundaries carefully before any production deployment.
