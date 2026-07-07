@@ -1,0 +1,179 @@
+---
+title: "CocoIndex – Incremental Data Framework for AI Agents"
+description: "Open-source incremental data framework that keeps AI agents grounded in fresh, structured context. Only the delta is reprocessed — no stale batches, zero re-processing."
+pubDate: "2026-07-07"
+tags: ["ai-setup", "dev-tools", "data-pipeline", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cocoindex-incremental-data-framework.webp"
+  alt: "CocoIndex – incremental data framework for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** CocoIndex is an open-source (Apache-2.0) Rust-core, Python-API framework that keeps AI agents fed with fresh context by tracking data lineage and reprocessing only what changed — not the entire dataset.
+
+## Source and Accuracy Notes
+
+- Project page: [cocoindex.io](https://cocoindex.io)
+- Source repository: [github.com/cocoindex-io/cocoindex](https://github.com/cocoindex-io/cocoindex)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=44369237](https://news.ycombinator.com/item?id=44369237)
+- Stars: 10,600+ (verified via GitHub API, as of July 2026)
+- Source last checked: 2026-07-07
+
+## What Is CocoIndex?
+
+Most RAG pipelines re-process entire codebases, document stores, or data lakes on every sync. If a single file changes, you re-embed everything. CocoIndex flips this: it tracks **what changed** via data lineage and reprocesses only the delta.
+
+From the README:
+
+> CocoIndex turns codebases, meeting notes, inboxes, Slack, PDFs, and videos into live, continuously fresh context for your AI agents and LLM apps to reason over effectively — with minimal incremental processing.
+
+The project is Rust-powered under the hood (fast, memory-safe), with a Python API for declaring sources, targets, and transformations. A single `@coco.fn(memo=True)` decorator is the core primitive — it caches the result by hashing the input and the function body, so only actual changes trigger recomputation.
+
+## Core Concepts
+
+CocoIndex is built around three primitives:
+
+### Sources
+
+Connectors for the data you want to index:
+
+```python
+from cocoindex.connectors import localfs, postgres, slack
+```
+
+Supported sources include local filesystem, Postgres, Slack, and more — see the [connector docs](https://cocoindex.io/docs/).
+
+### Targets
+
+Where indexed data lands:
+
+```python
+table = await postgres.mount_table_target(PG, table_name="docs")
+table.declare_vector_index(column="embedding")
+```
+
+### The `@coco.fn` Decorator
+
+The heart of incremental processing:
+
+```python
+import cocoindex as coco
+from cocoindex.connectors import localfs, postgres
+from cocoindex.ops.text import RecursiveSplitter
+
+@coco.fn(memo=True)  # cached by hash(input) + hash(code)
+async def index_file(file, table):
+    for chunk in RecursiveSplitter().split(await file.read_text()):
+        table.declare_row(text=chunk.text, embedding=embed(chunk.text))
+
+@coco.fn
+async def main(src):
+    table = await postgres.mount_table_target(PG, table_name="docs")
+    table.declare_vector_index(column="embedding")
+    await coco.mount_each(index_file, localfs.walk_dir(src).items(), table)
+
+coco.App(coco.AppConfig(name="docs"), main, src="./docs").update_blocking()
+```
+
+Run once to backfill. Re-run anytime — only the changed files re-embed.
+
+### Data Lineage
+
+Every row in a target tracks its provenance: which source document it came from, what transformation produced it, and when it was last refreshed. This is critical for debugging AI outputs and understanding why an agent saw what it saw.
+
+### MCP Server for Coding Agents
+
+CocoIndex ships an MCP server (`cocoindex-code`) specifically for AI coding agents:
+
+- **AST-aware chunking** — understands code structure, not just text
+- **Call graph tracking** — knows which functions call which
+- **Blast-radius analysis** — when a function changes, knows what else is affected
+- **Incremental by default** — sub-second freshness after a commit
+- **Supports** Python, TypeScript, Rust, and Go
+
+Install the skill for your agent:
+
+```sh
+pip install -U cocoindex
+```
+
+Then point it at your repo. Claude Code, Cursor, and other MCP-aware agents see the full repository context instantly, refreshed on every file change.
+
+## Setup
+
+### Install
+
+```sh
+pip install -U cocoindex
+```
+
+Requires Python 3.10-3.13. The Rust core is pre-compiled and bundled.
+
+### Quick Start
+
+```python
+import cocoindex as coco
+
+@coco.fn(memo=True)
+async def my_flow(src):
+    ...
+
+coco.App(coco.AppConfig(name="my-app"), my_flow, src="/path/to/data").update_blocking()
+```
+
+### Self-Hosted Deployment
+
+CocoIndex can run fully self-hosted. There is no mandatory cloud component — the entire sync engine runs on your infrastructure:
+
+```sh
+docker run -d --restart=unless-stopped -p 8080:8080 cocoindex/cocoindex
+```
+
+Connect your own Postgres, S3, or other backing store for the target.
+
+## Practical Evaluation Checklist
+
+- **Incremental sync works** — `@coco.fn(memo=True)` caches by input+code hash; only changed data is re-processed (README-verified)
+- **Python API** — Declarative, 5-minute setup (README claim, consistent with API shape)
+- **Rust core** — Core processing in Rust; Python API on top (README-verified: `rust-core` badge, `db6d28` badge color)
+- **Apache-2.0 license** — Fully open source, no mandatory paid tier for core features
+- **MCP server** — `cocoindex-code` MCP server for Claude Code and Cursor (README, skills/ directory)
+- **Self-hostable** — Docker image available, no lock-in to cloud service
+- **Data lineage** — Every row tracks its source and transformation chain
+- **Vector index support** — `declare_vector_index()` on table targets
+
+## Security Notes
+
+- Data stays in your infrastructure — self-host option means no mandatory data egress
+- CocoIndex Cloud is available if you want a hosted option; self-hosted is the default
+- The framework reads from whatever sources you connect (Slack, Postgres, localfs) — apply standard access controls on those systems
+- No built-in authentication or authorization layer — CocoIndex is a data pipeline tool, not an access control system; wrap it behind your own auth if exposing via API
+
+## FAQ
+
+**Q: How is this different from just running a cron job that re-embeds everything?**
+**A:** CocoIndex tracks what actually changed. A cron job re-processes the full dataset every interval — a 50-file repo change means 50 re-embeds. CocoIndex's lineage engine knows exactly which files changed and only processes those. On large codebases or frequent updates, this is the difference between sub-second refreshes and minutes of re-processing.
+
+**Q: Does this replace LangChain or LlamaIndex?**
+**A:** No — those are frameworks for building RAG applications (chunking strategies, prompt templates, retrieval logic). CocoIndex is the **data pipeline layer underneath them**: it ensures the data those frameworks retrieve from is always fresh. You can use CocoIndex to feed a LangChain or LlamaIndex pipeline with incrementally maintained indexes.
+
+**Q: Does CocoIndex have a hosted option?**
+**A:** Yes, CocoIndex Cloud offers a hosted service. The core open-source framework is fully self-hostable with Docker.
+
+## Conclusion
+
+CocoIndex solves the "stale context" problem that plagues production AI agents. Instead of re-indexing everything on every change, it tracks data lineage and only touches what actually changed — keeping your agents' context fresh without the recompute overhead.
+
+The Rust core and Python API make it approachable for Python-first AI teams while delivering the performance of a compiled language for the hot path. The MCP server for coding agents is the killer integration for developer tooling: Claude Code and Cursor get live repository context without the token waste of full re-indexing on every keystroke.
+
+If you are building production AI agents that need reliable, fresh data context — especially over large codebases or frequently-updated documents — CocoIndex is worth a look.
+
+- [cocoindex.io](https://cocoindex.io) — project page and docs
+- [GitHub](https://github.com/cocoindex-io/cocoindex) — 10K+ stars, Apache-2.0
+- [Quickstart](https://cocoindex.io/docs/getting_started/quickstart) — 5-minute intro
