@@ -1,0 +1,201 @@
+---
+title: "Sumi – Free Voice Dictation with Per-App AI Polish"
+description: "Free, open-source voice dictation for macOS. Whisper + local LLM polish that adapts tone per app—Gmail gets formal, Slack stays professional, LINE is casual."
+pubDate: "2026-07-08"
+tags: ["ai-setup", "macos", "voice-dictation", "local-ai"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sumi.webp"
+  alt: "Sumi voice dictation app interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sumi is a free, open-source menu-bar app for macOS that turns speech into text, then rewrites it with a local LLM tuned to the app you're in—Gmail gets formal prose, Slack gets professional shorthand, LINE gets casual chat.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [sumivoice.com](https://sumivoice.com/en/) — verified OG image and product description
+- Source repository: [github.com/alan890104/sumi](https://github.com/alan890104/sumi) — README read in full, LICENSE verified (GPLv3)
+- License: [GPLv3](https://github.com/alan890104/sumi/blob/main/LICENSE) — verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=47306572](https://news.ycombinator.com/item?id=47306572)
+- Source last checked: 2026-07-08 (commit `main` branch)
+
+## What Is Sumi?
+
+Sumi is a menu-bar application for macOS that provides system-wide voice dictation. You press a hotkey anywhere, speak, and the transcribed and AI-rewritten text pastes at your cursor. The twist is that Sumi runs **two local AI models** on every transcription: a speech-to-text engine (Whisper or Qwen3-ASR) and a local LLM that rewrites the output to match the target app's conventions.
+
+From the README:
+
+> **System-wide speech-to-text for macOS. Free and open source.**
+> Press a hotkey anywhere. Speak. The text pastes at your cursor — rewritten by an AI that knows which app you're in.
+
+### Architecture
+
+- **Speech recognition (Stage 1):** Whisper (whisper-rs, 7 model variants with DTW timestamps) or Qwen3-ASR. Both run fully on-device.
+- **Text polishing (Stage 2):** A local LLM via candle (HuggingFace's Rust ML framework). Available models: Phi 4 Mini (2.5 GB), Ministral 3B/14B, Qwen 3 4B/8B. All Q4_K_M GGUF. Runs on Metal (macOS) or CUDA (Windows).
+- **VAD (Voice Activity Detection):** Silero VAD pre-filters audio before either STT engine runs.
+- **App context detection:** Reads the active app and URL (NSWorkspace + osascript on Mac, GetForegroundWindow on Windows) to select the right rewrite prompt.
+
+### Per-App AI Polish
+
+Sumi ships with 18 built-in rewrite rules keyed to specific apps, bundle IDs, or URL patterns. For example:
+
+| App | Output style |
+|-----|-------------|
+| Gmail | Formal prose with greeting and sign-off |
+| Slack | Professional shorthand, skips filler words |
+| LINE | Casual, conversational |
+| Terminal | Clean command output |
+
+You can write custom rules or let the AI generate one from a description. The rule system is per-app, per-URL-regex, so you can have different tones for different contexts within the same app.
+
+### Edit by Voice
+
+Select any text in any app, press Option+E, and speak an instruction like "make this more formal" or "translate to Japanese." Sumi rewrites the selected text in place via a local LLM call.
+
+### Meeting Mode
+
+Background transcription to SQLite. Start before a call, stop when done. Speaker diarization with timestamps. Import existing audio files for retroactive transcription.
+
+### Cloud or Local — Your Choice
+
+Everything runs on-device by default. Optional BYOK cloud is available:
+- **STT:** Groq, OpenAI, Deepgram, Azure
+- **Polish:** OpenRouter, Groq, Gemini, SambaNova, or any OpenAI-compatible endpoint
+
+No Sumi account required. No subscription.
+
+### Supported Languages
+
+58 UI languages. Automatic zh-CN to zh-TW normalization on transcription output for Traditional Chinese users.
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS (Tauri v2, Metal GPU required for on-device inference)
+- Homebrew (optional, for install via tap)
+
+### Step 1: Install Sumi
+
+```bash
+brew tap alan890104/sumi && brew install --cask sumi
+```
+
+Alternatively, download the DMG from the releases page:
+
+```
+https://github.com/alan890104/sumi/releases/latest
+```
+
+### Step 2: Choose Your STT Engine
+
+On first launch, Sumi prompts you to select a speech recognition model:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| Whisper (7 variants) | Varies | whisper-rs, DTW timestamps |
+| Qwen3-ASR | ~2 GB | Quantized by author, better accented speech |
+
+Both run locally via Metal on macOS. Select the model that best matches your accent and language needs.
+
+### Step 3: Choose Your Polish LLM
+
+Sumi downloads the selected polish model on first use. Default models:
+
+| Model | VRAM/RAM | Recommended for |
+|-------|----------|----------------|
+| Phi 4 Mini | ~2.5 GB | Lightweight, fast |
+| Ministral 3B | ~3 GB | Balanced speed/quality |
+| Ministral 14B | ~14 GB | Higher quality |
+| Qwen 3 4B | ~4 GB | Good multilingual |
+| Qwen 3 8B | ~8 GB | Best quality option |
+
+All distributed as Q4_K_M GGUF. The polish model handles context detection and rewriting.
+
+### Step 4: Configure App Rules (Optional)
+
+Sumi's default rules cover major apps. To add or modify a rule:
+
+1. Open the Sumi menu bar app, then **Rules**
+2. Click **New Rule**
+3. Set the app name, bundle ID, or URL regex to match
+4. Choose a built-in template or describe the desired output style
+
+Custom rules are stored locally and persist across updates.
+
+## Deeper Analysis
+
+### Why Sumi vs. Alternatives?
+
+The existing tools in this space (Wispr Flow, SuperWhisper) are cloud-only for AI processing and subscription-based. Sumi's key differentiator is that **both stages of the pipeline run locally**: STT via Whisper/Qwen3-ASR and rewriting via a local GGUF LLM. The author explicitly built this because they wanted:
+
+- Local inference for both stages
+- Custom prompt rules per app
+- Source code they could actually read and audit
+
+### Technical Notes
+
+- **Rust plus Tauri v2** frontend — the core STT and LLM inference pipeline is in Rust
+- **Svelte 5** UI framework
+- **candle** (HuggingFace's Rust ML framework) for local LLM inference
+- **whisper-rs** bindings for Whisper STT
+- **SQLite** for meeting mode transcripts
+- **Metal** GPU acceleration on macOS, **CUDA** on Windows
+
+### Privacy Model
+
+All audio processing happens on-device. The app reads the active window (app name plus URL) to select the rewrite prompt, but no audio or transcript is sent to any server unless you configure a BYOK cloud endpoint.
+
+## Practical Evaluation Checklist
+
+- [ ] Installs via Homebrew tap or DMG without errors
+- [ ] Hotkey works system-wide (test in a few apps)
+- [ ] Per-app tone adaptation is active (dictation in Gmail versus Slack produces different output)
+- [ ] Edit-by-voice Option+E works in a native app
+- [ ] Meeting mode starts/stops and produces timestamped transcript
+- [ ] BYOK cloud endpoint works as fallback (optional)
+- [ ] Local LLM polish is perceptibly faster than cloud alternatives on same hardware
+
+## Security Notes
+
+- All inference runs locally by default — no mandatory cloud dependency
+- BYOK is opt-in and requires manual endpoint configuration
+- No Sumi account or telemetry is required to use the app
+- Source code is publicly readable on GitHub
+
+## FAQ
+
+**Q: Does Sumi work on Windows?**
+**A:** Yes. STT and LLM inference run on CUDA (Windows) or Metal (macOS). The UI is cross-platform via Tauri v2.
+
+**Q: How much RAM/VRAM do I need?**
+**A:** The minimum polish model (Phi 4 Mini) needs roughly 2.5 GB. The most capable option (Ministral 14B) needs ~14 GB. On macOS, Metal shared memory covers this on modern Apple Silicon.
+
+**Q: Can I use my own LLM with Sumi?**
+**A:** Yes. Sumi supports any OpenAI-compatible endpoint for the polish stage via BYOK. You can point it at Ollama, LM Studio, or any self-hosted model server.
+
+**Q: Does it support languages other than English?**
+**A:** Whisper and Qwen3-ASR both support 100+ languages with automatic code-switching. The 58 UI languages refer to the Sumi app interface itself, not the speech recognition supported languages.
+
+**Q: Is the app free?**
+**A:** Yes. Sumi is free and open source under GPLv3. There is no subscription, no account required, and no forced cloud dependency.
+
+## Conclusion
+
+Sumi is a well-architected local-first voice dictation tool that addresses the gap between raw speech-to-text and polished, context-aware text output. By running both STT and LLM rewriting locally via Rust-based inference (whisper-rs plus candle), it delivers a workflow that cloud-only tools like Wispr Flow cannot match on privacy grounds — and, depending on your hardware, may match or beat on speed.
+
+The per-app tone adaptation is the killer feature for power users who switch between Gmail, Slack, and messaging apps throughout the day. One spoken dictation pass produces contextually appropriate text for each target environment without manual editing.
+
+If you want to audit the code, extend it, or self-host your inference stack, the full source is on GitHub under GPLv3. If you just want a free, local voice dictation tool that adapts to how you write in each app, Sumi delivers that with no account and no subscription.
+
+**Useful links:**
+
+- GitHub (source, releases): [github.com/alan890104/sumi](https://github.com/alan890104/sumi)
+- Project page: [sumivoice.com](https://sumivoice.com/en/)
