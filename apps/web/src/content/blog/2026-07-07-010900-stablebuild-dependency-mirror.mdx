@@ -1,0 +1,147 @@
+---
+title: "StableBuild - Freeze and Pin Any Software Dependency"
+description: "StableBuild mirrors Docker, Python, Debian, and Ubuntu packages into immutable, version-pinned endpoints so your builds never break when upstream changes."
+pubDate: "2026-07-07"
+tags: ["dev-tools", "docker", "python", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/stablebuild.webp"
+  alt: "StableBuild product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** StableBuild mirrors Docker Hub, PyPI, Debian, Ubuntu, and Alpine into immutable, version-pinned endpoints — eliminating broken builds when upstream packages change or disappear. Free tier with 1 TB traffic included.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [stablebuild.com](https://www.stablebuild.com)
+- Documentation: [stablebuild.gitbook.io/en/](https://stablebuild.gitbook.io/en/)
+- Pricing page: [stablebuild.com/pricing](https://www.stablebuild.com/pricing)
+- HN launch thread: Not available (Show HN post had no URL attached)
+
+## What Is StableBuild?
+
+When an upstream Docker image gets deleted, a PyPI package version vanishes, or an apt source rotates its keys, your CI pipeline breaks — even though nothing in your own code changed. StableBuild addresses this by maintaining fully mirrored, historically versioned copies of major software repositories and exposing them through immutable endpoints.
+
+The core promise: **make your existing builds deterministic in under five lines of configuration**, without restructuring your architecture.
+
+The service mirrors:
+
+- **Docker Hub** — immutable image mirror; protects against images being overwritten or deleted, and removes Docker Hub pull rate limits
+- **Ubuntu, Debian, Alpine** — daily snapshot of complete package repositories with full version history
+- **PyPI** — full historical Python package index; works with both Pip and Poetry
+- **Arbitrary file URLs** — pin any file or URL immutably in a single line of code
+
+## Setup Workflow
+
+### Step 1: Create a Free Account
+
+Sign up at [dashboard.stablebuild.com](https://dashboard.stablebuild.com). The free Community tier includes 1 TB of traffic and 30 GB of CDN storage — sufficient for personal projects and small team CI.
+
+### Step 2: Configure a Docker Mirror
+
+StableBuild provides a registry mirror URL for each Docker image you want to pin. In your `Dockerfile` or `docker-compose.yml`, replace the upstream image reference with your StableBuild-pinned equivalent:
+
+```dockerfile
+# Before (upstream — mutable)
+FROM python:3.12-slim
+
+# After (StableBuild — immutable snapshot)
+FROM registry.stablebuild.com/python/3.12-slim@sha256:abc123...
+```
+
+The digest-based reference locks both the image content and the registry endpoint. If the upstream image is later overwritten or deleted, your build continues using the exact cached copy.
+
+### Step 3: Pin Python Dependencies with Poetry
+
+For Python, configure Poetry to resolve packages through StableBuild's PyPI mirror:
+
+```toml
+# pyproject.toml
+[[tool.poetry.source]]
+name = "stablebuild"
+url = "https://pypi.stablebuild.com/simple/"
+default = true
+```
+
+Run `poetry install` as normal. StableBuild serves a historically snapshotted version of PyPI — if a package version is later yanked or a dependency disappears from the index, your lockfile remains valid.
+
+### Step 4: Pin apt Packages
+
+For Debian/Ubuntu systems, configure your apt sources to point at the StableBuild mirror:
+
+```bash
+# /etc/apt/sources.list.d/stablebuild.list
+deb https://deb.stablebuild.com/ubuntu jammy main
+```
+
+Update and install as usual. The mirror retains all historical package versions — you can install `nginx=1.18.0` months after it has been superseded in the default archive.
+
+## Deeper Analysis
+
+### The Problem StableBuild Solves
+
+Modern software builds rely on external package registries that are, by design, mutable. Docker Hub images can be overwritten with the same tag. PyPI packages can be yanked. Ubuntu archives rotate keys. When any of this changes, builds that worked last week fail today — even if your code is identical.
+
+The traditional mitigation is vendoring everything, but that inflates repository sizes and creates maintenance overhead. StableBuild takes a middle path: it acts as a proxy and cache that snapshots upstream state at build time, then serves that immutable snapshot indefinitely.
+
+### CDN-Backed Distribution
+
+All mirrors are served through Cloudflare's CDN, which means low-latency access globally without StableBuild operating its own edge infrastructure. For teams distributed across regions, this avoids the latency penalty that self-hosted mirrors typically incur.
+
+### Pricing Tiers
+
+From [stablebuild.com/pricing](https://www.stablebuild.com/pricing):
+
+| Tier | Price | Traffic | Storage | Key limit |
+|---|---|---|---|---|
+| Community | Free | 1 TB (hard limit) | 30 GB (hard limit) | 5 users |
+| Professional | $199/month | 10 TB | 1 TB | Unlimited users |
+| Enterprise | $499/month | 30 TB | 3 TB | SSO/SAML support |
+
+Overage pricing applies for traffic beyond the included quota ($0.10/GB) and storage ($0.05/GB/month).
+
+## Practical Evaluation Checklist
+
+- [ ] Docker image pinned with digest reference and confirmed resolvable
+- [ ] PyPI mirror verified with `pip install` through the StableBuild endpoint
+- [ ] Mirror latency measured vs. direct upstream (CDN should be comparable or faster)
+- [ ] Historical package version installed (e.g., an older `nginx` release) to confirm snapshot depth
+- [ ] Build reproducibility tested by rebuilding a week-old commit against the pinned mirror
+
+## Security Notes
+
+Since StableBuild operates as a man-in-the-middle between your build system and upstream registries, consider the following:
+
+- **HTTPS only** — all endpoints use TLS, preventing in-transit tampering
+- **Digest pinning** — Docker images referenced by SHA256 digest cannot be swapped without changing the digest
+- **Vendor lock-in risk** — if StableBuild discontinues the service, you need a migration plan (self-hosted mirrors or vendoring)
+- **Supply chain trust** — you are extending trust to StableBuild's infrastructure as an additional dependency; factor this into your threat model
+
+## FAQ
+
+**Q: Does StableBuild cache indefinitely, or do snapshots expire?**
+**A:** The mirror retains historical snapshots permanently. New package versions from upstream are fetched on demand and added to the cache. Once a version is cached, it does not expire.
+
+**Q: How does this differ from using a private registry mirror like Harbor or self-hosted Docker distribution?**
+**A:** Self-hosted mirrors require you to operate the infrastructure and manage storage. StableBuild offloads both to their managed Cloudflare-backed infrastructure. You get immutability and deduplication without the operational burden.
+
+**Q: Can I pin an image that no longer exists on Docker Hub?**
+**A:** Yes — if StableBuild has already pulled and cached that image, you can reference it by digest even after it has been deleted from Docker Hub. This is one of the primary use cases.
+
+**Q: What happens when I exceed the free tier traffic limit?**
+**A:** The free tier has a hard traffic cap. Once exceeded, builds against the mirror will fail until the next billing period or you upgrade. Overage pricing on paid tiers is metered.
+
+## Conclusion
+
+StableBuild targets a specific but painful class of CI failures: upstream mutability breaking reproducible builds. By mirroring Docker Hub, PyPI, and major Linux package repositories behind immutable endpoints, it removes a whole category of intermittent build failures without requiring you to vendor every dependency.
+
+The free tier is genuinely useful for personal projects. The $199/month Professional tier is reasonable for teams that need reliable, fast CI without operating their own mirrors.
+
+**→ [stablebuild.com](https://www.stablebuild.com)**
