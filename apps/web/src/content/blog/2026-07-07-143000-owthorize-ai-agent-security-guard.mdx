@@ -1,0 +1,149 @@
+---
+title: "owthorize – Block Destructive AI Agent Tool Calls Before They Run"
+description: "owthorize is a synchronous Node.js guard that parses SQL, HTTP, shell, and filesystem tool calls into typed shapes and evaluates them against rules — catching destructive AI agent actions before they execute."
+pubDate: "2026-07-07"
+tags: ["ai-agent", "security", "nodejs", "sql-injection", "ssrf"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/owthorize.webp"
+  alt: "owthorize product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** owthorize is a synchronous Node.js guard that intercepts AI agent tool calls, parses them into typed shapes (SQL AST, normalized URLs, tokenized shell commands), and evaluates them against rules — blocking destructive actions like `DELETE FROM users` with no `WHERE` before they ever reach your database.
+
+## What Is owthorize?
+
+AI agents call tools. Tools have side effects. Three things go wrong in production:
+
+1. **Prompt injection** — hidden instructions in a document or webpage coerce the model into calls the developer never anticipated.
+2. **Hallucinated arguments** — the model forms a syntactically valid call with the wrong payload, like `DELETE FROM users` instead of `DELETE FROM users WHERE id = ?`.
+3. **Reasoning errors** — the model tries to "be helpful" and runs destructive cleanup it wasn't asked to run.
+
+Telling a model to "be careful" is not a security control. The failure happens at the **tool call**, not the prompt — so that's where owthorize lives: between your agent and your database, HTTP endpoint, filesystem, and shell.
+
+owthorize blocks by understanding what a call actually *does* — parsing SQL into an AST, normalizing URLs, tokenizing shell commands — instead of pattern-matching strings. Regex misses `WHERE 1=1`, schema-qualified table names, and IPv4-mapped IPv6 addresses. owthorize doesn't.
+
+> **Parse, don't match.** The model isn't the boundary. The layer between it and your systems is.
+
+## Installation
+
+```bash
+npm install owthorize
+```
+
+Requires Node.js 18 or higher. Both ESM and CommonJS are supported.
+
+## Quickstart
+
+```ts
+import { Guard, rules, GuardDenied } from "owthorize"
+
+const guard = new Guard({
+  rules: [
+    rules.sql.denyDDL(),                              // block DROP, ALTER, TRUNCATE, etc.
+    rules.sql.denyMutationWithoutWhere(),              // block DELETE/UPDATE with no WHERE
+    rules.http.denyHosts(rules.http.SSRF_DEFAULTS),   // block internal IPs, AWS metadata
+  ],
+})
+
+// Wrap your tool handler once. owthorize intercepts every call.
+const safeQuery = guard.tool("db.query", {
+  adapter: "sql.postgres",
+  handler: async ({ query }: { query: string }) => db.query(query),
+})
+
+// This gets blocked before it ever reaches your database:
+try {
+  await safeQuery({ query: "DROP TABLE users" })
+} catch (err) {
+  if (err instanceof GuardDenied) {
+    console.log(err.matched, "->", err.reason)
+    // sql.denyDDL -> DDL not allowed: drop
+  }
+}
+```
+
+### Simulate Without Side Effects
+
+```ts
+const result = guard.simulate("db.query", { query: "DROP TABLE users" })
+// { decision: "deny", matched: "sql.denyDDL", reason: "DDL not allowed: drop", irreversible: true }
+```
+
+`guard.simulate()` runs the full evaluation pipeline but never calls your handler — safe for test suites.
+
+## How It Works: Adapters
+
+When your agent calls a tool, owthorize passes the payload through an **adapter** before rules evaluate it. The adapter turns the raw input into a typed, structured shape. Rules see that shape — not the original string.
+
+| Adapter | What your tool receives | What rules see |
+|---|---|---|
+| `sql.postgres` / `sql.mysql` / `sql.sqlite` | `{ query, params? }` | `kind`, `tables`, `hasWhere`, `ddlOp`, `dialect` |
+| `http` | `{ url, method?, headers?, body? }` | parsed URL with IPv4-mapped IPv6 normalization |
+| `shell` | `{ command }` or `{ argv }` | tokenized argv, metacharacter / pipe / redirect / substitution flags |
+| `fs` | `{ path, op? }` | normalized absolute path, op type |
+| `raw` | anything | passthrough for cross-adapter custom rules |
+
+This is the core difference from regex. A rule like `denyMutationWithoutWhere()` doesn't search for the word "WHERE" in a string — it checks whether the parsed SQL AST has a WHERE node. `DELETE FROM users WHERE 1=1` has a WHERE node and passes. That's documented, expected behavior.
+
+## Built-in Rules
+
+```ts
+// SQL
+rules.sql.denyDDL()                         // DROP, TRUNCATE, ALTER, CREATE, RENAME
+rules.sql.denyMutationWithoutWhere()         // UPDATE/DELETE with no WHERE clause
+rules.sql.denyTables({ deny: ["users"] })    // block writes to specific tables
+rules.sql.denyTables({ allow: ["logs"] })    // only allow writes to specific tables
+
+// HTTP
+rules.http.denyHosts(rules.http.SSRF_DEFAULTS)   // RFC1918, loopback, AWS metadata, *.internal
+rules.http.denyHosts(["evil.com"])
+
+// Shell
+rules.shell.denyDangerous()                  // rm -rf, pipe abuse, backtick/$() substitution
+rules.shell.denyBackground()                 // commands ending with &
+
+// Filesystem
+rules.fs.denyTraversal()                    // block path traversal attempts
+rules.fs.restrictRoot("/app/workspace")     // all ops must resolve inside this directory
+```
+
+## What It Catches
+
+| Category | Examples blocked |
+|---|---|
+| SQL DDL | `DROP TABLE`, `TRUNCATE`, `ALTER TABLE`, `CREATE`, `RENAME` |
+| Unbounded mutations | `DELETE FROM users` with no `WHERE`, `UPDATE users SET ...` with no `WHERE` |
+| SSRF targets | `169.254.169.254` (AWS metadata), `192.168.x.x`, `localhost`, `*.internal`, IPv4-mapped IPv6 |
+| Dangerous shell | `rm -rf`, pipe abuse, backtick / `$()` substitution, shell metacharacters |
+| Path traversal | Anything resolving outside configured root directories |
+
+## FAQ
+
+**Q: Does owthorize work with non-Node.js agents?**
+**A:** The core Guard and rules engine are Node.js-only. The design patterns (AST parsing, adapter-based evaluation) could be ported, but no official ports exist yet.
+
+**Q: How is this different from a WAF or a regex-based input filter?**
+**A:** Regex pattern-matches strings and misses evasion techniques like `WHERE 1=1`, IPv4-mapped IPv6 (`::ffff:192.168.1.1`), and schema-qualified table names. owthorize parses inputs into typed structures before evaluating them — the same approach a compiler uses to catch bugs, not a firewall uses to block keywords.
+
+**Q: Can I write custom rules?**
+**A:** Yes. The `raw` adapter passes the original payload through, and you can write typed rule functions against the parsed shape. The API supports custom predicates beyond regex strings.
+
+**Q: Does it work with TypeScript?**
+**A:** Yes. The package ships with TypeScript type definitions (`.d.ts`) included.
+
+**Q: What's the performance overhead?**
+**A:** owthorize evaluates rules synchronously in-process before your handler runs. For SQL, HTTP, and shell adapters, the parsing step adds negligible latency — well under 1ms for typical query sizes.
+
+## Source and Accuracy Notes
+
+- Project page: [owthorize on npm](https://www.npmjs.com/package/owthorize)
+- Source repository: [github.com/Spyyy004/owthorize](https://github.com/Spyyy004/owthorize)
+- License: MIT (verified via LICENSE file on GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=48785072](https://news.ycombinator.com/item?id=48785072)
+- Current version: 0.4.2 (verified via npm registry)
