@@ -1,0 +1,175 @@
+---
+title: "Ghidra MCP Server – 256 Tools for AI Reverse Engineering"
+description: "Production-ready MCP server bridging Ghidra's reverse engineering capabilities with AI tools and automation frameworks. 256 tools, Docker headless mode, convention enforcement."
+pubDate: "2026-07-09"
+tags: ["reverse-engineering", "ghidra", "mcp", "ai-tools", "security"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ghidra-mcp.webp"
+  alt: "Ghidra MCP Server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Ghidra MCP Server is an Apache-2.0 Model Context Protocol bridge that exposes 256 Ghidra reverse-engineering operations as MCP tools, enabling AI agents to analyze binaries through a standardized interface with Docker headless support.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/bethington/ghidra-mcp](https://github.com/bethington/ghidra-mcp)
+- Source repository: [github.com/bethington/ghidra-mcp](https://github.com/bethington/ghidra-mcp)
+- License: Apache-2.0 (verified via `LICENSE` file on `main` branch)
+- HN launch thread: [news.ycombinator.com/item?id=46882389](https://news.ycombinator.com/item?id=46882389)
+- Documentation: README.md on `main` branch, `python -m tools.setup --help` for CLI reference
+- Source last checked: 2026-07-09
+
+## What Is Ghidra MCP Server?
+
+Ghidra MCP Server is a production-ready Model Context Protocol bridge developed by reverse engineer [bethington](https://github.com/bethington). It exposes Ghidra's binary analysis engine through 256 MCP tools, letting AI agents interact with compiled executables using a standardized protocol rather than Ghidra's GUI or custom scripts.
+
+The project positions itself as a daily-driver tool for working reverse engineers, not a demo. Key differentiators from other Ghidra MCP implementations:
+
+- **3x more tools** than competing implementations (256 vs ~80 reported for alternatives)
+- **Write access** rather than read-only operations — renaming, typing, commenting, structure creation, script execution, P-code emulation
+- **Convention enforcement** — naming standards, type safety, and documentation rules embedded in the tool layer so AI output stays consistent without per-prompt style guides
+- **Batch operations** with atomic transactions — the README claims 93% API call reduction for bulk workflows
+- **Cross-binary documentation transfer** — SHA-256 function hash matching propagates comments across binary versions automatically
+
+## Prerequisites
+
+- Java 21 LTS (OpenJDK recommended)
+- Apache Maven 3.9+
+- Ghidra 12.1.2 (or compatible version)
+- Python 3.10+ with pip
+- Model Context Protocol client (Claude Desktop, Cursor, Windsurf, etc.)
+
+## Setup Workflow
+
+### Step 1: Clone the repository
+
+```bash
+git clone https://github.com/bethington/ghidra-mcp.git
+cd ghidra-mcp
+```
+
+### Step 2: Preflight check (optional but recommended)
+
+Before building, verify your environment has all required dependencies:
+
+```bash
+python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.2_PUBLIC
+```
+
+Replace `~/ghidra_12.1.2_PUBLIC` with your actual Ghidra installation path.
+
+### Step 3: Build and deploy to Ghidra
+
+The canonical build uses Maven through the `tools.setup` module:
+
+```bash
+python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.2_PUBLIC
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path ~/ghidra_12.1.2_PUBLIC
+```
+
+`ensure-prereqs` installs runtime Python requirements and Ghidra JARs into the local Maven repository. `deploy` copies build output, installs the user-profile extension, patches Ghidra user config, and restarts Ghidra with MCP health checks.
+
+> **Note:** Ghidra 12.1.2 ships Jython as an optional extension. Java scripts work by default, but `.py` scripts in `ghidra_scripts/` require installing the Jython extension via **File > Install Extensions** and restarting Ghidra.
+
+### Step 4: Docker headless mode
+
+For CI/CD pipelines or environments without a display, use Docker Compose:
+
+```bash
+docker-compose up -d ghidra-mcp
+
+# Verify connection
+curl http://localhost:8089/check_connection
+# Connection OK - GhidraMCP Headless Server v5.15.0
+```
+
+Headless mode lets you load binaries and run auto-analysis over HTTP without the Ghidra GUI:
+
+```bash
+# Load a binary
+curl -X POST -d "file=/data/program.exe" http://localhost:8089/load_program
+
+# Run auto-analysis
+curl -X POST -d "program=/data/program.exe" http://localhost:8089/run_auto_analysis
+```
+
+## Deeper Analysis
+
+### Tool categories
+
+The 256 tools span every major Ghidra subsystem:
+
+| Category | Operations |
+|---|---|
+| **Function analysis** | Decompilation, call graphs, cross-references, completeness scoring |
+| **Data flow analysis** | P-code emulation (forward/backward), value propagation from any register or variable |
+| **Data structures** | Struct/union/enum creation, field analysis, naming suggestions |
+| **String extraction** | Regex search, quality filtering, string-anchored function discovery |
+| **Memory inspection** | Raw memory reads, byte pattern search, array boundary detection |
+| **Import/export** | Symbol tables, external locations, ordinal import resolution |
+| **Documentation** | Batch comment authoring, cross-binary hash matching and propagation |
+| **Dynamic analysis** | Live debugger integration (dbgeng on Windows PE, gdb/lldb on Linux/macOS), breakpoints, register/memory reads |
+
+### Convention enforcement
+
+The v5.0 release moved naming conventions into the tool layer, eliminating per-prompt style guide repetition. Three enforcement tiers:
+
+| Tier | Behavior |
+|---|---|
+| **Auto-fix** | Applied silently (e.g., `count` on `uint32` → `dwCount` on save) |
+| **Warn** | Change applied but warning returned with correct naming |
+| **Reject** | Change blocked with explanation |
+
+For AI agents, this means consistent output regardless of model or session. The tool knows the rules; the model just calls the tool.
+
+### Cross-binary documentation
+
+SHA-256 function hashing lets you document a function in one binary and automatically propagate those comments to the same function in a different build or version. Document once; applies everywhere.
+
+## Practical Evaluation Checklist
+
+- [ ] Preflight passes with `python -m tools.setup preflight`
+- [ ] MCP tools appear in your AI client tool registry (Claude Desktop, Cursor, etc.)
+- [ ] Can decompile a known binary and read the output
+- [ ] Convention enforcement triggers on intentionally bad naming
+- [ ] Headless Docker mode responds to `curl http://localhost:8089/check_connection`
+- [ ] Batch operation reduces API calls vs. individual tool calls (confirm via logs)
+
+## Security Notes
+
+- **Local-only by design** — the server runs locally with access to whatever binaries you load; no telemetry or phone-home reported in the codebase
+- **Headless mode exposes HTTP port 8089** — bind to `localhost` in untrusted environments; Docker Compose default may expose externally
+- **Ghidra scripts run with full process privileges** — only load binaries you own or have legal authority to analyze
+- **Maven dependency scope** — `ensure-prereqs` pulls Ghidra JARs into `.m2/`; verify your org's policy on third-party JAR caching if deploying in enterprise environments
+
+## FAQ
+
+**Q: How does this compare to the NSA's official Ghidra MCP?**
+**A:** The official NSA Ghidra repository does not ship an MCP server. This is an independent implementation (github.com/bethington/ghidra-mcp) that pre-dates and supersedes the NSA's Community Firmware Analysis enhancements in scope — covering 256 tools vs. the handful available in the NSA fork.
+
+**Q: Can I use this without Ghidra installed?**
+**A:** The GUI/Ghidra-plugin mode requires Ghidra 12.1.2+. However, the Docker headless server bundles Ghidra internally and only requires Docker — no local Ghidra installation needed for headless workflows.
+
+**Q: Does it work with Ghidra 12.0 or 12.1?**
+**A:** The README targets 12.1.2. Shared Ghidra Server users should note that 12.1.2 clients require a Ghidra Server at 12.1, 12.0.5, or newer — older server versions may reject connection.
+
+**Q: What AI clients support MCP with this server?**
+**A:** Any client that implements the Model Context Protocol spec. The README specifically calls out GitHub Copilot CLI and Claude Desktop as validated clients.
+
+**Q: Is the tool count accurate?**
+**A:** The README claims 256 MCP tools on the `main` branch (as of July 2026). The exact count may grow — verify with `git log` and the tool catalog in the repo.
+
+## Conclusion
+
+Ghidra MCP Server fills a real gap for AI-assisted reverse engineering: instead of writing one-off Ghidra Python scripts or manually navigating the GUI, you expose every Ghidra operation through a protocol AI models already understand. The convention enforcement layer is a thoughtful touch for teams using AI in code review workflows — consistent output without per-prompt instructions.
+
+The Docker headless mode is the most practical entry point for automation and CI/CD. The GUI plugin is better suited for interactive exploration sessions. Either way, 256 tools covering the full Ghidra API surface makes this the most comprehensive Ghidra MCP implementation available.
