@@ -1,0 +1,195 @@
+---
+title: "BotBrowser – Extract Clean Markdown from Any Webpage"
+description: "Webpages average 50K+ tokens. BotBrowser strips the bloat and returns clean markdown, saving 90–95% of tokens for LLM agents. MIT licensed."
+pubDate: "2026-07-09"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/botbrowser.webp"
+  alt: "BotBrowser product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** BotBrowser extracts clean markdown from any URL, cutting LLM token costs by 90–95% with no API key or server required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [thebotbrowser.com](https://thebotbrowser.com) — verified content and feature list
+- Source repository: [github.com/AmplifyCo/botbrowser](https://github.com/AmplifyCo/botbrowser) — README read in full
+- License: MIT (verified via `LICENSE` file on GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=42587891](https://news.ycombinator.com/item?id=42587891) — Show HN, 2026-07-08
+- Source last checked: 2026-07-09 (commit `main`, README v1)
+
+## What Is BotBrowser?
+
+A typical web page weighs **52,000+ tokens**. The actual article content? Just **2,000–5,000 tokens**. The rest is ads, scripts, tracking, navigation, and CSS noise thatinflates context windows without adding value.
+
+BotBrowser is an open-source tool that fetches a URL and returns clean, structured markdown — stripping scripts, styles, cookie banners, nav bars, and hidden elements. It ships native SDKs for both JavaScript/TypeScript and Python, with no API key or server required for basic use.
+
+```
+Raw HTML:   52,000 tokens  ████████████████████████████████████████████████████
+BotBrowser:  3,200 tokens  ██████
+                           ↑ 94% savings
+```
+
+## Setup Workflow
+
+### Step 1: Install the SDK
+
+Install via your language's package manager:
+
+```bash
+npm install botbrowser    # JavaScript / TypeScript
+```
+
+```bash
+pip install botbrowser    # Python
+```
+
+No API key. No account. No server. Works offline after install.
+
+### Step 2: Extract Content from a URL
+
+Pass any URL and get back clean structured output:
+
+```typescript
+import { extract } from 'botbrowser';
+
+const result = await extract('https://example.com/article');
+console.log(result.content);       // clean markdown
+console.log(result.metadata.tokenSavingsPercent);  // 94
+```
+
+```python
+from botbrowser import extract
+
+result = extract("https://example.com/article")
+print(result.content)                         # clean markdown
+print(result.metadata.token_savings_percent)  # 94
+```
+
+### Step 3: Inspect the Full Response
+
+The returned object includes structured metadata alongside the content:
+
+```json
+{
+  "url": "https://example.com/article",
+  "title": "Article Title",
+  "description": "Meta description",
+  "content": "# Article Title\n\nClean markdown content...",
+  "textContent": "Plain text version...",
+  "links": [
+    { "text": "Related Article", "href": "https://example.com/related" }
+  ],
+  "metadata": {
+    "rawTokenEstimate": 52000,
+    "cleanTokenEstimate": 3200,
+    "tokenSavingsPercent": 94,
+    "wordCount": 1250,
+    "fetchedAt": "2026-02-26T10:30:00.000Z"
+  }
+}
+```
+
+### Step 4: Configure Extraction Options
+
+```typescript
+const result = await extract({
+  url: 'https://example.com',
+  format: 'text',          // "markdown" (default) or "text"
+  timeout: 10000,          // request timeout in ms (default: 15000)
+  includeLinks: false,     // extract links (default: true)
+});
+```
+
+```python
+result = extract(
+    "https://example.com",
+    format="text",
+    timeout=10000,
+    include_links=False,
+)
+```
+
+## Optional REST API
+
+For language-agnostic access or shared infrastructure, BotBrowser also ships a Docker-based REST API:
+
+```bash
+docker compose up
+# or: cd js && pnpm install && pnpm build && pnpm dev
+```
+
+```bash
+curl -X POST http://localhost:3000/extract \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://example.com"}'
+```
+
+Python client for the REST API:
+
+```python
+from botbrowser import BotBrowserClient
+
+client = BotBrowserClient("http://localhost:3000")
+result = client.extract("https://example.com")
+```
+
+## How It Works
+
+```
+URL → Fetch → Extract → Clean → Markdown
+```
+
+1. **Fetch** — Smart HTTP with user-agent rotation, redirect handling, and timeouts
+2. **Extract** — Identifies main content using Mozilla Readability (JS) and Trafilatura (Python)
+3. **Clean** — Strips scripts, styles, ads, nav, footers, cookie banners, tracking, and hidden elements
+4. **Convert** — Produces clean Markdown preserving headings, lists, links, tables, and code blocks
+
+## Practical Evaluation Checklist
+
+- [ ] Install SDK and run basic extract on a news article URL
+- [ ] Compare raw HTML token count against BotBrowser output token count
+- [ ] Test with a JS-heavy site (e.g. SaaS product page) to verify noise removal
+- [ ] Verify code blocks and tables render correctly in the markdown output
+- [ ] Test `includeLinks: false` to reduce output size for single-page scraping
+- [ ] Spin up the REST API with Docker and confirm curl extraction works
+- [ ] Check Python vs JS output parity on the same URL (edge case: sites that gate against one SDK)
+
+## Security Notes
+
+- BotBrowser runs locally — no data leaves your infrastructure unless you self-host the REST API
+- The REST API Docker image should be network-isolated in production; do not expose it publicly without authentication
+- No API key or credentials are required for the SDK, which means no secrets to rotate or leak
+- Review the source if scraping internal or authenticated pages to ensure no session cookies or auth headers are forwarded unexpectedly
+
+## FAQ
+
+**Q: How does it compare to existing tools like Readability.js or Trafilatura?**
+**A:** BotBrowser wraps Mozilla Readability (JavaScript) and Trafilatura (Python) — the same engines powering Firefox Reader View. The added value is a unified API across both languages, a REST server option, and a token-usage reporting layer built into the metadata response.
+
+**Q: Does it handle JavaScript-rendered pages (SPA)?**
+**A:** The SDK does not include a headless browser. For sites that render content via JavaScript, you would need to pre-render (e.g. with Playwright or Puppeteer) before passing the HTML to BotBrowser. The REST API also does not handle JS rendering.
+
+**Q: What about rate limiting or blocking from target sites?**
+**A:** The SDK includes basic user-agent rotation and respects robots.txt. For bulk scraping, add your own retry logic and rate limiting. Use a proxy pool for high-volume production workloads.
+
+**Q: Is there a hosted API or does it require self-hosting?**
+**A:** BotBrowser itself is self-hosted only. There is no official managed API at this time. The REST API Docker image lets you self-host a shared extraction service within your own network.
+
+## Conclusion
+
+BotBrowser solves a concrete problem — web pages are bloated, and sending 50K+ tokens to an LLM for a 3K-token article is wasteful. The 90–95% token reduction directly translates to lower API costs and faster response times, especially at scale.
+
+The dual-language SDKs, MIT license, and zero-config local use make it easy to drop into existing pipelines. If you are building AI agents that read web content, this is worth keeping in your stack.
+
+- GitHub: [AmplifyCo/botbrowser](https://github.com/AmplifyCo/botbrowser)
+- npm: [botbrowser](https://www.npmjs.com/package/botbrowser)
+- PyPI: [botbrowser](https://pypi.org/project/botbrowser/)
