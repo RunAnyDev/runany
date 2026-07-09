@@ -1,0 +1,137 @@
+---
+title: "Spanly – MCP Observability That Actually Understands the Protocol"
+description: "Open-source observability for MCP servers. TypeScript and Python SDKs plus a CLI, with real-time tracing, per-tool latency breakdown, and alerting."
+pubDate: "2026-07-10"
+tags: ["mcp", "observability", "ai-agents", "dev-tools", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/spanly-mcp-observability.webp"
+  alt: "Spanly – MCP Server Observability dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Spanly is an open-source observability layer purpose-built for Model Context Protocol (MCP) servers — tracking tool calls, prompts, resource reads, and errors in real time via TypeScript/Python SDKs or a zero-code CLI. Free tier includes 100k MCP requests per month.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [spanly.com](https://spanly.com) ← visited and verified
+- Source repository: [github.com/spanlyhq/spanly](https://github.com/spanlyhq/spanly) ← README read in full
+- License: [Apache-2.0](https://github.com/spanlyhq/spanly/blob/main/LICENSE) ← verified
+- HN launch thread: [news.ycombinator.com/item?id=48489664](https://news.ycombinator.com/item?id=48489664)
+- Source last checked: 2026-07-10 (commit verified via GitHub API)
+
+## What Is Spanly?
+
+Most AI agent observability tools slot into the same bucket as generic APM: they see HTTP requests, durations, and error rates. But MCP servers speak a different protocol — one built around tool calls, resource reads, and prompt exchanges — and generic APM has no idea what any of that means.
+
+Spanly is purpose-built for MCP. Its SDKs instrument the actual MCP JSON-RPC messages: every tool call, every prompt execution, every resource read gets captured with full arguments, results, and timing. The dashboard then shows you per-tool latency percentiles, error rates broken down by tool name, and traces where the prompt and arguments are preserved next to the span.
+
+> "Those tools see HTTP requests and stack traces. Spanly sees the MCP protocol — tool calls, prompts, resource reads — with the prompt and arguments preserved next to the trace."
+
+The GitHub repo is straightforward: three independently versioned artifacts live under one monorepo.
+
+| Path | Package | Install |
+|---|---|---|
+| `js/` | `@spanly/sdk` (npm) | `npm install @spanly/sdk` |
+| `python/` | `spanly` (PyPI) | `pip install spanly` |
+| `cli/` | `@spanly/spanly` / Homebrew | `npx -y @spanly/spanly run -- <mcp-command>` |
+
+## Quick Start
+
+### TypeScript / JavaScript SDK
+
+```bash
+npm install @spanly/sdk
+```
+
+### Python SDK
+
+```bash
+pip install spanly
+```
+
+### CLI (zero instrumentation required)
+
+```bash
+# via npm — wrap any MCP command
+npx -y @spanly/spanly run -- <your-mcp-command>
+
+# or via Homebrew
+brew install spanlyhq/tap/spanly
+```
+
+The CLI approach requires no code changes: it runs your MCP server as a child process and captures all stdio-based MCP traffic transparently.
+
+## Why Not Just Use My Existing APM?
+
+Spanly is additive, not a replacement. The docs are explicit: keep sending your HTTP and infrastructure telemetry to Datadog, Sentry, or New Relic, and layer MCP-shaped traffic on top of Spanly. Most customers run both side by side.
+
+The key difference is **payload context**. A generic APM records "this HTTP POST took 340ms." Spanly records "tool `code_exec` was called with arguments `[query]`, returned 1,240 tokens, and errored on line 4 of the generated Python." The prompt and full arguments are preserved alongside the trace, which is what you actually need when debugging a misbehaving agent.
+
+Spanly also supports OpenTelemetry export: you can pipe the same MCP spans back into your existing APM so a single trace spans both your HTTP layer and your MCP layer.
+
+## Features
+
+- **Real-time MCP request tracing** — every tool call, prompt execution, and resource read captured as a span
+- **Error tracking with preserved prompts and arguments** — the full context survives the trace
+- **Per-tool latency breakdown** — p50/p95 per tool, not just per endpoint
+- **Alerting** — email, Slack, webhooks; 10 rules on Pro, 100 on Business
+- **Public read-only dashboards** — share with stakeholders without granting app access
+- **Multi-region ingestion** — US and EU endpoints
+
+## Pricing
+
+| Plan | Price | MCP Requests | Retention | Alert Rules |
+|---|---|---|---|---|
+| Free | $0/mo | 100k/mo (soft cap, sampled after) | 30 days | None |
+| Pro | $41/mo (billed annually) | 100k included, $6/100k after | 90 days | Up to 10 |
+| Business | $249/mo | 100k included, volume discounts | 12 months | Up to 100 |
+
+Paid plans also include unlimited seats and public dashboards. Free tier is restricted to 2 seats and has no alerting.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone repo and run `npm install @spanly/sdk` in a TypeScript project with an MCP server
+- [ ] Wrap a Python MCP server with `pip install spanly` and call `spanly.init()`
+- [ ] Use `npx -y @spanly/spanly run --` to trace an existing MCP server without code changes
+- [ ] Verify spans appear in the dashboard at app.spanly.com
+- [ ] Check that per-tool latency breakdown matches expected p50/p95 for your server
+- [ ] Test the CLI proxy mode on a third-party MCP server you do not own
+- [ ] Enable an alert rule for error rate spike and verify Slack/email notification fires
+
+## Security Notes
+
+The SDK instruments your MCP server locally; telemetry is sent to Spanly's hosted ingestion endpoints. For self-hosted options, see the Enterprise plan or contact the team. Vulnerabilities can be reported privately via the [GitHub Security tab](https://github.com/spanlyhq/spanly/security).
+
+## FAQ
+
+**Q: Does Spanly require code changes to my MCP server?**
+**A:** The SDK approach requires minimal instrumentation (`spanly.init()` in Python or `new Spanly()` in TypeScript). The CLI approach requires zero code changes — it wraps the process at the transport layer.
+
+**Q: How is billing calculated for MCP requests?**
+**A:** Each MCP protocol message — initialization, tool call, prompt execution, or resource access — counts as one MCP request. The request and its response count as one.
+
+**Q: Can I self-host Spanly?**
+**A:** Not currently — Spanly is a hosted service. Enterprise plans with custom limits and dedicated support are available on request.
+
+**Q: Does Spanly work alongside Datadog or Sentry?**
+**A:** Yes. Spanly's SDK can export traces via OpenTelemetry to your existing APM, so the same MCP trace appears in both systems.
+
+**Q: What happens if I exceed 100k requests on a paid plan?**
+**A:** Overages are billed at a graduated rate: $6.00 per 100k from 100k to 1M, decreasing to $5.50, $5.25, and $5.00 per 100k at higher volume tiers.
+
+## Conclusion
+
+Spanly fills a real gap in the MCP tooling ecosystem: observability that understands what MCP servers actually do. The three-artifact SDK strategy (TypeScript, Python, CLI) means you can adopt it incrementally — start with the CLI for zero-code tracing, then drop in the SDK for deeper instrumentation. The Free tier is generous enough for solo development and small teams, and the Pro/Business tiers scale reasonably for production workloads.
+
+If you are running MCP servers in production and your current APM is flying blind on tool call performance, Spanly is worth a look.
+
+**Project page:** [spanly.com](https://spanly.com)
+**GitHub:** [github.com/spanlyhq/spanly](https://github.com/spanlyhq/spanly)
+**Docs:** [spanly.com/docs](https://spanly.com/docs/)
