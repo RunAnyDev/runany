@@ -1,0 +1,164 @@
+---
+title: "Nudge - Type-Safe Prompt Builder with AI Codegen"
+description: "Nudge is an open-source TypeScript library for building prompts with a fluent builder API and generating optimized system prompts via AI CLI codegen."
+pubDate: "2026-07-10"
+tags: ["typescript", "dev-tools", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nudge-setup-guide-open-source-typescript-ai-tool.webp"
+  alt: "Nudge - Type-Safe Prompt Builder for TypeScript"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nudge is an open-source TypeScript library that lets you define prompts using a fluent builder API, then generates optimized system prompts via an AI-powered CLI.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [nudge-ai.dev](https://nudge-ai.dev)
+- Source repository: [github.com/nudge-libs/nudge](https://github.com/nudge-libs/nudge)
+- License: MIT (verified via npm package metadata)
+- HN launch thread: [news.ycombinator.com/item?id=46903799](https://news.ycombinator.com/item?id=46903799)
+
+## What Is Nudge?
+
+Nudge is a TypeScript library for developers who want type-safe, maintainable prompts. Instead of writing raw system prompt strings that are hard to version and refactor, you define prompts programmatically using a fluent builder API, then run a CLI that generates optimized system prompts using AI.
+
+The key workflow:
+
+1. Define prompts in `.prompt.ts` files using the fluent builder
+2. Run `npx @nudge-ai/cli generate` to produce `.gen.ts` output
+3. Import the generated prompts anywhere in your app
+
+It supports OpenAI, OpenRouter, and local model providers.
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+npm install @nudge-ai/core @nudge-ai/cli
+```
+
+### Step 2: Initialize configuration
+
+```bash
+npx @nudge-ai/cli init
+```
+
+This creates a `nudge.config.json` file and guides you through choosing a provider (OpenAI, OpenRouter, or local).
+
+### Step 3: Define a prompt
+
+Prompts live in files matching `*.prompt.ts`. The CLI discovers them by this naming convention.
+
+```ts
+// src/summarizer.prompt.ts
+import { prompt } from "@nudge-ai/core";
+
+export const summarizerPrompt = prompt("summarizer", (p) =>
+  p
+    .persona("expert summarizer")
+    .context(
+      "Users will paste articles, documents, or notes they want condensed",
+    )
+    .input("a block of text to summarize")
+    .output("a concise summary")
+    .do("preserve key facts and figures", { nudge: 1 })
+    .do("use clear, simple language")
+    .dont("add opinions or interpretations", { nudge: 3 })
+    .constraint("keep under 3 paragraphs")
+    .example("The quick brown fox...", "A fox jumps over a dog."),
+);
+```
+
+### Step 4: Generate optimized prompts
+
+```bash
+npx @nudge-ai/cli generate
+```
+
+This creates `src/prompts.gen.ts` with AI-generated system prompts. Use `--force` to regenerate ignoring the hash cache:
+
+```bash
+npx @nudge-ai/cli generate --force
+```
+
+### Step 5: Import and use
+
+Import the generated file once at your app's entry point. After that, `.toString()` works on any prompt throughout your codebase.
+
+```ts
+// src/index.ts (entry point)
+import "./prompts.gen";
+
+import { summarizerPrompt } from "./summarizer.prompt";
+
+console.log(summarizerPrompt.toString());
+```
+
+## Builder Methods Reference
+
+| Method | Description |
+|---|---|
+| `.raw(text)` | Include raw text verbatim in the prompt |
+| `.persona(role)` | Define the AI's identity and role |
+| `.context(information)` | Provide background information or situational context |
+| `.input(description)` | Describe what input the AI will receive |
+| `.output(description)` | Specify what the AI should produce |
+| `.do(instruction, options?)` | A positive instruction to follow |
+| `.dont(instruction, options?)` | Something the AI must avoid |
+| `.constraint(rule, options?)` | A hard rule or limitation |
+| `.example(input, output)` | An input/output example to demonstrate expected behavior |
+
+## Deeper Analysis
+
+### Why use a prompt builder instead of raw strings?
+
+Raw string prompts have no type safety, no refactoring support, and no way to track which parts of a prompt influence the output. Nudge solves this by letting you compose prompts from typed building blocks — `.persona()`, `.do()`, `.dont()`, `.constraint()` — that map directly to sections in the generated output.
+
+### The nudge weight system
+
+The `.do()` and `.dont()` methods accept an optional `nudge` weight (integer). Higher values signal more importance. The CLI uses these weights to inform how strongly each instruction should be emphasized in the generated system prompt.
+
+### Hash-based caching
+
+Generated prompts are cached by hash. If a `.prompt.ts` file has not changed, running `generate` will not regenerate it. Use `--force` to bypass.
+
+## Practical Evaluation Checklist
+
+- Installs cleanly with `npm install` — no native dependencies
+- CLI discovery via `*.prompt.ts` naming convention is predictable
+- Hash cache prevents unnecessary regeneration on unchanged prompts
+- Supports OpenAI, OpenRouter, and local model providers
+- Generated prompts export `.toString()` for drop-in compatibility
+- TypeScript-first with full type inference on builder methods
+
+## Security Notes
+
+Prompts and generated output stay in your local codebase. The CLI calls your configured AI provider to generate the optimized prompt text — your prompt definitions and application code are not sent anywhere except to the provider you configure in `nudge.config.json`.
+
+## FAQ
+
+**Q: Does Nudge require a specific AI provider?**
+**A:** No. You configure the provider (OpenAI, OpenRouter, or local) during `npx @nudge-ai/cli init` by editing `nudge.config.json`. The builder API itself is provider-agnostic.
+
+**Q: Can I use Nudge with JavaScript?**
+**A:** Yes — `.prompt.js` files are also accepted alongside `.prompt.ts`. The TypeScript types provide better developer experience, but the library works in plain JavaScript projects.
+
+**Q: How does the hash cache work?**
+**A:** Each time `generate` runs, it hashes the contents of each `.prompt.ts` file. If the hash matches the cached value in `prompts.gen.ts`, that prompt is skipped. Use `--force` to regenerate all prompts regardless of cache.
+
+**Q: Is the generated prompt output version-controlled?**
+**A:** Yes — `prompts.gen.ts` is a regular TypeScript file you can commit. The hash cache lives separately and does not get committed.
+
+## Conclusion
+
+Nudge fills the gap between "raw string prompts" and "full prompt management frameworks." Its fluent builder API gives TypeScript developers a type-safe way to compose prompts, while the AI-powered CLI generates the actual system prompt text. The hash-based caching and provider-agnostic design make it practical for real projects. If you are building AI applications in TypeScript and want more structure around your prompt engineering, Nudge is worth a look.
+
+**HN discussion:** [news.ycombinator.com/item?id=46903799](https://news.ycombinator.com/item?id=46903799)
