@@ -1,0 +1,152 @@
+---
+title: "Nimble – Token-Efficient MCP Server That Lazy Loads Tools"
+description: "Nimble is an MCP server that lazy loads tools on demand instead of flooding your context window with every tool schema. Over 99% token savings on initial MCP load."
+pubDate: "2026-07-10"
+tags: ["mcp", "ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nimble.webp"
+  alt: "Nimble MCP server token savings dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nimble is an MCP server that lazy loads tools only when needed, replacing the naive approach of dumping every tool schema into the context window — cutting initial token use by over 99% in testing.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/mquan/nimble](https://github.com/mquan/nimble)
+- Source repository: [github.com/mquan/nimble](https://github.com/mquan/nimble)
+- License: [MIT](https://github.com/mquan/nimble/blob/main/LICENSE) (verified: `Copyright (c) 2026 Quan Nguyen`)
+- HN launch thread: [news.ycombinator.com/item?id=46645096](https://news.ycombinator.com/item?id=46645096)
+
+## What Is Nimble?
+
+MCP clients naively include all tool descriptions and schemas on the context window at once. When you connect to multiple MCP servers — Notion, Linear, Figma — your chat session accumulates every tool's full schema upfront, even if you only use two or three tools. This is expensive and quickly hits model token limits.
+
+Nimble solves this by acting as a token-efficient proxy. Instead of forwarding every tool schema to the client, it exposes three lightweight top-level tools:
+
+- `list-tools` — lists available tools with concise summaries only
+- `get-tool` — retrieves the full schema for a specific tool on demand
+- `execute-tool` — proxies the actual tool call to the original server
+
+When a model needs a tool, it calls `get-tool` to expand the full schema, then `execute-tool` to run it. No upfront flooding of every schema.
+
+Per the README, testing with popular MCP servers (Notion, Linear, Figma, etc.) showed **over 99% token savings on initial load** and **90% savings during typical chat sessions**.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ (runs over `npx`)
+- An MCP-compatible client (Claude Desktop, Cursor, etc.)
+- Optional: `OPENAI_API_KEY` for automatic LLM-generated tool summaries
+
+### Step 1: Add Nimble to Your MCP Client
+
+Nimble runs over stdio. Configure it as an MCP server in your client's config file:
+
+```json
+{
+  "mcpServers": {
+    "nimble-mcp": {
+      "command": "npx",
+      "args": ["-y", "nimble-mcp"],
+      "env": {
+        "NIMBLE_ENCRYPTION_KEY": "your-encryption-key",
+        "NIMBLE_UI_PORT": "3333"
+      }
+    }
+  }
+}
+```
+
+The `NIMBLE_ENCRYPTION_KEY` encrypts stored server credentials (access and refresh tokens) in a local SQLite database. The `NIMBLE_UI_PORT` sets the local dashboard port (default: `3333`).
+
+### Step 2: Open the Config Dashboard
+
+Open `http://localhost:3333/` in your browser. From here you can:
+
+- Add and authenticate MCP server connections
+- Edit tool summaries manually or auto-generate them via LLM
+- View active connections and their status
+
+### Step 3: Connect MCP Servers
+
+In the dashboard, add your target MCP servers (Notion, Linear, etc.) and authenticate each one. Credentials are encrypted and stored in the local SQLite database.
+
+### Step 4: Enable Automatic Summaries (Optional)
+
+If you provide an `OPENAI_API_KEY` in the server config, Nimble automatically infers concise tool summaries using the LLM when you connect a new server:
+
+```json
+{
+  "env": {
+    "NIMBLE_ENCRYPTION_KEY": "your-encryption-key",
+    "OPENAI_API_KEY": "sk-...",
+    "OPENAI_MODEL": "gpt-4o-mini"
+  }
+}
+```
+
+Without an API key, Nimble uses the first sentence from each tool's description as the summary.
+
+### Step 5: Customize Summaries Manually
+
+Click any tool in the dashboard to open its modal and edit the summary directly. Custom summaries override both the auto-generated and default options.
+
+## How Lazy Loading Works
+
+The core loop:
+
+1. `list-tools` returns every tool's name plus a brief summary — no full schemas
+2. The LLM decides which tool it needs and calls `get-tool` to expand the full schema
+3. `execute-tool` proxies the call to the original MCP server and returns the result
+
+This is in contrast to the standard MCP pattern where all tool schemas are embedded in the initial context, regardless of whether they'll be used.
+
+## Practical Evaluation Checklist
+
+- Runs over stdio — no separate server process, just `npx -y nimble-mcp`
+- Three top-level tools: `list-tools`, `get-tool`, `execute-tool`
+- Local dashboard at `localhost:3333` for managing connections
+- Credentials encrypted in local SQLite with `NIMBLE_ENCRYPTION_KEY`
+- Auto-summarization via OpenAI (requires `OPENAI_API_KEY`)
+- Manual summary editing per tool
+- 9 GitHub stars (as of 2026-07-10) — early-stage project
+- MIT License
+
+## Security Notes
+
+- **Encryption key required** — `NIMBLE_ENCRYPTION_KEY` must be set to encrypt stored server credentials
+- **Local SQLite** — credentials are stored locally, not in memory or a remote DB
+- **No network for tool execution** — `execute-tool` proxies calls to the original server over its native transport (usually stdio or HTTP)
+- **Open source** — audit the code at [github.com/mquan/nimble](https://github.com/mquan/nimble)
+
+## FAQ
+
+**Q: Does this work with any MCP client?**
+**A:** Yes — any client that supports the MCP stdio protocol can run Nimble as a server. Claude Desktop, Cursor, and other common MCP clients are confirmed compatible.
+
+**Q: How much token savings should I expect?**
+**A:** The README reports over 99% token savings on initial load and 90% during typical chat sessions, based on testing with Notion, Linear, and Figma MCP servers. Your results depend on how many servers and tools you connect.
+
+**Q: What happens when a tool is called that hasn't been expanded?**
+**A:** The model calls `get-tool` to fetch the full schema before `execute-tool` runs it. If the schema isn't cached, Nimble fetches it from the original server.
+
+**Q: Is my data sent anywhere?**
+**A:** Only to the MCP servers you connect (Notion, Linear, etc.). Nimble itself is a local proxy — no telemetry or external data sharing beyond what the connected servers already do.
+
+**Q: What is the encryption key for?**
+**A:** It encrypts your server credentials (OAuth tokens, API keys) stored in the local SQLite database. Without it, credentials are stored in plaintext.
+
+## Conclusion
+
+If you run multiple MCP servers and watch your context window inflate with tool schemas, Nimble is a clean solution. It proxies tool calls through three minimal top-level operations and only expands full schemas on demand. The local dashboard makes configuration straightforward, and the encryption key ensures credentials stay local.
+
+Install it with `npx -y nimble-mcp` and open `http://localhost:3333/` to connect your MCP servers. Find the full source and documentation at [github.com/mquan/nimble](https://github.com/mquan/nimble).
