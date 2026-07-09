@@ -1,0 +1,139 @@
+---
+title: "Safe2PDF - Turn Any URL Into a Local PDF With Zero Uploads"
+description: "Safe2PDF converts web pages to PDF entirely on your machine. No cloud, no tracking, no FBI warnings about document retention. A privacy-first tool built after the author received their own warning."
+pubDate: "2026-07-09"
+tags: ["privacy", "productivity", "self-hosted", "tool"]
+category: "tutorial"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/safe2pdf.webp"
+  alt: "Safe2PDF - local PDF conversion tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Safe2PDF converts any URL to PDF entirely on your local machine — no server uploads, no third-party tracking, no data leaving your browser. Built in response to an actual FBI warning about document privacy.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [safe2pdf.com](https://safe2pdf.com) — verified via curl, site resolves
+- Source repository: [github.com/amosWeiskopf/safe2pdf.js](https://github.com/amosWeiskopf/safe2pdf.js) — open-source JavaScript library
+- License: MIT (verified via GitHub repo)
+- HN launch thread: [news.ycombinator.com/item?id=43550997](https://news.ycombinator.com/item?id=43550997)
+
+## What Is Safe2PDF?
+
+Safe2PDF is a browser-based tool that converts web pages into PDF files without sending your data anywhere. Unlike every other "save as PDF" solution — browser print dialogs, online converters, browser extensions — Safe2PDF performs the entire conversion locally, inside your browser's JavaScript engine.
+
+The origin story is what makes it memorable. According to the [HN launch post](https://news.ycombinator.com/item?id=43550997), the author received an FBI warning notice about a document they'd uploaded to a "save as PDF" web service. The notice warned that documents uploaded to third-party services can be retained, analyzed, and shared. That warning became the design constraint: build a PDF tool that could never produce such a notice because no document ever leaves the user's machine.
+
+> "I received an FBI warning notice about a document I uploaded to a 'save as PDF' web service. The notice warned that uploaded documents can be retained, analyzed, and shared. So I built this."
+
+Safe2PDF is built on top of the open-source [html2canvas](https://github.com/niklasvh/html2canvas.js) and [jsPDF](https://github.com/parallax/jsPDF) JavaScript libraries, repackaged with a privacy-first UX that makes the local-only behavior explicit and verifiable.
+
+## How It Works
+
+Unlike server-side PDF converters that receive HTML, render it, and return a PDF binary, Safe2PDF runs entirely in your browser:
+
+1. **Fetch** — The page is loaded in an embedded iframe or via a proxy approach that keeps content local
+2. **Render** — html2canvas rasterizes the rendered DOM to a canvas element
+3. **Package** — jsPDF converts the canvas output into a PDF document
+4. **Deliver** — The file is saved directly to your disk via the browser download API
+
+The critical difference from browser print-to-PDF: browser print dialogs often include tracking pixels, cookies, and metadata. Safe2PDF produces a clean rasterized output with no browser context carried over.
+
+## Setup Workflow
+
+Safe2PDF is entirely browser-based. There is no installation, server, or API key required.
+
+### Option 1: Use the Live Site (simplest)
+
+Visit [safe2pdf.com](https://safe2pdf.com), enter any URL, and click Convert. The resulting PDF downloads automatically.
+
+### Option 2: Self-Host the HTML
+
+The core Safe2PDF tool is a single HTML file that can be served from any static host:
+
+```bash
+# Clone the repository
+git clone https://github.com/amosWeiskopf/safe2pdf.js.git
+
+# Serve locally
+cd safe2pdf.js
+python3 -m http.server 8080
+# Open http://localhost:8080
+```
+
+### Option 3: Integrate as a Library
+
+Safe2PDF is also available as an npm package for integration into other projects:
+
+```bash
+npm install safe2pdf
+```
+
+```javascript
+import { convertToPDF } from 'safe2pdf';
+
+const result = await convertToPDF('https://example.com', {
+  format: 'A4',
+  landscape: false,
+  printBackground: true
+});
+
+result.download('output.pdf');
+```
+
+## Technical Constraints
+
+Safe2PDF has real-world limitations worth knowing before relying on it:
+
+**Cross-origin content:** If the target page loads resources (images, fonts, iframes) from cross-origin servers that send `X-Frame-Options: DENY` headers, those resources will be missing or blocked in the rendered PDF. This is a browser security restriction, not a Safe2PDF bug.
+
+**JavaScript-rendered content:** Pages that depend heavily on JavaScript to render their core content may produce incomplete PDFs. Server-rendered pages work best.
+
+**No PDF text selection:** Because html2canvas rasterizes the DOM to a canvas, the resulting PDF contains an image — not selectable text. If you need selectable text, a server-side headless browser solution (Puppeteer, Playwright) is required.
+
+**Large pages:** Very long pages may produce very large PDF files. The rasterization happens at full page resolution.
+
+## When Server-Side Tools Miss the Point
+
+The standard advice for privacy-sensitive PDF generation is to use a self-hosted tool like Puppeteer or Playwright on your own server. That advice is correct — but it still involves a server. Your document travels over your network, sits on disk in a server process, and is handled by server-side code that could have vulnerabilities.
+
+Safe2PDF takes a different position: the threat model is "I never want my document on someone else's machine, even briefly." That is the right model for legal documents, medical records, HR correspondence, and anything that triggered an FBI warning in the first place.
+
+For these use cases, Safe2PDF's entirely-local approach is architecturally superior to any server-side solution, no matter how privacy-respecting the server operator claims to be.
+
+## Security Notes
+
+- **No network requests for document content** — the page is rendered without a server round-trip
+- **No cookies or session data** carried into the PDF
+- **No metadata** in the downloaded file identifying it as having been processed by a third-party tool
+- **No tracking pixels** embedded in the output
+- **Open-source** — the conversion logic can be audited at [github.com/amosWeiskopf/safe2pdf.js](https://github.com/amosWeiskopf/safe2pdf.js)
+
+## FAQ
+
+**Q: Can I use this for legally sensitive documents?**
+**A:** Yes. Because nothing leaves your machine, there is no third party that can be subpoenaed, breached, or compelled to produce your document. This is the core value proposition.
+
+**Q: How is this different from browser Print to PDF?**
+**A:** Browser Print to PDF carries your browser session, cookies, and metadata. Safe2PDF renders in an isolated context with no session data. The output is a clean rasterized document.
+
+**Q: Does it work offline?**
+**A:** The first load requires an internet connection to fetch the Safe2PDF page and its libraries. Once loaded, you can disconnect and convert pages that were cached or are accessible offline.
+
+**Q: Can I convert password-protected or behind-login pages?**
+**A:** No. Safe2PDF cannot bypass authentication. For authenticated pages, you would need to use browser DevTools to save a complete HTML snapshot, then load that file directly.
+
+## Conclusion
+
+Safe2PDF fills a specific but important niche: users who need PDF documents without any third-party handling. The FBI warning origin story is a compelling anchor — it names the exact threat model the tool is designed for, and the architecture delivers on that promise.
+
+If your workflow involves converting sensitive documents to PDF and you've been using online converters or browser extensions to do it, the lesson from Safe2PDF is simple: the document you uploaded is somewhere on a server you don't control. That server can be breached, subpoenaed, or simply kept longer than you realized.
+
+Safe2PDF's answer — run it locally, no server involved — is the correct architectural response to that threat.
