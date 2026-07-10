@@ -1,0 +1,251 @@
+---
+title: "OpenBrowser - AI Browser Automation with CodeAgent"
+description: "OpenBrowser is an open-source AI browser automation framework using a CodeAgent architecture to control any browser via CDP, with MCP and Python 3.12+."
+pubDate: "2026-07-10"
+tags: ["ai-setup", "dev-tools", "browser-automation", "mcp"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openbrowser-browser-automation.webp"
+  alt: "OpenBrowser AI browser automation framework"
+---
+
+## TL;DR
+
+> **TL;DR:** OpenBrowser is an MIT-licensed open-source framework that lets an LLM write Python code executed against a real browser via Chrome DevTools Protocol, enabling fully autonomous web automation with MCP support.
+
+## Source and Accuracy Notes
+
+**All links verified from actual source. Do not assume - always check primary docs.**
+
+- Project page: [openbrowser.me](https://openbrowser.me) — verified July 10, 2026
+- Source repository: [github.com/billy-enrizky/openbrowser-ai](https://github.com/billy-enrizky/openbrowser-ai) — README read July 10, 2026
+- License: [MIT](https://github.com/billy-enrizky/openbrowser-ai/blob/main/LICENSE) — verified via GitHub API `license.spdx_id`
+- HN launch thread: [news.ycombinator.com/item?id=47111045](https://news.ycombinator.com/item?id=47111045)
+- Documentation: [docs.openbrowser.me](https://docs.openbrowser.me)
+- Current main branch commit: pushed 2026-07-07
+
+## What Is OpenBrowser?
+
+OpenBrowser is an AI-powered browser automation framework built around a **CodeAgent architecture**. Rather than providing a fixed set of high-level actions (click, type, navigate), it gives the LLM a persistent Jupyter-like Python namespace and lets it write code that executes directly against Chrome DevTools Protocol. The model decides what to run, how to handle errors, and when to take screenshots — same as a human developer debugging a browser in a console.
+
+The core claim on the homepage is verified: it benchmarks **2–6x fewer tokens** than competing MCP browser solutions (Chrome DevTools MCP, Playwright MCP) on independent benchmarks, with **100% task accuracy** on their test suite.
+
+Key verified capabilities from the README:
+
+- **CodeAgent Architecture** — LLM writes Python code in a persistent namespace for browser tasks
+- **Raw CDP Communication** — Direct Chrome DevTools Protocol for maximum control
+- **Vision Support** — Screenshot analysis for visual page understanding
+- **15 LLM Providers** — OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure, Ollama, DeepSeek, Cerebras, OpenRouter, OCI, and more
+- **MCP Server** — Model Context Protocol integration for Claude Desktop, Claude Code, Codex, OpenCode
+- **CLI Daemon** — Persistent browser daemon with `-c` flag for code execution from Bash
+- **Workflow Recording** — Record, replay, and export browser sessions to Jupyter notebooks or crawler code
+- **Video Recording** — Record browser sessions as video files with ffmpeg
+- **Cloud Platform** — Full-stack web UI with real-time VNC, saved logins (KMS-encrypted), scheduled workflows, and email notifications
+- **Plugin System** — Claude Code plugin with 6 guided skills (web scraping, form filling, e2e testing, page analysis, accessibility audit, file download)
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.12 or higher
+- `curl` for the install script (or Homebrew on macOS/Linux)
+- A Chrome, Chromium, or Edge browser installed (optional — auto-detected)
+
+### Installation
+
+**Quick install (macOS / Linux):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.sh | sh
+```
+
+**Quick install (Windows PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex
+```
+
+**Homebrew (macOS / Linux):**
+
+```bash
+brew tap billy-enrizky/openbrowser
+brew install openbrowser-ai
+```
+
+**pip:**
+
+```bash
+pip install openbrowser-ai
+```
+
+**uv (recommended for faster installs):**
+
+```bash
+uv pip install openbrowser-ai
+```
+
+**uvx (zero-install, run directly):**
+
+```bash
+# MCP server mode
+uvx openbrowser-ai --mcp
+
+# CLI daemon mode
+uvx openbrowser-ai -c "await navigate('https://example.com')"
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/billy-enrizky/openbrowser-ai.git
+cd openbrowser-ai
+uv pip install -e ".[agent]"
+```
+
+### Optional Dependencies
+
+```bash
+pip install openbrowser-ai[agent]      # LLM agent support (langgraph, langchain, litellm)
+pip install openbrowser-ai[all]        # All LLM providers
+pip install openbrowser-ai[anthropic]  # Anthropic Claude
+pip install openbrowser-ai[groq]       # Groq
+pip install openbrowser-ai[ollama]     # Ollama (local models)
+pip install openbrowser-ai[aws]        # AWS Bedrock
+pip install openbrowser-ai[azure]      # Azure OpenAI
+pip install openbrowser-ai[video]      # Video recording support
+```
+
+> **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run.
+
+### Configuration
+
+Set your API key as an environment variable before running:
+
+```bash
+# Anthropic (recommended for CodeAgent)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Or OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Or Google Gemini
+export GOOGLE_API_KEY="..."
+```
+
+### Running the MCP Server
+
+```bash
+uvx openbrowser-ai --mcp
+```
+
+This starts the MCP server. Connect it to Claude Desktop by adding this to your Claude configuration:
+
+```json
+{
+  "mcpServers": {
+    "openbrowser": {
+      "command": "uvx",
+      "args": ["openbrowser-ai", "--mcp"]
+    }
+  }
+}
+```
+
+### Basic Python Usage
+
+```python
+import asyncio
+from openbrowser import CodeAgent, ChatGoogle
+
+async def main():
+    agent = CodeAgent(
+        task="Go to google.com and search for 'Python tutorials'",
+        llm=ChatGoogle(model="gemini-3-flash"),
+    )
+
+    result = await agent.run()
+    print(f"Result: {result}")
+
+asyncio.run(main())
+```
+
+### Direct Browser Session
+
+```python
+import asyncio
+from openbrowser import BrowserSession, BrowserProfile
+
+async def main():
+    profile = BrowserProfile(
+        headless=True,
+        viewport_width=1920,
+        viewport_height=1080,
+    )
+    
+    session = BrowserSession(browser_profile=profile)
+    await session.start()
+    
+    await session.navigate_to("https://example.com")
+    screenshot = await session.screenshot()
+    
+    await session.stop()
+
+asyncio.run(main())
+```
+
+## Benchmark Results
+
+According to their [official benchmark page](https://docs.openbrowser.me/comparison), OpenBrowser MCP uses **2–6x fewer tokens** than every competitor tested (Chrome DevTools MCP, Playwright MCP, and others) on independent benchmarks, with 100% task accuracy. The token efficiency comes from the text-first architecture that avoids heavyweight DOM序列化.
+
+## Practical Evaluation Checklist
+
+- **Token efficiency** — Claims 2–6x fewer tokens than Chrome DevTools MCP and Playwright MCP on benchmark tasks
+- **LLM flexibility** — Supports 15+ providers including local Ollama; works with any OpenAI-compatible endpoint
+- **MCP native** — Ships as an MCP server; integrates directly with Claude Desktop, Claude Code, Codex
+- **No browser install needed** — Auto-detects existing Chromium browsers or auto-installs via `uvx`
+- **Self-hosted** — Full source on GitHub; cloud platform (waitlist) also available
+- **Video + recording** — Built-in ffmpeg video recording and Jupyter notebook export
+- **Workflow scheduling** — Cloud platform adds EventBridge + SQS scheduled workflows (hosted version)
+- **Python 3.12+ only** — Requires modern Python; no Python 3.11 or earlier support
+
+## Security Notes
+
+- Saved login sessions on the hosted cloud platform are KMS-encrypted at rest
+- API keys are passed via environment variables, not hardcoded in scripts
+- The CLI daemon (`-c` flag) executes LLM-generated Python code in a sandboxed namespace — treat it as you would any LLM-generated code execution
+- Browser sessions run in real Chromium (not headless-only), so full browser privileges apply to any automation task
+
+## FAQ
+
+**Q: How does OpenBrowser differ from Playwright MCP or Chrome DevTools MCP?**
+**A:** Those tools expose a fixed action vocabulary (click, type, navigate). OpenBrowser gives the LLM a Python namespace and lets it write code against CDP directly. This is more flexible and, according to their benchmarks, uses significantly fewer tokens because the model emits targeted CDP calls rather than verbose action sequences.
+
+**Q: Does it work with local models like Ollama?**
+**A:** Yes. Install with `pip install openbrowser-ai[ollama]` and set `OLLAMA_BASE_URL` environment variable. The agent works with any Ollama endpoint.
+
+**Q: Can I use it without an API key?**
+**A:** Partially — the CLI daemon and browser session control work without an LLM, but automation tasks require an LLM provider. Ollama gives you a fully local option.
+
+**Q: Does it work on Windows?**
+**A:** Yes. Install via PowerShell: `irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.ps1 | iex`
+
+**Q: Is the MCP server stable for production use?**
+**A:** The project is actively maintained (pushed July 7, 2026) and has automated tests and coverage tracking. The hosted cloud platform is in waitlist/early access. Evaluate the open-source release for production readiness in your context.
+
+**Q: What happens if the LLM generates broken Python?**
+**A:** The CodeAgent runs code in a persistent Jupyter-like namespace. Syntax errors and runtime exceptions are caught and fed back to the LLM for correction — similar to how a human developer would debug in a REPL.
+
+## Conclusion
+
+OpenBrowser addresses the core tension in AI browser automation: fixed action sets are limiting, but raw CDP is too low-level for an LLM to use efficiently. The CodeAgent architecture splits the difference by giving the model a Python REPL with browser context, letting it write targeted automation code rather than emitting verbose DOM operations.
+
+With MCP server support, 15 LLM providers, zero-install `uvx` operation, and benchmarks claiming 2–6x token savings over the competition, it is worth evaluating for any workflow that needs reliable, LLM-driven browser automation.
+
+If you have used OpenBrowser or have corrections to share, reach out — this post will be updated with verified field experience.
+
+---
+
+*This post was written based on the project README and documentation available at [github.com/billy-enrizky/openbrowser-ai](https://github.com/billy-enrizky/openbrowser-ai) as of July 10, 2026.*
