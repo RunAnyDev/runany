@@ -1,0 +1,188 @@
+---
+title: "Tansive – Policy-Driven AI Agent Platform"
+description: "Open-source platform for securing AI agents with fine-grained policies, runtime enforcement, and tamper-evident audit logs. Apache-2.0."
+pubDate: "2026-07-10"
+tags: ["ai-setup", "self-hosted", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tansive-policy-driven-ai-agents.webp"
+  alt: "Tansive policy-driven AI agent platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tansive is an open-source platform that lets you run AI agents on your own infrastructure with fine-grained access policies, runtime enforcement, and full audit logs — preventing agents from accidentally touching production systems.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [tansive.com](https://tansive.com) — verified July 10, 2026
+- Source repository: [github.com/tansive/tansive](https://github.com/tansive/tansive) — verified July 10, 2026
+- License: Apache-2.0 (verified via GitHub API)
+- HN launch thread: not available
+
+## What Is Tansive?
+
+Tansive is an open-source platform for **secure, policy-driven AI agent execution** on your own infrastructure. Rather than relying on external agent platforms, Tansive lets you define what tools each agent can call, enforce runtime validation rules, and log every action for audit purposes.
+
+The core problem it solves: AI agents are increasingly being given access to real systems — Kubernetes clusters, cloud APIs, deployment pipelines. Without guardrails, a single bad prompt or model hallucination can trigger production changes. Tansive provides the control layer between agents and your infrastructure.
+
+**Key claims from the README:**
+- Works with any agent framework (LangChain, CrewAI, etc.)
+- Policy-driven tool access control with allow/deny rules
+- Portable runtime that deploys as a VM or runs on developer laptops
+- MCP (Model Context Protocol) proxy support for input filtering
+- Full execution graph visibility and tamper-evident audit logs
+- Models can be hosted anywhere with API access
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux/macOS (runtime deployment)
+- Go 1.21+ (for building from source)
+- Docker (optional, for containerized deployment)
+
+### Step 1: Install Tansive
+
+```bash
+# Clone the repository
+git clone https://github.com/tansive/tansive.git
+cd tansive
+
+# Build from source
+go build ./...
+
+# Or install via Homebrew (if available)
+brew install tansive
+```
+
+### Step 2: Configure a Skillset Catalog
+
+Tansive uses a **skillset catalog** — a directory of tools and agent definitions that the control plane manages.
+
+```bash
+# Initialize a catalog
+tansive catalog init ./my-catalog
+
+# Add a skillset (e.g., Kubernetes troubleshooting tools)
+tansive catalog add ./my-catalog/skillsets/k8s-troubleshoot \
+  --tools kubernetes.pods.list,kubernetes.pods.get,kubernetes.troubleshoot
+```
+
+### Step 3: Create a Policy-Governed Session
+
+```bash
+# Create a session with a specific skillset and policy view
+tansive session create /skillsets/k8s-troubleshoot --view devops-engineer
+```
+
+This outputs an MCP endpoint and access token:
+
+```
+Session created. MCP endpoint:
+https://127.0.0.1:8627/session/mcp
+Access token: tn_7c2e4e0162df66d929666703dc67a87a
+```
+
+### Step 4: Define Policy Rules
+
+Tansive uses YAML to define policy rules that the runtime enforces:
+
+```yaml
+# Example: Kubernetes troubleshooter agent policies
+spec:
+  rules:
+    - intent: Allow
+      actions:
+        - system.skillset.use
+        - kubernetes.pods.list
+        - kubernetes.troubleshoot
+      targets:
+        - res://skillsets/agents/kubernetes-agent
+    - intent: Deny
+      actions:
+        - kubernetes.deployments.restart
+        - kubernetes.services.delete
+      targets:
+        - res://skillsets/agents/kubernetes-agent
+```
+
+### Step 5: Connect an Agent Framework
+
+Point your LangChain or CrewAI agent to the local MCP endpoint:
+
+```python
+from langchain.agents import initialize_agent
+from langchain.tools import Tool
+
+tansive_tools = [
+    Tool(
+        name="k8s_pods_list",
+        func=...,
+        description="List Kubernetes pods (policy-governed via Tansive)"
+    )
+]
+
+agent = initialize_agent(
+    tansive_tools,
+    llm,
+    agent="zero-shot-react-description",
+    verbose=True
+)
+```
+
+## Deeper Analysis
+
+**Architecture:** Tansive deploys as a portable runtime (VM or laptop-side process) that acts as a policy enforcement layer between your agent and the tools it calls. The control plane is YAML-based, making it reviewable and version-controlled.
+
+**MCP Proxy:** The built-in MCP proxy can wrap external MCP servers with input filtering — useful when using third-party tools that your agent accesses via the Model Context Protocol. This prevents prompt injection via tool inputs.
+
+**Audit Logging:** Every tool call is logged with tamper-evident metadata. Logs can be reviewed to understand exactly what an agent did, when, and whether policy rules were bypassed or triggered.
+
+**Limitations observed from source:**
+- The GitHub repo has 9 stars (as of July 2026) — early-stage project
+- Last pushed December 2025 — verify active maintenance before production use
+- No commercial hosted offering mentioned; self-hosted only
+
+## Practical Evaluation Checklist
+
+- [ ] Successfully clone and build from source
+- [ ] Create a session and verify MCP endpoint responds
+- [ ] Define a deny-rule policy and confirm the runtime blocks the action
+- [ ] Verify audit log captures a tool call
+- [ ] Test MCP proxy input filtering with a mock injection prompt
+- [ ] Deploy runtime on a VM and connect a LangChain agent remotely
+
+## Security Notes
+
+- **Policy enforcement is only as good as the policy file** — misconfigured allow rules defeat the purpose
+- Audit logs are tamper-evident but not tamper-proof; ensure log storage itself is protected
+- The MCP proxy filters inputs but does not replace output validation — always validate what agents return
+- No mention of encryption at rest for credentials stored in the control plane
+
+## FAQ
+
+**Q: Does Tansive replace my agent framework?**
+**A:** No. Tansive is a sidecar control layer that wraps tools and enforces policies. You keep using LangChain, CrewAI, or any other framework — Tansive intercepts tool calls.
+
+**Q: Can I use Tansive with hosted LLMs?**
+**A:** Yes. Tansive does not manage the LLM itself; it only enforces access policies on the tools the agent calls. Any LLM accessible via API works.
+
+**Q: What is the difference between Tansive and a VPN for agents?**
+**A:** A VPN controls network-level access. Tansive operates at the tool-call level — it can allow listing pods while denying deployment restarts, even within the same Kubernetes API.
+
+**Q: Is there a managed/cloud version?**
+**A:** Not mentioned in the README. The project appears to be self-hosted only as of July 2026.
+
+## Conclusion
+
+Tansive fills a real gap in the agent infrastructure stack: **runtime policy enforcement** between AI agents and the systems they touch. As agents gain access to Kubernetes, cloud APIs, and deployment pipelines, a tool like this becomes a prerequisite for production safety — not an afterthought.
+
+With Apache-2.0 licensing and a lightweight portable runtime, it is accessible to teams that cannot or will not hand agent actions to a third-party platform. The tradeoff is that you own the ops burden of maintaining the control plane yourself.
+
+If you are running agents in a non-trivial environment today, Tansive is worth evaluating as a policy layer before your next production incident.
