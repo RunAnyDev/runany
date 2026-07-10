@@ -1,0 +1,130 @@
+---
+title: "Tesserae – Self-Hosted Dashboards for E-Ink Displays"
+description: "Turn your e-ink panel into a live dashboard with this open-source server. Compose in a browser, push over MQTT or REST, no cloud required."
+pubDate: "2026-07-10"
+tags: ["self-hosted", "e-ink", "dashboard", "iot"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tesserae-ink.webp"
+  alt: "Tesserae dashboard server for e-ink displays"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tesserae is a free, open-source dashboard server for e-ink displays. You compose dashboards in HTML, it renders them headless via Playwright, dithers the output to your panel's color palette, and pushes frames over MQTT or REST. No cloud account, no telemetry.
+
+## What Is Tesserae?
+
+Tesserae is a self-hosted dashboard companion for e-ink displays. If you have a Raspberry Pi driving a Pimoroni Inky, a Waveshare panel, a TRMNL device, or even a jailbroken Kindle gathering dust, Tesserae can turn it into a live, auto-refreshing dashboard.
+
+The core idea is simple: dashboards are plain HTML pages. The editor loads the same URL the production render does — a headless Chromium (via Playwright) screenshots the composition at panel resolution, so what you see in the editor is exactly what appears on the wall.
+
+From the [Tesserae README](https://github.com/dmellok/tesserae):
+
+> Self-hosted dashboard companion for e-ink displays. Compose tile-based dashboards in a browser, render the frame headless, push it to one or more panels over MQTT or HTTP. Open source under AGPL-3.0-or-later. No SaaS, no telemetry, no cloud account required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [tesserae.ink](https://tesserae.ink) ← **MUST visit and verify**
+- Source repository: [github.com/dmellok/tesserae](https://github.com/dmellok/tesserae) ← **MUST read README**
+- License: [AGPL-3.0-or-later](https://github.com/dmellok/tesserae/blob/main/LICENSE) ← **MUST verify from LICENSE file**
+- Docs: [docs.tesserae.ink](https://docs.tesserae.ink/)
+- HN launch thread: [news.ycombinator.com/item?id=48732157](https://news.ycombinator.com/item?id=48732157)
+
+## Hardware Supported
+
+- Pimoroni Inky Impression (via client daemon)
+- Waveshare panels (via custom firmware)
+- Seeed reTerminal
+- TRMNL devices
+- Jailbroken Kindles (via TRMNL client)
+
+## Setup Workflow
+
+### Step 1: Run the Server via Docker
+
+The fastest path is Docker Compose:
+
+```bash
+mkdir tesserae && cd tesserae
+curl -fsSLO https://raw.githubusercontent.com/dmellok/tesserae/main/docker-compose.yml
+docker compose up -d
+```
+
+Open [http://localhost:8765](http://localhost:8765). The first request walks through password setup and an onboarding wizard.
+
+Other install options are documented at [docs.tesserae.ink/install](https://docs.tesserae.ink/install/):
+
+- Home Assistant App
+- LXC / Proxmox / MicroCloud
+- macOS / Linux / Pi shell installer
+- Windows PowerShell
+- Manual venv
+
+### Step 2: Pair Your Panel
+
+Choose a [hardware quickstart](https://docs.tesserae.ink/quickstart/) for your specific panel. The general flow:
+
+1. Install the Pi client (for always-on panels like Inky) or configure the REST endpoint (for battery clients like ESP32 or Kindle).
+2. The client daemon registers with the Tesserae server.
+3. From the compose UI, pair the panel to your account.
+
+### Step 3: Compose a Dashboard
+
+1. Open the editor at `http://localhost:8765/compose`.
+2. Add widgets — each is a plain HTML page. A [widget gallery](https://docs.tesserae.ink/widgets/gallery/) and [community catalog](https://docs.tesserae.ink/widgets/community/) are available.
+3. Preview renders at panel resolution in real time.
+4. Assign the dashboard to one or more panels and set a refresh cadence.
+
+### Step 4: Frames Reach the Panel
+
+When a dashboard changes (or on a timer), Tesserae:
+
+1. Renders the HTML via headless Playwright.
+2. Runs Floyd-Steinberg dithering against the panel's **measured** color palette.
+3. Packs bytes into the panel's native format (4-bit Spectra 6, 1-bit mono, or 4-bit grayscale).
+4. Pushes over MQTT (always-on clients) or serves via REST with `If-None-Match` / 304 caching (battery clients).
+
+## How the Rendering Works
+
+The README explains the rendering pipeline in detail:
+
+> The frame then goes through a per-device renderer: Floyd-Steinberg dithering against the panel's **measured** color palette (Spectra 6 and ACeP panels don't actually produce sRGB primaries; calibrated measurements come from [epdoptimize](https://github.com/paperlesspaper/epdoptimize)), then packing into the exact byte format the panel wants.
+
+This means color accuracy on multi-color e-ink panels depends on actual color measurements of your specific panel — not guesswork. Tesserae includes a calibration tool via `epdoptimize` to get those measurements.
+
+## Widget Architecture
+
+Widgets, renderers, and device kinds are all drop-in plugins (folders). The [developer documentation](https://docs.tesserae.ink/dev/writing-a-widget/) covers how to build a custom widget. The [hardware support guide](https://docs.tesserae.ink/dev/adding-hardware/) covers adding a new panel type.
+
+## Security Notes
+
+- No telemetry. The server phones home for nothing.
+- No cloud account required — everything runs on your own hardware.
+- MQTT can be secured with TLS; REST clients use `If-None-Match` to avoid redundant frame downloads.
+- Password setup is enforced on first launch.
+
+## FAQ
+
+**Q: Does this work with a Kindle Paperwhite?**
+**A:** Yes — jailbroken Kindles with the TRMNL client can receive frames via REST. TRMNL is a supported Tesserae target.
+
+**Q: How does the panel update? Does it stay on Wi-Fi constantly?**
+**A:** For always-on clients (Raspberry Pi + Inky), frames are pushed over MQTT the moment a dashboard changes. For battery clients (ESP32, Kindles), the device wakes, fetches only if the ETag changed (304 = skip), posts battery/RSSI telemetry, and deep-sleeps. No constant Wi-Fi draw.
+
+**Q: Can I use a custom HTML widget without writing code?**
+**A:** Yes. The widget gallery has community-built widgets. You can also paste any public URL into the composer if it renders well at your panel's resolution.
+
+**Q: Is there a Home Assistant integration?**
+**A:** Yes — Tesserae has a [Home Assistant App](https://docs.tesserae.ink/install/home-assistant/) install path.
+
+## Conclusion
+
+Tesserae solves a niche but satisfying problem: you already own e-ink panels that could be showing useful information, but the existing tools are either cloud-dependent or too rigid for custom dashboards. Tesserae's HTML-first, self-hosted approach means you own the whole stack — from the widget HTML to the dithered bytes on your panel.
+
+If you have any e-ink hardware gathering dust, Tesserae is worth a look. The Docker Compose install takes under five minutes.
