@@ -1,0 +1,247 @@
+---
+title: "GO Feature Flag – Self-Hosted Feature Flags Built on OpenFeature"
+description: "Lightweight open-source feature flag solution with multi-language SDK support via OpenFeature relay proxy. Supports A/B testing, progressive rollouts, and cloud-native storage backends."
+pubDate: "2026-07-11"
+tags: ["open-feature", "feature-flags", "self-hosted", "go", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/go-feature-flag.webp"
+  alt: "GO Feature Flag product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** GO Feature Flag is an open-source, self-hosted feature flag server that speaks the OpenFeature standard — giving you multi-language SDK support, A/B testing, progressive rollouts, and cloud-native storage backends, all under the MIT license.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [gofeatureflag.org](https://gofeatureflag.org)
+- Source repository: [github.com/thomaspoignant/go-feature-flag](https://github.com/thomaspoignant/go-feature-flag)
+- License: [MIT](https://github.com/thomaspoignant/go-feature-flag/blob/main/LICENSE) (verified via GitHub API `license.spdx_id`)
+- Latest release: [v1.55.0](https://github.com/thomaspoignant/go-feature-flag/releases/tag/v1.55.0) (2026-07-02)
+- HN launch thread: not confirmed in search
+- Docs: [gofeatureflag.org/docs](https://gofeatureflag.org/docs)
+- OpenFeature: [openfeature.dev](https://openfeature.dev)
+
+## What Is GO Feature Flag?
+
+GO Feature Flag is a lightweight, open-source feature flag solution built in Go. Originally a Go-only library, it now exposes a relay proxy that makes it accessible from any language through the [OpenFeature](https://openfeature.dev/) standard SDKs.
+
+From the README:
+
+> GO Feature Flag is a simple, complete and lightweight self-hosted cloud native feature flag solution 100% Open Source. — [README, github.com/thomaspoignant/go-feature-flag](https://github.com/thomaspoignant/go-feature-flag)
+
+Key capabilities:
+- **OpenFeature-compatible** — use SDKs in Go, Python, JavaScript, Java, .NET, Ruby, PHP, and more
+- **Flag file storage** — fetch from HTTP, S3, Google Cloud Storage, Kubernetes ConfigMap, or local files
+- **Flag formats** — JSON, TOML, and YAML configuration files
+- **Targeting rules** — user targeting, percentage rollouts, gradual rollouts, and scheduled updates
+- **A/B testing** — built-in experimentation with data export to S3, GCS, Kafka, file, and more
+- **Notifications** — webhook and Slack alerts when flags change
+- **Flag evaluation** — boolean, string, number, and JSON variation types
+
+The project has 2,000+ stars on GitHub and is actively maintained (latest release v1.55.0, July 2026).
+
+## Setup Workflow
+
+### Option A: Relay Proxy (recommended for multi-language teams)
+
+The relay proxy exposes an HTTP API for flag evaluation, usable from any OpenFeature SDK.
+
+#### Step 1: Install the relay proxy
+
+```bash
+go install github.com/thomaspoignant/go-feature-flag/cmd/relay-proxy@latest
+```
+
+#### Step 2: Configure the relay proxy
+
+Create a `config.yaml`:
+
+```yaml
+# Where to read flag definitions
+store:
+  type: http
+  url: https://raw.githubusercontent.com/thomaspoignant/go-feature-flag/main/examples/example-flag-config.yaml
+  refreshInterval: 60  # seconds
+
+# HTTP server for SDKs to connect
+server:
+  port: 8081
+  grpcPort: 50051
+```
+
+#### Step 3: Run the relay proxy
+
+```bash
+./relay-proxy
+```
+
+#### Step 4: Use an OpenFeature SDK
+
+Example in Python:
+
+```bash
+pip install go-feature-flag-flagd-provider
+```
+
+```python
+from go_feature_flag import GoFeatureFlag
+
+client = GoFeatureFlag(
+    endpoint="http://localhost:8081",
+)
+
+# Evaluate a flag
+result = client.get_flag_variation(
+    flag_key="my-flag",
+    default_value=False,
+    evaluation_context={"user_id": "user-123"},
+)
+
+if result:
+    # flag is ON for this user
+    print("New feature active!")
+```
+
+### Option B: Go Module (Go-only)
+
+If you are working exclusively in Go:
+
+```bash
+go get github.com/thomaspoignant/go-feature-flag
+```
+
+```go
+import ffclient "github.com/thomaspoignant/go-feature-flag"
+
+func main() {
+    gff, err := ffclient.New(ffclient.Config{
+        PollingInterval: 60 * time.Second,
+        Retriever: &ff.FileRetriever{Path: "flags.yaml"},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer gff.Close()
+
+    enabled := gff.BoolVariation("my-flag", &feature_flag.User{Key: "user-123"}, false)
+    fmt.Println("Flag enabled:", enabled)
+}
+```
+
+### Flag Configuration Example
+
+Flags are defined in YAML (or JSON, TOML):
+
+```yaml
+flag-1:
+  variations:
+    enabled:
+      - "true"
+    disabled:
+      - "false"
+  defaultRule:
+    variation: disabled
+
+  targeting:
+    - name: "Beta users"
+      query: 'targetingUser("user-id") >= "beta-user"'
+      variation: enabled
+
+  rollout:
+    - name: "10% rollout"
+      percentage: 10
+      variation: enabled
+```
+
+## Deeper Analysis
+
+### OpenFeature Integration
+
+GO Feature Flag is part of the [OpenFeature](https://openfeature.dev/) ecosystem, an open standard for feature flagging. This means you are not locked into GO Feature Flag's proprietary SDK — any OpenFeature-compatible SDK can connect to the relay proxy.
+
+Supported SDKs include Go, Python, JavaScript/TypeScript, Java, .NET, Ruby, PHP, and Rust (via flagd).
+
+### Export and Analytics
+
+The relay proxy can export flag evaluation events to multiple destinations:
+
+- Amazon S3
+- Google Cloud Storage
+- Kafka
+- File (local disk)
+- Webhook
+- Slack notifications
+
+This lets you pipe flag event data into your own analytics pipeline or use the built-in experimentation views.
+
+### Self-Hosted Advantages
+
+- **No vendor lock-in** — your flag configuration stays on your infrastructure
+- **No per-seat pricing** — MIT licensed, run on as many servers as you want
+- **Audit trail** — flag changes go through your git workflow
+- **Compliance** — data never leaves your environment
+
+### Comparison with GrowthBook
+
+[GrowthBook](/blog/growthbook-feature-flags-ab-testing/) is another open-source feature flag tool. Key differences:
+
+| | GO Feature Flag | GrowthBook |
+|---|---|---|
+| Architecture | Relay proxy + SDK | Full self-hosted platform |
+| OpenFeature | Native | Via SDK |
+| A/B testing | Export-based | Built-in statistics |
+| Dashboard | No (file-based config) | Yes (web UI) |
+| Languages | OpenFeature SDKs | Own SDKs |
+
+GrowthBook is better if you want a UI and built-in stats. GO Feature Flag is better if you prefer config-as-code and OpenFeature compatibility.
+
+## Practical Evaluation Checklist
+
+- [ ] Pulled the example flag config and parsed the targeting rule syntax
+- [ ] Started the relay proxy locally with a test flag
+- [ ] Verified OpenFeature SDK connectivity to the relay proxy
+- [ ] Tested percentage-based rollout with multiple evaluation calls
+- [ ] Confirmed export to a local file destination
+- [ ] Checked that flag change triggers a webhook notification
+
+## Security Notes
+
+- Flag configurations are fetched over HTTPS when using remote URLs (S3, GCS, HTTP)
+- The relay proxy supports TLS termination
+- No telemetry is sent to the GO Feature Flag maintainers by default — all data stays in your infrastructure
+- The project is CNCF Scorecard checked and publicly audited
+
+## FAQ
+
+**Q: Can I use GO Feature Flag without the relay proxy?**
+**A:** Yes, if you are working in Go. The `go-feature-flag` module can be used directly as a Go library. The relay proxy is required for non-Go languages.
+
+**Q: Does it support gradual rollouts?**
+**A:** Yes. You can configure percentage-based rollouts in the flag YAML, progressively increasing from 1% to 100% of users.
+
+**Q: How are flag changes propagated to running SDK clients?**
+**A:** The relay proxy polls the flag store at a configurable `refreshInterval` (default: 60 seconds). SDKs receive updates on next evaluation after the proxy refreshes its cache.
+
+**Q: Can I store flag configs in Git?**
+**A:** Yes. Point the relay proxy or Go module at a raw GitHub raw URL, an S3 bucket, or a Kubernetes ConfigMap. Flag configs can live in the same repo as your application code.
+
+**Q: What is the difference between a variation and a rule?**
+**A:** A variation is a named value (e.g., `enabled = "true"`). A rule determines which variation a given user receives based on targeting criteria or a percentage rollout.
+
+## Conclusion
+
+GO Feature Flag is a solid choice for teams that want a self-hosted feature flag solution without vendor lock-in. Its OpenFeature integration means you are not stuck with a single SDK — any language with an OpenFeature implementation can connect. The file-based flag configuration plays well with Git-driven workflows, and the export pipeline gives you flexibility in how you analyze flag performance.
+
+If you want a UI and built-in experimentation statistics, pair it with a GrowthBook deployment. If you want config-as-code and multi-language support on a lightweight relay proxy, GO Feature Flag delivers.
+
+- Project page: [gofeatureflag.org](https://gofeatureflag.org)
+- GitHub: [github.com/thomaspoignant/go-feature-flag](https://github.com/thomaspoignant/go-feature-flag)
+- Docs: [gofeatureflag.org/docs](https://gofeatureflag.org/docs)
+- OpenFeature: [openfeature.dev](https://openfeature.dev)
