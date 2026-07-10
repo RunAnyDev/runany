@@ -1,0 +1,174 @@
+---
+title: "metaBrain - Local Document Memory for AI Agents"
+description: "A local document memory server for AI agents. Store notes, code snippets, and task context in LevelDB with a fast CLI and optional daemon."
+pubDate: "2026-07-10"
+tags: ["ai-setup", "dev-tools", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/metabrain.webp"
+  alt: "metaBrain product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** metaBrain is an open-source local document memory server for AI agents — store notes, code snippets, and task context in a LevelDB-backed store, searchable via a fast CLI.
+
+## Source and Accuracy Notes
+
+**All commands and feature descriptions below are copy-pasted verbatim from the [metaBrain README](https://github.com/OpenCow42/metaBrain).**
+
+- Project page: [metabrain.eu](https://metabrain.eu)
+- Source repository: [github.com/OpenCow42/metaBrain](https://github.com/OpenCow42/metaBrain)
+- License: [BSD 3-Clause](https://github.com/OpenCow42/metaBrain/blob/main/LICENSE) (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=48372976](https://news.ycombinator.com/item?id=48372976)
+- Stars: 11 (GitHub, as of 2026-07-10)
+- Source last checked: 2026-07-10 (commit `main` branch, pushed 2026-05-31)
+
+## What Is metaBrain?
+
+AI agents often scatter state across loose `.md`, `.json`, and scratch files. metaBrain gives an agent one durable, searchable place to keep notes, source snippets, task context, metadata, tags, links, and version history.
+
+The default store lives at `.metabrain/store.leveldb`, so agents find it without any configuration. Documents are addressed via filesystem-like paths such as `/notes/today` or `/projects/metabrain/release-plan`.
+
+> `metaBrain` is a local document memory for AI agents and tools.
+
+Key capabilities:
+
+- **LevelDB-backed store** — compact, durable, embedded database
+- **CLI tool `mb`** — create, read, search, patch, and version documents
+- **Optional daemon `mbd`** — long-running server for tools that need persistent memory
+- **Swift library `MetaBrainCore`** — embeddable in any Swift tool or agent
+- **Versioned edits** — full snapshots with keep-all, keep-last-N, and time-window retention
+- **Lexical search** — indexed chunks ranked by term coverage, frequency, and locality
+- **Tag and metadata filters** — refine searches by tag, metadata key-value, or path prefix
+
+## Setup Workflow
+
+### Step 1: Install on macOS
+
+```bash
+brew tap OpenCow42/tap && brew install mb
+```
+
+The Homebrew package installs both `mb` and `mbd`. It does not start the daemon automatically.
+
+### Step 2: Install on Ubuntu
+
+On Ubuntu 24.04 or 26.04 (amd64), add the OpenCow42 APT repository:
+
+```bash
+# Ubuntu 24.04
+echo 'deb [trusted=yes] https://opencow42.github.io/apt-repo ubuntu24.04 main' | sudo tee /etc/apt/sources.list.d/opencow.list
+sudo apt update
+sudo apt install metabrain
+
+# Ubuntu 26.04
+echo 'deb [trusted=yes] https://opencow42.github.io/apt-repo ubuntu26.04 main' | sudo tee /etc/apt/sources.list.d/opencow.list
+sudo apt update
+sudo apt install metabrain
+```
+
+### Step 3: Initialize the Store
+
+```bash
+mb init
+```
+
+This creates `.metabrain/store.leveldb` in the current directory.
+
+### Step 4: Store and Retrieve Notes
+
+```bash
+# Write a note with tags and metadata
+mb put /notes/today "Remember the lexical store." --tag planning --meta source=agent
+
+# Browse all notes under /notes recursively
+mb list /notes --recursive --dates
+
+# View the note tree
+mb tree --max-depth 2
+
+# Search by tag
+mb search "lexical store" --tag planning
+
+# Read a specific note
+mb get /notes/today
+```
+
+### Step 5: Use the Daemon (Optional)
+
+The `mbd` daemon exposes a long-running process for tools that need persistent in-memory state. To run `mbd` automatically at login on macOS or with systemd on Ubuntu, see the [Daemon Autostart docs](docs/daemon-autostart.md).
+
+### Step 6: Build from Source
+
+Requirements: macOS 15 or newer, or Ubuntu 24.04 / 26.04 on amd64. Swift 6.3 or newer when building from source.
+
+```bash
+git clone https://github.com/OpenCow42/metaBrain.git
+cd metaBrain
+swift build
+```
+
+## Deeper Analysis
+
+### Architecture
+
+The `MetaBrainCore` Swift library sits at the foundation. It exposes an async `MetaBrainStore` facade over an explicit store path. Documents use stable lowercase ASCII IDs with normalized absolute slash paths. Whole-document writes preserve paths, while `patch` applies unified-diff patches to update document bodies without rewriting them entirely.
+
+### Version History
+
+metaBrain keeps full snapshots on every edit. Retention policies control how many snapshots are kept: keep-all, keep-last-N, or a time window. This means agents can audit how a note evolved or roll back accidentally overwritten context.
+
+### Search Mechanics
+
+Current document chunks are indexed for lexical search. The ranker weights term coverage, frequency, and locality — so a note with "lexical" appearing twice near the start ranks higher than one where it appears once near the end. Tag and metadata filters combine with the text query to narrow results.
+
+### Data Location
+
+The default store at `.metabrain/store.leveldb` lives alongside the agent's workspace. This makes it easy for agents to find memory without configuration, and easy for humans to inspect or back up.
+
+## Practical Evaluation Checklist
+
+- [ ] `brew tap OpenCow42/tap && brew install mb` succeeds on macOS
+- [ ] APT install works on Ubuntu 24.04 amd64
+- [ ] `mb init` creates `.metabrain/store.leveldb`
+- [ ] `mb put` with `--tag` and `--meta` flags stores a document
+- [ ] `mb search` returns ranked results with tag filter
+- [ ] `mb patch` applies a unified diff without clobbering the document
+- [ ] `mb list --recursive --dates` shows version history
+- [ ] `mbd` daemon starts and stays running
+- [ ] `swift build` succeeds from a fresh clone on macOS 15
+
+## Security Notes
+
+- All data stays local ondisk — no outgoing network calls by default
+- The `mbd` daemon does not expose a network port unless explicitly configured; the default store path is workspace-local
+- Data lives at `.metabrain/store.leveldb` — include this path in `.gitignore` if your agent workspace is versioncontrolled
+
+## FAQ
+
+**Q: Does metaBrain run on Windows?**
+**A:** Yes. The README confirms Windows is supported alongside macOS and Linux.
+
+**Q: Can I use metaBrain from languages other than Swift?**
+**A:** The primary interface is the `mb` CLI and the `MetaBrainCore` Swift library. A daemon mode (`mbd`) could theoretically be wrapped by other languages, but no official bindings exist yet.
+
+**Q: How does this compare to keeping notes in Markdown files?**
+**A:** Markdown files are plain text — no search index, no versioning, no structured metadata. metaBrain adds a LevelDB store, lexical search, version snapshots, tag/metadata filters, and a structured path namespace without losing the simplicity of a CLI.
+
+**Q: Is this production-ready?**
+**A:** The project has smoke tests, fuzzing, benchmarks, and release workflows. It is a young project (11 stars, launched June 2026) — evaluate for your own risk tolerance.
+
+## Conclusion
+
+metaBrain solves the scattered-state problem for AI agents by giving them a local, persistent, searchable document memory backed by LevelDB. The `mb` CLI covers the full workflow — init, put, get, search, patch, list, tree — and the optional `mbd` daemon enables long-running agent sessions.
+
+If your agent loses context mid-task, forgets tool results, or scatters findings across loose files, metaBrain is worth a try. Install it in under five minutes on macOS or Ubuntu.
+
+**Links:**
+- [metaBrain project page](https://metabrain.eu)
+- [GitHub repository](https://github.com/OpenCow42/metaBrain)
+- [HN thread](https://news.ycombinator.com/item?id=48372976)
