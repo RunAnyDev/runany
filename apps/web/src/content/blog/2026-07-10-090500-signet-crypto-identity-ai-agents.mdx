@@ -1,0 +1,158 @@
+---
+title: "Signet - Replace Bearer Tokens with Crypto Identity for AI Agents"
+description: "Signet uses Ed25519 and post-quantum ML-DSA-44 ephemeral certificates to replace bearer tokens with phishing-resistant cryptographic proof-of-possession for AI coding agents."
+pubDate: "2026-07-10"
+tags: ["ai-security", "developer-tools", "open-source", "cryptography"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/signet-agent-identity-crypto.webp"
+  alt: "Signet - cryptographic identity for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Signet replaces bearer tokens with ephemeral Ed25519 certificates, giving AI coding agents a phishing-resistant cryptographic identity. Git commit signing works offline in sub-millisecond time.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links verified from actual source, not guessed.**
+
+- Project page: [notme.bot](https://notme.bot) — verified July 2026
+- Source repository: [github.com/agentic-research/signet](https://github.com/agentic-research/signet) — README read end-to-end
+- License: Apache-2.0 (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=47170174](https://news.ycombinator.com/item?id=47170174) — verified via HN Algolia
+- APAS standard: [agent-provenance-standard.md](https://github.com/agentic-research/signet/blob/main/docs/apas/agent-provenance-standard.md) — read
+
+## What Problem Does Signet Solve?
+
+AI coding agents modify source code autonomously, but authentication has not kept pace. Most agent tools authenticate with long-lived bearer tokens or API keys — the same model a web scraper uses. This creates a gap in the software supply chain: agent decision chains are invisible in the final code commit.
+
+Signet tackles this on two levels:
+
+1. **Proof-of-possession at the HTTP layer** — replaces bearer tokens with ephemeral X.509 certificates signed by a local CA. A compromised token is useless after 5 minutes because the certificate expires.
+2. **Cryptographic commit signing** — agents sign Git commits with the same ephemeral certificates, creating a verifiable chain from decision to code.
+
+The broader vision is APAS (Agent Provenance Attestation Standard) — a draft specification for cryptographically verifiable provenance chains across autonomous agent pipelines.
+
+## Key Capabilities
+
+All verified from the [Signet README](https://github.com/agentic-research/signet):
+
+### Git Commit Signing
+
+Replace GPG with modern Ed25519 signatures in one line per step:
+
+```bash
+# Build and install
+make install
+
+# Initialize
+signet-git init
+
+# Configure Git
+git config --global gpg.format x509
+git config --global gpg.x509.program signet-git
+git config --global user.signingKey $(signet-git export-key-id)
+
+# Sign commits
+git commit -S -m "Signed with Signet"
+```
+
+Ephemeral certificates are issued by a local CA and expire after 5 minutes. Signing performance is sub-millisecond (approximately 0.12ms).
+
+### HTTP Authentication Middleware
+
+Two-step verification middleware for Go HTTP servers:
+
+```go
+import "github.com/agentic-research/signet/pkg/http/middleware"
+
+auth, err := middleware.SignetMiddleware(
+    middleware.WithMasterKey(masterPubKey),
+    middleware.WithClockSkew(30*time.Second),
+)
+handler := auth(yourHandler)
+```
+
+Features: replay attack prevention, pluggable token/nonce stores (memory or Redis), clock skew tolerance, and token revocation via CA bundle rotation.
+
+### MCP Client Authentication
+
+One-command onboarding for MCP endpoints with mTLS:
+
+```bash
+# Interactive OAuth2 + PKCE browser flow
+signet auth login
+
+# Headless CI registration
+signet auth register --github-token $GITHUB_TOKEN
+
+# Check certificate status
+signet auth status
+```
+
+### Post-Quantum Cryptography
+
+ML-DSA-44 (post-quantum) is available alongside Ed25519:
+
+```bash
+./signet sign --init --algorithm ml-dsa-44
+```
+
+Algorithm agility is built in — Signet defaults to Ed25519 and can transparently switch to post-quantum primitives.
+
+## How It Works
+
+Signet's identity model separates four concerns:
+
+- **Owner** — the human or organization
+- **Machine** — the device running the agent
+- **Actor** — the agent process itself
+- **Identity** — the ephemeral certificate presented to services
+
+The flow: a master key lives on the machine (OS keyring or `~/.signet/master.key`). From it, the local CA issues short-lived ephemeral certificates. Each HTTP request or Git commit carries the ephemeral cert, not the master key. Compromised ephemeral certs expire automatically; revocation is not needed for routine rotation.
+
+## Practical Evaluation Checklist
+
+Before using Signet in a project:
+
+- **Platform support** — macOS (with TouchID/CGO) and Linux (pure Go, no CGO). Windows is not yet supported.
+- **Security status** — v0.2.0 is experimental and not audited. The README explicitly warns: "use for development only."
+- **Key storage** — defaults to OS keyring; falls back to plaintext `~/.signet/master.key` if keyring is unavailable (use `--insecure` flag to enable this explicitly)
+- **Native Go** — the Go implementation passes OpenSSL interop tests. Cryptography core is unit-tested with 13k+ LOC and partially fuzzed.
+- **Integration surface** — Go HTTP middleware is the primary server-side integration path. MCP client auth is CLI-first.
+
+## Security Notes
+
+- Ephemeral certificates reduce the window of token theft from "indefinite" to "5 minutes"
+- No third-party CA involved — everything is local CA, local key
+- The `auth.notme.bot` hosted authority is proprietary; self-hosting is available via Cloudflare Worker (`notme/worker` repo) or the Go authority server
+- The APAS provenance chain is draft-spec; the signing infrastructure is usable today, the full attestation chain is still being standardized
+
+## FAQ
+
+**Q: Is Signet open source?**
+**A:** Yes. The signet CLI, Go libraries, and APAS specification are Apache-2.0 licensed on [github.com/agentic-research/signet](https://github.com/agentic-research/signet). The hosted auth service at `auth.notme.bot` is proprietary.
+
+**Q: What algorithms does it use?**
+**A:** Ed25519 by default (fast, widely supported) and ML-DSA-44 for post-quantum migration. Algorithm agility is built into the token format via COSE headers.
+
+**Q: How does it compare to GPG for commit signing?**
+**A:** GPG is legacy and requires managing a long-lived GPG key. Signet's ephemeral CA model means no persistent private key to protect — the master key never leaves the machine, and each signing operation uses a short-lived certificate derived from it.
+
+**Q: Does it work in CI?**
+**A:** Yes — `signet auth register --github-token $GITHUB_TOKEN` supports headless/CI environments. Ephemeral certs are issued and used without interactive browser flows.
+
+**Q: What is APAS?**
+**A:** Agent Provenance Attestation Standard is a draft specification for cryptographically verifiable chains across agent pipelines — from work decomposition to code delivery. Signet is the cryptographic layer; APAS is the attestation format built on top of it.
+
+## Conclusion
+
+Signet solves the most fragile part of AI agent authentication — long-lived bearer tokens — with a design that was already standard practice in TLS mTLS, adapted for the agent context. Ephemeral certificates with local CA issuance mean no third-party trust, no token revocation infrastructure, and a 5-minute window instead of indefinite exposure on a leaked key.
+
+The 5-minute commit signing, offline operation, and post-quantum option make it a credible foundation for secure agent workflows. At v0.2.0 experimental status it is not production-audited, but the architecture is sound and the implementation is open for review.
+
+**Source:** [notme.bot](https://notme.bot) | **GitHub:** [github.com/agentic-research/signet](https://github.com/agentic-research/signet) | **HN:** [news.ycombinator.com/item?id=47170174](https://news.ycombinator.com/item?id=47170174)
