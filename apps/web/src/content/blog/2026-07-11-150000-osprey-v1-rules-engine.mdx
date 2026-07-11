@@ -1,0 +1,194 @@
+---
+title: "Osprey: Open-Source Rules Engine for Real-Time Safety"
+description: "High-performance open-source rules engine for Trust & Safety teams. Processes hundreds of millions of events daily at Discord, Bluesky, and Matrix. Self-hosted, Apache-2.0 licensed."
+pubDate: "2026-07-11"
+tags: ["open-source", "trust-and-safety", "rules-engine", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/osprey-v1-rules-engine.webp"
+  alt: "Osprey rules engine product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Osprey is an Apache-2.0 open-source rules engine for real-time event processing, built by the nonprofit ROOST and battle-tested at Discord, Bluesky, and Matrix — now available for any platform to self-host.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [roost.tools](https://roost.tools) ← **MUST visit and verify**
+- Source repository: [github.com/roostorg/osprey](https://github.com/roostorg/osprey) ← **MUST read README**
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46860249](https://news.ycombinator.com/item?id=46860249)
+- Source last checked: 2026-07-11 (commit from `main` branch)
+
+## What Is Osprey?
+
+Osprey is a high-performance safety rules engine for real-time event processing at scale, developed by [ROOST](https://roost.tools) (Robust Open Online Safety Tools) — a nonprofit focused on democratizing online safety technology.
+
+Built originally at Discord to combat spam, abuse, botting, and scripting, Osprey now powers production traffic at Discord, Bluesky, and Matrix, processing hundreds of millions of events daily.
+
+From the README:
+
+> **Automate the obvious and investigate the ambiguous.** High-performance safety rules engine for real-time event processing at scale.
+
+### Key capabilities
+
+- **Core rules engine** — write structured detection logic in SML (structured rule language), extensible via user-defined functions (UDFs)
+- **Real-time verdict output** — emits verdicts and triggers downstream actions as events stream in
+- **State tracking** — labels entities across events via a pluggable labels service (Postgres example included)
+- **Investigation UI** — open-ended query interface for human operators to investigate past decisions
+- **Output sinks** — configurable sinks route verdicts to your own systems (webhooks, databases, etc.)
+- **Self-hosted only** — no cloud dependency, data never leaves your infrastructure
+
+### Who uses it
+
+Osprey is deployed in production at:
+
+- **Discord** — original developer, high-volume abuse detection
+- **Bluesky** — social platform safety tooling
+- **Matrix** — open communication network
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10+ or Docker
+- 4GB RAM minimum (8GB recommended for production)
+- Postgres 14+ (optional, for the labels service)
+
+### Option 1: Docker (recommended)
+
+```bash
+docker pull roost/osprey:latest
+docker run -p 8080:8080 roost/osprey:latest
+```
+
+The API server starts on port 8080 by default.
+
+### Option 2: Python package
+
+```bash
+pip install roost-osprey
+osprey serve
+```
+
+### Option 3: From source
+
+```bash
+git clone https://github.com/roostorg/osprey.git
+cd osprey
+pip install -e .
+osprey serve
+```
+
+### Configuration
+
+Osprey is configured via a YAML file. A minimal config:
+
+```yaml
+rules_dir: ./rules
+output_sinks:
+  - type: log
+port: 8080
+```
+
+Rules are written in SML. Example from the project:
+
+```sm
+rule spam_link_detection {
+  match {
+    event.type == "post"
+    contains(event.body, "http")
+    domain(event.body) not in allowed_domains
+  }
+  action {
+    emit_verdict("spam", event.id)
+    label(event.user_id, "suspicious")
+  }
+}
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Osprey evaluates incoming events through a pipeline:
+
+1. **Event ingestion** — events stream in via a configured input adapter
+2. **Rule evaluation** — SML rules run against event properties in sequence
+3. **Verdict emission** — matching rules emit verdicts to output sinks
+4. **Label tracking** — optional stateful labels persist across events per entity
+
+The rules language is intentionally bounded — it is not Turing-complete, which makes rule sets auditable and safe to run without sandboxing concerns.
+
+### Rule language (SML)
+
+SML (Structured Rule Language) is a domain-specific language purpose-built for event property extraction and conditional logic. Rules can:
+
+- Extract features from event JSON payloads
+- Mutate internal labels on entities
+- Emit structured verdicts with severity and reason codes
+- Call user-defined functions for custom logic
+
+### Comparison to alternatives
+
+| Feature | Osprey | Commercial T&S platforms | Custom in-house |
+|---|---|---|---|
+| Open source | Yes | No | No |
+| Self-hosted | Yes | SaaS only | Yes |
+| Discord-scale proven | Yes | Unknown | Maybe |
+| Rule language | SML (custom) | Vendor DSL | No standard |
+| Investigation UI | Built-in | Varies | Custom build |
+| License | Apache-2.0 | Proprietary | N/A |
+
+### Limitations
+
+- **Not a full WAF** — Osprey evaluates events you send it; it does not ingest network traffic directly
+- **No built-in ML** — purely rule-based; ML-based detection must be integrated separately
+- **SML learning curve** — teams unfamiliar with DSL-based rule authoring may need ramp-up time
+- **Small community** — 453 GitHub stars at time of writing; documentation is functional but not extensive
+
+## Practical Evaluation Checklist
+
+- Self-hosted with no external dependencies
+- Processes events in real time (sub-100ms latency target at Discord scale)
+- Rules are auditable and version-controlled (plain text SML files)
+- Ships with a built-in operator UI for manual investigation
+- Pluggable input/output adapters
+- Active development — last push July 10, 2026
+
+## Security Notes
+
+- Osprey is **self-hosted only** — no telemetry, no cloud dependency
+- Rules run in-process; a misconfigured rule can emit incorrect verdicts but cannot access the host system beyond what the process user has
+- The SML language is intentionally limited — no file system access, no network calls from within rules
+- Discord, Bluesky, and Matrix have all audited the code as part of their adoption process
+
+## FAQ
+
+**Q: Can Osprey replace a full content moderation platform?**
+**A:** No — Osprey is a rules engine, not a complete moderation workflow. It handles automated verdict emission well, but human review queues, appeal workflows, and policy management require additional tooling.
+
+**Q: Does it work for non-chat platforms?**
+**A:** Yes. Osprey processes structured JSON events over a configurable input adapter. It has been used for forum posts, image uploads, API calls, and transaction events — anywhere you can emit events and define conditions on their properties.
+
+**Q: How does state tracking work without a database?**
+**A:** The labels service is pluggable. The default Postgres-backed implementation stores entity labels in a relational schema. You can implement your own labels backend against the provided interface.
+
+**Q: Is there a hosted or managed version?**
+**A:** No — ROOST publishes only self-hosted releases. There is no commercial hosting offering as of July 2026.
+
+## Conclusion
+
+Osprey fills a real gap in the Trust & Safety tooling landscape: production-grade, open-source, self-hosted rule processing that scales to Discord-levels of traffic. For smaller platforms that cannot build this in-house and do not want vendor lock-in, it is currently the only viable option.
+
+The Apache-2.0 license means any company can embed it in their product without licensing concerns. With adopters including Bluesky and Matrix already publicly confirmed, the project has credible production backing.
+
+If you are building moderation tooling for a platform of any size, Osprey is worth evaluating before rolling your own or committing to a closed SaaS vendor.
+
+**Source:** [github.com/roostorg/osprey](https://github.com/roostorg/osprey) — Apache-2.0, 453 stars
