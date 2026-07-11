@@ -1,0 +1,175 @@
+---
+title: "Semble – Code Search for AI Agents"
+description: "Semble indexes any codebase in ~250ms and answers natural-language queries in ~1.5ms on CPU, using 98% fewer tokens than grep-plus-read. MIT-licensed, no API keys needed."
+pubDate: "2026-07-11"
+tags: ["ai-setup", "dev-tools", "mcp", "code-search"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/semble.webp"
+  alt: "Semble code search tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Semble is an open-source code search tool that lets AI agents query any codebase in natural language, returning only the relevant snippets at 98% lower token cost than grep-plus-read — and it runs entirely on CPU with no API keys.
+
+## What Is Semble?
+
+Semble is a code search library built specifically for AI coding agents. When an agent asks "How is authentication handled?", Semble returns only the relevant code chunks — not full files — without burning through a 100k-token context window.
+
+The core claim is backed by benchmarks on ~1,250 queries across 63 repositories in 19 languages: Semble hits 94% recall at around 2k tokens, while grep-plus-read needs the full 100k context window to reach 85% recall.
+
+**Source description** (from the README): *"Fast and Accurate Code Search for Agents. Uses ~98% fewer tokens than grep+read."*
+
+Semble indexes a codebase in approximately 250ms and answers queries in approximately 1.5ms, all on CPU. The project is MIT-licensed, has 5,580 GitHub stars, and its latest release is v0.5.0 (published 2026-07-08).
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) as the package manager
+
+### Step 1: Install Semble
+
+```bash
+uv tool install semble
+```
+
+### Step 2: Run the Interactive Installer
+
+```bash
+semble install
+```
+
+The installer detects installed coding agents (Claude Code, Codex, OpenCode, Cursor, and others) and lets you choose which integrations to enable:
+
+- **MCP server** — exposes Semble as a native MCP tool the agent calls directly.
+- **Instructions** — adds CLI usage guidance to `AGENTS.md` or `CLAUDE.md`.
+- **Sub-agent** — installs a dedicated `semble-search` sub-agent.
+
+For fully unattended setup:
+
+```bash
+semble install --agent claude --type mcp subagent --yes
+```
+
+### Step 3: Use It from Your Agent
+
+Once installed, your agent queries Semble in natural language:
+
+```text
+"How is authentication handled?"
+```
+
+Semble returns the relevant snippets with file paths and line numbers. No need to grep through files or read them in full.
+
+### Step 4: Update Semble
+
+```bash
+uv tool upgrade semble
+uv cache clean semble    # for MCP users — restart MCP client after this
+```
+
+## How It Works
+
+Semble splits each file into code-aware chunks using [tree-sitter](https://github.com/tree-sitter/py-tree-sitter), then scores every chunk against the query using two complementary retrievers:
+
+1. **Static Model2Vec embeddings** — the code-specialized [potion-code-16M](https://huggingface.co/minishlab/potion-code-16M) model for semantic similarity. Because the embedding model is static with no transformer forward pass at query time, everything runs in milliseconds on CPU.
+2. **BM25** — for lexical matches on identifiers and API names.
+
+The two score lists are fused with [Reciprocal Rank Fusion (RRF)](https://plms.ai/2023/08/A-Generalization-of-Reciprocal-Rank-Fusion-to-Linear-Rank-Fusion), then reranked with code-aware signals including definition boosts, identifier stemming, and file coherence.
+
+## CLI Reference
+
+Semble also ships as a standalone CLI for scripts or CI:
+
+```bash
+# Search a local repo (index built and cached automatically)
+semble search "authentication flow" ./my-project
+
+# Search a remote repo (cloned on demand)
+semble search "save model to disk" https://github.com/MinishLab/model2vec
+
+# Limit results
+semble search "save model to disk" ./my-project --top-k 10
+
+# Search docs or config instead of just code
+semble search "deployment guide" ./my-project --content docs
+semble search "config values" ./my-project --content config
+
+# Find code similar to a known location
+semble find-related src/auth.py 42 ./my-project
+```
+
+If `semble` is not on `$PATH`, use:
+
+```bash
+uvx --from "semble[mcp]" semble
+```
+
+## Controlling Which Files Are Indexed
+
+Semble respects `.gitignore` and `.sembleignore` (standard gitignore syntax, merged). `.sembleignore` lets you add rules without touching `.gitignore`:
+
+```text
+# .sembleignore
+generated/     # exclude generated directory
+*.pb.go        # exclude Go protobuf files
+!*.proto       # force-include Protobuf files
+```
+
+Well-known non-source directories (`node_modules/`, `.venv/`, `dist/`, `build/`, `__pycache__/`, etc.) are always skipped regardless of ignore files.
+
+## Practical Evaluation Checklist
+
+- Indexing speed on a ~50k-line codebase (should be under 1 second)
+- First-query latency after cold index
+- Quality of results for ambiguous natural-language queries
+- Token savings reported by `semble savings`
+- Correctness of line number references in results
+- Behavior when no results match the query
+- Integration with your specific coding agent (Claude Code, Cursor, Codex, etc.)
+
+## Security Notes
+
+- All processing is local — no data leaves the machine.
+- No API keys or external services required.
+- Remote git URLs are cloned on demand; no persistent remote connection.
+- Cache is stored locally (`~/.cache/semble/` on Linux, `~/Library/Caches/semble/` on macOS) and can be cleared with `uv cache clean`.
+
+## Source and Accuracy Notes
+
+**All claims in this post were verified from the following primary sources:**
+
+- Project page: [github.com/MinishLab/semble](https://github.com/MinishLab/semble)
+- README (read end-to-end): [raw.githubusercontent.com/MinishLab/semble/main/README.md](https://raw.githubusercontent.com/MinishLab/semble/main/README.md)
+- License: MIT (verified via `github.com/MinishLab/semble/blob/main/LICENSE`)
+- Stars: 5,580 (verified via GitHub API, 2026-07-11)
+- Latest release: v0.5.0 (verified via GitHub API releases endpoint, 2026-07-08)
+- Benchmarks methodology: [benchmarks/README.md](https://github.com/MinishLab/semble/tree/main/benchmarks) on the repo
+- Embedding model: [huggingface.co/minishlab/potion-code-16M](https://huggingface.co/minishlab/potion-code-16M)
+
+## FAQ
+
+**Q: Does Semble require a GPU?**
+**A:** No. Everything runs on CPU. The static Model2Vec embedding model does not need a transformer forward pass at query time.
+
+**Q: Does it work with Claude Code, Cursor, and VS Code?**
+**A:** Yes, via the MCP server integration. The README lists Claude Code, Cursor, Codex, OpenCode, and VS Code as supported.
+
+**Q: How does it compare to Greptile or other code search tools?**
+**A:** Semble's distinguishing claim is token efficiency: 98% fewer tokens than grep-plus-read at equivalent recall (94% vs 85%), with indexing at approximately 250ms per repo. The README acknowledges Greptile in its acknowledgements. Direct feature comparisons require running both on the same codebase.
+
+**Q: Can I use it as a Python library rather than CLI?**
+**A:** Yes. The README includes a Python API example using `SembleIndex.from_path()` and `index.search()`.
+
+**Q: What happens when code changes?**
+**A:** In CLI mode, the cache is invalidated automatically when files change. In MCP mode, a file watcher detects changes and rebuilds the index within the same session.
+
+## Conclusion
+
+Semble solves a real problem for AI coding agents: context window waste from reading full files just to find a few relevant lines. The benchmarks are compelling — 98% token reduction at higher recall than grep-plus-read — and the tool is production-ready with MCP support, a clean CLI, and MIT licensing. If your agent workflow involves large codebases, Semble is worth integrating today.
