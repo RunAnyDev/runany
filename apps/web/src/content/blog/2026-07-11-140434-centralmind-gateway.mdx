@@ -1,0 +1,165 @@
+---
+title: "CentralMind Gateway – Universal MCP-Server for Databases"
+description: "Connect any database to AI agents via auto-generated MCP or REST APIs. Supports PostgreSQL, MySQL, ClickHouse, Snowflake, BigQuery, and more with built-in PII protection."
+pubDate: "2026-07-11"
+tags: ["mcp", "database", "ai-agent", "self-hosted", "api"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/centralmind-gateway.webp"
+  alt: "CentralMind Gateway product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** CentralMind Gateway exposes any database (PostgreSQL, MySQL, Snowflake, etc.) as an auto-generated MCP server or REST API, giving AI agents direct tool-calling access to your structured data in minutes.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [centralmind.ai](https://centralmind.ai)
+- Source repository: [github.com/centralmind/gateway](https://github.com/centralmind/gateway)
+- License: Apache-2.0 (verified via GitHub API)
+- Latest release: v0.2.19 (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=43845360](https://news.ycombinator.com/item?id=43845360)
+- Source last checked: 2026-07-11 (commit verified)
+
+## What Is CentralMind Gateway?
+
+CentralMind Gateway is an open-source tool written in Go that automatically generates an MCP (Model Context Protocol) server or REST API from your existing database schema. Rather than writing manual API endpoints or wrestling with SQL in prompts, you point the gateway at a database and it produces a fully-typed, AI-agent-friendly interface — complete with PII redaction, row-level security, and OpenTelemetry tracing.
+
+The project launched on HN in April 2025 and has accumulated 531 GitHub stars as of mid-July 2026.
+
+## Setup Workflow
+
+### Prerequisites
+
+- A supported database: PostgreSQL, MySQL, ClickHouse, Snowflake, BigQuery, MSSQL, Oracle, SQLite, or ElasticSearch
+- Docker (recommended) or Go 1.21+ for binary builds
+- A database user with read access to the schemas you want to expose
+
+### Step 1: Run the Gateway Container
+
+The fastest way to get started is with Docker:
+
+```bash
+docker run --platform linux/amd64 -p 9090:9090 \
+  ghcr.io/centralmind/gateway:v0.2.19 start \
+  --connection-string "postgres://db-user:password@db-host/db-name?sslmode=require"
+```
+
+This launches the gateway and immediately exposes two endpoints:
+
+```text
+INFO Gateway server started successfully!
+INFO MCP SSE server for AI agents is running at: http://localhost:9090/sse
+INFO REST API with Swagger UI is available at: http://localhost:9090/
+```
+
+The `--platform linux/amd64` flag is required on Apple Silicon hosts.
+
+### Step 2: Choose Your Protocol
+
+**Option A — MCP (recommended for AI agents)**
+
+MCP is the native protocol. Point your AI client at the SSE endpoint:
+
+```
+http://localhost:9090/sse
+```
+
+Cursor, Claude Desktop, and other MCP-compatible clients can connect directly. The gateway sends enhanced metadata that helps AI models understand the available tools.
+
+**Option B — REST / OpenAPI**
+
+Open `http://localhost:9090/` in a browser for the auto-generated Swagger UI. The gateway also serves an OpenAPI 3.1.0 spec at `/openapi.json` for importing into Postman, Insomnia, or any OpenAPI-compatible tool.
+
+### Step 3: Connect to an AI Agent
+
+Once running, add the MCP server to your AI client. The gateway introspects your schema and generates typed tools for each table. For example, with a `users` table you get tools like `users.list`, `users.get`, and `users.filter` — ready for the AI to call via function invocation.
+
+## Deeper Analysis
+
+### Supported Databases
+
+CentralMind Gateway supports nine database backends:
+
+- PostgreSQL
+- MySQL
+- ClickHouse
+- Snowflake
+- Microsoft SQL Server
+- BigQuery
+- Oracle Database
+- SQLite
+- ElasticSearch
+
+Configuration for each is handled via a YAML file or CLI flags. Full connector docs are at [docs.centralmind.ai/connectors](https://docs.centralmind.ai/connectors/postgres/).
+
+### Security Layer
+
+Two built-in security plugins address common AI data-access concerns:
+
+**PII Redaction** — The gateway ships with a regex-based PII detector and a Microsoft Presidio plugin. Both can strip personally identifiable information (emails, phone numbers, credit cards, etc.) before data reaches the AI, helping with GDPR, CPRA, and SOC 2 compliance.
+
+**Row-Level Security (RLS)** — Lua scripts allow you to enforce fine-grained access control per query, so an AI agent only sees rows its user is authorized to access.
+
+### AI Provider Integration
+
+During the schema-discovery phase, the gateway can call an LLM to generate optimized API configurations. It natively supports:
+
+- OpenAI (GPT-4o, GPT-4o-mini)
+- Anthropic (Claude 3.5 Sonnet, Claude 3 Opus)
+- Amazon Bedrock
+- Google Gemini / Vertex AI
+
+Self-hosted models via OpenAI-compatible endpoints are also supported.
+
+### Caching
+
+Built-in LRU cache and time-based cache plugins reduce database load for repeated queries — a common pattern in AI agent loops where the same tool is called multiple times per conversation.
+
+## Practical Evaluation Checklist
+
+- [x] Docker one-liner launch (no compile step for evaluation)
+- [x] Auto-discovers schema — no manual endpoint writing
+- [x] MCP SSE mode — AI-native, no HTTP client code needed
+- [x] REST + Swagger UI fallback for human testing
+- [x] PII redaction plugin ships out of the box
+- [x] Row-level security via Lua scripts
+- [x] Multi-database: 9 connectors including Snowflake and BigQuery
+- [x] OpenTelemetry integration for audit trails
+- [x] API key and OAuth authentication plugins
+- [x] Apache-2.0 license, no usage restrictions
+
+## Security Notes
+
+- Connection strings are passed at runtime and never stored in config files — prefer environment variable interpolation in production.
+- The PII redaction plugins (regex and Presidio) run server-side before data leaves the gateway.
+- RLS via Lua scripts executes in an isolated sandbox — validate your scripts against adversarial prompts before production use.
+- The gateway is designed for internal network use behind your own infrastructure. Do not expose the raw port to the public internet without a reverse proxy that enforces its own authentication.
+
+## FAQ
+
+**Q: How is this different from a standard REST API?**
+**A:** The gateway auto-generates typed, AI-optimized tools from your schema rather than requiring you to hand-write endpoints. MCP mode also sends structured metadata that helps AI models understand parameter semantics — something plain REST does not provide.
+
+**Q: Can I self-host the LLM used during schema discovery?**
+**A:** Yes. The gateway supports OpenAI-compatible endpoints, so you can point it at a local Ollama instance, LM Studio, or any self-hosted model server.
+
+**Q: Does it support write operations, not just reads?**
+**A:** Yes. The generated tools include create, read, update, and delete operations based on the schema. Write operations respect the RLS configuration.
+
+**Q: What is the performance overhead?**
+**A:** The gateway adds a thin proxy layer between the AI agent and the database. For analytical queries, the built-in LRU cache can significantly reduce database load. No benchmarks are published yet; baseline your specific workload.
+
+## Conclusion
+
+CentralMind Gateway fills a specific gap in the AI-agent toolchain: giving agents reliable, secure access to structured data without hand-rolling a custom API layer. The auto-generation approach means you can go from a database connection string to a fully interactive MCP server in under two minutes. With nine database connectors, built-in PII compliance tooling, and both MCP and REST output formats, it covers the most common enterprise AI data-access patterns out of the box.
+
+If you are building AI agents that need to query or mutate database state, this is worth evaluating — particularly if your data sits in Snowflake, BigQuery, or an on-premises PostgreSQL instance that cannot be replicated to a managed vector store.
+
+Try it: `docker run ghcr.io/centralmind/gateway:v0.2.19 ...` (see Step 1 above).
