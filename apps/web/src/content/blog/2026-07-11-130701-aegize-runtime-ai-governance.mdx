@@ -1,0 +1,207 @@
+---
+title: "Aegize – Runtime Governance for AI Agents"
+description: "Aegize is a runtime governance layer that sits between autonomous AI agents and the tools they control — adding identity, policy enforcement, permissions, and audit logging."
+pubDate: "2026-07-11"
+tags: ["ai-setup", "dev-tools", "agent", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/aegize-runtime-ai-governance.webp"
+  alt: "Aegize runtime governance platform product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Aegize is an open-source Python runtime that wraps every AI agent tool call with identity, policy enforcement, and audit logging — so nothing reaches the outside world without explicit permission.
+
+## What Is Aegize?
+
+Aegize is a runtime governance layer for autonomous AI agents. It sits between an agent and the tools it calls — web search, email, shell commands, file access, or any custom function — and enforces identity, permissions, and policy before the call executes. Every attempt is logged; every denied action creates an immutable audit record.
+
+The core primitives are:
+
+- **AgentIdentity** — who is making the call (agent ID, owner, environment)
+- **PermissionPolicy** — YAML-defined rules governing what each agent can do
+- **GuardedTool** — a wrapper that intercepts the tool call and gates it through policy
+- **AuditLog** — append-only JSONL log of every authorization decision
+
+> Every agent action must have identity, permission, policy enforcement, and audit.
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install aegize
+```
+
+Python 3.9 or higher is required. The package is MIT-licensed.
+
+### Step 2: Define a Policy
+
+Create `aegize.yaml` in your project:
+
+```yaml
+agent_id: research_bot
+rules:
+  - tool: web_search
+    operation: search
+    risk_level: low
+    action: allow
+
+  - tool: email
+    operation: send
+    risk_level: medium
+    action: require_approval
+
+  - tool: shell
+    operation: execute
+    risk_level: high
+    action: deny
+```
+
+### Step 3: Wrap Your Tools
+
+```python
+from aegize import AgentIdentity, PermissionPolicy, GuardedTool, AuditLog
+
+agent = AgentIdentity(
+    agent_id="research_bot",
+    name="Research Bot",
+    owner="Geoffrey",
+    environment="dev",
+)
+
+policy = PermissionPolicy.from_yaml("aegize.yaml")
+audit = AuditLog("audit.jsonl")
+
+def web_search(query: str) -> str:
+    return f"searched: {query}"
+
+safe_web_search = GuardedTool(
+    tool_name="web_search",
+    operation="search",
+    func=web_search,
+    agent=agent,
+    policy=policy,
+    audit_log=audit,
+    risk_level="low",
+)
+
+result = safe_web_search("Aegize runtime")
+```
+
+### Step 4: Handle Authorization Outcomes
+
+```python
+from aegize import PolicyDenied, ApprovalRequired
+
+try:
+    safe_web_search("Aegize runtime")
+except ApprovalRequired as exc:
+    # Route to a human approval workflow
+    print("Approval required — human review needed")
+except PolicyDenied as exc:
+    # Blocked outright by policy
+    print("Action denied by policy")
+```
+
+## Deeper Analysis
+
+### How It Fits Into an Agent Stack
+
+Aegize intercepts tool calls at the Python function level. When an agent framework (LangChain, AutoGPT, CrewAI, or a custom loop) calls a guarded tool, execution passes through Aegize's policy engine first. Only actions that pass policy reach the actual function.
+
+The README frames it this way:
+
+> "Aegize is the runtime layer between autonomous AI agents and the tools they use."
+
+### Approval Workflows
+
+For medium-risk actions, Aegize raises `ApprovalRequired` instead of running the function. This lets you build a human-in-the-loop step — a Slack message, a terminal prompt, a web UI — before the action proceeds. The agent pauses, the human approves, and the tool call resumes.
+
+### Audit Logging
+
+Every tool call attempt — allowed, denied, or held for approval — writes a record to the audit log:
+
+```json
+{"event": "authorization", "agent_id": "research_bot", "tool": "web_search", "action": "allow", "timestamp": "2026-07-11T10:00:00Z"}
+{"event": "result", "tool": "web_search", "result": "searched: Aegize runtime"}
+```
+
+Audit logs are append-only JSONL, suitable for later analysis in Elasticsearch, Datadog, or a SIEM.
+
+### Decorator Quickstart (v0.2+)
+
+For cleaner code, use the `@guarded_tool` decorator instead of wrapping functions manually:
+
+```python
+from aegize import guarded_tool, AgentIdentity, PermissionPolicy, AuditLog
+
+agent = AgentIdentity(agent_id="research_bot", name="Research Bot", owner="Geoffrey")
+policy = PermissionPolicy.from_yaml("aegize.yaml")
+audit = AuditLog("audit.jsonl")
+
+@guarded_tool(agent=agent, policy=policy, audit_log=audit, risk_level="low")
+def web_search(query: str) -> str:
+    return f"searched: {query}"
+```
+
+### MCP Integration
+
+Aegize supports the Model Context Protocol (MCP). MCP servers that expose tools can be wrapped with Aegize guards, giving you policy and audit coverage for any MCP-capable framework.
+
+### Python Version and Status
+
+Python 3.9+ is required. The project is in alpha status (v0.3.0 as of July 2026). The architecture diagram shows integration with OpenAI, Anthropic, LangChain, and custom agent frameworks.
+
+## Practical Evaluation Checklist
+
+- Written in Python (3.9+) with an MIT license
+- Installs via pip; no external services required
+- Policy defined in plain YAML, version-controlled alongside code
+- Audit log is a local JSONL file — no third-party log sink needed
+- Raises typed exceptions (`PolicyDenied`, `ApprovalRequired`) — easy to handle in agent code
+- Decorator API available for cleaner tool wrapping
+- MCP server tool coverage built in
+- Alpha status means rapid API changes are possible; pin to a version tag in production
+
+## Security Notes
+
+Aegize runs in the same Python process as the agent. The guard is enforced by raising exceptions — if the wrapped function itself contains the sensitive logic, a bypass is possible if the caller ignores `PolicyDenied`. Treat audit logs as authoritative: if an exception was not raised, the call was allowed; if it was raised, the function did not execute.
+
+For production deployments, run Aegize and the agent in an isolated process or container to limit blast radius if the agent framework itself is compromised.
+
+## FAQ
+
+**Q: Does Aegize require a separate server or SaaS?**
+**A:** No. It is a Python library that runs locally or in your infrastructure. There is no cloud dependency.
+
+**Q: Can I use it with LangChain or CrewAI?**
+**A:** Yes. Any Python function can be wrapped as a GuardedTool. The README shows integration with AI frameworks via the `GuardedTool` wrapper.
+
+**Q: How is policy evaluated — is it synchronous?**
+**A:** Policy evaluation is synchronous within the Python call. Approval-required flows raise `ApprovalRequired` and pause the agent until a human approves via your own workflow.
+
+**Q: What happens to audit logs in high-throughput agents?**
+**A:** Logs are written as JSONL to a local file. For high-volume production use, consider mounting the log file on a filesystem that supports append-only semantics, or piping to a log aggregator.
+
+**Q: Is this production-ready?**
+**A:** The project is labeled alpha (v0.3.0). The API may change. Do not use unpinned versions in critical workflows without testing.
+
+## Conclusion
+
+Aegize addresses a real gap in the AI agent stack: the moment between an agent deciding to act and the tool actually executing. By wrapping tool calls in identity, policy, and audit, it gives operators visibility and control over what autonomous agents can actually do. The Python-only, no-backend design makes it straightforward to add to existing agent projects.
+
+If you are running autonomous agents in production — especially ones with access to email, shell commands, or external APIs — Aegize is worth evaluating before an agent does something irreversible.
+
+## Source and Accuracy Notes
+
+- Project page: [aegize.com](https://aegize.com)
+- Source repository: [github.com/gggaswint/aegize](https://github.com/gggaswint/aegize)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=42270161](https://news.ycombinator.com/item?id=42270161) (YC W26 batch)
+- Python version: 3.9+ (verified via README badge)
+- Source last checked: 2026-07-11 (commit `8f3a9d4`, v0.3.0)
