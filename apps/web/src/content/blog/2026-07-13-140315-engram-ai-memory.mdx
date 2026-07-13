@@ -1,0 +1,204 @@
+---
+title: "Engram – Persistent Memory for AI Agents"
+description: "Engram gives AI agents persistent, searchable memory with a 5-line Python SDK. SQLite-backed, self-hosted, zero-config, MIT licensed."
+pubDate: "2026-07-13"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/engram-ai-memory.webp"
+  alt: "Engram product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Engram is an open-source memory layer for AI agents — persistent, searchable, and self-hosted via a 5-line Python SDK backed by SQLite.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [engram-ai.dev](https://engram-ai.dev) — verified via direct fetch
+- Source repository: [github.com/engram-memory/engram](https://github.com/engram-memory/engram) — README read end-to-end
+- License: [MIT](https://github.com/engram-memory/engram/blob/main/LICENSE) — verified via README badge
+- HN launch thread: not available in current HN search window
+
+## What Is Engram?
+
+Memory that sticks. For every AI agent.
+
+Engram is a universal memory layer for AI agents — persistent, searchable, and zero-config. It solves a core problem for developers building agentic systems: how do you give an AI memory that persists between sessions, can be searched efficiently, and stays private?
+
+The core is simple:
+
+```python
+from engram import Memory
+
+mem = Memory()
+mem.store("User prefers Python", type="preference", importance=8)
+results = mem.search("programming language")
+context = mem.recall(limit=10)
+```
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install engram-core
+```
+
+Optional extras:
+
+```bash
+pip install engram-core[server]      # REST API + WebSocket
+pip install engram-core[synapse]      # Synapse message bus
+pip install engram-core[mcp]         # MCP server
+pip install engram-core[embeddings]   # Semantic search
+pip install engram-core[all]          # Everything
+```
+
+### Step 2: Python SDK
+
+```python
+from engram import Memory
+
+mem = Memory()
+
+# Store memories with importance ratings
+mem.store("User prefers dark mode", type="preference", importance=8)
+mem.store("Fixed bug by adding null check", type="error_fix", importance=7, ttl_days=90)
+
+# Full-text search
+results = mem.search("dark mode")
+for r in results:
+    print(f"{r.memory.content} (score: {r.score:.2f})")
+
+# Semantic search (requires embeddings extra)
+results = mem.search("UI theme settings", semantic=True)
+
+# Smart context — auto-select relevant memories within token budget
+ctx = mem.context("User is asking about their editor preferences", max_tokens=500)
+print(ctx.context)  # Ready-to-inject context string
+```
+
+### Step 3: MCP Server for Claude Code
+
+Add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "/path/to/engram"
+    }
+  }
+}
+```
+
+### Step 4: REST API (optional)
+
+```bash
+# Start server
+engram-server
+
+# Store a memory
+curl -X POST http://localhost:8100/v1/memories \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Important fact", "importance": 8}'
+
+# Search
+curl -X POST http://localhost:8100/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "fact"}'
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Engram runs entirely locally with SQLite as its storage engine. No external services required — `pip install` and it works. The storage layer uses SQLite FTS5 for full-text search, which provides fast, typo-tolerant retrieval without additional infrastructure.
+
+For semantic search, you install the `[embeddings]` extra and plug in `sentence-transformers`. This gives embedding-based similarity search on top of the text index.
+
+### Memory Types and Importance
+
+Each memory has a `type` and an `importance` score (1-10). Types include `preference`, `error_fix`, and custom values. Importance drives which memories are included when token budgets are tight.
+
+### Memory TTL
+
+Set expiry on memories with `ttl_days=30`. Engram auto-cleanup removes expired entries, keeping the database lean without manual maintenance.
+
+### Memory Links and Graph
+
+Create directed relationships between memories using `mem.link(bug_id, fix_id, "caused_by")`. Traverse the knowledge graph with BFS:
+
+```python
+graph = mem.graph(bug_id, max_depth=2)
+```
+
+This enables tracing the root causes of errors or building dependency chains between facts.
+
+### Multi-Agent Namespaces
+
+```python
+agent1 = Memory(namespace="researcher")
+agent2 = Memory(namespace="coder")
+```
+
+Namespace isolation keeps each agent's memory private, while cross-namespace search lets a coordinator agent query across all namespaces.
+
+### Agent AutoSave
+
+Trigger-based automatic checkpointing — save by message count, time interval, or RAM threshold. Delta tracking saves only what changed, keeping checkpoint sizes small.
+
+### Smart Context Builder
+
+Automatically selects the most relevant memories for a given prompt within a token budget. Combines text search, semantic search, and priority recall into a single `mem.context()` call:
+
+```python
+ctx = mem.context("User is asking about their editor preferences", max_tokens=500)
+```
+
+## Practical Evaluation Checklist
+
+- SQLite out of the box, no external services — runs locally
+- 5-line core API: `store`, `search`, `recall`, `delete`, `stats`
+- FTS5 full-text search with typo tolerance
+- Semantic search via sentence-transformers
+- MCP server integration for Claude Code and other MCP clients
+- REST API on port 8100 with WebSocket real-time events
+- Multi-agent namespace isolation
+- Memory TTL with auto-cleanup
+- Memory links and graph traversal
+- Agent AutoSave with delta tracking
+- Synapse message bus for multi-agent pub/sub
+- MIT licensed
+
+## Security Notes
+
+Engram is privacy-first. The entire database runs on your machine — your data never leaves your infrastructure. The cloud API (European servers, Germany) is optional and offers a 7-day free trial. All self-hosted usage is unlimited and free.
+
+## FAQ
+
+**Q: Does this work with any AI framework?**
+**A:** Yes. Engram has a Python SDK, a REST API, and an MCP server. Any agent that can make HTTP calls or use Python can integrate. The MCP server specifically targets Claude Code and other MCP-compatible clients.
+
+**Q: How does semantic search work?**
+**A:** Install `engram-core[embeddings]` which pulls in `sentence-transformers`. The SDK handles embedding generation and storage automatically when you call `mem.search(query, semantic=True)`.
+
+**Q: Can multiple agents share memory?**
+**A:** Yes. Use namespaces for isolation (`Memory(namespace="agent1")`). Cross-namespace search lets a coordinator agent query across all namespaces.
+
+**Q: What happens when the SQLite database grows large?**
+**A:** TTL-based auto-cleanup removes expired memories. For very large datasets, you can also query by importance threshold and manually prune low-value entries.
+
+## Conclusion
+
+Engram fills a real gap in the AI agent stack — persistent, queryable memory without the operational overhead of a database cluster. The 5-line core API makes it trivial to add to any project, while the MCP server integration brings zero-effort memory recall to Claude Code users.
+
+For developers building agents that need to remember facts, preferences, and error fixes across sessions, Engram is worth a look. MIT licensed, runs entirely locally, no external dependencies beyond SQLite.
