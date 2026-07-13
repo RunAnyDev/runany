@@ -1,0 +1,197 @@
+---
+title: "Colanode – Local-First Slack and Notion Alternative"
+description: "Colanode is an open-source, local-first collaboration workspace with real-time chat, rich text pages, customizable databases, and file management — self-host on Docker or Kubernetes with full data ownership."
+pubDate: "2026-07-13"
+tags: ["self-hosted", "collaboration", "local-first", "slack-alternative", "notion-alternative"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/colanode.webp"
+  alt: "Colanode dashboard showing chat, pages, and database views"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Colanode is an open-source, self-hostable Slack + Notion alternative that stores data in a local SQLite database first, syncing to your server in the background so you can work offline and never lose a change.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [colanode.com](https://colanode.com) ← verified July 2026
+- Source repository: [github.com/colanode/colanode](https://github.com/colanode/colanode) ← README verified
+- License: Apache-2.0 (verified via GitHub API)
+- Stars: 4,968 (as of July 2026)
+- HN launch thread: [Show HN: Colanode](https://news.ycombinator.com/item?id=44725306) ← 147 points
+
+## What Is Colanode?
+
+Colanode is an all-in-one collaboration platform that puts data ownership first. It combines real-time team chat, rich text documents, customizable databases, and file storage into a single workspace you can self-host on your own infrastructure.
+
+The core differentiator is its **local-first architecture**: every operation writes to a local SQLite database first, then syncs to the server in the background. This means you can keep working offline — on a plane, in a basement server room, or just with a spotty connection — and never lose a draft or have a conflict you cannot resolve.
+
+From the README:
+
+> Colanode is an all-in-one platform for easy collaboration, built to prioritize your data privacy and control. Designed with a local-first approach, it helps teams communicate, organize, and manage projects — whether online or offline.
+
+It is licensed under Apache-2.0 and has no paywalled features for self-hosting.
+
+## Core Features
+
+### Real-Time Chat
+
+Built-in messaging for teams and individuals. Channels, direct messages, file attachments.
+
+### Rich Text Pages
+
+Documents, wikis, and notes using an intuitive block-based editor — similar to Notion. Supports headings, code blocks, embeds, and more.
+
+### Customizable Databases
+
+Structured data with custom fields and dynamic views:
+- **Table view** — spreadsheet-style rows and columns
+- **Kanban view** — drag-and-drop cards by status
+- **Calendar view** — time-based layout for due dates
+
+### File Management
+
+Store, share, and manage files within secure workspaces. Supports local filesystem, S3-compatible, Google Cloud Storage, and Azure Blob Storage backends.
+
+### Concurrent Edits via CRDTs
+
+Colanode uses **[Yjs](https://docs.yjs.dev/)** — a battle-tested CRDT (Conflict-free Replicated Data Type) library — to handle real-time collaboration on pages and database records. Multiple people can edit the same document simultaneously, and the system merges updates automatically without conflicts. Messages and file operations use simpler database tables since they do not require concurrent editing.
+
+## Self-Hosting with Docker
+
+### Prerequisites
+
+- **PostgreSQL** with the **pgvector** extension
+- **Redis** (or Valkey, a Redis-compatible alternative)
+- **Colanode server** (Docker image)
+- **Storage backend** — local filesystem, S3-compatible, Google Cloud Storage, or Azure Blob
+
+### Docker Compose Setup
+
+Colanode ships with a `config.json` that covers most defaults out of the box. Only two required variables:
+
+```bash
+# Minimal required env vars (env:// syntax)
+POSTGRES_URL=env://POSTGRES_URL
+REDIS_URL=env://REDIS_URL
+```
+
+Sensitive values (database password, S3 keys) are stored as env vars and resolved at runtime via `env://VAR_NAME` pointers in the config. You can also use `file://path/to/secret.pem` to mount secrets directly.
+
+To customize:
+
+1. Copy `apps/server/config.json` from the repo
+2. Edit it to set your storage backend, domain, and other options
+3. Mount it into the container:
+
+```yaml
+# docker-compose.yaml excerpt
+services:
+  colanode:
+    image: colanode/colanode:latest
+    volumes:
+      - ./config.json:/app/config.json:ro
+    environment:
+      POSTGRES_URL: postgresql://user:password@postgres:5432/colanode
+      REDIS_URL: redis://redis:6379/0
+```
+
+Full compose file: [`hosting/docker/docker-compose.yaml`](https://github.com/colanode/colanode/blob/main/hosting/docker/docker-compose.yaml)
+
+### Kubernetes / Helm
+
+For production Kubernetes deployments, Colanode provides Helm charts in [`hosting/kubernetes/`](https://github.com/colanode/colanode/tree/main/hosting/kubernetes):
+
+```bash
+helm install colanode ./hosting/kubernetes \
+  --set-file colanode.configFile.data=./config.json \
+  --set colanode.secret.POSTGRES_URL="postgresql://..." \
+  --set colanode.secret.REDIS_URL="redis://..."
+```
+
+## Architecture Deep Dive
+
+### Local-First Sync Model
+
+1. **Local write** — Every change writes to a local SQLite database immediately. UI reflects the change instantly.
+2. **Background sync** — A sync process pushes changes to the server in the background.
+3. **Offline resilience** — If the server is unreachable, the local database continues accepting writes. On reconnect, sync resumes automatically.
+4. **Server storage** — The server stores data in PostgreSQL (with pgvector for any embedding/search needs) and manages user authentication and workspace permissions.
+
+This is a fundamentally different reliability model from SaaS tools where a dropped connection means lost input.
+
+### CRDT Conflict Resolution
+
+Pages and database entries use Yjs CRDTs, which guarantee:
+- **No merge conflicts** — concurrent edits are automatically merged
+- **No locking** — anyone can edit anytime
+- **Deletion tracking** — deletes are explicit transactions, not silent removals
+
+Messages and file metadata use standard database tables since they have simpler consistency requirements.
+
+### Storage Backend Flexibility
+
+Colanode abstracts storage behind a `STORAGE_TYPE` configuration:
+
+| Backend | Config |
+|---|---|
+| Local filesystem | `STORAGE_TYPE=local` |
+| S3-compatible (MinIO, etc.) | `STORAGE_TYPE=s3` + `S3_*` env vars |
+| Google Cloud Storage | `STORAGE_TYPE=gcs` |
+| Azure Blob Storage | `STORAGE_TYPE=azure` |
+
+This is useful for homelab setups (local NFS) and enterprise environments (existing S3 buckets or GCS accounts).
+
+## Practical Evaluation Checklist
+
+- [ ] Local-first SQLite writes work offline
+- [ ] Sync resumes correctly after prolonged offline period
+- [ ] CRDT merge produces correct document state after concurrent edits
+- [ ] Docker Compose single-node setup completes without errors
+- [ ] Postgres + pgvector extension initializes correctly
+- [ ] Redis pub/sub enables real-time message delivery
+- [ ] Workspace permissions restrict access correctly
+- [ ] S3-compatible storage backend accepts file uploads
+- [ ] Database views (table, kanban, calendar) render correctly
+- [ ] Helm chart installs on a standard Kubernetes cluster
+
+## Security Notes
+
+- **Data ownership** — All data stays on your infrastructure. No telemetry, no third-party data sharing.
+- **CRDT merge safety** — Yjs CRDTs are proven correct; concurrent edits cannot corrupt document state.
+- **Storage isolation** — File storage is sandboxed per workspace via the storage backend abstraction.
+- **Secrets management** — Config supports `env://` and `file://` secret pointers; secrets are never baked into `config.json`.
+
+## FAQ
+
+**Q: How does this compare to Notion?**
+**A:** Colanode offers similar block-based documents and databases, but with full local-first architecture and self-hosting. Notion is SaaS-only. Colanode also does not require a paid plan for self-hosting.
+
+**Q: How does it compare to Slack?**
+**A:** Colanode includes real-time chat (like Slack) plus the document/database layer (which Slack lacks natively). It is a unified workspace rather than a chat-first tool.
+
+**Q: Does it work without an internet connection?**
+**A:** Yes — the local SQLite database accepts writes offline. Changes sync to the server when connectivity is restored.
+
+**Q: What is the minimum setup for self-hosting?**
+**A:** One Docker host with PostgreSQL (pgvector), Redis, and the Colanode server image. No Kubernetes required for single-node or small-team use.
+
+**Q: Is there a managed cloud option?**
+**A:** Yes — Colanode offers free beta cloud servers (EU and US) at [app.colanode.com](https://app.colanode.com). Pricing has not been announced yet.
+
+## Conclusion
+
+Colanode solves the offline-availability problem that trips up most collaboration tools. Its local-first SQLite model, CRDT-powered concurrent editing via Yjs, and flexible storage backends make it a credible open-source alternative to Slack + Notion for teams that want to own their data.
+
+The Docker Compose setup is straightforward for single-node deployments, and the Kubernetes Helm charts cover production-grade self-hosting. If a unified workspace with real offline support and no vendor lock-in sounds useful, Colanode is worth a weekend deployment.
+
+**Next steps:**
+- Try the web app at [app.colanode.com](https://app.colanode.com) (no install needed)
+- Browse the repo: [github.com/colanode/colanode](https://github.com/colanode/colanode)
+- See self-hosting docs: [`hosting/docker/`](https://github.com/colanode/colanode/tree/main/hosting/docker) and [`hosting/kubernetes/`](https://github.com/colanode/colanode/tree/main/hosting/kubernetes)
