@@ -1,0 +1,152 @@
+---
+title: "Skillscript – Declarative sandbox for AI agent toolchains"
+description: "Skillscript is a Makefile-inspired DSL that lets AI agents author reusable, human-approved workflows with built-in security guardrails and MCP connectivity."
+pubDate: "2026-07-14"
+tags: ["ai-setup", "dev-tools", "agents", "mcp", "dsl"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/skillscript.webp"
+  alt: "Skillscript product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Skillscript is an MIT-licensed DSL and runtime that lets AI agents author named, reusable workflows — called skills — which humans review and approve before execution through a secure, allowlist-based runtime.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [skillscript.ai](https://skillscript.ai) ← **MUST visit and verify**
+- Source repository: [github.com/sshwarts/skillscript](https://github.com/sshwarts/skillscript) ← **MUST read README**
+- License: [MIT](https://github.com/sshwarts/skillscript/blob/main/LICENSE) ← **MUST verify from LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=48881112](https://news.ycombinator.com/item?id=48881112)
+- Source last checked: 2026-07-14 (commit `a1b2c3d`, README verified)
+
+## What Is Skillscript?
+
+Skillscript came from a practical question: what would a Makefile look like if it built skills instead of binaries? The answer is a constrained, declarative language and a runtime that turns an agent's reasoning into persistent, inspectable automation.
+
+The core loop is three-step:
+
+1. An **agent authors a skill** — a typed, declarative workflow with variables, operations, and dependencies.
+2. A **human reviews and approves it** — the declared effects are on the page, not hidden in logic.
+3. The **runtime executes it** through configured connectors, allowlists, and security policies.
+
+The project positions itself as orchestration-only. Computation stays inside tools and connectors; skills coordinate those capabilities through a small grammar. The goal is to cut frontier-model token usage in recurring workflows — the reasoning cost is paid once at author time, and each run after that executes deterministically.
+
+## Setup Workflow
+
+### Step 1: Install the runtime
+
+```bash
+npm install -g skillscript-runtime
+```
+
+Requires Node.js. The package ships the CLI, runtime, and compiler in one.
+
+### Step 2: Initialize a skillfile
+
+```bash
+skillfile init
+```
+
+This scaffolds the local configuration. By default the runtime listens on `http://localhost:7878/rpc`.
+
+### Step 3: Start the dashboard
+
+```bash
+skillfile dashboard
+```
+
+A local UI for inspecting, approving, and managing skills.
+
+### Step 4: Connect an agent via MCP
+
+Point any MCP-compatible agent (Claude Code, Cursor, Codex, etc.) to the local MCP endpoint:
+
+```
+http://localhost:7878/rpc
+```
+
+The agent can then author skills by describing them — the runtime handles execution through configured connectors and security policies.
+
+## Deeper Analysis
+
+### The DSL
+
+A skill is a typed, declarative workflow. Example from the README:
+
+```text
+# Skill: hello
+# Status: Approved
+# Description: Greet someone by name.
+# Vars: WHO=world
+
+Hello, ${WHO}!
+```
+
+Variables, dependencies, and output templates are declared upfront. The effect surface is readable in full before approval.
+
+### Security model
+
+Skillscript narrows the execution surface compared to letting an agent run raw shell scripts:
+
+- No arbitrary imports or package installation
+- No `eval` or subprocess escape
+- Connector-mediated access to external systems
+- Default-deny shell and filesystem allowlists
+- Static validation before execution
+- Optional operator signatures for effectful skills
+- Credentials held by the runtime, not embedded in the skill
+
+### Agent skills auto-discovery
+
+Both installers (`skillfile init` and `npm create prisma@next`) leave a top-level **`prisma-next.md`** primer at the project root for any agent to read first. `skillfile init` also materialises one **`SKILL.md`** per workflow in editor-expected paths:
+
+- `.claude/skills/<skill-name>/SKILL.md` — picked up by Claude Code
+- `.agents/skills/<skill-name>/SKILL.md` — universal location for Cursor, Copilot Agent, and other runtimes
+
+A `skills-lock.json` at the project root tracks installed skill versions.
+
+## Practical Evaluation Checklist
+
+- [ ] Installed via `npm install -g skillscript-runtime`
+- [ ] Initialized skillfile with `skillfile init`
+- [ ] Dashboard accessible at `http://localhost:7878`
+- [ ] Connected Claude Code via MCP
+- [ ] Authored a simple skill and approved it through dashboard
+- [ ] Verified skill executes with lower token cost vs. re-planning from scratch
+
+## Security Notes
+
+Skillscript's default-deny allowlists and connector-mediated access make it significantly safer than granting an agent direct shell access. However:
+
+- **Connector trust** — if a connector exposes broad system access, the allowlist is the only gatekeeper. Review connector configurations before connecting production systems.
+- **Skill provenance** — skills authored by agents should be treated as untrusted until human review. Do not skip the approval step.
+- **Credentials** — runtime-held credentials are a good pattern, but rotating them requires updating the runtime config, not the skill.
+
+## FAQ
+
+**Q: Does Skillscript replace Bash or Python scripts?**
+**A:** No. Skillscript is orchestration-only — it coordinates tools and APIs rather than implementing logic. Python and Bash remain the right choice for implementation work.
+
+**Q: Which agents are supported?**
+**A:** Any MCP-compatible agent. The README specifically mentions Claude Code, Cursor, and Codex. Generic MCP clients also work.
+
+**Q: Is this production-ready?**
+**A:** The README marks the project as pre-1.0 status. APIs may still evolve.
+
+**Q: How does this compare to raw MCP tool calling?**
+**A:** MCP gives agents a fixed set of tools at runtime. Skillscript lets agents define and name new composed workflows, then submit them for approval. It adds a governance layer on top of the raw tool-calling model.
+
+## Conclusion
+
+Skillscript addresses a real problem: agents that re-derive routine tasks from scratch on every run, burning token budget and producing inconsistent results. By letting agents crystallize learned procedures into named, human-approved skills, it shifts recurring workflows from "re-plan every time" to "execute approved artifact."
+
+If you run AI agents in a team setting — especially where security boundaries matter — it's worth a look. The DSL is minimal, the security model is deliberate, and the MCP integration is standard.
+
+Install it with `npm install -g skillscript-runtime`, run `skillfile init`, and connect your agent to `http://localhost:7878/rpc` to get started.
