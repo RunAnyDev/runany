@@ -1,0 +1,191 @@
+---
+title: "Stoneforge – AI Agent Orchestration Platform"
+description: "Stoneforge is an open-source TypeScript platform for orchestrating multiple AI coding agents in parallel. It features a web dashboard, git worktree isolation, and automated merge review."
+pubDate: "2026-07-13"
+tags: ["ai-setup", "dev-tools", "open-source", "typescript"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/stoneforge-ai-orchestration.webp"
+  alt: "Stoneforge AI agent orchestration platform dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Stoneforge is an open-source TypeScript platform that orchestrates multiple AI coding agents in parallel using a Director-Worker-Steward architecture, git worktree isolation, and a web dashboard for real-time visibility.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [stoneforge.ai](https://stoneforge.ai)
+- Source repository: [github.com/stoneforge-ai/stoneforge](https://github.com/stoneforge-ai/stoneforge)
+- License: Apache 2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47267105](https://news.ycombinator.com/item?id=47267105)
+- Source last checked: 2026-07-13 (README verified, API metadata confirmed)
+
+## What Is Stoneforge?
+
+Stoneforge describes itself as "a web dashboard and runtime for orchestrating AI coding agents." The README states:
+
+> **"A web dashboard and runtime for orchestrating AI coding agents"**
+
+It targets developers already running 3–5 AI coding agents in parallel who need better coordination. Stoneforge is built in TypeScript, runs on Node.js 18+ or Bun, and is organized around two core packages:
+
+- **Smithy** (`@stoneforge/smithy`) — the orchestrator. Spawns agents, dispatches tasks, manages sessions, handles worktree isolation and merge review.
+- **Quarry** (`@stoneforge/quarry`) — the underlying event-sourced data SDK used internally by Smithy, also available standalone for custom integrations.
+
+### Agent Roles
+
+| Role | What It Does |
+|------|-------------|
+| **Director** | Strategic planner. You describe a goal, the Director breaks it into tasks with priorities and dependencies. Runs as a persistent session. |
+| **Ephemeral Worker** | Auto-spawned by the dispatch daemon to complete a specific task. Executes in an isolated worktree, commits, pushes, then completes. |
+| **Persistent Worker** | Started manually for exploratory work. Runs an interactive session, not auto-dispatched for tasks. |
+| **Steward** | Handles maintenance workflows — merge review, documentation scanning, recovery of stuck tasks. Runs on triggers or schedules. |
+
+### Comparison with Claude Code Agent Teams
+
+Stoneforge's README includes a direct comparison with Claude Code's experimental agent teams feature:
+
+| | Claude Code Agent Teams | Stoneforge |
+|---|---|---|
+| **State** | Ephemeral — file-based, no persistence across sessions | Event-sourced — SQLite + JSONL, survives restarts |
+| **UI** | Terminal-only | Web dashboard with real-time agent output |
+| **Branch isolation** | Manual — avoid editing the same file | Automatic — each worker gets its own git worktree |
+| **Merge** | Manual | Merge steward runs tests, squash-merges on pass |
+| **Provider** | Claude Code only | Claude Code, OpenCode, or OpenAI Codex |
+| **Scaling** | Single plan | Multi-plan via custom executable paths |
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ or Bun
+- npm, pnpm, or bun for package installation
+
+### Step 1: Install the CLI
+
+```bash
+npm install -g @stoneforge/smithy
+```
+
+### Step 2: Initialize a workspace
+
+```bash
+cd your-project && sf init
+```
+
+### Step 3: Start the server and web dashboard
+
+```bash
+sf serve
+```
+
+Open the dashboard at `http://localhost:3457`.
+
+### Step 4: Register agents
+
+```bash
+# Register a Director
+sf agent register director --role director
+
+# Register workers
+sf agent register e-worker-1 --role worker
+
+# Register a Merge Steward
+sf agent register m-steward-1 --role steward --focus merge
+```
+
+### Step 5: Start the dispatch daemon (background)
+
+```bash
+sf daemon start
+```
+
+### Step 6: Direct the Director
+
+Use the Director Panel in the dashboard (or CLI) to describe your goal, then watch the Director plan, assign tasks to workers, and the Merge Steward handle completed work.
+
+## Deeper Analysis
+
+### What Problem Does It Solve?
+
+Running a single AI coding agent is straightforward. Running several in parallel introduces real coordination problems:
+
+- **Merge conflicts** — agents edit the same files on the same branch
+- **Wasted work** — two agents grab the same task, or one starts on blocked work
+- **Lost context** — when an agent fails mid-task, the next starts from scratch
+- **No visibility** — you cannot see what is happening until you check each terminal
+
+Stoneforge addresses these with: worktree isolation per worker (each gets its own git branch), a dispatch daemon that assigns tasks by priority respecting dependencies, an event-sourced task state that survives restarts, and a Merge Steward that auto-squash-merges passing work.
+
+### Architecture
+
+The README describes the orchestration loop:
+
+1. You describe a goal to the Director
+2. Director creates a plan with tasks, priorities, and dependencies
+3. Dispatch daemon assigns ready tasks to idle workers
+4. Workers execute in isolated git worktrees
+5. Merge Steward reviews completed work
+6. Results are merged or a fix task is created on failure
+
+### Supported Providers
+
+Agents can use Claude Code (default), OpenCode, or OpenAI Codex as the underlying provider. Set via the `--provider` flag at registration or session start.
+
+### Multi-Plan Scaling
+
+The README documents splitting agents across multiple Claude MAX/Pro plans via custom executable paths — useful for high-throughput workflows that exceed a single account's rate limits. See `packages/smithy/README.md#scaling-with-multiple-plans` for the setup guide.
+
+## Practical Evaluation Checklist
+
+Based on the README and GitHub metadata:
+
+- [ ] Single `npm install -g @stoneforge/smithy` install works
+- [ ] `sf init` creates a valid workspace config
+- [ ] `sf serve` starts the web dashboard on port 3457
+- [ ] Director can break a multi-file goal into tasks with correct dependencies
+- [ ] Workers operate in isolated git worktrees (no branch conflicts)
+- [ ] Dispatch daemon correctly assigns tasks by priority
+- [ ] Merge Steward runs tests and auto-squash-merges on pass
+- [ ] State survives restart (event-sourced SQLite + JSONL)
+- [ ] Multi-plan scaling via custom executable paths works as documented
+- [ ] Discord community is active for support
+
+## Security Notes
+
+The README is explicit about two security-relevant points:
+
+1. **Agents run autonomously without approval gates.** Stoneforge spawns agents with permissions bypassed — there are no human approval prompts before agents take actions. This is intentional to avoid bottlenecking a parallel pipeline, but means agents read, write, execute, and push code without asking.
+
+2. **Token consumption is high.** A typical session can burn through multiple Claude MAX/Pro or Codex subscriptions worth of tokens per week. Budget accordingly.
+
+## FAQ
+
+**Q: Do I need multiple AI coding agent subscriptions to use Stoneforge?**
+**A:** Not strictly, but Stoneforge is designed for teams of agents. A Director alone is not very useful — you need at least one Director, one Worker, and ideally a Merge Steward. Each worker runs a separate coding agent session (Claude Code, OpenCode, or Codex), so yes, meaningful use implies multiple agent subscriptions.
+
+**Q: How is state persisted?**
+**A:** Stoneforge uses an event-sourced architecture backed by SQLite + JSONL files. This survives restarts and provides a full audit trail of agent actions. The Quarry package (`@stoneforge/quarry`) is the underlying data layer.
+
+**Q: Can I use Stoneforge with Cursor or other AI coding tools?**
+**A:** Stoneforge supports Claude Code, OpenCode, and OpenAI Codex as agent providers. Support for other tools (Cursor, Copilot, etc.) is not listed in the current README.
+
+**Q: Is Stoneforge production-ready?**
+**A:** The README explicitly states Stoneforge is "early-stage, experimental software under active development" and warns to "expect sharp edges." It is usable today, but some edge cases still have rough spots and documentation sometimes lags behind the code.
+
+**Q: How does Stoneforge compare to running background agents in Cursor?**
+**A:** Stoneforge adds dependency-aware scheduling, automatic merge automation, and a persistent knowledge layer on top of what background agents provide. The README frames it as giving you "parallel execution with coordination."
+
+## Conclusion
+
+Stoneforge fills a specific niche: developers who have already moved beyond a single AI coding agent and need structured coordination across a team of them. The git worktree isolation, event-sourced state, automated merge review, and web dashboard are all concrete solutions to real problems that emerge at that scale.
+
+If you are running 3–5 agents in parallel today and managing merge conflicts and lost context manually, Stoneforge is worth evaluating. If a single coding agent handles your workload, come back when that changes — the README itself advises against premature adoption.
+
+Install: `npm install -g @stoneforge/smithy`
+Docs: [github.com/stoneforge-ai/stoneforge](https://github.com/stoneforge-ai/stoneforge)
