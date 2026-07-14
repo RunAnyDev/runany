@@ -1,0 +1,222 @@
+---
+title: "Deeb – ACID JSON Database for Rust"
+description: "Deeb is a lightweight embedded JSON database written in Rust. It turns JSON files into ACID-compliant collections with query, insert, update, and transaction support — no server needed."
+pubDate: "2026-07-14"
+tags: ["rust", "database", "embedded", "json", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/deeb.webp"
+  alt: "Deeb JSON database product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Deeb is a Rust library that turns a folder of JSON files into a lightweight ACID-compliant database with a familiar MongoDB-like query API — no server, no configuration, just add it to your `Cargo.toml`.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [deebkit.com](https://deebkit.com) ← visited and verified
+- Source repository: [github.com/The-Devoyage/deeb](https://github.com/The-Devoyage/deeb) ← README read end-to-end
+- License: [MIT](https://github.com/The-Devoyage/deeb/blob/main/LICENSE) ← verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=44637301](https://news.ycombinator.com/item?id=44637301)
+- Docs: [docs.rs/deeb/latest/deeb/](https://docs.rs/deeb/latest/deeb/) ← read end-to-end
+- Stars: 26 (GitHub API, 2026-07-14)
+- Source last checked: 2026-07-14 (commit verified against README)
+
+## What Is Deeb?
+
+Deeb is a Rust crate that treats a set of JSON files as a real database. It exposes operations you'd recognise from MongoDB — `insert`, `find_one`, `find_many`, `update_one`, `update_many`, `delete_one`, `delete_many` — layered over plain JSON files with proper ACID transaction semantics.
+
+The core idea: instead of spinning up Postgres or Mongo for a small app, side project, or internal tool, you point Deeb at a directory of JSON files and get a queryable, transactional store. You can even open and edit the JSON manually in any text editor — no proprietary binary format lock-in.
+
+From the README:
+
+> Call it "Deeb," "D-b," or "That Cool JSON Thing" — this ACID Compliant database is perfect for tiny sites and rapid experiments. Inspired by flexibility of Mongo and lightweight of SQLite, Deeb is a tool that turns a set of JSON files into a lightweight database.
+
+## Setup Workflow
+
+### Step 1: Add Deeb to Your `Cargo.toml`
+
+```bash
+cargo add deeb
+```
+
+Deeb also requires `tokio` and `serde_json` as peer dependencies.
+
+### Step 2: Create JSON Instance Files (Optional)
+
+Deeb will create the files for you if they don't exist, but you can bootstrap them manually:
+
+```bash
+echo '{"user": []}' > user.json
+echo '{"comment": []}' > comment.json
+```
+
+### Step 3: Define Your Collections with Proc Macros
+
+```rust
+use deeb::*;
+use serde_json::json;
+use serde::{Serialize, Deserialize};
+
+#[derive(Collection, Serialize, Deserialize)]
+#[deeb(
+    name = "user",
+    primary_key = "id",
+    associate = ("comment", "id", "user_id", "user_comment"),
+)]
+struct User {
+    id: i32,
+    name: String,
+    age: i32
+}
+
+#[derive(Collection, Serialize, Deserialize)]
+#[deeb(name = "comment", primary_key = "id")]
+struct Comment {
+    user_id: i32,
+    comment: String
+}
+```
+
+The `#[deeb(...)]` proc macro generates the entity helper methods like `User::find_many(...)`.
+
+### Step 4: Perform Database Operations
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    // Create entities
+    let mut user = User::entity();
+    user.add_index("age_index", vec!["age"], None)?;
+    let comment = Comment::entity();
+
+    // Set up a new Deeb instance
+    let db = Deeb::new();
+    db.add_instance("test", "./user.json", vec![user.clone()]).await?;
+    db.add_instance("test2", "./comment.json", vec![comment.clone()]).await?;
+
+    // Insert documents
+    let _result = db.insert("test", "user", json!({
+        "id": 1,
+        "name": "Alice",
+        "age": 30
+    })).await?;
+
+    // Query with conditions
+    let users = db.find_many(
+        "test",
+        "user",
+        Query::eq("name", "Alice".into()),
+    ).await?;
+
+    // Update documents
+    let updated = db.update_one(
+        "test",
+        "user",
+        Query::eq("id".into(), 1.into()),
+        json!({"age": 31}),
+    ).await?;
+
+    // Use transactions
+    let mut tx = db.begin_transaction("test").await?;
+    db.insert("test", "comment", json!({"user_id": 1, "comment": "Hello"})).await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+```
+
+## Deeper Analysis
+
+### Query API
+
+Deeb exposes a full set of query operators familiar from MongoDB and SQL:
+
+| Operator | Description |
+|---|---|
+| `eq` | Equal match |
+| `ne` | Not equal |
+| `gt` / `gte` | Greater than / greater or equal |
+| `lt` / `lte` | Less than / less or equal |
+| `like` | Pattern match |
+| `and` / `or` | Combine conditions |
+| `all` | Return all documents |
+| `associated` | JOIN-like queries via defined associations |
+
+### Associations
+
+The `associate` parameter in `#[deeb(...)]` lets you define foreign-key relationships between collections:
+
+```rust
+#[deeb(
+    name = "user",
+    primary_key = "id",
+    associate = ("comment", "id", "user_id", "user_comment"),
+)]
+struct User { ... }
+```
+
+This enables the `associated` query operator to fetch related documents across collections — for example, finding all comments belonging to a user in a single query.
+
+### Indexing
+
+```rust
+user.add_index("age_index", vec!["age"], None)?;
+```
+
+Indexes are added per-entity and improve query performance on the specified fields.
+
+### Data Management
+
+Deeb also provides `add_key` and `drop_key` to bulk-update or remove fields across all documents in a collection — useful for schema migrations.
+
+## Practical Evaluation Checklist
+
+- [ ] Add to `Cargo.toml` and compile without errors
+- [ ] Create JSON instance files manually or let Deeb auto-create them
+- [ ] Define a `Collection` struct with `#[derive(Collection, Serialize, Deserialize)]` and `#[deeb(...)]`
+- [ ] Perform `insert`, `find_one`, `find_many` operations
+- [ ] Test `update_one` / `update_many` with query conditions
+- [ ] Verify JSON file is updated correctly after operations
+- [ ] Test manual JSON editing — does Deeb read changes on next query?
+- [ ] Experiment with transactions (`begin_transaction`, `commit`)
+- [ ] Add an index and verify performance difference on large collections
+
+## Security Notes
+
+- Deeb operates entirely on local JSON files. There is no built-in authentication or access control — it is designed for local/embedded use.
+- Because data is stored as plain JSON, any process with file-system access can read and modify the database. Keep instance files in a protected directory.
+- The `add_key` and `drop_key` operations modify all documents in a collection atomically — test these in a dev environment first.
+- No encryption at rest — if you need encrypted storage, layer it at the filesystem level (e.g., LUKS, gocryptfs).
+
+## FAQ
+
+**Q: How is Deeb different from SQLite?**
+**A:** SQLite stores data in a binary format you can't read or edit manually. Deeb stores plain JSON files you can open in any editor. Deeb is document-oriented (MongoDB-style) rather than relational, and has no server process — it's a library you embed directly.
+
+**Q: Can I open the JSON files and edit them manually?**
+**A:** Yes. This is a core design goal. Deeb reads the JSON file on each operation, so manual edits are picked up on the next query.
+
+**Q: What happens if two processes write to the same JSON file simultaneously?**
+**A:** Deeb has basic transaction support with file-level locking via `begin_transaction` and `commit`. Concurrent write performance is not the primary use case — this is aimed at single-process embedded scenarios.
+
+**Q: Does it support nested JSON documents?**
+**A:** Yes, since it stores raw JSON, nested objects and arrays are fully supported without schema constraints.
+
+**Q: What is the current status?**
+**A:** As of the latest README, features marked complete include: benchmarks, associations, documentation, tests, examples, and proc macro streamline. Logging and error handling are still listed as in progress. The project is actively maintained — latest activity visible on GitHub.
+
+## Conclusion
+
+Deeb fills a specific niche: when you want the ergonomics of a document database but the transparency of a flat file. Because everything is plain JSON you can inspect and edit with any tool, it is ideal for prototypes, internal dev tools, local-first apps, and scenarios where portability trumps raw performance. If you reach for SQLite out of habit but end up wishing you could just open the data in a text editor, Deeb is worth a look.
+
+**Install it with one line:**
+```bash
+cargo add deeb
+```
