@@ -1,0 +1,201 @@
+---
+title: "Ragtime - Self-Hosted RAG API and MCP Server"
+description: "Deploy a self-hosted RAG pipeline with built-in MCP tools for PostgreSQL, MSSQL, MySQL, SSH, and filesystem indexing. Works with Claude Desktop, Cursor, and any OpenAI-compatible client."
+pubDate: "2026-07-14"
+tags: ["rag", "mcp", "self-hosted", "ai-setup"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ragtime-self-hosted-rag-mcp.webp"
+  alt: "Ragtime - Self-Hosted RAG API and MCP Server"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Ragtime is a self-hosted RAG API with a built-in MCP server that exposes SQL, SSH, and filesystem tools to any AI client — no external RAG service required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/mattv8/ragtime](https://github.com/mattv8/ragtime)
+- Source repository: [github.com/mattv8/ragtime](https://github.com/mattv8/ragtime)
+- License: MIT (verified via LICENSE file in repository)
+- HN launch thread: [news.ycombinator.com/item?id=46964772](https://news.ycombinator.com/item?id=46964772)
+
+## What Is Ragtime?
+
+Ragtime is a self-hosted, OpenAI-compatible RAG API combined with an MCP server. It indexes your knowledge bases (PostgreSQL schemas, git repositories, uploaded files, live filesystems) and exposes them as tools via the [Model Context Protocol](https://modelcontextprotocol.io).
+
+Instead of paying for a hosted RAG service, you run Ragtime on a VPS or local machine. It speaks the `/v1/chat/completions` API that OpenWebUI, Continue, and any OpenAI SDK client already understand. For AI coding assistants like Claude Desktop, Cursor, and VS Code Copilot, it additionally exposes a native MCP endpoint.
+
+The project ships as a Docker Compose stack: PostgreSQL for persistence, a bundled SearXNG for web search, and a separate runtime worker for isolated sandbox sessions.
+
+## Setup Workflow
+
+### Step 1: Prerequisites
+
+- Docker and Docker Compose
+- A machine with at least 4 GB RAM
+
+### Step 2: Create the Environment File
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your actual values. The key variables are:
+
+```bash
+# Database
+POSTGRES_PASSWORD=your_secure_password
+
+# Admin account
+LOCAL_ADMIN_USER=admin
+LOCAL_ADMIN_PASSWORD=your_admin_password
+
+# For non-local deployments, also set:
+API_KEY=$(openssl rand -base64 32)
+ALLOWED_ORIGINS=https://your-domain.com
+EXTERNAL_BASE_URL=https://ragtime.example.com
+```
+
+### Step 3: Launch with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+The stack starts four services: `ragtime-db` (PostgreSQL with pgvector), `searxng` (web search), `ragtime` (the API), and `runtime` (isolated sandbox sessions).
+
+### Step 4: Access the Web UI
+
+Open http://localhost:8000 and log in with the admin credentials you set in `.env`.
+
+### Step 5: Configure Tools
+
+Navigate to the **Tools** tab in the web UI. Click **Add Tool** and select your tool type:
+
+| Tool Type | What It Does |
+|-----------|-------------|
+| `postgres` | Run read queries against a PostgreSQL database |
+| `mssql` | Run queries against Microsoft SQL Server |
+| `mysql` | Run queries against MySQL |
+| `ssh_shell` | Execute commands on a remote server |
+| `filesystem_indexer` | Index and search files on mounted paths |
+
+Use the built-in test button to verify each connection before saving.
+
+### Step 6: Create an Index
+
+Go to the **Indexes** tab. Ragtime supports multiple index types:
+
+| Method | Backend | Use Case |
+|--------|---------|----------|
+| **Upload** (zip/tar) | FAISS or pgvector | Static codebases, documentation snapshots |
+| **Git Clone** | FAISS or pgvector | Repositories with optional private token auth |
+| **Filesystem** | FAISS or pgvector | Live SMB/NFS shares, Docker volumes |
+| **Schema** | pgvector | Auto-generated from your database tools |
+
+### Step 7: Connect via MCP (Claude Desktop, Cursor, etc.)
+
+Ragtime exposes an MCP endpoint at `/mcp` with HTTP Streamable transport. Add it to your client:
+
+```json
+{
+  "servers": {
+    "ragtime": {
+      "url": "http://localhost:8000/mcp",
+      "type": "http"
+    }
+  }
+}
+```
+
+For **Claude Desktop**, edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ragtime": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+### Step 8: Connect via OpenAI-Compatible API
+
+For OpenWebUI, Continue, or any OpenAI SDK client, point the API base to:
+
+```
+http://localhost:8000/v1
+```
+
+Use the `API_KEY` you configured as the bearer token.
+
+## Deeper Analysis
+
+### Architecture
+
+Ragtime combines three layers in one stack:
+
+- **RAG layer**: FAISS (in-memory) or pgvector (PostgreSQL-backed) for embedding storage. Embedding provider is configurable per-index (OpenAI, Ollama, llama.cpp, LM Studio).
+- **Tool layer**: MCP tools for SQL databases, SSH, Odoo, and filesystem. Each tool runs inside an isolated runtime sandbox.
+- **API layer**: OpenAI-compatible `/v1/chat/completions` for general chat, MCP endpoint for structured tool calls, and a built-in web UI with live preview sessions.
+
+The `runtime` service creates Replit-like sandboxed environments where tools execute. When the Docker host supports it, Ragtime uses `pivot_root` for full isolation; otherwise it falls back to `chroot`.
+
+### Model Provider Flexibility
+
+Unlike hosted RAG services that lock you into one LLM, Ragtime lets you choose per-conversation:
+
+| Provider | Auth | Chat | Embeddings |
+|----------|------|:----:|:----------:|
+| OpenAI | API key | Yes | Yes |
+| Anthropic | API key | Yes | — |
+| Claude Code | Claude Pro subscription (CLI) | Yes | — |
+| GitHub Copilot | OAuth device flow or PAT | Yes | — |
+| Ollama | Local | Yes | Yes |
+| llama.cpp | Local | Yes | Yes |
+| LM Studio | Local | Yes | Yes |
+| OpenRouter | API key | Yes | Yes |
+
+Subscription-backed providers (Claude Code, GitHub Copilot) authenticate from the Settings UI without needing an API key.
+
+### Security Considerations
+
+- **API_KEY is strongly recommended** for non-local deployments. When unset, the `/v1/chat/completions` endpoint is open to anyone with network access.
+- **MCP is disabled by default.** When you enable it in Settings, route authentication is off by default — turn on MCP authentication if the endpoint is network-accessible.
+- **SSH tool uses `AutoAddPolicy`** — it accepts any host key on first connect without verification. Only use the SSH tool on trusted networks.
+- The Docker compose includes a `docker.sock` mount and optional `SYS_ADMIN` capability for advanced features. Remove these if you do not need container exec, SSH tunnels, or NFS/SMB mounts.
+
+## Practical Evaluation Checklist
+
+- [ ] Docker Compose starts cleanly with `docker compose up -d`
+- [ ] Web UI accessible at http://localhost:8000
+- [ ] PostgreSQL tool connects and returns query results
+- [ ] MCP endpoint responds to Claude Desktop connection
+- [ ] OpenAI-compatible API returns streaming responses
+- [ ] FAISS index loads and answers semantic search queries
+- [ ] Workspace preview URLs load isolated sandbox sessions
+
+## FAQ
+
+**Q: What is the minimum hardware requirement?**
+**A:** The README recommends a machine with enough RAM to hold FAISS indexes in memory. For typical use with pgvector, 4 GB RAM is sufficient.
+
+**Q: Can I use Ragtime without Docker?**
+**A:** Ragtime is designed for Docker Compose deployment. Manual installation is not documented in the README.
+
+**Q: How does Ragtime differ from hosted RAG APIs like Pinecone?**
+**A:** Hosted services handle the infrastructure for you. Ragtime gives you full control on your own hardware — your data never leaves your server. It also bundles an MCP server, whereas most hosted RAG APIs only expose an OpenAI-compatible endpoint.
+
+**Q: Does Ragtime support private repository indexing?**
+**A:** Yes. Git Clone indexes support optional private tokens for authenticated repository access.
+
+## Conclusion
+
+Ragtime covers the full self-hosted RAG stack in one Docker Compose file: ingestion, embedding storage (FAISS or pgvector), an OpenAI-compatible chat API, and an MCP server with database and SSH tools. If you want to keep your knowledge bases off a third-party service while still using standard AI client integrations, it is a production-ready starting point.
