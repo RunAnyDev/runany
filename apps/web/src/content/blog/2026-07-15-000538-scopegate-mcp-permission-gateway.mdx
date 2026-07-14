@@ -1,0 +1,157 @@
+---
+title: "ScopeGate – MCP Permission Gateway for AI Agents"
+description: "ScopeGate is an open-source MCP proxy that gives each AI agent exactly the access it needs — nothing more. Connect Google services, define granular OAuth scopes, and get an MCP endpoint URL in minutes."
+pubDate: "2026-07-15"
+tags: ["mcp", "ai-agent", "security", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/scopegate.webp"
+  alt: "ScopeGate MCP permission gateway product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ScopeGate is an open-source MCP proxy that acts as a permission gateway between AI agents and external services (Google Gmail, Calendar, Drive) — letting you define exactly which OAuth scopes each agent can use, then exposing it as an MCP endpoint URL.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [scopegate.dev](https://scopegate.dev) — **MUST visit and verify**
+- Source repository: [github.com/alifanov/scopegate](https://github.com/alifanov/scopegate) — **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: not available for this specific launch
+- Source last checked: 2026-07-15 (README verified via raw.githubusercontent.com)
+
+## What Is ScopeGate?
+
+When an AI agent needs to access your Gmail or Google Calendar, you have two options: give it full OAuth access to the entire service, or deny it entirely. ScopeGate sits in between — it is an MCP-compatible proxy that lets you define **per-agent, per-tool permissions** and exposes a single MCP endpoint URL for your agent to use.
+
+The agent can only do what you explicitly allow. If you authorize it to read emails but not send them, `gmail:send_email` is simply not in the tool list the MCP server returns.
+
+It is built with Next.js 16 (App Router), TypeScript, PostgreSQL + Prisma 7, and the `@modelcontextprotocol/sdk` with Streamable HTTP transport.
+
+## Setup Workflow
+
+### Step 1: Prerequisites
+
+- Node.js 18+
+- pnpm
+- PostgreSQL database
+
+### Step 2: Clone and Install
+
+```bash
+git clone https://github.com/alifanov/scopegate.git
+cd scopegate
+pnpm install
+```
+
+### Step 3: Configure Environment
+
+Copy the example env file and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+Required environment variables:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `BETTER_AUTH_SECRET` | Secret key for session signing |
+| `BETTER_AUTH_URL` | App base URL (e.g. `http://localhost:3000`) |
+| `ADMIN_EMAIL` | Bootstrap admin email |
+| `ADMIN_PASSWORD` | Bootstrap admin password |
+
+### Step 4: Run Database Migration
+
+```bash
+pnpm prisma migrate dev
+```
+
+### Step 5: Start the Development Server
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) and log in with your admin credentials.
+
+## How It Works
+
+The workflow has five steps:
+
+1. **Login** — authenticate with admin credentials bootstrapped from env vars
+2. **Create a Project** — group endpoints and services logically
+3. **Connect a Service** — add an OAuth service connection (Google Gmail, Calendar, or Drive)
+4. **Create an MCP Endpoint** — select the service connection and pick specific permissions
+5. **Plug the MCP URL into your agent** — only allowed actions are exposed
+
+### Available Permissions by Service
+
+| Service | Available Actions |
+|---|---|
+| Gmail | `gmail:read_emails`, `gmail:send_email`, `gmail:list_labels`, `gmail:search_emails` |
+| Google Calendar | `calendar:list_events`, `calendar:create_event`, `calendar:update_event`, `calendar:delete_event` |
+| Google Drive | `drive:list_files`, `drive:read_file`, `drive:create_file`, `drive:delete_file` |
+
+Every request is logged in the audit trail — you can see which agent called which action, when, and whether it succeeded.
+
+## Deeper Analysis
+
+### Why a Permission Gateway Matters for AI Agents
+
+Standard OAuth grants are coarse. Google's `gmail.read` scope gives an app read access to all labels, not just a specific label. When an AI agent needs to check your calendar, OAuth hands it the keys to delete events too.
+
+ScopeGate addresses this by operating at the **MCP tool level**. The MCP protocol defines tools as discrete operations — `calendar:create_event` vs `calendar:delete_event` are separate tools. ScopeGate filters the tool list at the gateway, so an agent using a ScopeGate MCP endpoint literally cannot see or invoke tools you did not authorize.
+
+This is especially relevant for:
+- **Multi-agent systems** where different agents should have different access levels
+- **Compliance scenarios** where you need to audit exactly which data an agent touched
+- **Least-privilege enforcement** that OAuth alone cannot provide at the tool level
+
+### Self-Hosted vs. Managed
+
+ScopeGate is currently fully self-hosted. There is no managed cloud offering — you run it on your own infrastructure with your own PostgreSQL database. The hosted offering at scopegate.dev likely provides a managed version, but the core project is open source and free to deploy yourself.
+
+## Practical Evaluation Checklist
+
+- [ ] Clone and run `pnpm dev` locally with a PostgreSQL instance
+- [ ] Connect one Google service account (Gmail or Calendar)
+- [ ] Create an MCP endpoint with a subset of available permissions
+- [ ] Point a Claude Desktop or other MCP-compatible agent at the endpoint URL
+- [ ] Verify unauthorized tools are absent from the agent's tool list
+- [ ] Check the audit log after a few operations
+
+## Security Notes
+
+- All sessions are database-backed via Better Auth (not JWT)
+- Each MCP endpoint has its own API key
+- Rate limits are configurable per endpoint
+- All agent-service interactions are logged with timestamps, action type, and status
+- You can revoke an endpoint at any time without touching the underlying OAuth tokens
+
+## FAQ
+
+**Q: Does ScopeGate work with non-Google services?**
+**A:** Currently only Google services (Gmail, Calendar, Drive) are supported out of the box. The permission system in `src/lib/mcp/permissions.ts` is the source of truth and could be extended to other OAuth providers.
+
+**Q: Can I self-host ScopeGate in production?**
+**A:** Yes. Clone the repo, set up PostgreSQL, configure your environment variables, run `pnpm prisma migrate deploy`, and `pnpm build && pnpm start`. The README documents all required env vars.
+
+**Q: Does it work with any MCP-compatible agent?**
+**A:** It implements the MCP Streamable HTTP transport using `@modelcontextprotocol/sdk`. Any agent that supports MCP over HTTP (including Claude Desktop with MCP add-on, Cursor, and other MCP-compatible editors) can connect.
+
+**Q: Is there a hosted version?**
+**A:** scopegate.dev appears to offer a hosted service, but the core project is open source under the MIT license.
+
+## Conclusion
+
+ScopeGate fills a real gap in the AI agent toolchain: fine-grained, auditable permission boundaries between agents and external services. If you are running MCP-based agents that touch Google Workspace data, ScopeGate lets you enforce least-privilege access without giving up the convenience of MCP tool calling.
+
+The self-hosted setup takes under 20 minutes if you already have PostgreSQL running. The audit log alone makes it worth evaluating if you are serious about AI agent security.
