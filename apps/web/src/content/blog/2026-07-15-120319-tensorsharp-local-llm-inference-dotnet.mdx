@@ -1,0 +1,171 @@
+---
+title: "TensorSharp - Local LLM Inference in C# .NET"
+description: "Run GGUF models on your own hardware with a native .NET inference engine. CLI, web UI, and Ollama/OpenAI-compatible APIs on Windows, macOS, Linux."
+pubDate: "2026-07-15"
+tags: ["dotnet", "gguf", "local-inference", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tensorsharp-llm-inference.webp"
+  alt: "TensorSharp product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** TensorSharp is an open-source .NET inference engine for GGUF models that runs a CLI, browser chat UI, and Ollama/OpenAI-compatible HTTP APIs on your own hardware — no data leaves the machine, no per-token fees.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [tensorsharp.ai](https://tensorsharp.ai) ← **MUST visit and verify**
+- Source repository: [github.com/zhongkaifu/TensorSharp](https://github.com/zhongkaifu/TensorSharp) ← **MUST read README**
+- License: [BSD-3-Clause](https://github.com/zhongkaifu/TensorSharp/blob/main/LICENSE) ← **verified via GitHub API**
+- Latest release: [v3.1.0.0](https://github.com/zhongkaifu/TensorSharp/releases/tag/v3.1.0.0) (verified via `git ls-remote --tags`)
+- Stars: 214 (GitHub API, as of 2026-07-15)
+- HN launch thread: [news.ycombinator.com/item?id=48855138](https://news.ycombinator.com/item?id=48855138)
+- Source last checked: 2026-07-15 (commit `d111641`)
+
+## What Is TensorSharp?
+
+TensorSharp is a native .NET LLM inference engine for GGUF models — autoregressive LLMs and DiffusionGemma-style text-diffusion models. It ships as three things in one repo:
+
+- **TensorSharp.Cli** — a command-line tool for running prompts, images, audio, batches, and benchmarks directly from a terminal.
+- **TensorSharp.Server** — a browser-based chat UI with a local web server.
+- **HTTP API layer** — Ollama-compatible and OpenAI-compatible endpoints, so any client that works with Ollama or the OpenAI chat completions API works with TensorSharp out of the box.
+
+The tagline from the README: *"Native .NET LLM inference engine for GGUF models."*
+
+It supports Windows, macOS, and Linux, with GPU acceleration backends for NVIDIA (CUDA), Apple Silicon (Metal), and AMD/Intel/NVIDIA (Vulkan).
+
+## Prerequisites
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) — `dotnet --version` must start with `10.`
+- `git` and `curl`
+- A GPU backend for your hardware (CUDA, Metal, or Vulkan — see the [wiki Prerequisites page](https://tensorsharp.ai/prerequisites.html) for the required SDKs/runtimes per backend)
+- GGUF model file (the README uses [gemma-4-E4B-it-Q8_0.gguf](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) from the `ggml-org` Hugging Face org as the verified test model — 7.48 GiB)
+
+## Setup Workflow
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/zhongkaifu/TensorSharp.git
+cd TensorSharp
+```
+
+### Step 2: Download a GGUF Model
+
+The README verifies its fast path with Gemma 4 E4B Q8_0. Download it from Hugging Face:
+
+```bash
+mkdir -p models
+curl -L --fail "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q8_0.gguf?download=true" -o models/gemma-4-E4B-it-Q8_0.gguf
+```
+
+The file is 7.48 GiB. Adjust `models/` path and the Hugging Face model URL for other GGUF files.
+
+### Step 3: Build and Run
+
+**macOS (Apple Silicon):**
+
+```bash
+dotnet run --project TensorSharp.Cli -c Release -p:TensorSharpSkipMlxNative=true -- \
+  --model models/gemma-4-E4B-it-Q8_0.gguf \
+  --input prompt.txt \
+  --max-tokens 128 \
+  --backend ggml_metal
+```
+
+**Linux + NVIDIA:**
+
+```bash
+TENSORSHARP_GGML_NATIVE_ENABLE_CUDA=ON dotnet run --project TensorSharp.Cli -c Release -p:TensorSharpSkipMlxNative=true -- \
+  --model models/gemma-4-E4B-it-Q8_0.gguf \
+  --input prompt.txt \
+  --max-tokens 128 \
+  --backend ggml_cuda
+```
+
+**Windows + NVIDIA (PowerShell):**
+
+```powershell
+$env:TENSORSHARP_GGML_NATIVE_ENABLE_CUDA = 'ON'
+dotnet run --project TensorSharp.Cli -c Release -p:TensorSharpSkipMlxNative=true -- `
+  --model models\gemma-4-E4B-it-Q8_0.gguf `
+  --input prompt.txt `
+  --max-tokens 128 `
+  --backend ggml_cuda
+```
+
+Replace `ggml_cuda` with `ggml_vulkan` on a Vulkan-capable device (Windows/Linux AMD, Intel, or NVIDIA):
+
+```bash
+TENSORSHARP_GGML_NATIVE_ENABLE_VULKAN=ON dotnet run --project TensorSharp.Cli -c Release -p:TensorSharpSkipMlxNative=true -- \
+  --model models/gemma-4-E4B-it-Q8_0.gguf \
+  --input prompt.txt \
+  --max-tokens 128 \
+  --backend ggml_vulkan
+```
+
+### Step 4: Serve the Web UI and HTTP API
+
+The same fused per-sequence inference path used by the CLI also runs in the server. Start it with:
+
+```bash
+dotnet run --project TensorSharp.Server -c Release -p:TensorSharpSkipMlxNative=true -- \
+  --model models/gemma-4-E4B-it-Q8_0.gguf \
+  --backend ggml_metal
+```
+
+Then open `http://localhost:5000/index.html` in your browser. The server exposes Ollama-compatible endpoints at the same base URL.
+
+## Deeper Analysis
+
+### Ollama and OpenAI Compatibility
+
+The HTTP API layer is designed to be drop-in compatible with existing tooling. If you have code using the Ollama `/api/chat` endpoint or the OpenAI `v1/chat/completions` endpoint, point it at `http://localhost:5000` and it should work without changes. This makes TensorSharp useful as a local replacement for Ollama in environments where .NET is the preferred stack.
+
+### Multi-Modal Support
+
+The same Gemma 4 E4B model path supports thinking, tools, and optional-projector image, video, and audio — the README notes these are activated when using a model that includes a projector. The text-only commands above skip the projector, so they work without a multimodal model file.
+
+### GPU Backend Options
+
+| Backend | Hardware | Notes |
+|---|---|---|
+| `ggml_cuda` | NVIDIA GPU | Requires CUDA toolkit |
+| `ggml_metal` | Apple Silicon | Built into macOS |
+| `ggml_vulkan` | AMD/Intel/NVIDIA GPU | Cross-vendor, needs Vulkan runtime |
+
+## Practical Evaluation Checklist
+
+- [ ] .NET 10 SDK installed (`dotnet --version` starts with `10`)
+- [ ] Repository cloned and builds without errors
+- [ ] GGUF model downloaded successfully
+- [ ] CLI runs a text-only prompt and returns output
+- [ ] Server starts and web UI is accessible at localhost:5000
+- [ ] API endpoint responds to a curl request or an Ollama client
+
+## Security Notes
+
+Everything runs locally on your own hardware. No data leaves the machine, no telemetry is mentioned in the README, and there are no per-token fees — you pay for the hardware only. This makes TensorSharp suitable for sensitive workloads where sending prompts to a third-party API is not an option.
+
+## FAQ
+
+**Q: How does this compare to Ollama?**
+**A:** TensorSharp uses the same GGUF model format as Ollama, but is built natively in .NET. Its HTTP API layer is Ollama-compatible, so you can point Ollama clients at it. The key difference is the .NET runtime and the native .NET GPU backends (CUDA, Metal, Vulkan) versus Ollama's Go-based implementation.
+
+**Q: Does it support Windows with an NVIDIA GPU?**
+**A:** Yes — use the `ggml_cuda` backend with `TENSORSHARP_GGML_NATIVE_ENABLE_CUDA=ON` on Windows (PowerShell) or Linux with NVIDIA. Vulkan is also available on Windows for AMD/Intel/NVIDIA GPUs.
+
+**Q: Can I use models other than Gemma 4?**
+**A:** Yes — any GGUF-format model should work. The README uses Gemma 4 E4B Q8_0 as the verified test case, but the engine itself is model-agnostic within the GGUF spec.
+
+## Conclusion
+
+TensorSharp fills a gap for .NET developers who want to run local LLMs without leaving the .NET ecosystem. The Ollama/OpenAI-compatible API means existing tooling works without rewrite, and the native GPU backends on CUDA, Metal, and Vulkan cover the three major desktop GPU platforms. If you are already in the .NET world and need a self-hosted inference option, this is worth evaluating.
+
+For more, see the [Getting Started guide](https://tensorsharp.ai/getting-started.html) and the [full wiki](https://tensorsharp.ai/overview.html) on the project site.
