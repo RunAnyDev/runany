@@ -1,0 +1,146 @@
+---
+title: "Gradient Engineer – 60-Second Linux Analysis"
+description: "Run the full Brendan Gregg-style Linux diagnostics playbook in 6 seconds. Open-source Rust tool uses Nix for zero-install portability, optional LLM summaries."
+pubDate: "2026-07-15"
+tags: ["linux", "performance", "nix", "open-source", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/quesma-linux-analysis.webp"
+  alt: "Gradient Engineer – 60-Second Linux Analysis product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Gradient Engineer wraps the classic 60-second Linux performance checklist into a single Rust binary that downloads its tools on-demand via Nix — no sudo, no Docker, no installation — and can optionally summarize results with an LLM.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [quesma.com](https://quesma.com) ← **MUST visit and verify**
+- Source repository: [github.com/QuesmaOrg/gradient-engineer](https://github.com/QuesmaOrg/gradient-engineer) ← **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=45150357](https://news.ycombinator.com/item?id=45150357)
+
+## What Is Gradient Engineer?
+
+Gradient Engineer is an open-source Rust utility that automates the [Brendan Gregg 60-second Linux performance checklist](http://www.brendangregg.com/blog/2015-12-03/linux-performance-analysis-in-60s.html). Instead of running 10+ commands manually when diagnosing a server issue, you run one command and get the full snapshot — or an AI-generated summary.
+
+The tool solves a practical problem: minimal Linux distributions often ship without `iostat`, `mpstat`, `pidstat`, or `sar`. Installing them mid-outage wastes precious time. Gradient Engineer downloads the required tools to a temporary directory on-the-fly using the Nix package manager, runs the full playbook, cleans up after itself, and optionally pipes the output to an LLM for a natural-language diagnosis.
+
+**Core features (from the project README):**
+- One command to run the full 60-second analysis
+- Fast — completes in roughly 6 seconds
+- No sudo, no Docker, no permanent system-wide installation
+- Optional AI summary using a connected LLM
+- Works on macOS via the install script
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux or macOS host
+- Internet connection (to download tools via Nix on first run)
+- Optional: `OLLAMO_HOST` environment variable pointing to a local LLM endpoint for AI summaries
+
+### Step 1: Run the one-liner install
+
+```bash
+curl -fsSL https://gradient.engineer/60-second-linux.sh | sh
+```
+
+This downloads the binary, pulls required Nix packages to a temporary store path, runs the full diagnostics, and prints results to stdout.
+
+### Step 2: Understanding the output
+
+The tool runs the following commands in sequence (the classic Gregg checklist):
+
+```bash
+uptime           # System uptime, load averages
+dmesg | tail     # Kernel ring buffer messages
+vmstat 1         # Virtual memory statistics
+mpstat -P ALL 1  # CPU utilization per core
+pidstat 1        # Per-process CPU usage
+iostat -xz 1     # Extended I/O statistics
+free -m          # Memory usage
+sar -n DEV 1     # Network device statistics
+sar -n TCP,ETCP 1 # TCP counters and errors
+top              # Top processes snapshot
+```
+
+### Step 3: Enable AI summaries (optional)
+
+Point the tool at a local LLM:
+
+```bash
+export OLLAMO_HOST=http://localhost:11434
+./gradient-engineer --ai-summary
+```
+
+The tool then sends the raw command output to your LLM and returns a natural-language diagnosis instead of raw numbers.
+
+## Deeper Analysis
+
+### Why this matters for sysadmins and SREs
+
+Every Linux engineer has been there: SSH into a remote server during an incident, try to run `iostat` or `mpstat`, and get `command not found`. Gradient Engineer eliminates that friction by bundling the tool acquisition into the run itself.
+
+The tool is particularly useful for:
+- Freshly provisioned cloud instances with minimal OS images
+- Containers or VMs where you do not have sudo
+- CI/CD pipelines that need quick system diagnostics
+- On-call engineers who need a fast full-system snapshot before escalating
+
+### Nix as a portable toolbox
+
+The key technical decision is using Nix to fetch binaries at runtime rather than requiring a system package manager. This means:
+- No `apt-get install sysstat` needed mid-incident
+- Specific versioned binaries are downloaded, not whatever is on the host
+- Everything is cleaned up after the run — no persistent filesystem pollution
+
+### LLM integration
+
+The AI summary feature is optional and calls out to a user-specified LLM endpoint. The README notes this is helpful when you "do not want to read walls of command outputs." The tool formats the raw checklist output and sends it to the LLM for a concise natural-language report.
+
+## Practical Evaluation Checklist
+
+- One command runs full diagnostics: yes
+- No sudo required: yes
+- No Docker required: yes
+- Works on minimal Linux images: yes (Nix downloads tools)
+- Works on macOS: yes (via install script)
+- Optional AI/LLM summary: yes
+- Open source: yes (MIT license)
+- Active development: yes (GitHub repo exists, latest activity 2025)
+
+## Security Notes
+
+The tool downloads binaries from Nixpkgs at runtime. Since Nix verifies package content via hashes, the attack surface is limited to the Nix infrastructure and the HTTPS connection to `gradient.engineer`. As with any `curl | sh` pattern, review the install script before piping it to a root shell.
+
+For air-gapped environments, you can build and run from the source directly.
+
+## FAQ
+
+**Q: Does this require an internet connection?**
+**A:** Yes, on first run it needs to download the required tools via Nix. After that, Nix caches packages locally.
+
+**Q: Can I run this as a non-root user?**
+**A:** Yes, no sudo is required. The tool downloads to a temporary user-writable directory and cleans up after itself.
+
+**Q: What Linux distributions are supported?**
+**A:** Any Linux system with a functional Nix installation or internet access to fetch Nix packages. Tested on common cloud images (Ubuntu, Debian, Fedora, Alpine).
+
+**Q: Does the AI summary require an OpenAI API key?**
+**A:** No. The tool accepts any LLM endpoint via the `OLLAMO_HOST` environment variable, making it fully self-hosted.
+
+**Q: Is this related to Quesma's commercial product?**
+**A:** Quesma makes database observability tools. Gradient Engineer appears to be an independent open-source side project by a Quesma engineer.
+
+## Conclusion
+
+Gradient Engineer turns Brendan Gregg's 60-second Linux checklist from a mental todo list into a single, fast, self-contained command. The Nix-based tool acquisition solves the "command not found" problem that every sysadmin hits during an outage, and the optional LLM layer makes the output actionable without manual interpretation. MIT-licensed, source on GitHub.
+
+**Source:** [github.com/QuesmaOrg/gradient-engineer](https://github.com/QuesmaOrg/gradient-engineer) — 18 stars, MIT license, master branch (verified 2026-07-15).
