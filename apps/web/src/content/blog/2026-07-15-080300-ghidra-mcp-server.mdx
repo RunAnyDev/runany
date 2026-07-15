@@ -1,0 +1,157 @@
+---
+title: "Ghidra MCP Server – 200+ AI Reverse Engineering Tools"
+description: "An MCP server that bridges Ghidra's binary analysis engine with AI tools, providing 200+ tools for decompilation, live debugging, and P-code emulation."
+pubDate: "2026-07-15"
+tags: ["ghidra", "reverse-engineering", "mcp", "ai-tools", "binary-analysis"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ghidra-mcp-server.webp"
+  alt: "Ghidra MCP Server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The Ghidra MCP Server is a production-ready Model Context Protocol bridge for Ghidra, offering 200+ MCP tools for AI-assisted reverse engineering, live debugging, and batch binary analysis workflows.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/bethington/ghidra-mcp](https://github.com/bethington/ghidra-mcp)
+- Official site/docs: [modelcontextprotocol.io](https://modelcontextprotocol.io)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46882389](https://news.ycombinator.com/item?id=46882389)
+- Latest release: v5.14.2 (2026-06-27, verified via GitHub Releases API)
+- Source last checked: 2026-07-15 (commit `main` branch, pushed 2026-07-14)
+
+## What Is Ghidra MCP?
+
+The Ghidra MCP Server is a Model Context Protocol bridge that exposes Ghidra's reverse engineering capabilities as MCP tools for AI agents and editors. Rather than manually scripting Ghidra in Python or Java, you interact with a structured tool layer — renaming functions, extracting strings, tracing data flow, and running P-code emulation — from any MCP-compatible client like Claude Code or Cursor.
+
+The project was built by a reverse engineer who uses it daily on real binaries. According to the README, it ships **256 MCP tools** covering read and write operations: full decompilation access, function renaming, type assignments, structure creation, script execution, P-code emulation, live debugging, and batch operations that reduce API call volume by 93 percent.
+
+Key requirements:
+- Java 21 LTS (OpenJDK recommended)
+- Apache Maven 3.9+
+- Ghidra 12.1.2
+- Python 3.10+ with pip
+
+## Setup Workflow
+
+### Step 1: Install Prerequisites
+
+```bash
+# Verify Java version (requires Java 21)
+java -version
+
+# Verify Python version (requires 3.10+)
+python3 --version
+
+# Verify Maven
+mvn --version
+```
+
+### Step 2: Clone and Build
+
+```bash
+git clone https://github.com/bethington/ghidra-mcp.git
+cd ghidra-mcp
+```
+
+### Step 3: Preflight Check (Optional but Recommended)
+
+```bash
+python -m tools.setup preflight --ghidra-path "/path/to/ghidra_12.1.2_PUBLIC"
+```
+
+### Step 4: Build and Deploy to Ghidra
+
+```bash
+python -m tools.setup ensure-prereqs --ghidra-path "/path/to/ghidra_12.1.2_PUBLIC"
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path "/path/to/ghidra_12.1.2_PUBLIC"
+```
+
+The `deploy` step saves and closes any running Ghidra instance, installs the extension, restarts Ghidra, waits for MCP health confirmation, and runs schema smoke checks. On first run this takes a few minutes.
+
+### Step 5: Connect an MCP Client
+
+Once Ghidra is running with the MCP server active, configure your MCP client (Claude Code, Cursor, etc.) to connect to the server endpoint. The README documents the exact tool schema for each of the 256 tools.
+
+## Deeper Analysis
+
+### Convention Enforcement
+
+The v5.0 release introduced a tiered convention enforcement system built into the tool layer itself:
+
+| Tier | Behavior |
+|------|----------|
+| **Auto-fix** | Applied silently (example: `count` on `uint32` auto-prefixed `dwCount`) |
+| **Warn** | Change proceeds with a warning returned |
+| **Reject** | Change blocked with explanation |
+
+This means AI agents and human engineers produce consistent output without pasting a style guide into every prompt. The tool knows the naming conventions and enforces them automatically.
+
+### Batch Operations
+
+Manual reverse engineering at scale requires bulk operations. The MCP server exposes batch renaming, commenting, typing, and label management. The README claims a 93 percent reduction in API calls compared to individual tool calls for the same operations.
+
+### Cross-Binary Documentation Transfer
+
+Function documentation can be propagated across binary versions using SHA-256 hash matching. Document a function once, and the system applies the same documentation to the same function in a different build or version of the target binary automatically.
+
+### P-Code Emulation (v5.4.0)
+
+Ghidra's `EmulatorHelper` drives isolated function emulation. You can run any function in isolation without a full system simulation. The README specifically calls out brute-force API hash resolution in milliseconds via P-code emulation.
+
+### Live Debugger Integration
+
+The server connects to Ghidra's TraceRmi framework for live debugging:
+- **Windows PE:** dbgeng backend
+- **Linux/macOS:** gdb/lldb backend
+
+Available operations include attach, step, breakpoints, register reads, memory reads, non-breaking function tracing, and ASLR-aware static-to-dynamic address translation. The README lists 17 Java endpoints and 22 Python bridge tools for debugger control.
+
+## Practical Evaluation Checklist
+
+Run through these steps against a target binary of your choice:
+
+- [ ] Load a binary in Ghidra and verify MCP server health endpoint responds
+- [ ] Run `analyze_function_completeness` on a known function and review the 0–100 score
+- [ ] Rename a function via MCP tool and confirm the change reflects in Ghidra's UI
+- [ ] Trigger batch documentation on 5 functions and verify the output follows Hungarian notation
+- [ ] Run P-code emulation on a small leaf function and confirm trace output
+- [ ] (If on Linux) Attach to a running process via the debugger tools and read registers
+- [ ] Trigger orphaned code discovery on a binary with known gaps between functions
+
+## Security Notes
+
+- All analysis runs locally against binaries you own or have permission to analyze
+- No telemetry or outbound network calls from the MCP server itself
+- Ghidra Server integration supports shared analysis environments with checkout/checkin workflows
+- The project is Apache-2.0 licensed with an OpenSSF Scorecard report available
+
+## FAQ
+
+**Q: Does this work with Ghidra's headless mode, or only the GUI?**
+
+**A:** Both. The server ships a GUI plugin and a headless server mode. The headless mode is Docker-ready and suitable for CI/CD pipelines.
+
+**Q: Which Ghidra versions are supported?**
+
+**A:** Ghidra 12.1.2 is the current recommended version. Shared Ghidra Server environments require server-side version 12.1, 12.0.5, or newer.
+
+**Q: Can multiple analysts connect to the same Ghidra Server simultaneously?**
+
+**A:** Yes. The project integrates with Ghidra's native Server feature, which supports multi-user collaboration with version-control-style checkout/checkin for analysis artifacts.
+
+**Q: What programming languages do the MCP tools support?**
+
+**A:** The MCP bridge exposes tools written in both Java (the Ghidra native layer) and Python (via Jython or the native CPython interpreter bundled with Ghidra 12.1.2 as an optional extension).
+
+## Conclusion
+
+The Ghidra MCP Server turns Ghidra into a cooperative environment for AI agents doing binary analysis. With 200+ tools, batch operations, convention enforcement, live debugging, and P-code emulation all accessible via the Model Context Protocol, the workflow shifts from writing one-off scripts to orchestrating a structured reverse engineering session from any MCP-compatible editor. If you are doing any kind of binary analysis involving AI tools, this bridges the gap between Ghidra's capabilities and modern agentic workflows without the overhead of building your own Ghidra-OS integration.
