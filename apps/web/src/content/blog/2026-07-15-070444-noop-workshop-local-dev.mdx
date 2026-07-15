@@ -1,0 +1,189 @@
+---
+title: "Noop Workshop - Local Dev with Cloud Parity"
+description: "Free dev tool that defines app infrastructure in a YAML blueprint and runs it locally with the same config as cloud - no drift between local and prod."
+pubDate: "2026-07-15"
+tags: ["dev-tools", "local-dev", "docker-alternative", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/noop-workshop.webp"
+  alt: "Noop Workshop - local development with cloud parity"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Noop Workshop is a free desktop dev tool that runs your application locally using the same YAML blueprint format as its cloud platform, eliminating infrastructure drift between local development and production.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [noop.dev](https://noop.dev) — verified via direct visit
+- Documentation: [noop.dev/docs](https://noop.dev/docs/installation/) — verified via direct visit
+- HN launch thread: [news.ycombinator.com/item?id=39539526](https://news.ycombinator.com/item?id=39539526) — verified via HN Algolia API
+- License: proprietary free-to-use (no open-source license found on the repository)
+
+## What Is Noop Workshop?
+
+Noop Workshop is a free desktop application for Mac, Linux, and Windows that lets you run your application infrastructure locally. The core idea is a **single YAML blueprint** that describes your entire application — services, databases, routes, environment variables — and works identically on your local machine and in the Noop Cloud.
+
+The HN launch post describes it as a tool that bridges the gap between local development and cloud hosting. Rather than maintaining separate Docker Compose files, `.env` configs, and cloud infrastructure templates, you write one `blueprint.yaml` and Noop handles the rest.
+
+From the HN announcement by milin82:
+
+> "Noop Workshop aims to solve this problem by defining an Application in one unified format that works in both local and cloud environments."
+
+## How It Works
+
+### The Blueprint
+
+You describe your application in a `blueprint.yaml` file. A minimal example looks like this:
+
+```yaml
+name: my-app
+runtime: docker
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+
+resources:
+  database:
+    type: postgres
+```
+
+The blueprint declares services (your running code), resources (databases, caches), routes, and environment variables in one place.
+
+### Local Development
+
+After installing Noop Desktop, you point it at your project's `blueprint.yaml`. Noop reads the blueprint and spins up the described infrastructure locally — typically using Docker under the hood. Changes to your code are reflected immediately, similar to a local dev server.
+
+### Cloud Parity
+
+The same `blueprint.yaml` that runs locally can be deployed to Noop Cloud without modification. This means the infrastructure your code runs against in development is bit-for-bit identical to production — no hidden environment-specific behavior, no "works on my machine" gaps.
+
+## Setup Workflow
+
+### Step 1: Install Noop Desktop
+
+Download the installer for your platform from the official installation page:
+
+- **macOS** — download the `.dmg` from [noop.dev/docs/installation/](https://noop.dev/docs/installation/)
+- **Linux** — download the appropriate package
+- **Windows** — download the Windows installer
+
+### Step 2: Create a Blueprint
+
+In your project root, create `blueprint.yaml`. The docs cover the full schema, but a quick-start looks like:
+
+```yaml
+name: my-project
+runtime: docker
+
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=${resources.database.url}
+
+resources:
+  database:
+    type: postgres
+    version: "15"
+```
+
+### Step 3: Run Locally
+
+```bash
+noop run
+```
+
+Noop reads your blueprint, provisions the declared resources, and starts your services. Logs from all services aggregate in the Noop Desktop UI.
+
+### Step 4: Deploy to Cloud (optional)
+
+When you are ready to deploy:
+
+```bash
+noop deploy --org your-org --env production
+```
+
+The same blueprint that ran locally becomes your production deployment.
+
+## Deeper Analysis
+
+### Migration from Docker Compose
+
+Noop provides a [guide for migrating from Docker Compose](https://noop.dev/docs/migrate-from-docker-compose-to-noop/). The core mapping is straightforward:
+
+| Docker Compose concept | Noop equivalent |
+|---|---|
+| `services` block | `services` block in blueprint |
+| `volumes` | `resources` (named, persistent) |
+| `environment` | `environment` on each service |
+| `ports` | `ports` on each service |
+| External services | `resources` with `external: true` |
+
+The advantage is that Docker Compose is one-directional — you cannot directly deploy a `docker-compose.yaml` to a cloud host. Noop's blueprint is deployment-target-agnostic.
+
+### Supported Resources
+
+Noop blueprints support a range of managed resources out of the box:
+
+- **PostgreSQL** — `type: postgres`, versioned
+- **MySQL** — `type: mysql`
+- **Redis** — `type: redis`
+- **Amazon S3** — `type: amazon-s3`
+- **Amazon DynamoDB** — `type: amazon-dynamo-db`
+
+These are provisioned as named resources in the blueprint and referenced via environment variables `${resources.database.url}` style substitution.
+
+### Operations Agent (Coop)
+
+Noop includes an AI-powered operations agent called **Coop** that monitors your running application. From the product description, Coop builds "an understanding of your software" for both local development and cloud environments. This is a different take on the AI-dev-assistant pattern — focused specifically on operations and infrastructure comprehension rather than code generation.
+
+## Practical Evaluation Checklist
+
+- **Free to use locally** — no pricing for local Workshop use
+- **Cross-platform** — macOS, Linux, Windows desktop apps available
+- **YAML-based** — human-readable, version-controllable infrastructure definition
+- **Cloud parity** — same blueprint runs locally and on Noop Cloud
+- **Docker-backed** — familiar container runtime under the hood
+- **Database resources** — first-class Postgres, MySQL, Redis support
+- **No vendor lock-in for local dev** — works entirely offline without Noop Cloud
+
+## Security Notes
+
+- Secrets are injected via `${resources.database.password}` style interpolation, not hardcoded in the blueprint
+- Resources support environment-variable-only exposure to services (services cannot see other services' env vars by default)
+- Noop Cloud inherits the same blueprint, so security posture between dev and prod is consistent
+
+## FAQ
+
+**Q: Is Noop open source?**
+**A:** Noop Workshop and the Noop Cloud platform appear to be proprietary. There is no open-source license confirmed in the repository. The [GitHub organization](https://github.com/noop) exists but the source code for the desktop app is not clearly published as open source.
+
+**Q: How does this differ from Docker Compose?**
+**A:** Docker Compose uses `docker-compose.yaml` which is Docker-specific and cannot be directly deployed to most cloud platforms. Noop's `blueprint.yaml` is platform-agnostic — it runs locally via Noop Workshop and deploys identically to Noop Cloud. The migration path is documented on the [Migrate from Docker Compose](https://noop.dev/docs/migrate-from-docker-compose-to-noop/) page.
+
+**Q: Can I use Noop Workshop without Noop Cloud?**
+**A:** Yes. You can run applications locally using the blueprint format without ever touching Noop Cloud. The Workshop is a free desktop tool.
+
+**Q: What languages and frameworks are supported?**
+**A:** Because Noop runs Docker containers, any language or framework that can be containerized works. The `runtime: docker` directive in the blueprint builds from your existing `Dockerfile` or build context.
+
+## Conclusion
+
+Noop Workshop tackles a real pain point in modern development: the impedance mismatch between "how it runs locally" and "how it runs in production." By providing a single YAML format that works in both environments, it removes an entire class of deployment bugs.
+
+The free desktop app makes it easy to try without commitment, and the blueprint format is simple enough to adopt incrementally. If you have been burned by Docker Compose configs that worked locally but failed in CI, or infrastructure that drifted from staging to production, Noop's approach is worth evaluating.
+
+**Project page:** [noop.dev](https://noop.dev)
+
+**HN launch:** [news.ycombinator.com/item?id=39539526](https://news.ycombinator.com/item?id=39539526)
