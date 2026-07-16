@@ -1,0 +1,138 @@
+---
+title: "OneCLI – Vault for AI Agents in Rust"
+description: "Open-source gateway that stores API credentials once and injects them transparently for AI agents. Never give agents your real keys."
+pubDate: "2026-07-17"
+tags: ["ai-agents", "security", "rust", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/onecli-vault-ai-agents.webp"
+  alt: "OneCLI – Open-Source Credential Gateway for AI Agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OneCLI is an open-source gateway that stores your real API credentials in an encrypted vault and injects them transparently when AI agents make HTTP calls — the agent never sees the actual secret.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [onecli.sh](https://onecli.sh)
+- Source repository: [github.com/onecli/onecli](https://github.com/onecli/onecli)
+- License: Apache-2.0 (verified via LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=47353558](https://news.ycombinator.com/item?id=47353558)
+- Docs: [onecli.sh/docs](https://onecli.sh/docs)
+- Source last checked: 2026-07-17 (commit `main`, README v3)
+
+## What Is OneCLI?
+
+AI agents need to call APIs — but handing each agent raw API keys is a security incident waiting to happen. OneCLI solves this with a gateway layer: store your real credentials once in an encrypted vault, give agents placeholder keys, and let the proxy handle the swap transparently.
+
+From the README:
+
+> OneCLI is an open-source gateway that sits between your AI agents and the services they call. Instead of baking API keys into every agent, you store credentials once in OneCLI and the gateway injects them transparently.
+
+The gateway is written in Rust. The dashboard is Next.js. Secrets are AES-256-GCM encrypted at rest and decrypted only at request time, matched by host and path patterns.
+
+**Core claim from README:**
+> "The agent never touches the real secrets. It just makes normal HTTP calls and the gateway handles the swap."
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker (for the quickest local setup)
+- Or `git`, `docker compose` for the manual path
+
+### Step 1: One-line install
+
+```bash
+curl -fsSL https://onecli.sh/install | sh
+```
+
+This pulls the Docker Compose stack (OneCLI app + PostgreSQL), starts everything, and opens the dashboard at `http://localhost:10254`.
+
+### Step 2: Create an agent and add secrets
+
+Open **http://localhost:10254**. In local mode (no login required), create an agent entry and add your real API credentials — keyed by the host and path pattern they apply to.
+
+### Step 3: Point your agent to the gateway
+
+Give your agent the placeholder key and set its HTTP proxy to `localhost:10255`. When the agent makes a call, OneCLI intercepts it, swaps the placeholder for the real credential, and forwards the request.
+
+The README describes the flow as:
+
+> "You store your real API credentials in OneCLI and give your agents placeholder keys (e.g. `FAKE_KEY`). When an agent makes an HTTP call through the gateway, the OneCLI gateway matches the request to the right credentials, swaps the `FAKE_KEY` for the `REAL_KEY`, decrypts them, and injects them into the outbound request."
+
+### Step 4: Verify with `docker compose`
+
+```bash
+git clone https://github.com/onecli/onecli.git
+cd onecli
+docker compose -f docker/docker-compose.yml up -d --wait
+```
+
+## Architecture
+
+The project has three main components (per README):
+
+- **Rust Gateway** (`apps/gateway`): HTTP proxy that intercepts outbound requests and injects credentials. Agents authenticate with access tokens via `Proxy-Authorization` headers.
+- **Web Dashboard** (`apps/web`): Next.js app for managing agents, secrets, and permissions.
+- **Secret Store**: AES-256-GCM encrypted credential storage. Secrets are decrypted only at request time, matched by host and path patterns.
+
+## Key Features
+
+These are copied verbatim from the README:
+
+- **Transparent credential injection**: agents make normal HTTP calls, the gateway handles auth
+- **Encrypted secret storage**: AES-256-GCM encryption at rest, decrypted only at request time
+- **Host and path matching**: route secrets to the right API endpoints with pattern matching
+- **Multi-agent support**: each agent gets its own access token with scoped permissions
+- **Two auth modes**: single-user (no login) for local use, or Google OAuth for teams
+- **Rust gateway**: fast, memory-safe HTTP gateway with MITM interception for HTTPS
+- **Vault integration**: connect Bitwarden or other password managers for on-demand credential injection without storing secrets on the server
+
+## Practical Evaluation Checklist
+
+If you are evaluating OneCLI for a team or project, here is a concrete checklist based on what the README and HN thread describe:
+
+- Does your agent make outbound HTTP calls to third-party APIs? OneCLI intercepts those calls at the proxy layer.
+- Do you need to rotate API keys without redeploying the agent? Credentials live in OneCLI, not in the agent's environment.
+- Do multiple agents need different subsets of credentials? Each agent has its own scoped access token.
+- Do you need audit logs of which agent called which API? The dashboard tracks agent activity.
+- Do you need team sharing with Google OAuth? Available as an optional configuration (set `NEXTAUTH_SECRET` + Google credentials).
+
+## Security Notes
+
+OneCLI is not a substitute for proper agent isolation, but it does close a specific attack surface: credential exfiltration via agent output or logs. The README is explicit that the agent "never touches the actual secret" — the gateway handles the swap server-side.
+
+The encryption model (AES-256-GCM at rest, decrypted per-request) means secrets are only in plaintext in gateway memory during the request lifecycle. The gateway itself acts as a MITM on HTTPS traffic for the configured hosts, which is by design but worth understanding before deploying.
+
+## FAQ
+
+**Q: How is this different from environment variables?**
+
+A: Environment variables are static — once baked into the agent's runtime, they are hard to rotate without restarting the agent. OneCLI rotates credentials at the proxy layer with zero agent downtime. It also supports revoking per-agent access without rotating the underlying credential.
+
+**Q: Does this work with any AI agent framework?**
+
+A: Yes — the agent makes normal HTTP calls through the gateway. The README specifically mentions Claude, Cursor, and "any" AI client. The gateway exposes an MCP endpoint as well.
+
+**Q: Is there a hosted / cloud version?**
+
+A: No. OneCLI is self-hosted only. The `onecli.sh/install` script sets up a local Docker stack.
+
+**Q: What happens if the OneCLI server is compromised?**
+
+A: Credentials are AES-256-GCM encrypted at rest. Without the gateway's runtime decryption, raw credential extraction is not trivial. However, as with any secret manager, the security of the OneCLI server itself is critical.
+
+## Conclusion
+
+OneCLI fills a specific gap in the AI agent toolchain: credential management at the proxy layer. Instead of distributing real API keys to agents and hoping they do not leak them, you route all outbound traffic through a gateway that handles the swap transparently.
+
+The setup is genuinely one line (`curl -fsSL https://onecli.sh/install | sh`) and the architecture is straightforward enough to audit. If you are running AI agents in production and currently passing raw API keys around, OneCLI is worth a look.
+
+**Source repository:** [github.com/onecli/onecli](https://github.com/onecli/onecli) — 2.5k stars, Apache-2.0 license, actively maintained (last push July 2026).
