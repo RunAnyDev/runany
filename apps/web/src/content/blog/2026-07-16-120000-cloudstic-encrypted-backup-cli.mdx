@@ -1,0 +1,192 @@
+---
+title: "Cloudstic CLI – Encrypted Backups for Google Drive, OneDrive, and Local Files"
+description: "Open-source Go CLI that deduplicates, encrypts with AES-256-GCM, and backs up Google Drive, OneDrive, and local directories to S3, R2, B2, or local storage."
+pubDate: "2026-07-16"
+tags: ["self-hosted", "dev-tools", "backup", "golang", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cloudstic-encrypted-backup.webp"
+  alt: "Cloudstic CLI encrypted backup tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cloudstic is an open-source Go CLI that deduplicates and encrypts backups from Google Drive, OneDrive, and local directories, storing them to S3-compatible backends (including R2), with point-in-time restore and retention policies.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [cloudstic.com](https://cloudstic.com) — product site
+- Source repository: [github.com/Cloudstic/cli](https://github.com/Cloudstic/cli) — verified README, v1.14.0
+- License: [MIT](https://github.com/Cloudstic/cli/blob/main/LICENSE) — verified via GitHub API `license.spdx_id`
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306) — Show HN launch
+- Source last checked: 2026-07-16 (commit `main` branch, v1.14.0 release)
+
+## What Is Cloudstic?
+
+Cloudstic is a content-addressable, encrypted backup CLI written in Go. It backs up three source types — Google Drive, Microsoft OneDrive, and local directories — and stores the results in an encrypted, deduplicated repository on any S3-compatible backend (including Cloudflare R2, Backblaze B2, MinIO, or plain local filesystem).
+
+The key differentiator is **client-side encryption with deduplication**: identical file chunks stored across multiple sources or machines are stored only once. The README describes it as:
+
+> Content-addressable, encrypted backup tool for Google Drive, OneDrive, and local files.
+
+### Supported Sources
+
+| Source | Flag | Notes |
+|---|---|---|
+| Local directory | `-source local` | Auto-detects portable drives by GPT partition UUID |
+| Google Drive | `-source gdrive` | Full rescan of My Drive or Shared Drives |
+| Google Drive Changes | `-source gdrive-changes` | Incremental via Changes API (recommended) |
+| OneDrive | `-source onedrive` | Full scan of OneDrive account |
+| OneDrive Changes | `-source onedrive-changes` | Incremental via Delta API (recommended) |
+
+### Supported Backends
+
+Local filesystem, Amazon S3 (and compatibles like Cloudflare R2, MinIO), and Backblaze B2. Prefix-based namespacing lets multiple repositories share a single bucket.
+
+### Security Model
+
+- **AES-256-GCM** encryption by default
+- Password, platform key, or recovery key slot unlocking
+- Key slots allow credential rotation without re-encrypting all data
+- 24-word recovery key generation (`cloudstic key add-recovery`)
+- All encryption happens client-side before upload
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+# macOS / Linux via Homebrew
+brew install cloudstic/tap/cloudstic
+
+# Windows via winget
+winget install Cloudstic.CLI
+
+# Go
+go install github.com/cloudstic/cli/cmd/cloudstic@latest
+
+# Curl installer (macOS / Linux)
+curl -fsSL https://raw.githubusercontent.com/Cloudstic/cli/main/scripts/install.sh | sh
+```
+
+Download binary releases for other platforms from [github.com/Cloudstic/cli/releases](https://github.com/Cloudstic/cli/releases).
+
+### Step 2: Initialize a Repository
+
+```bash
+cloudstic init
+```
+
+This creates an encrypted repository. It prompts for a password interactively, generates a master encryption key, and wraps it into a key slot protected by your credentials.
+
+### Step 3: Run a Backup
+
+```bash
+# Local directory
+cloudstic backup -source local:~/Documents
+
+# Google Drive (opens browser for OAuth on first run)
+cloudstic backup -source gdrive-changes
+
+# OneDrive
+cloudstic backup -source onedrive-changes
+
+# Portable drive (auto-detected by partition UUID)
+cloudstic backup -source local:/Volumes/MyUSB
+
+# Dry run preview
+cloudstic backup -source local:~/Documents -dry-run
+```
+
+Google Drive and OneDrive work out of the box — Cloudstic opens your browser for OAuth authorization on first run and caches the token locally.
+
+### Step 4: List Snapshots and Restore
+
+```bash
+# List all snapshots
+cloudstic list
+
+# Restore latest snapshot to a zip file
+cloudstic restore
+
+# Preview what changed between two snapshots
+cloudstic diff <snapshot-a> <snapshot-b>
+```
+
+## How the Backup Internals Work
+
+Cloudstic's architecture layers storage concerns for flexibility. From the docs:
+
+> `CompressedStore → EncryptedStore → MeteredStore → [PackStore] → KeyCacheStore → Backend`
+
+All objects are content-addressed with keys like `chunk/<hash>`, `content/<hash>`, `filemeta/<hash>`, and `snapshot/<hash>`. The process per backup:
+
+1. **Scan** source files and chunk them using FastCDC
+2. **Hash** each chunk with SHA-256
+3. **Deduplicate** — skip chunks already present in the repository
+4. **Compress** remaining chunks with zstd
+5. **Encrypt** with AES-256-GCM
+6. **Upload** only new chunks to the backend
+7. **Index** file metadata in a Hash Array Mapped Trie (HAMT) structure for immutable snapshots
+
+This means the first backup uploads everything; subsequent backups only send changed chunks. Google Drive and OneDrive incremental sources use change delta APIs for even faster subsequent runs.
+
+## Retention Policies
+
+Cloudstic ships with flexible retention rules. Examples from the docs:
+
+```bash
+# Keep last 7 daily snapshots
+cloudstic forget --policy "keep-last:7,daily"
+
+# Keep weekly for 4 weeks, monthly for 6 months
+cloudstic forget --policy "keep-last:4,weekly;keep-last:6,monthly"
+```
+
+Policies can be applied per source, tag, or account for granular control.
+
+## Practical Evaluation Checklist
+
+- **Encryption:** AES-256-GCM, client-side, all data encrypted before upload
+- **Deduplication:** Content-addressable — identical chunks stored once across all sources
+- **Portability:** Portable drives identified by GPT partition UUID; back up the same physical drive from any machine or mount point (macOS, Linux, Windows)
+- **Backend flexibility:** S3-compatible — store where you want (R2, B2, MinIO, self-hosted)
+- **Incremental:** First backup is full; subsequent backups only send changed chunks
+- **Restore granularity:** Point-in-time restore of any file from any snapshot
+- **Key recovery:** 24-word recovery key per repository slot
+- **Auth:** OAuth-based for cloud sources; token cached locally after first browser flow
+
+## Security Notes
+
+- **Client-side encryption** — the backend never sees plaintext
+- **No default key escrow** — losing your password means losing access; the recovery key is the only fallback
+- **Key slot design** supports credential rotation without full re-encryption
+- **Repository locking** coordinates concurrent access via distributed locks stored in the repository itself (prevents corruption from crashed processes with `cloudstic break-lock`)
+
+## FAQ
+
+**Q: How does Cloudstic handle the encryption key?**
+**A:** On `cloudstic init`, a master encryption key is generated and wrapped into a key slot protected by your password. The slot design allows multiple credentials (password, platform key, recovery key) to unlock the same repository. Changing the password re-wraps the master key without re-encrypting all stored data.
+
+**Q: Can I use Cloudstic with Cloudflare R2?**
+**A:** Yes. R2 exposes an S3-compatible API. Point Cloudstic at your R2 bucket URL and credentials the same way you would for AWS S3.
+
+**Q: What happens if the backup is interrupted?**
+**A:** Cloudstic uses repository locking. If a process crashes mid-backup, the lock is left behind and can be cleared with `cloudstic break-lock`. Repository integrity can be verified with `cloudstic check`.
+
+**Q: Does it support Google Workspace Shared Drives?**
+**A:** Yes. The `-source gdrive` and `-source gdrive-changes` flags cover both My Drive and Shared Drives.
+
+**Q: Is there a way to preview what a backup would do before running it?**
+**A:** Yes. Add the `-dry-run` flag to any backup command to see what would be uploaded without making any changes.
+
+## Conclusion
+
+Cloudstic fills a specific niche: open-source, client-side encrypted, deduplicated backups for mixed environments (local files, Google Drive, OneDrive) with flexible S3-compatible storage. Its content-addressable architecture means backing up multiple machines or cloud accounts to the same repository is efficient — identical chunks are stored once.
+
+The tool is actively maintained (v1.14.0 as of July 2026), MIT-licensed, and the codebase is at [github.com/Cloudstic/cli](https://github.com/Cloudstic/cli). If you want encrypted, deduplicated backups without vendor lock-in — or need to consolidate scattered cloud and local data into a single encrypted repository — Cloudstic is worth a look.
