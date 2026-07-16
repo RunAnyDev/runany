@@ -1,0 +1,182 @@
+---
+title: "AgentWatch - Stop Runaway AI Agents Burning Your Budget"
+description: "AgentWatch is an open-source proxy firewall that sits between AI agents and LLM providers, blocking requests that would blow past your budget. Two lines of code, 10 providers, sub-10ms latency."
+pubDate: "2026-07-17"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/agent-watch.webp"
+  alt: "AgentWatch product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AgentWatch is an open-source proxy that intercepts AI agent requests and kills them before they burn through your budget — loop detection, per-session spending limits, and cross-provider forensics in one lightweight layer.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [agent-watch.dev](https://agent-watch.dev)
+- Source repository: [github.com/AgentWatch-dev/AgentWatch](https://github.com/AgentWatch-dev/AgentWatch)
+- License: Apache 2.0 (verified via `LICENSE` file on GitHub)
+- HN launch thread: [news.ycombinator.com/item?id=48706317](https://news.ycombinator.com/item?id=48706317)
+
+## What Is AgentWatch?
+
+Your AI agent just got stuck in a loop. It is retrying the same failing function call, appending each failure to its context window. Token count climbs: 1,000 to 50,000 to 500,000. By the time you notice, the bill is already hundreds of dollars.
+
+Traditional monitoring tells you this 15 minutes later. AgentWatch stops it before it happens.
+
+AgentWatch is a **local proxy firewall** that sits between your AI agent and its provider. When a request would exceed your configured budget or trigger a loop pattern, it blocks the request and returns a structured error before a single token reaches the provider.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8787/v1/proxy/openai",  # Point at AgentWatch
+    api_key="sk-you...-key"                            # Your real key
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello"}],
+    extra_headers={
+        "x-agentwatch-session-id": "my-session-123",
+        "x-agentwatch-budget-usd": "2.00"               # Hard limit: $2
+    }
+)
+```
+
+When the budget is exceeded, the response is:
+
+```json
+{
+  "error": "budget_exceeded",
+  "message": "Session budget exceeded. Current: $1.85, Limit: $1.50",
+  "code": 402
+}
+```
+
+The request is blocked before it reaches OpenAI. Zero extra spend.
+
+### Supported Providers
+
+AgentWatch proxies requests to 10 LLM providers via a unified OpenAI-compatible interface:
+
+- OpenAI, Azure OpenAI, Anthropic, Google Vertex AI, Google AI Studio, Mistral, Groq, Perplexity, Cohere, and AWS Bedrock.
+
+### Pricing Tiers
+
+AgentWatch uses an open-core model:
+
+| | Community (Free) | Pro ($99/mo) | Enterprise |
+|---|:---:|:---:|:---:|
+| **Requests/month** | 50K | 500K | Unlimited |
+| LLM proxy (10 providers) | ✅ | ✅ | ✅ |
+| Session budgets | ✅ | ✅ | ✅ |
+| Team budgets | — | ✅ | ✅ |
+| Per-agent budgets | — | ✅ | ✅ |
+| Loop detection | Basic (50-req) | State repetition | ✅ |
+| PII detection | Tag only | Block (403) | Block + custom |
+| Edge caching | — | ✅ | ✅ |
+
+## Setup Workflow
+
+### Step 1: Install the Docker container
+
+```bash
+docker run -p 8787:8787 agentwatch/agentwatch
+```
+
+For Supabase-backed persistence (required for team and enterprise features):
+
+```bash
+docker run -p 8787:8787 \
+  -e SUPABASE_URL=your-url \
+  -e SUPABASE_SERVICE_ROLE_KEY=your-key \
+  -e TENANT_TOKEN_MAP='{"your..._1"}' \
+  -e ADMIN_SECRET=your-admin-secret \
+  agentwatch/agentwatch
+```
+
+### Step 2: Point your AI client at AgentWatch
+
+**Python (OpenAI SDK):**
+
+```python
+client = OpenAI(
+    base_url="http://localhost:8787/v1/proxy/openai",
+    api_key="sk-your-real-key"
+)
+```
+
+**CLI tools (Cursor, Claude Code, etc.):**
+
+```bash
+export OPENAI_BASE_URL="http://localhost:8787/v1/proxy/openai"
+export OPENAI_API_KEY="sk-your-real-key"
+```
+
+### Step 3: Set a budget per session
+
+Pass the `x-agentwatch-budget-usd` header on individual requests, or configure persistent budgets via the dashboard API at `/v1/dashboard/*`.
+
+### Step 4: Monitor with the dashboard
+
+AgentWatch exposes a dashboard API at `/v1/dashboard/*` for spend tracking, session replay, and anomaly forensics.
+
+## Deeper Analysis
+
+### How the proxy works
+
+AgentWatch runs as a Cloudflare Worker with Durable Objects for stateful budget tracking. It intercepts every request before it leaves your infrastructure, evaluates it against active budget rules and loop-detection state machines, and either passes it through or blocks it with a structured 402 response.
+
+### Loop detection
+
+The Community tier detects basic state repetition over a 50-request window. Pro and Enterprise tiers use full state repetition analysis — tracking not just identical request sequences but semantically similar patterns that indicate an agent spinning without making progress.
+
+### PII detection
+
+AgentWatch inspects request content for personally identifiable information. The Community tier tags detected PII in logs. Pro tier blocks requests and returns a 403 with the PII tag. Enterprise allows custom classification rules.
+
+## Practical Evaluation Checklist
+
+- [ ] Pull and run the Docker container on a local port
+- [ ] Point the OpenAI SDK at `http://localhost:8787/v1/proxy/openai`
+- [ ] Send a request with `x-agentwatch-budget-usd: "0.01"` and confirm a 402 response before real spend occurs
+- [ ] Verify loop detection triggers on repeated identical request sequences
+- [ ] Check dashboard API for session-level cost breakdown
+
+## Security Notes
+
+- AgentWatch is a local proxy — your actual API keys never leave your infrastructure in plain text; they are stored in the proxy config and injected into upstream requests server-side.
+- The Supabase integration requires a service role key, which should be treated as a secrets and not committed to source control.
+- Enterprise SAML SSO is available for centralized identity management.
+- Community tier PII detection is logging-only (tags), not blocking. Do not rely on it for compliance purposes.
+
+## FAQ
+
+**Q: Does AgentWatch work with non-OpenAI-compatible SDKs?**
+**A:** AgentWatch provides an OpenAI-compatible proxy interface. SDKs that use a custom API format (for example, the Anthropic SDK with its own endpoint structure) need to be pointed at the equivalent proxy path under `/v1/proxy/[provider]/*`.
+
+**Q: What happens to in-flight requests when a budget limit is hit?**
+**A:** The request is blocked before it reaches the provider. No tokens are consumed, and no charges are incurred. The client receives an immediate 402 response.
+
+**Q: Can I run AgentWatch without Docker?**
+**A:** AgentWatch is designed as a Cloudflare Worker. The community Docker image is the recommended local development setup. For production, deploying as a Cloudflare Worker gives you the Durable Objects-backed state tracking out of the box.
+
+**Q: Does it support streaming responses?**
+**A:** Yes. AgentWatch proxies streaming responses from providers and can apply budget checks based on token count mid-stream.
+
+## Conclusion
+
+AgentWatch solves a real problem that emerges as soon as AI agents move from demos to production: runaway loops that silently accumulate massive token counts. By inserting a thin, fast proxy layer in front of every LLM provider, it gives you budget enforcement, loop detection, and cost attribution without requiring SDK changes or code instrumentation. The Community tier is free and self-hostable via Docker.
+
+If you are running AI agents in production — especially autonomous ones that can loop — AgentWatch is worth evaluating before you get your first five-figure API bill.
+
+**GitHub:** [github.com/AgentWatch-dev/AgentWatch](https://github.com/AgentWatch-dev/AgentWatch)  
+**License:** Apache 2.0
