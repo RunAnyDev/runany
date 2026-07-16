@@ -1,0 +1,138 @@
+---
+title: "ai-cli-bridge – Claude Max and ChatGPT Pro as a Team API"
+description: "Bridge your Claude Max or ChatGPT Pro subscription into a private REST API for your team. Self-hosted Express + Bun server with hashed API keys, per-key rate limits, and usage tracking."
+pubDate: "2026-07-17"
+tags: ["ai-tools", "dev-tools", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ai-cli-bridge.webp"
+  alt: "ai-cli-bridge product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ai-cli-bridge wraps Claude Code CLI and OpenAI Codex CLI behind an Express API, letting teams share a single Claude Max or ChatGPT Pro subscription as a metered HTTP API with per-key auth and rate limits.
+
+## What Is ai-cli-bridge?
+
+If you pay for Claude Max (~$100–200/mo) or OpenAI Pro (~$200/mo), that usage is locked to the vendor's own CLI tools — they cannot be called from web apps, plugins, or arbitrary HTTP clients. ai-cli-bridge solves that by wrapping both CLIs behind a self-hosted REST API.
+
+The core idea:
+
+| Approach | Auth | Billing |
+|---|---|---|
+| SDK (Anthropic/OpenAI) | API key | Per-token |
+| CLI wrapper (this project) | OAuth subscription | Monthly flat rate |
+
+## Setup Workflow
+
+### Prerequisites
+
+- [Bun](https://bun.sh) 1.2 or higher
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated, **or** [Codex CLI](https://github.com/openai/codex) installed and authenticated
+- Node.js is NOT required — Bun runs everything
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/Shreyas-Dayal/ai-cli-bridge.git
+cd ai-cli-bridge
+bun install
+cp .env.example .env
+```
+
+### Step 2: Configure the Admin Key
+
+Edit the `.env` file and set `BRIDGE_ADMIN_KEY` to a strong random value. This key lets you access the admin dashboard and create per-user API keys.
+
+```bash
+BRIDGE_ADMIN_KEY=your-strong-random-key-here
+PORT=3456
+```
+
+### Step 3: Start the Server
+
+```bash
+bun dev
+```
+
+The server starts on `http://localhost:3456`. For a production deployment, the README includes a Docker Compose template and a systemd service with Cloudflare Tunnel support.
+
+### Step 4: Verify
+
+```bash
+curl http://localhost:3456/health
+# → {"status":"ok"}
+```
+
+### Step 5: Create an API Key
+
+Open the admin dashboard at `http://localhost:3456/admin` and generate a per-user API key. Each key can have independent limits on requests per day, requests per month, tokens per month, cost per day, and cost per month.
+
+## Usage Examples
+
+### Generate with Claude Code
+
+```bash
+curl -X POST http://localhost:3456/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"systemPrompt":"Reply concisely.","userPrompt":"What is 2+2?"}'
+```
+
+### Generate with Codex CLI
+
+```bash
+curl -X POST http://localhost:3456/generate-codex \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"systemPrompt":"Reply concisely.","userPrompt":"What is 2+2?"}'
+```
+
+## Features
+
+- **Two AI providers** — Claude Code CLI (`/generate`) and Codex CLI (`/generate-codex`) behind a single API
+- **Per-user API keys** — SHA-256 hashed, shown once at creation, timing-safe authentication
+- **Per-key rate limits** — granular controls over requests/day, requests/month, tokens/month, cost/day, cost/month
+- **Admin dashboard** — manage keys, monitor usage, view request logs
+- **Usage tracking** — in-memory with periodic disk flush and auto-pruning
+- **Security posture** — `execFile` (no shell injection), CSP headers, HSTS, rate limiting, input validation
+- **Deploy anywhere** — Docker Compose support, systemd service template, Cloudflare Tunnel configuration
+
+## Practical Evaluation Checklist
+
+- Bun is the only runtime required (no Node.js, no Docker for local dev)
+- API keys are one-way hashed — the raw key is shown only once at creation
+- The `/health` endpoint requires no auth, useful for load balancer health checks
+- Rate limits are enforced per API key, not per IP — useful for multi-user shared deployments
+- Both Claude Code and Codex CLI must be installed and authenticated on the host; the bridge does not store credentials
+
+## Security Notes
+
+ai-cli-bridge uses `execFile` rather than `exec` or `spawn` with shell interpretation, eliminating shell injection risk. The README explicitly recommends running the server on an isolated network segment and using a Cloudflare Tunnel or VPN for any production exposure.
+
+The admin dashboard is protected by the `BRIDGE_ADMIN_KEY` but does not appear to support two-factor authentication. Treat the admin key as a high-privilege secret.
+
+## FAQ
+
+**Q: Does this work with the free Claude tier?**
+**A:** No. Claude Code CLI requires a paid subscription (Claude Max or equivalent). The bridge simply exposes an already-authenticated CLI as an API.
+
+**Q: Can I use both Claude and Codex on the same server?**
+**A:** Yes. The server handles both providers simultaneously. Call `/generate` for Claude Code CLI and `/generate-codex` for Codex CLI.
+
+**Q: Does the bridge support streaming responses?**
+**A:** The README does not explicitly confirm streaming support. Check the `package.json` or the source for SSE capability before relying on it.
+
+**Q: How does billing tracking work?**
+**A:** Usage is tracked in-memory with periodic flushes to disk. For high-throughput production use, you may want to add an external metrics sink.
+
+## Source and Accuracy Notes
+
+- Project page: [github.com/Shreyas-Dayal/ai-cli-bridge](https://github.com/Shreyas-Dayal/ai-cli-bridge)
+- License: MIT (verified via `LICENSE` file in repository)
+- HN launch thread: [news.ycombinator.com/item?id=47191530](https://news.ycombinator.com/item?id=47191530)
+- Source last checked: 2026-07-17 (README, package.json, LICENSE verified via raw.githubusercontent.com)
