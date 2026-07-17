@@ -1,0 +1,160 @@
+---
+title: "Port42 - AI Companions for macOS"
+description: "Port42 is a native macOS app where multiple AI companions collaborate with humans in the same conversation, build real-time ports, and run CLI agents inline. Open source and end-to-end encrypted."
+pubDate: "2026-07-18"
+tags: ["ai-setup", "macos", "open-source", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/port42.webp"
+  alt: "Port42 AI companion computing app on macOS"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Port42 is a native macOS app that embeds multiple AI companions — running Claude, Gemini, or CLI agents — directly into a shared conversation space, complete with live interactive "ports" built on the fly. Open source and local-first.
+
+## What Is Port42?
+
+Port42 is the first "companion computing" platform — not another AI chat wrapper, but a shared workspace where humans and multiple AI companions coexist, build things together, and maintain persistent context across sessions.
+
+The project emerged from [gordonmattey/port42-native](https://github.com/gordonmattey/port42-native) (MIT license, 5 stars). The core proposition:
+
+- **Multiple companions per channel** — set each to Claude or Gemini individually. They riff off each other and synthesize across their different strengths.
+- **Command agents** — wrap any local binary or script as a companion via a simple NDJSON stdin/stdout protocol.
+- **Terminal companions** — run Claude Code or Gemini CLI as inline chat companions, with output bridging back into the conversation at 300ms intervals.
+- **Provider companions** — connect GitHub, Stripe, Cloudflare, or any REST API as companions using a built-in `rest.call` interface. No SDK needed.
+- **Ports** — companions build interactive surfaces (dashboards, visualizations, live simulations) inside the conversation using a `` ```port `` code fence with sandboxed HTML/CSS/JS and a `port42.*` bridge API.
+- **Relationship memory** — companions retain fold, position, and creases across sessions automatically.
+- **Heartbeats** — schedule wake-up prompts (1m to 60m intervals) to keep companions active without manual intervention.
+- **Remote API** — HTTP `/call` endpoint for external tools and coding agents to invoke any Port42 bridge API via `curl`.
+- **Multiplayer** — share a link to invite others into a channel with their own companions.
+- **Local-first** — pure SwiftUI on Apple Silicon, end-to-end encrypted, no cloud dependency.
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS 14+ (Sonoma or later)
+- Apple Silicon (M1/M2/M3/M4)
+- Homebrew (recommended) or manual DMG install
+
+### Step 1: Install Port42
+
+Download the official DMG from the project page:
+
+```bash
+# Or install via Homebrew once cask is available
+brew install --cask port42
+```
+
+The DMG is available at [port42.ai](https://port42.ai/) under the Downloads section.
+
+### Step 2: Configure AI Providers
+
+On first launch, Port42 prompts you to connect an AI provider:
+
+1. Click **Settings** → **Companions**
+2. Add a companion and choose **Claude** or **Gemini** per companion
+3. Enter your API key for the selected provider
+4. Companions can use different providers simultaneously — mix and match freely
+
+### Step 3: Create Your First Channel
+
+1. Click **+ New Channel** and give it a name (e.g., `build-session`)
+2. Add companions from the channel sidebar
+3. Start typing — companions respond inline, alongside your messages
+
+### Step 4: Try a Terminal Companion
+
+Port42 ships with built-in support for Claude Code as a terminal companion:
+
+1. In a channel, click **+ Companion** → **Terminal**
+2. Select **Claude Code** from the terminal type dropdown
+3. The companion appears as a live terminal port — chat messages route directly into the CLI
+4. Pop it out to a floating window for more space while it works
+
+### Step 5: Build a Port
+
+Ports are sandboxed HTML views that companions create on the fly. To trigger one from a companion:
+
+```port
+<title>companion dashboard</title>
+<meta name="version" content="1">
+<div id="app"></div>
+<script>
+  const companions = await port42.companions.list()
+  document.getElementById('app').innerHTML =
+    companions.map(c => `<div>${c.name} (${c.model})</div>`).join('')
+
+  port42.on('message', e => console.log('new:', e.sender))
+</script>
+```
+
+Companions write these `` ```port `` blocks directly into chat. Port42 wraps the content in a themed document with the port name and revision number in the header.
+
+## Deeper Analysis
+
+### Architecture
+
+Port42 uses a pure SwiftUI frontend on Apple Silicon. The companion runtime is structured around an NDJSON-based protocol: any binary or script can act as a companion by speaking JSON on stdin/stdout. This makes the companion layer genuinely extensible — you are not locked into a specific agent framework.
+
+The `port42.*` bridge inside ports exposes structured access to companions, channel state, raw LLM completion, and persistent key-value storage. The bridge is intentionally narrow — no direct network access from ports, all data flows through the API.
+
+### Companion Memory Model
+
+Unlike a stateless chat session, companions in Port42 carry "fold, position, and creases" across sessions. This is a deliberate memory model that preserves conversational structure rather than relying purely on a context window. The implementation is tied to per-channel persistent storage via `port42.storage`.
+
+### Port Versioning
+
+Every port revision is snapshotted automatically. Companions can read the current HTML of an existing port before writing an update, enabling non-destructive iteration on live dashboards. The version counter in the port header (`meta name="version"`) increments on each update so users can see which revision is running.
+
+## Practical Evaluation Checklist
+
+- **macOS 14+ required** — Intel Macs are not supported
+- **API keys needed** — Port42 does not include AI inference; bring your own Claude/Gemini API key
+- **Local data** — all conversation data stays on-device; no cloud sync or managed backend
+- **CLI agents** — any tool that speaks NDJSON on stdin/stdout can be wrapped as a companion
+- **Multiplayer** — peer-to-peer link sharing, no sign-up required for guests
+- **Open source** — the native app is MIT-licensed; the protocol is documented for third-party integrations
+
+## Security Notes
+
+- **End-to-end encrypted** — encryption is a first-class feature, not an afterthought
+- **Local-first** — data does not leave the device unless multiplayer sharing is explicitly enabled
+- **Sandboxed ports** — port webviews have no direct network access; all external data flows through the `port42.*` bridge API
+- **API key storage** — keys are stored in the macOS keychain, not in plaintext configs
+- **Remote API** — the HTTP `/call` endpoint should be secured (Firewall, VPN, or explicit allowlisting) if exposed beyond localhost
+
+## FAQ
+
+**Q: Does Port42 run AI models locally?**
+**A:** No. Port42 acts as a conversation and orchestration layer — AI inference is provided by Claude (Anthropic) or Gemini (Google). You need your own API key.
+
+**Q: Can I use my own open-source models?**
+**A:** Not natively in the current release. The terminal companion feature could theoretically wrap a local CLI tool (like `llama.cpp` or `ollama`), but Port42 does not have a dedicated local inference backend.
+
+**Q: How does Port42 differ from a Cursor or Claude Code workspace?**
+**A:** Cursor and Claude Code are primarily single-agent coding tools. Port42 is a multi-companion social space — multiple humans and multiple AI companions share the same channel, build things together, and use ports as live interactive surfaces rather than static code blocks.
+
+**Q: Is there a self-hosted server component?**
+**A:** No server is required for single-user or local multiplayer use. The multiplayer feature uses direct peer-to-peer link sharing.
+
+**Q: What does "companion" mean in Port42's vocabulary?**
+**A:** A companion is an AI agent with a persistent identity, memory model, and presence in a channel. It can be a language model (Claude/Gemini), a CLI agent (Claude Code/Gemini CLI), a REST API integration, or any binary that speaks the NDJSON companion protocol.
+
+## Conclusion
+
+Port42 is a genuinely different take on the AI tool category — less "chat with one AI" and more "coordinate a team of AI agents that build things." The port system is its most distinctive feature, letting companions construct live dashboards, visualizations, and interactive tools inside the conversation rather than pasting static screenshots. The NDJSON companion protocol means the platform is not tied to any specific agent framework.
+
+If you are on macOS 14+ and want to experiment with multi-agent AI workflows in a local-first, open-source environment, Port42 is worth installing. The DMG is available at [port42.ai](https://port42.ai/).
+
+## Source and Accuracy Notes
+
+- Project page: [port42.ai](https://port42.ai/)
+- Source repository: [github.com/gordonmattey/port42-native](https://github.com/gordonmattey/port42-native)
+- License: MIT (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=45262658](https://news.ycombinator.com/item?id=45262658)
+- Source last checked: 2026-07-18 (commit `main` branch, README verified)
