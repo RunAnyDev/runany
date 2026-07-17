@@ -1,0 +1,181 @@
+---
+title: "Membrane - Typed, Revisable Memory for AI Agents"
+description: "Membrane gives AI agents typed, revisable memory instead of append-only transcripts or flat vector stores. Five memory layers, trust-aware retrieval, and Go/TypeScript/Python SDKs."
+pubDate: "2026-07-17"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/membrane.webp"
+  alt: "Membrane project thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Membrane is an open-source memory substrate for LLM agents that stores typed, revisable, decayable memories across five layers — episodic, working, semantic, competence, and plan graph — with trust-aware retrieval and Go/TypeScript/Python SDKs.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/BennettSchwartz/membrane](https://github.com/BennettSchwartz/membrane)
+- Source repository: [github.com/BennettSchwartz/membrane](https://github.com/BennettSchwartz/membrane) — README read in full
+- License: [MIT](https://github.com/BennettSchwartz/membrane/blob/master/LICENSE) — verified via LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=46984655](https://news.ycombinator.com/item?id=46984655)
+- Source last checked: 2026-07-17 (commit `master` branch)
+
+## What Is Membrane?
+
+Most AI agents rely on append-only transcripts or flat vector stores for memory. Both approaches hit the same wall: stale knowledge accumulates, retrieval is undifferentiated, and there is no mechanism to revise a wrong fact once it is embedded in the context window.
+
+Membrane, built by Bennett Schwartz, takes a different approach. It is a **selective learning and memory substrate** that gives agents five distinct memory layers plus an entity graph spine — each with a specific retrieval and revision semantics.
+
+## Memory Model
+
+Membrane organizes memory into five typed layers plus a shared entity graph:
+
+| Layer | Purpose | Typical contents |
+|---|---|---|
+| Episodic | Raw experience | Tool calls, incidents, observations, agent turns |
+| Working | Active task state | Current goal, next actions, open questions |
+| Semantic | Durable facts | Preferences, system facts, relationships |
+| Competence | Learned procedures | Debugging playbooks, success rates, applicability |
+| Plan graph | Reusable plans | Rollout DAGs, checkpoints, dependencies |
+| Entity | Graph spine | Projects, services, tools, files, people, databases |
+
+The entity layer connects the other five — a retrieval query can walk bounded graph neighborhoods, not just return top-k semantic chunks.
+
+## Key Features
+
+**Revision operations.** Unlike a vector store, Membrane records can be superseded, forked, retracted, merged, or contested — all with audit trails. When an agent learns a fact was wrong, it does not have to wait for the context window to rotate out.
+
+**Trust-aware retrieval.** The `RetrieveGraph` call accepts trust filters: `max_sensitivity`, `authenticated`, `actor_id`, and `scopes`. Records can be redacted or gated by sensitivity level before they reach the agent.
+
+**Decay and reinforcement.** Salience decays over time and can be reinforced or penalized by outcomes. Competence records track success rates per procedure, letting the agent know when a playbook is reliable.
+
+**Multiple runtimes.** Run `membraned` as a gRPC daemon, embed the Go API directly, or use the TypeScript or Python SDK over the network.
+
+## Setup Workflow
+
+### Step 1: Clone and Build
+
+```bash
+git clone https://github.com/BennettSchwartz/membrane.git
+cd membrane
+make build
+./bin/membraned
+```
+
+By default, `membraned` uses local SQLite storage. To switch to Postgres:
+
+```bash
+./bin/membraned \
+  --postgres-dsn "postgres://membrane:password@localhost:5432/membrane?sslmode=disable"
+```
+
+### Step 2: TypeScript SDK
+
+```bash
+npm --prefix clients/typescript install
+npm --prefix clients/typescript run build
+```
+
+```typescript
+import { MembraneClient, MemoryType, Sensitivity, SourceKind } from "@bennettschwartz/membrane";
+
+const client = new MembraneClient("localhost:9090", {
+  apiKey: process.env.MEMBRANE_API_KEY,
+});
+
+const capture = await client.captureMemory(
+  { subject: "auth-service", predicate: "uses_database", object: "PostgreSQL" },
+  {
+    source: "agent",
+    sourceKind: SourceKind.OBSERVATION,
+    summary: "auth-service uses PostgreSQL",
+    tags: ["auth-service", "postgres"],
+    scope: "project-orion",
+    sensitivity: Sensitivity.LOW,
+  }
+);
+
+const graph = await client.retrieveGraph("debug auth-service latency", {
+  trust: { max_sensitivity: Sensitivity.MEDIUM, authenticated: true, actor_id: "debug-agent", scopes: ["project-orion"] },
+  memoryTypes: [MemoryType.ENTITY, MemoryType.EPISODIC, MemoryType.WORKING, MemoryType.SEMANTIC, MemoryType.COMPETENCE, MemoryType.PLAN_GRAPH],
+  rootLimit: 12, nodeLimit: 64, edgeLimit: 160, maxHops: 2,
+});
+
+console.log(capture.primary_record.id, graph.nodes.length);
+client.close();
+```
+
+### Step 3: Python SDK
+
+```bash
+pip install membrane-python
+```
+
+Python SDK usage mirrors the TypeScript interface. See `clients/python` in the repo for the full reference.
+
+## Deeper Analysis
+
+### Why Five Memory Layers?
+
+Vector stores treat all memories as equally typed semantic chunks. Membrane's layer model reflects a structural insight: an agent's memory is not homogeneous. Raw observations (episodic) need different retention semantics than durable facts (semantic) or active task state (working). By separating these concerns, retrieval can be scoped and trust-filtered at the layer level.
+
+### Competence Layer as Meta-Learning
+
+The competence layer tracks not just what an agent learned, but how well it worked — success rates per procedure. This is close to meta-learning: the agent can reason about which debugging playbook is reliable before applying it, rather than trying every approach in sequence.
+
+### Self-Hosted Docs
+
+Membrane's documentation is Docusaurus-based and designed to deploy to Cloudflare Workers with Wrangler. No external docs hosting dependency.
+
+## Practical Evaluation Checklist
+
+- Five typed memory layers are all present in the architecture
+- Entity graph connects across all five layers
+- Revision operations (supersede, fork, retract, merge, contest) with audit trails
+- Trust-aware retrieval filters by sensitivity, authentication, and scope
+- Decay and reinforcement of salience over time
+- SQLite default, Postgres as an option
+- gRPC daemon (`membraned`) plus Go/TypeScript/Python SDKs
+- Go 1.22+, Node.js 20+, Python 3.10+ requirements stated in README
+- MIT license
+
+## Security Notes
+
+- Trust filters operate at the retrieval layer — a record with `Sensitivity.HIGH` can be gated from unauthenticated actors even if it matches the query
+- gRPC API supports `apiKey` authentication via `MEMBRANE_API_KEY`
+- SQLite and Postgres backends both stay within the operator's infrastructure — no third-party data egress
+- No built-in encryption at rest for SQLite; Postgres supports `sslmode=disable` for local dev but should be configured with TLS in production
+
+## FAQ
+
+**Q: How is this different from a vector store like Pinecone or Weaviate?**
+
+A: Vector stores store embeddings and retrieve by semantic similarity. Membrane stores typed records with revision semantics, trust filters, decay curves, and a graph structure that lets retrieval walk bounded neighborhoods. A vector store can be used as a semantic layer behind Membrane's retrieval — they are complementary, not mutually exclusive.
+
+**Q: Can Membrane be used for a single-agent system, or is it designed for multi-agent?**
+
+A: The entity graph and trust model are explicitly multi-actor: `actor_id`, `authenticated`, and `scopes` are all per-retrieval parameters. That said, a single-agent system can use Membrane with default-open trust settings. The architecture does not require multiple agents.
+
+**Q: Does it require Postgres?**
+
+A: No. SQLite is the default and works out of the box. Postgres is an optional backend for production deployments that need concurrent access or replication.
+
+**Q: Is there a hosted version?**
+
+A: No — Membrane is self-hosted only. There is no SaaS offering.
+
+## Conclusion
+
+Membrane addresses a real gap in agentic AI tooling: the lack of a structured, revisable memory layer between raw context windows and flat vector retrieval. Its five-layer memory model, entity graph, trust-aware retrieval, and competence tracking give agents a more principled memory substrate than append-only transcripts or undifferentiated chunk retrieval.
+
+If you are building long-lived agents that need persistent, queryable memory with revision semantics, Membrane is worth evaluating. Clone the repo, run `make build`, and point it at SQLite to start experimenting.
+
+- Repo: [github.com/BennettSchwartz/membrane](https://github.com/BennettSchwartz/membrane)
+- Requirements: Go 1.22+, Node.js 20+, Python 3.10+
+- License: MIT
