@@ -1,0 +1,176 @@
+---
+title: "Better Agent – TypeScript Framework for Typed AI Agents"
+description: "A TypeScript framework for building typed, event-driven AI agents with AG-UI event streaming, structured output, and composable plugins."
+pubDate: "2026-07-17"
+tags: ["ai-setup", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/better-agent.webp"
+  alt: "Better Agent – TypeScript Agent Framework"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Better Agent is a TypeScript framework for building typed, composable AI agents with AG-UI event streaming, durable runs, and a plugin system that works across any app stack.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [better-agent.com](https://better-agent.com) — verified
+- Source repository: [github.com/better-agent/better-agent](https://github.com/better-agent/better-agent) — README read
+- License: MIT — verified via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=47694452](https://news.ycombinator.com/item?id=47694452)
+- Stars: 121 (as of 2026-07-17, GitHub API)
+- Source last checked: 2026-07-17 (commit from main branch)
+
+## What Is Better Agent?
+
+Better Agent is a TypeScript framework for building typed, durable agent applications. Its core pitch is end-to-end type safety — from tool definitions and agent configuration all the way to client-side streaming calls.
+
+Key characteristics (from the README):
+
+> "Agent apps should be typed end-to-end, from definitions to client calls."
+> "The framework should fit into your existing stack, including your application, database, and auth."
+> "Reusable behavior should be easy to package and share as plugins."
+
+The framework is organized around a few core concepts:
+
+- **Agents** — defined with `defineAgent`, each with a name, model provider, and tool set.
+- **Tools** — defined with `defineTool`, typed with Zod input schemas, targeting either `server` or `client`.
+- **Plugins** — encapsulate reusable behavior (auth, guards, middleware hooks) as shareable packages.
+- **AG-UI event streaming** — a standardized event protocol for streaming agent responses in real time.
+- **Durable runs** — interrupted agents can resume from where they left off.
+
+## Core API Patterns
+
+### Defining an Agent
+
+```typescript
+import { defineAgent, openai } from "@better-agent/core";
+
+export const devAgent = defineAgent({
+  name: "dev",
+  model: openai("gpt-5.5"),
+  tools: [searchDocs, githubTools],
+});
+```
+
+### Defining a Tool with Approval Guard
+
+```typescript
+export const refundTool = defineTool({
+  name: "refund_payment",
+  target: "server",
+  inputSchema: z.object({
+    orderId: z.string(),
+    amount: z.number(),
+  }),
+  approval: {
+    resolve: ({ toolInput }) => toolInput.amount > 100,
+  },
+  async execute({ input }) {
+    return processRefund(input);
+  },
+});
+```
+
+### Event Streaming (AG-UI)
+
+```typescript
+const stream = await app.agent("support").stream({
+  messages: [{ role: "user", content: "Check my ticket." }],
+  context: { userId: "user_123" },
+});
+
+for await (const event of stream.events) {
+  if (event.type === EventType.TEXT_MESSAGE_CONTENT) {
+    process.stdout.write(event.delta);
+  }
+}
+```
+
+### Plugins with Guards and Hooks
+
+```typescript
+export const tenantPolicy = definePlugin({
+  id: "tenant-policy",
+  guards: [
+    ({ auth }) => {
+      if (auth?.tenant) return null;
+      return new Response("Workspace required", { status: 403 });
+    },
+  ],
+  onBeforeModelCall({ messages, context, setMessages }) {
+    setMessages([
+      { role: "system", content: `Workspace: ${context.tenantId}` },
+      ...messages,
+    ]);
+  },
+  onAfterToolCall({ toolName, status }) {
+    audit.write({ toolName, status });
+  },
+});
+```
+
+## Installation
+
+Install the core package via npm, pnpm, or bun:
+
+```bash
+bun create better-agent
+```
+
+Or add to an existing project:
+
+```bash
+npm install @better-agent/core
+# or
+pnpm add @better-agent/core
+```
+
+## Project Status
+
+Better Agent is in **beta**. The README carries a warning that APIs may change as development continues. For a v1-ready alternative, the project recommends checking the changelog before production use.
+
+## Practical Evaluation Checklist
+
+- TypeScript-first with Zod schema validation for all tool inputs
+- Framework-agnostic — works with any app stack, database, or auth system
+- AG-UI event streaming standard for real-time agent responses
+- Plugin architecture for encapsulating and sharing reusable agent logic
+- Durable runs and resumable conversations for long-running tasks
+- MCP (Model Context Protocol) tool support via the `@model-context-protocol/sdk`
+- Human-in-the-loop via built-in approval hooks on sensitive tools
+
+## Security Notes
+
+The framework does not handle credentials or secrets — that is the developer's responsibility. The plugin system includes guard hooks (`guards[]`) that run before agent execution, providing a point to enforce auth context checks.
+
+For production deployments, ensure:
+- Model API keys are stored in environment variables, not hardcoded in agent configs
+- Approval hooks are configured for any tool that performs destructive or privileged actions
+- Plugin auth hooks validate session and tenant context before allowing agent execution
+
+## FAQ
+
+**Q: Is this production-ready?**
+**A:** The project is currently in beta. The README warns that APIs may change. Monitor the changelog before upgrading in a production system.
+
+**Q: What model providers does it support?**
+**A:** The framework ships with first-party provider adapters including `openai()`. Additional providers can be wired in through the plugin interface.
+
+**Q: How does it compare to Vercel AI SDK or LangChain.js?**
+**A:** Better Agent focuses specifically on agent composition with typed tools, durable runs, and a plugin system. Vercel AI SDK is broader; LangChain.js is more general-purpose. Better Agent's niche is structured, typed agent apps where tool contracts and resumability are first-class concerns.
+
+**Q: Does it support streaming?**
+**A:** Yes — via AG-UI event streaming, which provides a standardized event protocol for text chunks, tool calls, and other agent lifecycle events.
+
+## Conclusion
+
+Better Agent brings TypeScript-first discipline to the agent framework space. Its typed tool definitions, plugin architecture, and durable run support address real DX pain points in building reliable agent apps. Worth evaluating if you want strict type contracts between your agent's tools and the rest of your application stack.
+
+Check the project page at [better-agent.com](https://better-agent.com) or browse the source at [github.com/better-agent/better-agent](https://github.com/better-agent/better-agent).
