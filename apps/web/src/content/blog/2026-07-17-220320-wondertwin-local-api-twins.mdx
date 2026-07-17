@@ -1,0 +1,189 @@
+---
+title: "WonderTwin AI – Local API Twins for Safe Agentic Development"
+description: "WonderTwin gives your AI agents local, behavioral clones of third-party APIs — Stripe, Twilio, Resend, and more — that run offline and mirror production failures. Open-source MIT."
+pubDate: "2026-07-17"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wondertwin-ai.webp"
+  alt: "WonderTwin AI product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** WonderTwin ships local, stateful twins of third-party APIs (Stripe, Twilio, Resend, PostHog) that run completely offline — no mocks, no sandboxes, no rate limits. Built-in MCP server lets AI coding agents manage twins programmatically.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [wondertwin.ai](https://wondertwin.ai)
+- Source repository: [github.com/wondertwin-ai/wondertwin](https://github.com/wondertwin-ai/wondertwin)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Latest release: v0.3.0 (verified via GitHub Releases API)
+- HN launch thread: [news.ycombinator.com/item?id=47050616](https://news.ycombinator.com/item?id=47050616)
+
+## What Is WonderTwin?
+
+Every team integrating third-party APIs hits the same wall: mocks return the right shapes but wrong behaviors — they do not maintain state, fire webhooks, or enforce business rules. Sandboxes are rate-limited and online-only. Integration tests flake because Stripe had a 15-minute hiccup.
+
+WonderTwin solves this with **behavioral API twins**: stateful, locally-running replicas of real APIs that track balances, fire webhooks, manage sessions, and break the way real APIs break.
+
+From the README:
+
+> "WonderTwin gives you behavioral replicas of third-party APIs that run on your machine. Not mocks that return canned responses. Not stubs that match schemas. Twins — stateful, behavioral clones that track balances, fire webhooks, manage sessions, and break the way real APIs break."
+
+Twins are compiled Go binaries that implement the actual API contract. Official SDKs work against them without modification.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+**macOS via Homebrew:**
+
+```bash
+brew install wondertwin-ai/tap/wt
+```
+
+**Download a prebuilt binary (v0.3.0):**
+
+```bash
+curl -Lo wt https://github.com/WonderTwin-AI/wondertwin/releases/download/v0.3.0/wt-darwin-arm64
+chmod +x wt && sudo mv wt /usr/local/bin/
+```
+
+**Build from source:**
+
+```bash
+git clone https://github.com/WonderTwin-AI/wondertwin.git
+cd wondertwin
+make build-all
+```
+
+### Step 2: Install a Twin
+
+```bash
+wt install stripe@latest twilio@latest
+```
+
+Each twin is a self-contained Go binary downloaded and cached locally.
+
+### Step 3: Start Twins
+
+```bash
+wt up
+# ✓ stripe running on :4111
+# ✓ twilio running on :4112
+```
+
+### Step 4: Point Your SDK at Localhost
+
+```go
+// Go example — everything else stays the same
+stripe.SetBackend(stripe.APIBackend, &stripe.BackendConfig{
+    URL: "http://localhost:4111",
+})
+```
+
+Python, Node, Rust, and Java SDKs work the same way — change one endpoint URL.
+
+### Step 5: Run Tests Offline
+
+```bash
+go test ./...
+# Runs entirely against local twins, no internet required
+```
+
+## Twin Catalog
+
+| Twin | Coverage | Default Port |
+|------|----------|-------------|
+| **Stripe** | Accounts, Balance, Transfers, Payouts, External Accounts, Events, Webhooks | 4111 |
+| **Twilio** | Messages, Verify (OTP send/check) | 4112 |
+| **Resend** | Email send, delivery status | 4113 |
+| **PostHog** | Event ingestion, feature flags | 4114 |
+
+## Admin API
+
+Each twin exposes an admin control API on its port:
+
+```bash
+# Reset all state between tests
+curl -X POST localhost:4111/admin/reset
+
+# Load seed data
+curl -X POST localhost:4111/admin/state -d @fixtures/stripe.json
+
+# Inspect internal state
+curl localhost:4111/admin/state
+
+# Health check
+curl localhost:4111/admin/health
+
+# Inject a fault — return 500 on transfers 50 percent of the time
+curl -X POST localhost:4111/admin/fault/v1/transfers \
+  -d '{"status_code": 500, "rate": 0.5}'
+
+# Advance simulated time
+curl -X POST localhost:4111/admin/time/advance \
+  -d '{"duration": "24h"}'
+```
+
+This enables deterministic chaos testing in CI — inject 429s, timeouts, or 500s without touching production.
+
+## MCP Server for AI Agents
+
+WonderTwin includes an MCP server so AI coding agents can interact with twins programmatically:
+
+```bash
+wt mcp
+```
+
+Agents can discover, install, start, seed, and inspect twins — enabling agentic development workflows where your coding agent has full access to behavioral API twins for testing the code it writes.
+
+## Pricing
+
+WonderTwin is **open core**:
+
+- **Open source (free):** The wt CLI, MCP server, local runtime, and frozen snapshots of all twins. Twins model the service as of their release date — always free.
+- **Pro (paid):** Adaptive twins that stay aligned as the real service changes, version pinning, drift detection, and Pro-only services. Approximately $199 per twin per month, per organization.
+
+## Deeper Analysis
+
+**Why this matters for AI agent workflows:** Autonomous coding agents routinely reach for external APIs — Stripe for payments, Twilio for SMS, PostHog for analytics. With traditional development, agents either guess at API behavior (producing broken code) or need live credentials (risky in production). WonderTwin gives agents a safe sandbox that behaves exactly like the real thing, including failure modes.
+
+**Stateful vs. stateless:** Unlike HTTP replay tools (like VCR or Polly), WonderTwin twins maintain state across requests. If one request creates a customer and a later request refunds that customer, the twin knows the customer exists — your tests do not need to re-seed on every test case.
+
+**Chaos testing built in:** The fault injection API lets you simulate 429s, timeouts, and 500 errors deterministically. Want to verify your retry logic handles Stripe going down for 3 seconds? Inject the fault, run the test, verify the outcome.
+
+## Practical Evaluation Checklist
+
+- [ ] Install wt CLI via Homebrew or binary
+- [ ] Install and start a twin (e.g., Stripe)
+- [ ] Run your existing SDK tests against localhost
+- [ ] Verify state persists across test cases without re-seeding
+- [ ] Test fault injection (admin API)
+- [ ] Verify MCP server discovery works with your agent tooling
+
+## FAQ
+
+**Q: Does WonderTwin work with Python or Node SDKs, or only Go?**
+**A:** Yes — any language with an HTTP client works. You point your SDK's base URL at localhost. The official Stripe, Twilio, and PostHog SDKs all support custom backend URLs.
+
+**Q: How are twins kept in sync with real API behavior?**
+**A:** Open-source twins are frozen snapshots (free, always). Pro twins are adaptive and stay current as the real service evolves ($199/twin/month).
+
+**Q: Can I build my own twin?**
+**A:** Yes. WonderTwin includes an agent skill for building custom twins from OpenAPI specs or real API traffic.
+
+**Q: Is this suitable for production use?**
+**A:** The open-source twins are development/CI tools. For production-rate limiting, historical versions, and drift detection, the Pro tier is designed for production teams.
+
+## Conclusion
+
+WonderTwin fills the gap between brittle unit mocks and expensive integration environments. By shipping real, stateful API replicas that run offline, it makes both human and AI-driven development dramatically more reliable — and testing actually fast. If you are building anything that touches Stripe, Twilio, Resend, or PostHog, WonderTwin is worth a look.
+
+**Source:** Project page [wondertwin.ai](https://wondertwin.ai) and [github.com/wondertwin-ai/wondertwin](https://github.com/wondertwin-ai/wondertwin). License: MIT. Verified 2026-07-17.
