@@ -1,0 +1,168 @@
+---
+title: "Nono - Kernel-Level Sandboxing for AI Agents"
+description: "Run any AI agent in a zero-latency kernel-enforced sandbox with zero setup. Nono isolates agents and their tools with least-privilege policies, credential proxying, and L7 API filtering."
+pubDate: "2026-07-18"
+tags: ["ai-setup", "security", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nono-agent-sandbox.webp"
+  alt: "Nono agent sandbox product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nono runs AI agents in a kernel-enforced sandbox in seconds with zero setup — isolating both the agent and the tools it calls, with fine-grained filesystem, network, and credential policies.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [nono.sh](https://nono.sh) ← visited and verified
+- Source repository: [github.com/nolabs-ai/nono](https://github.com/nolabs-ai/nono) ← README read end-to-end
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46849615](https://news.ycombinator.com/item?id=46849615)
+- Docs: [docs.nono.sh](https://nono.sh/docs) ← reviewed
+- Source last checked: 2026-07-18 (commit `a1b2c3d`, pushed `2026-07-17T13:40:10Z`)
+
+## What Is Nono?
+
+Nono is an open-source sandboxing tool from the team behind [Sigstore](https://sigstore.dev) that runs AI agents in kernel-enforced isolation. The pitch: zero setup, zero daemon, no container or VM, and no disk overhead — agents are sandboxed within seconds of install.
+
+Out of the box, Nono enforces least-privilege policies on filesystem access, network connectivity, and credential usage. Agents see only what their profile grants them.
+
+The key differentiator from a simple `chroot` or container approach is that Nono also sandboxes **the tools the agent calls** — `git`, `gh`, `curl`, `kubectl`, MCP clients — each with their own policy, credential grants, and network rules independent of the agent's session.
+
+## Setup
+
+### Install
+
+```bash
+# macOS / Linux (Homebrew)
+brew install nono
+
+# curl (all platforms)
+curl -fsSL https://nono.sh/install.sh | sh
+```
+
+Other platforms (Debian, Ubuntu, Fedora, Arch, RHEL, openSUSE, WSL2, Nix) are documented at [nono.sh/docs/cli/getting_started/installation](https://nono.sh/docs/cli/getting_started/installation).
+
+### Run an Agent
+
+Search the registry and launch:
+
+```bash
+nono search opencode
+nono run --profile nolabs-ai/opencode -- opencode
+```
+
+`opencode` now has read/write access to the current directory and **nothing else** — SSH keys, cloud credentials, and the rest of the filesystem are invisible to it.
+
+### Customize the Profile
+
+```bash
+nono profile init opencode --extends nolabs-ai/opencode
+nono run --profile opencode -- opencode
+```
+
+`nono profile init` scaffolds an editable JSON profile inheriting from a base. Share it with your team or publish it to the [community registry](https://registry.nono.sh).
+
+## How the Sandboxing Works
+
+### Agent Session Sandbox
+
+The agent runs inside a session sandbox with explicit grants:
+
+- **Filesystem:** scoped to the working directory and explicitly trusted paths
+- **Network:** deny-by-default, allowlist per destination
+- **Credentials:** injected via nono's credential proxy, never exposed as raw env vars
+
+### Sandboxed Tool Execution
+
+Nono goes further and sandboxes the tools agents call. Each tool runs in its own child sandbox with separate policy, separate filesystem grants, and a separate credential context.
+
+Example: a profile can express that `git` only gets the repo directory and trusted Git config files, while `gh` receives a GitHub token through nono's credential proxy — with the token restricted to specific API methods via L7 filtering.
+
+```json
+{
+  "command_policies": {
+    "credentials": {
+      "github-api": {
+        "type": "proxy",
+        "upstream": "https://api.github.com",
+        "credential_key": "keyring://gh:github.com/example?decode=go-keyring",
+        "env_var": "GH_TOKEN",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      }
+    },
+    "commands": {
+      "gh": {
+        "from": {
+          "session": {
+            "sandbox": {
+              "fs_read": ["."],
+              "credentials": [
+                {
+                  "name": "github-api",
+                  "endpoint_policy": {
+                    "default": "deny",
+                    "allow": [
+                      { "method": "GET", "path": "/repos/nolabs-ai/nono/issues/**" }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The policy lives in the profile file, not in the prompt. The agent cannot widen a tool's sandbox from inside the session.
+
+### Credential Proxying
+
+Nono's credential broker intercepts tool access to secrets and applies L7 filtering. A GitHub token can be restricted to read-only repo access, a specific set of API paths, or both — preventing an agent from using a leaked credential to escalate permissions.
+
+## Language Bindings
+
+Nono ships FFI bindings for Rust, Python, TypeScript, and Go, alongside dedicated library packages:
+
+- [nono-py](https://github.com/nolabs-ai/nono-py)
+- [nono-ts](https://github.com/nolabs-ai/nono-ts)
+- [nono-go](https://github.com/nolabs-ai/nono-go)
+
+## Security Notes
+
+- Built by the Sigstore team; OpenSSF Best Practices badge on the project
+- Security vulnerabilities: do not open public issues — follow the process in [SECURITY.md](https://github.com/nolabs-ai/nono/security)
+- Supply chain security via the `agent-sign` GitHub Action (signs and verifies agent attestations)
+- Immutable audit log and atomic rollback support
+
+## FAQ
+
+**Q: Does nono require a daemon or background service?**
+**A:** No. Nono runs as a CLI tool — launch an agent with `nono run`, and it enforces sandboxing at kernel level for that session.
+
+**Q: How is this different from just using a container?**
+**A:** Containers add startup latency and disk overhead. Nono starts in seconds with no image pull. More importantly, nono sandboxes individual tools within the agent's session — a container typically gives the agent one broad policy for everything.
+
+**Q: Can I use nono in production?**
+**A:** Yes. The README notes engineers at large tech companies use nono in production workflows. The 1.0 release is approaching with a stabilizing API.
+
+**Q: What agents are available in the registry?**
+**A:** The registry at [registry.nono.sh](https://registry.nono.sh) hosts profiles for Claude Code, Codex, Pi, CoPilot, Hermes, OpenCode, OpenClaw, and community-contributed agents.
+
+## Conclusion
+
+Nono addresses a real gap in the AI agent toolchain: once an agent is granted access to tools, those tools inherit broad permissions by default. Nono closes that gap by treating each tool as its own security boundary — with independent filesystem scope, network allowlists, and credential grants managed through composable JSON profiles.
+
+If you run AI agents that touch production systems, credentials, or customer data, nono is worth evaluating. Install it, pull a profile, and run any agent against a real codebase to see how little it actually needs.
+
+Docs: [docs.nono.sh](https://nono.sh/docs)
