@@ -1,0 +1,205 @@
+---
+title: "Lambda CLI – MCP Server for Lambda GPU Cloud"
+description: "A fast CLI and MCP server for managing Lambda cloud GPU instances via natural language commands in Claude Code or other AI assistants."
+pubDate: "2026-07-18"
+tags: ["mcp", "gpu", "cloud", "cli", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lambda-cli-setup-guide-open-source-rust-ai-tool.webp"
+  alt: "Lambda CLI – MCP server for Lambda GPU cloud instances"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Lambda CLI is an open-source Rust tool that gives you a terminal interface and an MCP server for launching, listing, and terminating Lambda GPU instances — letting you manage cloud GPUs directly from Claude Code with plain English prompts.
+
+## Source and Accuracy Notes
+
+- Project page: [lambda.ai](https://lambda.ai)
+- Source repository: [github.com/Strand-AI/lambda-cli](https://github.com/Strand-AI/lambda-cli)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46621786](https://news.ycombinator.com/item?id=46621786)
+- Source last checked: 2026-07-18 (commit `main` branch)
+
+## What Is Lambda CLI?
+
+Lambda CLI is an unofficial Rust-based CLI and MCP server for [Lambda](https://lambda.ai/), a cloud GPU provider. It exposes Lambda's GPU instance lifecycle — list, start, stop, find — as both direct terminal commands and as MCP tools that AI assistants like Claude Code can调用.
+
+The CLI (`lambda`) is a traditional command-line tool. The MCP server (`lambda-mcp`) follows the Model Context Protocol, letting you add it as a backend to any MCP-compatible AI assistant. Once configured, you can manage GPU infrastructure with prompts like "Launch an H100 instance with my SSH key" instead of memorizing API flags.
+
+This is the key difference from Lambda's own API: instead of writing scripts or hitting REST endpoints, you describe what you want in natural language and let the LLM translate that into API calls.
+
+## Setup Workflow
+
+### Prerequisites
+
+- A [Lambda](https://lambda.ai/) account with API key access
+- [Rust toolchain](https://rustup.rs/) (for source build) or Homebrew (for macOS/Linux binary)
+- Node.js 18+ (for `npx` MCP mode)
+
+### Step 1: Install the CLI
+
+**Homebrew (macOS/Linux):**
+
+```bash
+brew install strand-ai/tap/lambda-cli
+```
+
+**From source:**
+
+```bash
+cargo install --git https://github.com/Strand-AI/lambda-cli
+```
+
+**Pre-built binaries** are available on the [GitHub Releases page](https://github.com/Strand-AI/lambda-cli/releases).
+
+### Step 2: Get Your API Key
+
+Generate an API key from the [Lambda dashboard](https://cloud.lambda.ai/api-keys/cloud-api).
+
+Set it as an environment variable:
+
+```bash
+export LAMBDA_API_KEY=your_key_here
+```
+
+Or use a secret manager command (works with 1Password, pass, and similar):
+
+```bash
+export LAMBDA_API_KEY_COMMAND="read op://Personal/Lambda/api-key"
+```
+
+### Step 3: Verify the CLI Works
+
+```bash
+lambda list
+```
+
+This outputs all available GPU instance types with per-region pricing and real-time availability. Example output line:
+
+```
+gpu_1x_h100     H100 SXM5 80GB     $2.89/hr   Available in us-east-1
+```
+
+### Step 4: Launch Your First Instance
+
+```bash
+lambda start --gpu gpu_1x_a10 --ssh my-key
+```
+
+Use `lambda find` to poll until a specific GPU type is available, then auto-launch:
+
+```bash
+lambda find --gpu gpu_1x_h100 --ssh my-key
+```
+
+### Step 5: Connect to Your Instance
+
+```bash
+lambda running
+```
+
+This prints SSH connection details for all running instances:
+
+```
+i-abc123  A10G  12GB  running  54.82.x.x  ssh ubuntu@54.82.x.x -i ~/.ssh/my-key.pem
+```
+
+Terminate when done:
+
+```bash
+lambda stop i-abc123
+```
+
+## MCP Server Setup
+
+The MCP server lets Claude Code (or any MCP-compatible AI assistant) manage your GPU infrastructure directly.
+
+### Quick Start with npx
+
+No installation required — run directly via `npx`:
+
+```bash
+npx @strand-ai/lambda-mcp
+```
+
+### Add to Claude Code
+
+```bash
+claude mcp add lambda -s user -e LAMBDA_API_KEY=your_key -- npx -y @strand-ai/lambda-mcp
+```
+
+With 1Password:
+
+```bash
+claude mcp add lambda -s user -e LAMBDA_API_KEY_COMMAND='read op://Personal/Lambda/api-key' -- npx -y @strand-ai/lambda-mcp
+```
+
+Then restart Claude Code.
+
+### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_gpu_types` | All available GPU types with pricing, specs, and availability |
+| `start_instance` | Launch a new GPU instance |
+| `stop_instance` | Terminate a running instance |
+| `list_running_instances` | Show all running instances with connection details |
+| `check_availability` | Check if a specific GPU type is available right now |
+
+### Example Prompts Once Configured
+
+Once the MCP server is connected, try these in Claude Code:
+
+- "What GPUs are currently available on Lambda?"
+- "Launch an H100 instance with my SSH key 'macbook'"
+- "Show me my running instances"
+- "Check if any A100s are available in us-east-1"
+- "Terminate instance i-abc123"
+
+## Notifications
+
+Lambda CLI can notify you on Slack, Discord, or Telegram when your instance is ready and SSH-able.
+
+Set one or more webhook environment variables before launching:
+
+```bash
+export LAMBDA_NOTIFY_SLACK_WEBHOOK="https://hooks.slack.com/services/T00/B00/XXX"
+export LAMBDA_NOTIFY_DISCORD_WEBHOOK="https://discord.com/api/webhooks/123/abc"
+export LAMBDA_NOTIFY_TELEGRAM_BOT_TOKEN="***"
+export LAMBDA_NOTIFY_TELEGRAM_CHAT_ID="123456789"
+```
+
+The MCP server sends these notifications automatically when instances become SSH-able — no extra flags required.
+
+## Security Notes
+
+- The CLI is **unofficial** — it is a community project, not affiliated with Lambda Labs
+- API keys are stored only in environment variables or via secret manager command — never hardcoded
+- `LAMBDA_API_KEY_COMMAND` executes at startup; ensure your secret manager has appropriate access controls
+- The MCP server defers `LAMBDA_API_KEY_COMMAND` execution until the first API call by default (use `--eager` to change this)
+
+## FAQ
+
+**Q: Is this officially supported by Lambda?**
+**A:** No. Lambda CLI is a community-built tool. Use the official [Lambda API](https://cloud.lambda.ai/docs/api) for production workloads.
+
+**Q: Does it support all Lambda GPU regions?**
+**A:** The `lambda list` command shows per-region availability. Check the output for your target region before launching.
+
+**Q: Can I use this with Cursor or other MCP-compatible editors?**
+**A:** Yes. The MCP server is a standard MCP server. You can install it in any MCP-compatible AI assistant using the same `npx @strand-ai/lambda-mcp` command.
+
+**Q: How is this different from Lambda's own API?**
+**A:** Lambda's API is REST-based — you write code or scripts to call it. Lambda CLI wraps that API in both a human-readable CLI and an MCP server. The MCP layer is the main differentiator: you can manage infrastructure via natural language instead of memorizing endpoint paths and request shapes.
+
+## Conclusion
+
+Lambda CLI fills a specific gap: if you use Lambda cloud GPUs and want to manage them from an AI assistant, there was no tool purpose-built for that workflow. The MCP layer is the key feature — it makes GPU provisioning feel like a conversation rather than an API call. Installation is straightforward (Homebrew or `npx`), and the notification integrations mean you do not have to babysit instance startup.
+
+For developers who spin up GPU instances frequently — for model fine-tuning, inference, or batch workloads — this eliminates the context-switching between dashboard, terminal, and AI session.
+
+If you want to try it, start with `brew install strand-ai/tap/lambda-cli` and `lambda list` to see what is available in your preferred region.
