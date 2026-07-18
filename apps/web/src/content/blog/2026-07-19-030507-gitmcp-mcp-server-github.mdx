@@ -1,0 +1,190 @@
+---
+title: "GitMCP: Turn Any GitHub Repo into an MCP Server"
+description: "Stop AI code hallucinations. GitMCP creates an MCP server for any public GitHub repo, giving AI coding tools like Cursor and Claude accurate, up-to-date documentation and code."
+pubDate: "2026-07-19"
+tags: ["mcp", "cursor", "claude", "ai-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gitmcp.webp"
+  alt: "GitMCP product thumbnail showing MCP server badge"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** GitMCP turns any public GitHub repository into a Model Context Protocol server, letting AI coding assistants like Cursor and Claude fetch real documentation and source code on demand — eliminating hallucinations caused by stale training data.
+
+## Source and Accuracy Notes
+
+- Project page: [gitmcp.io](https://gitmcp.io)
+- Source repository: [github.com/idosal/git-mcp](https://github.com/idosal/git-mcp)
+- License: Apache-2.0 (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=43573539](https://news.ycombinator.com/item?id=43573539)
+- Stars: 8,265 (as of 2026-07-19)
+- Source last checked: 2026-07-19 (commit `main`, pushed 2026-05-08)
+
+## What Is GitMCP?
+
+When an AI coding assistant answers questions about a library or framework, it relies on whatever was in its training data. For fast-moving projects, that means outdated examples, deprecated APIs, and hallucinated function signatures.
+
+[GitMCP](https://gitmcp.io) is a free, open-source remote MCP server that transforms any public GitHub repository into a documentation endpoint. AI tools that support the [Model Context Protocol](https://modelcontextprotocol.io/introduction) — such as Cursor, Claude Desktop, Windsurf, and any MCP-compatible editor — can query GitMCP at runtime to fetch the actual current state of a project's documentation and code.
+
+The project description reads:
+
+> Stop vibe-hallucinating and start vibe-coding! GitMCP is a free, open-source, remote MCP server that transforms any GitHub project (repositories or GitHub Pages) into a documentation hub.
+
+GitMCP supports two URL patterns:
+
+- **Specific repository:** `gitmcp.io/{owner}/{repo}` — for working with a particular library
+- **Generic server:** `gitmcp.io/docs` — for flexible cross-repository queries
+
+It prioritizes an `llms.txt` file if one exists, falling back to `README.md` and other documentation pages.
+
+## Setup Workflow
+
+### Step 1: Pick Your MCP Server URL
+
+Choose the URL format based on your target:
+
+```bash
+# For a specific GitHub repository
+https://gitmcp.io/{owner}/{repo}
+
+# For GitHub Pages sites
+https://{owner}.gitmcp.io/{repo}
+
+# Generic flexible server
+https://gitmcp.io/docs
+```
+
+For example, to access the Next.js documentation:
+
+```bash
+https://gitmcp.io/vercel/next.js
+```
+
+### Step 2: Connect to Cursor
+
+Open `~/.cursor/mcp.json` and add the server:
+
+```json
+{
+  "mcpServers": {
+    "gitmcp": {
+      "url": "https://gitmcp.io/{owner}/{repo}"
+    }
+  }
+}
+```
+
+Restart Cursor. The AI will now be able to search and read the actual repository documentation.
+
+### Step 3: Connect to Claude Desktop
+
+1. Open Claude Desktop → Settings → Developer → Edit Config
+2. Add to the MCP servers section:
+
+```json
+{
+  "mcpServers": {
+    "gitmcp": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://gitmcp.io/{owner}/{repo}"]
+    }
+  }
+}
+```
+
+### Step 4: Connect to Windsurf
+
+Update `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "gitmcp": {
+      "serverUrl": "https://gitmcp.io/{owner}/{repo}"
+    }
+  }
+}
+```
+
+## Deeper Analysis
+
+### Why Hallucinations Happen and How GitMCP Fixes Them
+
+Large language models used for code assistance are trained on snapshots of public codebases. A library updated last week is effectively invisible to a model whose knowledge cutoff is six months ago. GitMCP solves this by making the live repository the context source — AI queries hit the actual current documentation, not stale training data.
+
+### Self-Hosting Option
+
+GitMCP is fully open-source and can be deployed on your own infrastructure. From the README:
+
+```bash
+git clone https://github.com/idosal/git-mcp.git
+cd git-mcp
+pnpm install
+npm run dev
+# or
+pnpm dev
+```
+
+For local testing, use the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+Set Transport Type to `SSE` and point to `http://localhost:5173/docs`.
+
+### Badge Support
+
+GitMCP provides embeddable badges for repositories, letting projects signal MCP compatibility:
+
+```markdown
+[![GitMCP](https://img.shields.io/endpoint?url=https://gitmcp.io/badge/OWNER/REPO)](https://gitmcp.io/OWNER/REPO)
+```
+
+### Privacy
+
+GitMCP does not require authentication, does not store queries, and does not permanently log repository content. It only accesses content that is already publicly available via GitHub. For GitHub Pages sites, it respects `robots.txt`.
+
+## Practical Evaluation Checklist
+
+- Does the target repository have a README or llms.txt? (required for GitMCP to serve content)
+- Is the repository public? (private repos are not accessible)
+- Does your AI tool support MCP? (Cursor, Claude Desktop, Windsurf, VSCode with MCP extension)
+- Are you comfortable routing requests through gitmcp.io, or do you need self-hosting?
+- For self-hosting, do you have Node.js and pnpm available?
+
+## Security Notes
+
+- GitMCP accesses only publicly available GitHub content
+- No authentication required — requests are anonymous
+- Queries are not stored or logged permanently
+- GitHub Pages sites can opt out via `robots.txt`
+- Self-hosting provides full data isolation if needed
+
+## FAQ
+
+**Q: Does GitMCP work with private repositories?**
+**A:** No. GitMCP only accesses publicly available GitHub repositories and GitHub Pages sites.
+
+**Q: Does it work with any programming language?**
+**A:** Yes. GitMCP serves whatever documentation exists in the repository, regardless of language. It has no language-specific logic.
+
+**Q: How is this different from just pasting a README into the AI chat?**
+**A:** GitMCP is integrated into the AI tool's context layer via MCP. The AI can actively search, browse, and retrieve specific sections on demand during a coding session — rather than receiving a static dump at the start. This also means the AI gets the most up-to-date version, not a snapshot from a point-in-time paste.
+
+**Q: Does GitMCP cost money?**
+**A:** No. The hosted service at gitmcp.io is free and open-source under Apache-2.0. You can also self-host it at no cost.
+
+**Q: What is llms.txt?**
+**A:** `llms.txt` is a plain-text documentation format designed for large language models. If a repository includes one, GitMCP serves it preferentially over README.md because it is structured for AI consumption.
+
+## Conclusion
+
+GitMCP addresses a real problem: AI coding assistants that cannot see the current state of the libraries they are helping with. By exposing any GitHub repository as an MCP endpoint, it bridges the gap between static training data and live project documentation. If you use Cursor, Claude, or another MCP-compatible editor and work with actively maintained libraries, GitMCP is a zero-setup upgrade worth trying.
+
+Self-hosting is available if you need full control over the infrastructure.
