@@ -1,0 +1,173 @@
+---
+title: "MemoryGate - MCP Server for Persistent AI Memory"
+description: "Open-source MCP server providing persistent semantic memory for AI agents. Supports Postgres + pgvector, OAuth 2.0, and 20 tools for storage, retrieval, and knowledge graphs."
+pubDate: "2026-07-18"
+tags: ["ai-setup", "mcp", "open-source", "python", "memory"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/memorygate-setup-guide-open-source-python-ai-tool.webp"
+  alt: "MemoryGate MCP server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** MemoryGate is an open-source MCP server that gives AI agents persistent, external memory across sessions — backed by Postgres + pgvector, secured with OAuth 2.0, and exposing 20 MCP tools for storage, retrieval, and knowledge graphs.
+
+## Source and Accuracy Notes
+
+**This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [memorygate.ai](https://www.memorygate.ai)
+- Source repository: [github.com/PStryder/MemoryGate](https://github.com/PStryder/MemoryGate)
+- License: Apache-2.0 (verified via LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=46981840](https://news.ycombinator.com/item?id=46981840)
+
+## What Is MemoryGate?
+
+MemoryGate addresses a fundamental problem with AI agents: **memory is trapped inside the platform**. When a model updates, a context window rolls over, or a provider changes its API, everything the agent learned disappears. Preferences, decisions, project history — all wiped.
+
+MemoryGate is a production-ready MCP (Model Context Protocol) server that provides durable, external semantic memory for AI agents. It sits outside any single model or platform, so memory persists across sessions, model versions, and providers.
+
+According to the README:
+
+> MemoryGate is a production-ready MCP server that provides durable memory for AI agents. It combines structured storage with semantic search, OAuth-based authentication, and lifecycle controls for retention and archiving.
+
+The server exposes **20 MCP tools** covering:
+
+- **Session management:** `memory_bootstrap`, `memory_init_session`, `memory_user_guide`
+- **Storage:** `memory_store`, `memory_store_document`, `memory_store_concept`, `memory_update_pattern`
+- **Retrieval:** `memory_search`, `memory_recall`, `memory_get_concept`, `memory_get_pattern`, `memory_patterns`, `memory_stats`
+- **Knowledge graph:** `memory_add_concept_alias`, `memory_add_concept_relationship`, `memory_related_concepts`
+- **Cold storage:** `search_cold_memory`, `archive_memory`, `rehydrate_memory`, `list_archive_agents`
+
+Any MCP-compatible agent — Claude Desktop, ChatGPT, Cursor, or custom agents — can use these tools to store and retrieve memories.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10+
+- PostgreSQL 15+ with pgvector extension (or SQLite for local development)
+- Optional: Google or GitHub OAuth app credentials for user login
+
+### Step 1: Install Dependencies
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-postgres.txt
+```
+
+The `requirements-postgres.txt` pulls in `psycopg2-binary` and `pgvector`. For local-only development without a Postgres instance, skip the second file and MemoryGate falls back to SQLite.
+
+### Step 2: Configure Environment Variables
+
+```bash
+export DATABASE_URL="postgresql://user:password@localhost:5432/memorygate"
+export OPENAI_API_KEY="sk-..."
+export PSTRYDER_DESKTOP="your-client-id"
+export PSTRYDER_DESKTOP_SECRET="your-client-secret"
+export PSTRYDER_DESKTOP_REDIRECT_URIS="https://claude.ai/api/mcp/callback"
+```
+
+The `PSTRYDER_DESKTOP` variables configure OAuth 2.0 client credentials for MCP client authentication. The `REDIRECT_URIS` must include the callback URL of your MCP-compatible AI platform.
+
+For local development without enforcement:
+
+```bash
+export REQUIRE_MCP_AUTH=false
+```
+
+### Step 3: Run the Server
+
+```bash
+uvicorn app.main:asgi_app --host 0.0.0.0 --port 8080
+```
+
+### Step 4: Verify
+
+```bash
+curl http://localhost:8080/health
+```
+
+A healthy response indicates the server is running and the database connection is established.
+
+## Architecture
+
+MemoryGate is organized into three main layers:
+
+- `core/` — shared business logic and models, including the MCP tool definitions
+- `app/` — FastAPI middleware, routes, and OAuth flows
+- `core/mcp/` — FastMCP tool registration, exposing SSE and streamable HTTP transport
+
+Key endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `/mcp/` | SSE MCP transport (authenticated) |
+| `/MemoryGate` | Alias for streamable HTTP MCP |
+| `/auth/*` | OAuth login, client credentials, API key management |
+| `/oauth/*` | MCP OAuth discovery and PKCE flow |
+| `/.well-known/*` | OAuth 2.0 discovery |
+| `/health` | Health check |
+
+## Deeper Analysis
+
+### Why External Memory Matters
+
+The HN launch post captures the core problem well: context vanishes when models update, platforms change APIs, or context windows roll over. The agent's learned knowledge — preferences, decisions, project history — disappears.
+
+External memory decouples the agent's knowledge from its platform. MemoryGate stores memories as structured records with semantic embeddings, so agents can retrieve relevant context even across completely different platforms or model versions.
+
+### Storage and Retrieval
+
+MemoryGate uses Postgres + pgvector for semantic search. When an agent stores a memory, it gets embedded and stored alongside metadata (confidence score, domain, evidence). Retrieval searches the vector space to find semantically similar memories.
+
+For high-volume or cold data, the retention engine moves older memories to cold storage tiers, with support for rehydration when needed.
+
+### Authentication
+
+OAuth 2.0 + PKCE secures the MCP transport. MCP clients (the AI agent platforms) authenticate using client credentials. End users authenticate via Google or GitHub. API keys are hashed with bcrypt and looked up by prefix for debugging convenience.
+
+## Practical Evaluation Checklist
+
+- Is the MCP server running and passing health checks?
+- Can you connect from your AI agent platform using the configured redirect URI?
+- Does `memory_init_session` create a new session successfully?
+- Does `memory_store` accept and persist a memory with semantic embedding?
+- Does `memory_search` return relevant results for a query?
+- Does the OAuth callback flow complete without errors?
+- Does SQLite fallback work for local development without Postgres?
+
+## Security Notes
+
+- API keys are hashed with bcrypt before storage
+- Rate limiting is enabled by default
+- Security headers are applied to all responses
+- Request size limits prevent oversized payloads
+- Metadata-only audit logging tracks access without storing content
+- OAuth 2.0 + PKCE prevents credential interception on the MCP transport
+
+## FAQ
+
+**Q: Does it work with Claude Desktop?**
+**A:** Yes. Configure the MCP redirect URI to point to your Claude Desktop MCP callback endpoint. The server exposes standard SSE and HTTP MCP transports compatible with any MCP client.
+
+**Q: Can I self-host it?**
+**A:** Yes. MemoryGate is fully self-hostable. You need a Postgres instance with pgvector. The server runs on any machine that can execute `uvicorn app.main:asgi_app`.
+
+**Q: What happens to memories if the server goes down?**
+**A:** Memories stored in Postgres persist independently of the server process. If the server restarts, all previously stored memories remain available. Cold storage archives provide an additional tier for long-term retention.
+
+**Q: Is there a cloud-hosted option?**
+**A:** Yes. MemoryGate offers a hosted cloud tier starting at $9.99 per month for individuals.
+
+## Conclusion
+
+MemoryGate solves a real problem: AI agents forgetting everything when sessions end or platforms change. By exposing a structured memory layer over MCP, it makes persistent context available to any MCP-compatible agent — whether that is Claude, ChatGPT, Cursor, or a custom build.
+
+The Apache-2.0 license, Python implementation, and Postgres-backed vector search make it a practical self-hosting option for developers who want external memory without vendor lock-in. The OAuth 2.0 authentication and retention engine add production-readiness features that simple in-memory caches lack.
+
+If you run AI agents across multiple platforms or need context to survive model updates, MemoryGate is worth evaluating.
