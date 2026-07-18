@@ -1,0 +1,168 @@
+---
+title: "Fireproof – Local-First Database with Encrypted Sync"
+description: "Fireproof is an embedded JavaScript database with encrypted sync, Git-like versioning, and React hooks for building offline-capable apps."
+pubDate: "2026-07-18"
+tags: ["local-first", "database", "javascript", "encryption", "offline"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/fireproof-storage.webp"
+  alt: "Fireproof local-first database product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Fireproof is an open-source embedded JavaScript database that runs entirely in the browser with encrypted sync, Git-like versioning, and React hooks for building offline-capable apps.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [fireproof.storage](https://fireproof.storage) ← **verified July 2026**
+- Source repository: [github.com/fireproof-storage/fireproof](https://github.com/fireproof-storage/fireproof) ← **README read July 2026**
+- License: Apache-2.0 (verified via GitHub API)
+- GitHub stars: 974 (verified July 2026)
+- HN launch thread: [news.ycombinator.com/item?id=42184362](https://news.ycombinator.com/item?id=42184362)
+
+## What Is Fireproof?
+
+Fireproof is a lightweight embedded document database with encrypted live sync. It is designed for browser-first applications and provides a unified API that works across Deno, Bun, Node.js, and the browser. The official tagline: *"The vibe coding database runs in the browser, fits in the context window, and syncs anywhere."*
+
+The core innovation is **cryptographic causal consistency** using hash history — each change is content-addressed and linked to prior state, providing git-like versioning with blockchain-style verification without requiring a blockchain.
+
+## Key Features
+
+- **Runs anywhere** — bundles UI, data, and logic in one file
+- **Offline-first** — no loading or error states; works without connectivity
+- **Unified API** — TypeScript with Deno, Bun, Node.js, and browser support
+- **React hooks** — `useLiveQuery` and `useDocument` for live collaboration
+- **Encrypted sync** — data replicated as content-addressed encrypted blobs
+- **Git-like versioning** — hash history tracks every document change
+- **Compatible with LLM code generation** — designed for vibe coding workflows with ChatGPT Canvas, bolt.new, and Claude Artifacts
+
+## Setup Workflow
+
+### Step 1: Install the Package
+
+Install `use-fireproof` for the full React API:
+
+```bash
+npm install use-fireproof
+```
+
+Or install just the core ledger in any JavaScript environment:
+
+```bash
+npm install @fireproof/core
+```
+
+You can also load it via CDN:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/@fireproof/core/dist/browser/fireproof.global.js"></script>
+```
+
+Or use ESM.sh:
+
+```js
+import { useFireproof } from "https://esm.sh/use-fireproof";
+```
+
+### Step 2: Use in a React App
+
+```js
+import { useFireproof } from "use-fireproof";
+
+function App() {
+  const { database, useLiveQuery, useDocument } = useFireproof("my-ledger");
+
+  // Create and edit a document
+  const { doc, merge, submit } = useDocument({ text: "" });
+
+  // Query documents by _id, most recent first
+  const { docs } = useLiveQuery("_id", { descending: true, limit: 100 });
+
+  return (
+    <div>
+      <form onSubmit={submit}>
+        <input value={doc.text} onChange={(e) => merge({ text: e.target.value })} placeholder="New document" />
+        <button type="submit">Submit</button>
+      </form>
+      <ul>
+        {docs.map((doc) => (
+          <li key={doc._id}>{doc.text}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### Step 3: Sync Data
+
+Fireproof syncs via commodity object storage. Connect to any compatible backend:
+
+```js
+const db = new Fireproof("my-ledger");
+await db.sync("https://your-storage-provider.com/bucket");
+```
+
+## Architecture Deep Dive
+
+### Content-Addressing
+
+Every document is stored with a content address derived from its hash. This means identical content always produces the same address, making deduplication automatic and enabling efficient Merkle tree comparisons during sync.
+
+### Hash Chain (Git-like Versioning)
+
+Each document maintains a chain of hash pointers. When you update a document, the new version includes a pointer to the previous version's hash. This creates an immutable audit trail — you can reconstruct the full history of any document at any point in time.
+
+### Encryption Model
+
+Data is encrypted end-to-end. The sync layer only ever sees encrypted blobs, and the encryption keys never leave the client. This makes Fireproof safe to sync via untrusted infrastructure (e.g., a commodity S3 bucket or Cloudflare R2).
+
+### Conflict Resolution
+
+Fireproof uses a last-writer-wins strategy for conflicting writes, with the hash chain providing full auditability. Because all changes are content-addressed and immutable, there's no risk of data loss — every version is preserved.
+
+## Practical Evaluation Checklist
+
+- [ ] Installs without native dependencies (pure JavaScript)
+- [ ] Works offline with no loading states
+- [ ] React hooks integrate cleanly with existing apps
+- [ ] Sync works with standard object storage (S3, R2, GCS)
+- [ ] Encryption is verified before data leaves the browser
+- [ ] Hash chain correctly preserves full document history
+- [ ] Concurrent edits from multiple clients resolve cleanly
+- [ ] Works in Deno, Bun, and Node.js without adapters
+
+## Security Notes
+
+- Encryption keys are client-side only and never transmitted
+- Sync provider only sees encrypted blobs (no plaintext)
+- Hash chain provides tamper-evident audit trail
+- No external dependencies required for the core database
+
+## FAQ
+
+**Q: How does Fireproof compare to IndexedDB?**
+**A:** IndexedDB is a raw storage API requiring significant boilerplate. Fireproof provides a document API with built-in versioning, encryption, and sync. IndexedDB has no native sync story; Fireproof makes sync a first-class concern.
+
+**Q: Can Fireproof sync with a self-hosted backend?**
+**A:** Yes. Fireproof syncs via standard object storage APIs, so you can self-host MinIO, use a Cloudflare R2 bucket, or any S3-compatible endpoint.
+
+**Q: Does Fireproof work without React?**
+**A:** Yes. The `@fireproof/core` package provides a framework-agnostic API that works in any JavaScript environment, including vanilla HTML pages, Deno, Bun, and Node.js.
+
+**Q: Is the data encrypted at rest?**
+**A:** Yes. Data is encrypted before leaving the browser. The sync layer receives and stores only encrypted blobs. Decryption happens client-side on read.
+
+## Conclusion
+
+Fireproof fills a specific niche: browser-first applications that need real offline capability and encrypted sync without the operational complexity of running a traditional database server. The hash chain approach gives it a credible claim to data integrity that simpler localStorage or IndexedDB wrappers lack.
+
+If you are building a vibe-coded app and want persistence plus sync without a backend, Fireproof is worth a look. The Apache-2.0 license means you can use it freely in commercial projects.
+
+**Source:** [github.com/fireproof-storage/fireproof](https://github.com/fireproof-storage/fireproof) | [fireproof.storage](https://fireproof.storage)
