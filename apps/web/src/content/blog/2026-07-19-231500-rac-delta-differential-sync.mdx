@@ -1,0 +1,134 @@
+---
+title: "Rac-Delta – Open Protocol for Differential Directory Sync"
+description: "Rac-delta is a universal differential protocol for efficiently syncing and distributing builds across storage backends. MIT-licensed, with Rust and Node.js SDKs."
+pubDate: "2026-07-19"
+tags: ["sync", "open-source", "dev-tools", "protocol"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rac-delta.webp"
+  alt: "Rac-delta protocol social card"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rac-delta is a universal differential sync protocol with MIT-licensed Rust and Node.js SDKs that patch file directories efficiently across S3, GCS, Azure, SSH, HTTP, and local storage.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [raccreative.github.io/rac-delta-docs](https://raccreative.github.io/rac-delta-docs/)
+- Source repository (Node.js): [github.com/raccreative/rac-delta-js](https://github.com/raccreative/rac-delta-js)
+- Source repository (Rust): [github.com/raccreative/rac-delta-rs](https://github.com/raccreative/rac-delta-rs)
+- License: [MIT](https://github.com/raccreative/rac-delta-js/blob/master/LICENSE) (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47674776](https://news.ycombinator.com/item?id=47674776)
+
+## What Is Rac-Delta?
+
+Rac-delta is a universal differential protocol designed to sync and distribute builds — such as game files, app binaries, or plain directories — efficiently and in a storage-agnostic way. Instead of re-uploading an entire 2 GB game patch, you upload only the binary diff between the old and new version.
+
+From the official docs:
+
+> rac-delta is a universal differential protocol designed to sync and distribute builds (like games, apps or directories) efficiently and storage agnostic.
+
+The protocol sits between the sender and the storage backend. You pick a storage layer (S3, GCS, Azure Blob, SSH, HTTP, signed URLs, or local disk), and rac-delta handles chunking, delta computation, and reconstruction — regardless of the storage provider.
+
+### Core Properties
+
+- **Storage agnostic** — S3, Azure Blob, GCS, SSH, HTTP, signed URLs, local storage
+- **Language SDKs** — Rust and Node.js officially maintained; protocol spec is language-independent
+- **Streaming support** — reconstructs files via streams, avoiding full-file memory buffering
+- **MIT licensed** — both SDKs are fully open source
+
+## Installation and Setup
+
+### Node.js
+
+```bash
+npm install rac-delta
+# or
+yarn add rac-delta
+```
+
+For cloud storage integrations, install peer dependencies as needed:
+
+```bash
+npm install @aws-sdk/client-s3 @azure/identity @azure/storage-blob @google-cloud/storage ssh2
+```
+
+### Rust
+
+```bash
+cargo add rac-delta
+```
+
+Enable features for cloud backends:
+
+```bash
+cargo add rac-delta -F s3
+cargo add rac-delta -F azure
+cargo add rac-delta -F gcs
+cargo add rac-delta -F ssh
+cargo add rac-delta -F http
+```
+
+### Requirements
+
+Before starting, you need:
+
+1. A **storage solution** — S3, Azure Blob, GCS, SSH, HTTP, signed URLs, or local storage
+2. The `rd-index.json` index file that rac-delta generates — this lives alongside your chunks in your chosen storage backend
+
+Read the [protocol section](https://raccreative.github.io/rac-delta-docs/category/protocol/) of the docs before implementing to understand how the delta indexing works.
+
+## How It Works
+
+### 1. Indexing
+
+When you first upload a build, rac-delta generates an `rd-index.json` — a manifest that records chunk hashes, file structure, and metadata. This index travels with your chunks and lives in the same storage bucket or server.
+
+### 2. Delta Computation
+
+On a subsequent sync, the client compares its local `rd-index.json` against the remote index. It identifies which chunks changed, which are new, and which can be reused — then only transfers the missing pieces.
+
+### 3. Reconstruction
+
+The receiving side downloads the new chunks and rebuilds the full directory structure locally using streaming. This avoids buffering the entire reconstructed payload in memory.
+
+### 4. Storage Backend
+
+The protocol abstracts over all supported backends. Switching from S3 to GCS requires changing only the storage adapter configuration — the rest of the pipeline is unchanged.
+
+## Practical Evaluation Checklist
+
+- Clone and run the Node.js or Rust SDK locally to confirm it patches a real directory
+- Verify that a second sync with a modified file only transfers the changed chunk (not the full file)
+- Confirm streaming reconstruction works on large files without OOM
+- Test with a GCS or S3 backend if you have credentials
+
+## Security Notes
+
+- Rac-delta does not handle authentication — that is managed by your storage backend (IAM roles, SAS tokens, SSH keys)
+- The `rd-index.json` is trusted data; treat it as you would a lockfile — a maliciously modified index could cause arbitrary file overwrites
+- For SSH backend, key management is your responsibility (use `ssh-agent` or a dedicated deploy key)
+
+## FAQ
+
+**Q: How is rac-delta different from rsync?**
+**A:** Rsync operates over SSH and is optimized for UNIX filesystem trees. Rac-delta is a structured delta protocol with SDKs in Rust and Node.js, designed for build/distribution pipelines, and supports cloud object storage backends natively.
+
+**Q: Does it work for binary files?**
+**A:** Yes. The chunking is content-addressable and works on arbitrary binary data, not just text files.
+
+**Q: Can I self-host the storage?**
+**A:** Yes. The SSH and local storage adapters allow a fully self-hosted setup with no cloud dependencies.
+
+**Q: What language ecosystems are supported?**
+**A:** Officially Rust and Node.js. The protocol is documented, so implementing it in other languages is possible — no official implementations exist yet for Python, Go, or others.
+
+## Conclusion
+
+Rac-delta fills a specific gap between raw rsync-style file transfer and full CD pipeline tooling. It is MIT-licensed, actively maintained (last pushed April 2026), and offers SDKs in Rust and Node.js with native support for S3, GCS, Azure, SSH, HTTP, and local backends. If you are distributing large binary builds and want an open, storage-agnostic delta sync without tying yourself to a specific cloud provider, this is worth evaluating.
