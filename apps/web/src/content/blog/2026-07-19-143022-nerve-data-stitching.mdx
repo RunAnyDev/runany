@@ -1,0 +1,142 @@
+---
+title: "Nerve – Query Multiple Data Sources with One GraphQL API"
+description: "Nerve is a self-hosted query engine that joins data from multiple APIs, databases, and third-party services via GraphQL-style queries, executed entirely in your own infrastructure."
+pubDate: "2026-07-19"
+tags: ["dev-tools", "api", "data", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nerve.webp"
+  alt: "Nerve – data stitching query engine"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Nerve is a self-hosted container that lets you write GraphQL-style queries spanning multiple data sources — databases, REST APIs, and third-party services — with no data leaving your infrastructure.
+
+## What Is Nerve?
+
+Most projects that pull data from multiple systems end up as a mess of one-off connectors and brittle scripts. The common escape route is a data warehouse, but that introduces staleness, extra infrastructure, and another vendor to manage.
+
+Nerve takes a different approach. You deploy one container — the Nerve Engine — inside your own network, write GraphQL-style queries that span multiple sources, and Nerve handles the join, pagination, and merging at query time.
+
+Key properties:
+- **Your data never touches Nerve's servers.** The control plane manages query plans; the engine executes everything locally.
+- **Self-hosted, always.** No cloud dependency for data movement.
+- **Free tier:** up to 10,000 requests per month to the Nerve Engine.
+- **Flat subscription** when you outgrow the free tier — no per-record pricing.
+
+## How It Works
+
+The Nerve Engine runs as a container in your own environment. You write queries from your code using one of the client libraries, and Nerve shows you the exact calls to make.
+
+Query plans are cached locally in the engine, so a repeated query can run from the offline cache without hitting your upstream services again. If an upstream source changes its schema, Nerve still tries to handle the mismatch gracefully rather than falling over.
+
+```
+# Example query spanning two sources
+query {
+  users {
+    id
+    name
+    # nested query from a separate CRM API
+    crm_record { company, tier }
+  }
+}
+```
+
+Nerve merges the results at the schema level, so you get a single response without needing to manually correlate records from different systems.
+
+## Setup
+
+### Prerequisites
+
+- Docker (to run the Nerve Engine container)
+- Node.js or Python client library (for querying)
+
+### Step 1: Deploy the Nerve Engine
+
+```bash
+docker pull nerve/engine:latest
+docker run -d -p 4000:4000 nerve/engine:latest
+```
+
+The engine exposes a local endpoint on port 4000 by default.
+
+### Step 2: Install a Client Library
+
+**Node.js:**
+```bash
+npm install @nerve/client
+```
+
+**Python:**
+```bash
+pip install nerve-client
+```
+
+### Step 3: Configure Your Data Sources
+
+Point the engine at your data sources (databases, REST endpoints, third-party APIs) via the Nerve config file or environment variables. Pre-built bindings exist for a range of common third-party services.
+
+### Step 4: Write Your First Query
+
+```javascript
+import { Nerve } from '@nerve/client';
+
+const nerve = new Nerve({ endpoint: 'http://localhost:4000' });
+
+const result = await nerve.query(`
+  query {
+    users {
+      id
+      name
+      orders { total, date }
+    }
+  }
+`);
+
+console.log(result);
+```
+
+## Architecture Notes
+
+Nerve deliberately keeps its backend out of the query execution path. The control plane generates and caches query plans; the engine executes everything. This means:
+
+- No extra round-trip through Nerve's servers during a query
+- No risk of your API keys or data passing through a third-party system
+- The engine can operate offline once a query plan is cached
+
+Terraform and Pulumi providers are available for managing Nerve as infrastructure code.
+
+## Limitations
+
+- No built-in visual query builder — it is a code-first tool
+- Schema federation is limited to what the client library supports
+- Pricing beyond the free tier is subscription-based, but the model is flat-fee rather than consumption-based
+
+## Source and Accuracy Notes
+
+- Project page: [get-nerve.com](https://www.get-nerve.com)
+- HN launch thread: [news.ycombinator.com/item?id=47019329](https://news.ycombinator.com/item?id=47019329)
+- License: Proprietary (self-hosted engine, no open-source license confirmed at this time)
+- Source last checked: 2026-07-19
+
+## FAQ
+
+**Q: Does Nerve store my data?**
+**A:** No. The engine runs in your own infrastructure. Your data flows from the source, through the engine, to you — it never reaches Nerve's servers.
+
+**Q: What data sources does Nerve support?**
+**A:** The engine supports joining across databases, REST APIs, and third-party services. Pre-built bindings are available for common services.
+
+**Q: Is there a free tier?**
+**A:** Yes — up to 10,000 requests per month to the Nerve Engine at no cost. After that, a flat subscription fee applies.
+
+**Q: How does Nerve compare to a data warehouse approach?**
+**A:** A warehouse requires you to import and maintain a copy of your data. Nerve queries sources at runtime, avoiding staleness and extra infrastructure — but it requires the sources to be reachable when a query runs.
+
+## Conclusion
+
+Nerve targets developers who need to query across multiple data systems without building a custom integration layer or adopting a full data warehouse. The self-hosted model keeps data local and avoids per-record pricing, while the GraphQL-style interface provides a familiar query model. If you are dealing with federated data across internal services and third-party APIs, Nerve is worth evaluating.
