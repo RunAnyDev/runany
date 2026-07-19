@@ -1,0 +1,171 @@
+---
+title: "Transactional – HTML + Tailwind to PDF via API"
+description: "Design PDFs in HTML and Tailwind CSS, then generate them on-demand through a single API call. Open-source stack with MCP support."
+pubDate: "2026-07-20"
+tags: ["dev-tools", "api", "pdf", "saas"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/transactional-pdf-api.webp"
+  alt: "Transactional PDF infrastructure product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Transactional lets you design PDF templates in HTML and Tailwind CSS, then render them on-demand through a simple API call — no layout engine to manage.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [transactional.dev](https://transactional.dev) ← visited and verified
+- Source repository (open-source version): [github.com/yves1da2vinci3/designMyPdf-frontend](https://github.com/yves1da2vinci3/designMyPdf-frontend) ← README read
+- License: MIT (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=40498173](https://news.ycombinator.com/item?id=40498173)
+
+## What Is Transactional?
+
+Transactional is a PDF generation API that flips the typical approach. Instead of building PDFs programmatically with a library like `jsPDF` or `wkhtmltopdf`, you design the document visually using HTML, Tailwind CSS, and Handlebars templates — then call an API endpoint to render it.
+
+The product targets backend developers and SaaS builders who need to generate transactional PDFs: invoices, receipts, contracts, reports. The core pitch: your frontend developer designs the template, your backend just POSTs variables and gets back a hosted PDF URL.
+
+The rendering pipeline:
+1. Design the template using HTML + Tailwind in the visual editor
+2. Mark transactional variables with Handlebars syntax (`&#123;&#123;name&#125;&#125;`, `&#123;&#123;amount&#125;&#125;`)
+3. POST the document ID and variables to `/v1/generate`
+4. Receive a ready-to-serve PDF URL from the CDN
+
+The open-source version, [Design My PDF](https://github.com/yves1da2vinci3/designMyPdf-frontend), mirrors this workflow using Next.js, Mantine, and `jsPDF` for client-side rendering.
+
+## Setup Workflow
+
+### Step 1: Create a Template
+
+Sign up at [transactional.dev](https://transactional.dev) and create a new document. The editor lets you lay out a PDF page using standard HTML elements and Tailwind utility classes.
+
+```html
+<div class="p-8 bg-white">
+  <h1 class="text-2xl font-bold text-gray-900">Invoice</h1>
+  <p class="mt-2">&#123;&#123;customer_name&#125;&#125;</p>
+  <p class="text-xl font-semibold">$&#123;&#123;amount&#125;&#125;</p>
+</div>
+```
+
+Handlebars supports conditionals and loops:
+
+```html
+&#123;&#123;#each items&#125;&#125;
+  <tr>
+    <td>&#123;&#123;name&#125;&#125;</td>
+    <td>$&#123;&#123;price&#125;&#125;</td>
+  </tr>
+&#123;&#123;/each&#125;&#125;
+```
+
+### Step 2: Call the API
+
+```bash
+curl -X POST https://api.transactional.dev/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_id": "invoice-v3",
+    "variables": {
+      "customer_name": "Acme Corp",
+      "amount": "249.00",
+      "items": [
+        {"name": "Pro Plan", "price": "199.00"},
+        {"name": "Setup", "price": "50.00"}
+      ]
+    }
+  }'
+```
+
+Response:
+
+```json
+{
+  "pdf_url": "https://cdn.transactional.dev/pdf/8c7a3f2..."
+}
+```
+
+### Step 3: Serve or Store the PDF
+
+The generated PDF is hosted on their CDN and returned in the API response. You can embed it in an email, serve it to a user, or pipe it through your own storage.
+
+### Using the Open-Source Version
+
+The [Design My PDF](https://github.com/yves1da2vinci3/designMyPdf-frontend) repository is a full working implementation:
+
+```bash
+git clone https://github.com/yves1da2vinci3/designMyPdf-frontend.git
+cd designMyPdf-frontend
+yarn install
+```
+
+Set up environment variables (see `.env.local` template in the README):
+
+```bash
+NEXT_PUBLIC_API_URL=your_backend_url
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_key
+CLOUDINARY_API_SECRET=your_secret
+```
+
+```bash
+yarn dev
+```
+
+The open-source version runs entirely client-side using `jsPDF`, so there is no server-side rendering — the PDF generation happens in the browser. For production server-side generation, the hosted Transactional API is the intended path.
+
+## Deeper Analysis
+
+**What makes it different from alternatives?**
+
+The dominant pattern for PDF generation in web apps is using a server-side library (`puppeteer`, `wkhtmltopdf`, `weasyprint`) that renders a full HTML page to PDF. This works but requires running a headless browser or custom rendering stack. Transactional moves the design burden to a visual editor and exposes a single REST endpoint — the rendering complexity stays on their infrastructure.
+
+Contrast with tools like:
+- **PDFKit** (Ruby/Node) — programmatic PDF construction, no visual editor
+- **Decktape** — converts HTML presentations to PDF, not transactional documents
+- **Re原型** — form builder to PDF, focused on static forms rather than API-driven generation
+
+**MCP support:** Transactional exposes an MCP (Model Context Protocol) interface so AI agents can interact with the PDF generation workflow directly — create documents, render them, and embed the resulting URLs without human intervention. The MCP docs are at [transactional.dev/docs/mcp](https://transactional.dev/docs/mcp).
+
+**Paper sizes:** The editor supports A1 through A6 in both portrait and landscape orientations, with live preview in an iframe that simulates the actual paper size.
+
+## Practical Evaluation Checklist
+
+- Sign up at transactional.dev and create a free account
+- Design one template using the visual editor (invoice or receipt is a good start)
+- Mark 3–5 Handlebars variables in the template
+- Make a test POST call to `/v1/generate` with sample variables
+- Verify the returned PDF URL loads correctly
+- If using the open-source version: clone the repo, configure `.env.local`, run `yarn dev`, and test the client-side PDF export
+
+## Security Notes
+
+- PDF templates run on Transactional's infrastructure — verify their data handling policy before sending sensitive customer data through the API
+- The open-source version processes PDFs client-side only; no data leaves the browser when using `jsPDF` directly
+- Handlebars variable injection is server-side on the hosted product — sanitize variable content if it includes user-submitted strings
+
+## FAQ
+
+**Q: Does Transactional support custom fonts?**
+**A:** The visual editor supports Tailwind's default font stack. Custom font embedding in PDFs depends on whether the font is available in the PDF rendering pipeline — check the docs for the current font policy.
+
+**Q: Is there a free tier?**
+**A:** The product offers a free starting tier. Specific limits (number of PDFs per month, storage) are available on the pricing page at transactional.dev.
+
+**Q: Can I self-host the full pipeline?**
+**A:** The open-source [Design My PDF](https://github.com/yves1da2vinci3/designMyPdf-frontend) repo covers the frontend/editor. The full API infrastructure (rendering engine, CDN hosting) is the hosted product and is not currently available as a self-hosted option.
+
+**Q: What happens to the generated PDF URLs?**
+**A:** PDFs are hosted on Transactional's CDN. The URL returned by the API is a direct link to the file. Check the service's retention policy if you need long-term storage — you may want to download and re-upload to your own storage.
+
+**Q: How does MCP support work?**
+**A:** The MCP interface lets AI agents create, edit, and render documents programmatically. This is useful for automated workflows where an AI agent needs to produce a PDF without human design steps.
+
+## Conclusion
+
+Transactional solves the PDF generation problem from the design side rather than the code side. If your team already has a designer comfortable with HTML and Tailwind, it removes the back-and-forth between design and engineering that typically makes PDF-heavy features painful. The API-first model also makes it straightforward to integrate into any backend stack. The open-source version is useful for experimentation and smaller projects where client-side PDF generation is acceptable.
