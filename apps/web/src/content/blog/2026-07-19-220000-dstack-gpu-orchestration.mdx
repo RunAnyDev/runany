@@ -1,0 +1,252 @@
+---
+title: "dstack - Unified GPU Orchestration Across Clouds and Hardware"
+description: "dstack is an open-source control plane for provisioning and orchestrating GPU workloads across NVIDIA, AMD, TPU, and Tenstorrent on any cloud, Kubernetes, or bare metal."
+pubDate: "2026-07-19"
+tags: ["gpu", "orchestration", "ml-ops", "self-hosted"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dstack.webp"
+  alt: "dstack unified GPU orchestration platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** dstack is an open-source unified control plane for GPU provisioning and orchestration that works across NVIDIA, AMD, TPU, and Tenstorrent accelerators on any cloud, Kubernetes cluster, or bare metal — CLI-first, no vendor lock-in.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [dstack.ai](https://dstack.ai) ← **MUST visit and verify**
+- Source repository: [github.com/dstackai/dstack](https://github.com/dstackai/dstack) ← **MUST read README**
+- License: [MPL-2.0](https://github.com/dstackai/dstack/blob/master/LICENSE.md) ← **verified via repo**
+- HN launch thread: not available (pre-existing project, active development through 2025-2026)
+- Source last checked: 2026-07-19 (README, PyPI license, repo metadata)
+
+## What Is dstack?
+
+[dstack](https://dstack.ai) is a vendor-agnostic GPU orchestration tool that handles the full lifecycle of ML workloads — from local development to multi-cloud training runs and inference serving.
+
+From the README:
+
+> `dstack` is a unified control plane for GPU provisioning and orchestration that works with any GPU cloud, Kubernetes, or on-prem clusters. It streamlines development, training, and inference, and is compatible with any hardware, open-source tools, and frameworks.
+
+The core problems it solves:
+
+- **Fragmentation** — each GPU cloud (AWS, GCP, Crusoe, Lambda Labs, etc.) has its own SDK, CLI, and provisioning model. dstack abstracts them into a single interface.
+- **Multi-accelerator support** — NVIDIA GPUs are the default, but AMD GPUs, Google TPUs, and Tenstorrent accelerators are all supported through the same config.
+- **AI agent integration** — dstack ships an agent skill (`npx skills add dstackai/dstack`) that lets AI coding assistants like Claude, Codex, and Cursor provision GPU fleets directly through natural language.
+
+## Core Concepts
+
+### Backends
+
+Backends are the compute providers dstack talks to. Supported backends include:
+
+- **AWS** (via SageMaker or self-managed EC2)
+- **Google Cloud** (GKE or raw compute)
+- **Crusoe Cloud**
+- **Lambda Labs**
+- **Kubernetes** (any cluster with GPU nodes)
+- **SSH fleets** (bare metal, on-prem — no backend config needed)
+
+Configuration is done via `~/.dstack/server/config.yml` on the server side.
+
+### Fleets
+
+A fleet is a logical group of GPU nodes. Fleets can be:
+
+- **Cloud fleets** — dynamically provisioned GPU instances from a configured backend
+- **SSH fleets** — existing machines accessed over SSH (no cloud account required)
+
+AI agents can create and manage fleets autonomously via the dstack skill.
+
+### Workloads
+
+Workloads are the actual ML jobs — training runs, fine-tuning, inference servers, or arbitrary scripts. A workload is defined in a `dstack.yaml` file (similar to docker-compose but for GPU compute):
+
+```yaml
+# dstack.yaml
+workflows:
+  - name: finetune-llm
+    provider: run
+    image: nvidia/cuda:12.1-runtime-ubuntu22.04
+    resources:
+      gpu: 8 x A100
+      disk: 200GB
+    script:
+      - pip install transformers datasets
+      - python finetune.py
+```
+
+Submit with:
+
+```bash
+dstack run finetune-llm
+```
+
+### Projects
+
+dstack organizes resources into projects. Each project has its own configuration, fleets, and workloads. The CLI switches between projects with `dstack project add`.
+
+## Setup Workflow
+
+### Step 1: Install the CLI and server
+
+```bash
+# Install via uv (recommended)
+$ uv tool install "dstack[all]" -U
+
+# Start the server
+$ dstack server
+Applying ~/.dstack/server/config.yml...
+The admin token is "bbae0f28-d3dd-4820-bf61-8f4bb40815da"
+The server is running at http://127.0.0.1:3000/
+```
+
+The server runs on Linux, macOS, and Windows (WSL 2). It requires Git and OpenSSH.
+
+### Step 2: Configure a backend
+
+If using cloud GPUs, configure a backend in `~/.dstack/server/config.yml`:
+
+```yaml
+backends:
+  - type: aws
+    required: true
+    region: us-east-1
+  - type: gcp
+    required: false
+    region: us-central1
+```
+
+For SSH-based on-prem or bare metal, no backend config is needed — just add an SSH fleet directly.
+
+### Step 3: Connect the CLI
+
+```bash
+$ uv tool install dstack -U
+
+$ dstack project add \
+    --name main \
+    --url http://127.0.0.1:3000 \
+    --token bbae0f28-d3dd-4820-bf61-8f4bb40815da
+
+Configuration is updated at ~/.dstack/config.yml
+```
+
+### Step 4: Give AI agents GPU access
+
+```bash
+$ npx skills add dstackai/dstack
+```
+
+This installs a skill definition that teaches AI agents how to use the dstack CLI. After installation, agents like Claude, Codex, or Cursor can autonomously:
+
+- Provision GPU fleets on your behalf
+- Submit training or inference workloads
+- Manage SSH-based on-prem resources
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   dstack CLI / API                  │
+│              (your laptop or CI/CD)                 │
+└──────────────────────┬──────────────────────────────┘
+                       │ HTTP (port 3000)
+┌──────────────────────▼──────────────────────────────┐
+│               dstack Server                          │
+│   ┌─────────────┐  ┌────────────┐  ┌────────────┐  │
+│   │  Scheduler  │  │  Fleet     │  │  Storage   │  │
+│   │             │  │  Manager   │  │  Manager   │  │
+│   └──────┬──────┘  └─────┬──────┘  └────────────┘  │
+└──────────┼───────────────┼──────────────────────────┘
+           │               │
+    ┌──────▼──────┐  ┌─────▼──────┐
+    │  Backends   │  │  SSH Fleets │
+    │  AWS/GCP/   │  │  on-prem    │
+    │  Crusoe/    │  │  machines   │
+    │  Lambda/    │  │             │
+    │  K8s        │  │             │
+    └─────────────┘  └─────────────┘
+```
+
+The server is the central coordinator. It is installed once (e.g. on a jump box or your workstation) and all CLI interactions go through it. The server can also run continuously as a daemon.
+
+## Supported Accelerators
+
+dstack handles accelerator types declaratively in resource specs:
+
+| Accelerator | Notes |
+|---|---|
+| NVIDIA GPU | CUDA required; any series (A100, H100, RTX 4090, etc.) |
+| AMD GPU | ROCm required; MI300 and newer |
+| Google TPU | Via GCP backend |
+| Tenstorrent | Emerging accelerator; early support |
+
+The same `dstack.yaml` workflow definition works across accelerator types — you change the `resources.gpu` field, not the workflow code.
+
+## Practical Evaluation Checklist
+
+**Installation & Config:**
+- [ ] `uv tool install "dstack[all]" -U` succeeds on Linux/macOS/WSL2
+- [ ] `dstack server` starts without errors
+- [ ] Backend credentials configured (AWS/GCP/Crusoe or SSH)
+- [ ] CLI connects to server with `dstack project add`
+
+**GPU Provisioning:**
+- [ ] `dstack fleet add` provisions a GPU instance from configured backend
+- [ ] Fleet appears in `dstack fleet list`
+- [ ] GPU count and type match what was requested
+
+**Running a Workload:**
+- [ ] `dstack.yaml` with GPU resources parses correctly
+- [ ] `dstack run` schedules workload on correct fleet
+- [ ] Workload output streams to CLI in real time
+
+**Agent Integration:**
+- [ ] `npx skills add dstackai/dstack` installs the skill
+- [ ] AI agent can describe available fleets and backends
+- [ ] Agent can submit a workload autonomously
+
+## Security Notes
+
+- The dstack server exposes an HTTP API on a local port. The admin token (shown on first start) is required for CLI authentication.
+- No backend credentials are stored in the CLI config — only the server holds cloud API keys, in its `config.yml`.
+- For SSH fleets, key-based authentication is used (no password storage).
+- The server should run behind a firewall or VPN if exposed beyond localhost. By default it binds to `127.0.0.1:3000`.
+- dstack does not upload data to any external service — it is a self-hosted control plane. Your training data stays on the provisioned compute.
+
+## FAQ
+
+**Q: How is dstack different from Kubernetes itself?**
+**A:** Kubernetes is a general-purpose container orchestrator. dstack is GPU-specialized — it understands GPU types, multi-accelerator setups, cloud spot instances, and ML-specific concepts like distributed training and inference serving. You can use dstack alongside Kubernetes (dstack provisions the GPU nodes, Kubernetes schedules pods on them) or replace Kubernetes entirely for ML-focused setups.
+
+**Q: Does dstack support spot/preemptible instances?**
+**A:** Yes. Cloud backend configs can specify spot instance preferences, and dstack handles re-provisioning on interruption.
+
+**Q: Can I use dstack without any cloud account?**
+**A:** Yes. The SSH fleet feature lets you define existing machines (on-prem GPUs, a workstation with an RTX 4090, etc.) as a fleet — no cloud credentials needed.
+
+**Q: What ML frameworks does dstack support?**
+**A:** dstack is framework-agnostic. It runs any Docker container or script. PyTorch, JAX, TensorFlow, vLLM, Ollama, and custom training loops all work. The `image` field in `dstack.yaml` specifies the container image.
+
+**Q: How does the AI agent skill work?**
+**A:** The skill (`npx skills add dstackai/dstack`) installs a prompt definition that teaches the AI agent the dstack CLI syntax and concept model. The agent then calls `dstack` as a subprocess — it does not have direct API access to the server.
+
+## Conclusion
+
+dstack fills a real gap in the ML tooling landscape: the lack of a vendor-neutral, accelerator-agnostic orchestration layer. Instead of writing cloud-specific provisioning scripts for every new GPU project, you write a `dstack.yaml` once and target any backend. The AI agent skill is a forward-looking touch — giving coding assistants like Claude or Codex autonomous GPU provisioning is a natural extension of the "agent writes code" workflow.
+
+If you manage GPU infrastructure across multiple clouds or want to give your AI coding assistant real GPU muscle, dstack is worth a look.
+
+**Quick install:**
+
+```bash
+uv tool install "dstack[all]" -U
+dstack server
+```
