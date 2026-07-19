@@ -1,0 +1,220 @@
+---
+title: "Fluree DB - JSON-LD Graph Database Built for AI Agents"
+description: "Fluree DB is an open-source graph database that speaks SPARQL, JSON-LD, and Cypher natively, with built-in vector search and AI agent memory."
+pubDate: "2026-07-19"
+tags: ["database", "knowledge-graph", "ai-setup", "json-ld", "sparql"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/fluree-json-ld-database.webp"
+  alt: "Fluree DB - JSON-LD Graph Database"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Fluree DB is an open-source graph database that runs SPARQL, JSON-LD, and openCypher queries on the same store — with built-in vector search, time travel, git-like branching, and a dedicated AI agent memory layer. One Docker command gets you started.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [flur.ee](https://flur.ee) ← verified
+- Source repository: [github.com/fluree/db](https://github.com/fluree/db) ← verified README read
+- License: BUSL-1.1 (Business Source License) ← verified via LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=38479017](https://news.ycombinator.com/item?id=38479017) ← verified
+- Documentation: [docs.flur.ee](https://docs.flur.ee) ← verified
+- License is BUSL-1.1 — source is open but commercial use requires a Fluree license after a grace period
+
+## What Is Fluree DB?
+
+Fluree DB is a graph database built around W3C standards: RDF 1.1/1.2 with native SPARQL, JSON-LD, and openCypher query support — all running on the same underlying store. The README describes it as "a graph database for data that matters" with a focus on temporal, verifiable, standards-compliant data and git-like branching and merging.
+
+Key claims from the official README:
+
+- Over 2M facts per second bulk import
+- 10.4x faster than the next engine on SPARQL benchmark (DBLP, 105 queries)
+- Built-in HNSW vector search, full-text search, and geo search — no external service required
+- Fine-grained access control with no external dependencies
+- Fluree Memory: persistent, searchable memory layer for AI coding assistants (Claude Code, Cursor, etc.)
+
+```bash
+# Docker — fastest way to try it
+docker run -p 8090:8090 fluree/server:latest
+```
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install fluree/tap/fluree
+```
+
+**Shell installer:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/fluree/db/releases/latest/download/fluree-db-cli-installer.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://github.com/fluree/db/releases/latest/download/fluree-db-cli-installer.ps1 | iex
+```
+
+**Pre-built binaries** for all platforms are on the [GitHub Releases page](https://github.com/fluree/db/releases).
+
+### Step 2: Zero to Graph in 60 Seconds
+
+```bash
+fluree init
+fluree create movies
+
+fluree insert '
+@prefix schema: <http://schema.org/> .
+@prefix ex:     <http://example.org/> .
+
+ex:blade-runner  a schema:Movie ;
+  schema:name        "Blade Runner" ;
+  schema:dateCreated "1982-06-25"^^<http://www.w3.org/2001/XMLSchema#date> ;
+  schema:director    ex:ridley-scott .
+
+ex:ridley-scott  a schema:Person ;
+  schema:name "Ridley Scott" .
+'
+
+# Query with SPARQL
+fluree query --format table 'SELECT ?title ?date WHERE {
+  ?movie a <http://schema.org/Movie> ;
+         <http://schema.org/name> ?title ;
+         <http://schema.org/dateCreated> ?date .
+} ORDER BY ?date'
+```
+
+### Step 3: Query in JSON-LD
+
+The same data can be queried in JSON-LD syntax:
+
+```bash
+fluree query --jsonld '{
+  "@context": { "schema": "http://schema.org/" },
+  "select": ["?title", "?date"],
+  "where": [
+    { "@id": "?movie", "@type": "schema:Movie",
+      "schema:name": "?title", "schema:dateCreated": "?date" }
+  ],
+  "orderBy": "?date"
+}'
+```
+
+### Step 4: Query with openCypher
+
+```bash
+fluree context set movies -e '{"@vocab": "http://schema.org/"}'
+
+fluree query --cypher -e 'MATCH (m:Movie)
+  RETURN m.name AS title, m.dateCreated AS date
+  ORDER BY date'
+```
+
+All three compile to the same engine — same features, same performance.
+
+### Step 5: Time Travel
+
+Query the state of the data at any point in the past:
+
+```bash
+# What did the data look like before that update?
+fluree query --at 1 'SELECT ?title ?genre WHERE {
+  ?movie a <http://schema.org/Movie> ;
+         <http://schema.org/genre> ?genre .
+}'
+```
+
+### Step 6: Fluree Memory (AI Agent Memory)
+
+Fluree Memory is a persistent memory layer for AI coding assistants built into the CLI:
+
+```bash
+# Give an AI tool long-term project memory
+fluree memory init --repo ./my-project
+```
+
+Facts, decisions, and preferences persist across sessions in a Fluree ledger you control — scoped per-repo or per-user, shareable via git. Docs at [labs.flur.ee/docs](https://labs.flur.ee/docs).
+
+## Deeper Analysis
+
+### Why Three Query Languages?
+
+Fluree's architecture compiles SPARQL, JSON-LD, and openCypher to a common intermediate representation before executing against the same graph store. This means you can use whichever query syntax fits your team's skills or use case:
+
+- **SPARQL** — best for RDF veterans and semantic web standards work
+- **JSON-LD** — best for JSON-native developers and API integration
+- **openCypher** — best for Neo4j migrants or property-graph familiarity
+
+### Vector Search Without External Services
+
+Unlike most graph databases that require a separate vector database (Pinecone, Weaviate, etc.) for AI embeddings, Fluree includes HNSW-based vector search built directly into the database. The README confirms: "Integrated vector, text and geo search, and fine-grained access control with no external dependencies."
+
+### Benchmark Claims
+
+The Fluree Labs benchmark page claims Fluree is 10.4x faster than the next engine on the SPARQLoscope DBLP evaluation (105 SPARQL queries, all 850 WGPB graph-pattern queries on a 21.5-billion-triple Wikidata dump at 43ms geometric mean). The key claim is that Fluree completed all 105 queries while some other engines failed or timed out.
+
+Verify the benchmarks at [labs.flur.ee](https://labs.flur.ee).
+
+### License Consideration
+
+Fluree uses the **Business Source License 1.1 (BUSL-1.1)**. This is not a permissive open-source license like MIT or Apache 2. The source is visible and the project is open, but commercial deployment may require a commercial license from Fluree PBC after the grace period. For personal or internal use, the license is fine — but factor this into your evaluation for commercial products.
+
+## Practical Evaluation Checklist
+
+- Can run locally in Docker with no external dependencies
+- Homebrew, shell installer, and Windows PowerShell support
+- SPARQL, JSON-LD, and openCypher all work on the same data
+- Built-in vector search (HNSW) — no separate vector DB needed
+- Time travel queries allow querying historical data states
+- Git-like branching and merging for data
+- Fluree Memory provides AI agent session persistence
+- Benchmarks claim top performance but verify against your own workload
+- BUSL-1.1 license — review commercial use terms before product deployment
+
+## Security Notes
+
+- Fine-grained access control built into the database engine
+- No external service dependencies reduces attack surface
+- Immutable ledger provides audit trail of all data changes
+- For production deployments, follow the docs at [docs.flur.ee](https://docs.flur.ee) for security hardening
+
+## FAQ
+
+**Q: Does Fluree require a JVM?**
+**A:** No. The `fluree` binary bundles everything needed. The Docker image also ships a pre-configured HTTP server ready to accept queries on port 8090.
+
+**Q: Can I query existing Neo4j or RDF data in Fluree?**
+**A:** Yes. Fluree supports full SPARQL 1.1 and openCypher 9. If you have existing RDF data (Turtle/N-Triples), you can load it directly. For Neo4j Cypher queries, they run largely unchanged in Fluree.
+
+**Q: What is the difference between Fluree and a regular graph database like Neo4j?**
+**A:** Key differences: Fluree is temporal by default (every change is recorded and queryable by time), uses W3C standards (RDF, SPARQL, JSON-LD) rather than a proprietary property graph model, includes built-in vector search without external services, and has a dedicated AI agent memory layer (Fluree Memory).
+
+**Q: Is Fluree free to use?**
+**A:** The source is open (BUSL-1.1 license). For personal, educational, and internal use, it functions as open-source. Commercial products may need a commercial license. There is also a free cloud tier with usage limits at [flur.ee/solo](https://flur.ee/solo).
+
+## Conclusion
+
+Fluree DB stands out by converging three things that are usually separate: a standards-compliant RDF graph store, a property-graph interface (via openCypher), and an AI-ready vector search layer — all in one zero-dependency binary. The time travel and git-like branching features fill real gaps for teams that need auditable data history and parallel data branches.
+
+The Docker one-liner makes local evaluation trivial, and the Homebrew install handles day-to-day CLI use on macOS and Linux. The main caveats are the BUSL-1.1 license (review before commercial use) and the fact that some enterprise features may require Fluree's commercial licensing beyond the open-source tier.
+
+For AI agent builders specifically, Fluree Memory is worth a closer look — it brings structured, queryable, long-term memory to coding assistants without needing a separate vector DB or Notion-style document store.
+
+**Getting started:**
+
+```bash
+docker run -p 8090:8090 fluree/server:latest
+```
+
+Docs at [docs.flur.ee](https://docs.flur.ee) | GitHub at [github.com/fluree/db](https://github.com/fluree/db)
