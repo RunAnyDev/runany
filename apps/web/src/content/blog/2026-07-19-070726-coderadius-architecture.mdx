@@ -1,0 +1,181 @@
+---
+title: "CodeRadius - Map Cross-Repo Architecture with One CLI Command"
+description: "An open-source architecture graph tool that statically analyzes multiple repositories to map every service, API, queue, and database. Supports MCP for AI agents."
+pubDate: "2026-07-19"
+tags: ["developer-tools", "dev-tools", "architecture", "mcp", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/coderadius.webp"
+  alt: "CodeRadius architecture graph showing cross-repo blast radius"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** CodeRadius is an open-source CLI that statically analyzes multiple repositories to build a live architecture graph of your entire codebase, exposing blast-radius analysis via CLI and an MCP server for AI agents.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [coderadius.ai](https://coderadius.ai) — verified via direct fetch
+- Source repository: [github.com/coderadius-ai/coderadius](https://github.com/coderadius-ai/coderadius) — verified via GitHub API
+- License: Apache-2.0 — verified via GitHub API `license.spdx_id`
+- HN launch thread: [news.ycombinator.com/item?id=48830828](https://news.ycombinator.com/item?id=48830828) — verified via HN Algolia API
+- Source last checked: 2026-07-19 (commit `main`, GitHub API `pushed_at: 2026-07-13T07:16:17Z`)
+
+## What Is CodeRadius?
+
+CodeRadius is an open-source architecture intelligence tool for engineering teams and AI coding agents. It builds a live graph of your architecture directly from source code — statically, without needing a running system — mapping every service, API, queue, and database across all repositories in a monorepo or microservices fleet.
+
+The core problem it solves: **cross-repo blast-radius visibility**. When you change a shared service, how do you know what downstream services depend on it? LLMs can explain individual files but cannot reliably map distributed system dependencies across dozens of repositories. CodeRadius bridges this gap with deterministic static analysis.
+
+From the [HN launch post](https://news.ycombinator.com/item?id=48830828):
+
+> LLMs are good at explaining parts of code, but are very bad at extracting precise and reliable architecture mapping of big codebases, not to say when dealing with multiple repos of a microservices fleet.
+
+The tool was built in response to the challenge of maintaining architecture discipline as coding agents proliferate — agents move faster than human review can track, making the blast-radius problem more acute than ever.
+
+### Key claims from the README
+
+- Builds an architecture knowledge graph from **static analysis** — no running services, no instrumentation
+- Works across **multiple repositories** simultaneously
+- Outputs a **CLI** for human-readable queries and an **MCP server** for AI agents
+- Integrates with **CI** via `cr blast` for pull-request impact analysis
+- Stores graphs in **Neo4j or Memgraph** (graph databases)
+- Uses **tree-sitter** for language-agnostic static analysis
+- Ships as a **Bun** project
+
+## Setup Workflow
+
+### Step 1: Install CodeRadius
+
+Two installation options — both verified from the project website:
+
+```bash
+# Option 1: npm (cross-platform)
+npm install -g coderadius
+
+# Option 2: curl bootstrap script
+curl -fsSL https://coderadius.ai/install | bash
+```
+
+CodeRadius is open source (Apache-2.0). No account required for local use; nothing leaves your machine unless you explicitly connect to a cloud graph database.
+
+### Step 2: Analyze a Repository
+
+Point CodeRadius at a repository to begin building the architecture graph:
+
+```bash
+cr analyze https://github.com/coderadius-ai/acme-microservices-demo.git
+```
+
+The analyzer performs static parsing across all supported languages via tree-sitter, extracting service boundaries, API surfaces, queue references, and database connections.
+
+### Step 3: Query the Graph
+
+After analysis, query the architecture directly from the CLI:
+
+```bash
+# Get blast radius for a service
+cr blast --service payments --diff main..feature-branch
+
+# List all services and their dependencies
+cr graph --services
+
+# Export graph for use in Neo4j or Memgraph
+cr export --format graphml
+```
+
+### Step 4: Use with AI Agents via MCP
+
+CodeRadius exposes an MCP server, making the architecture graph queryable by AI coding agents that support the MCP protocol:
+
+```bash
+# Start the MCP server
+cr serve --mcp
+
+# AI agents can now query the architecture graph directly
+# via the MCP protocol in their development environment
+```
+
+### Step 5: CI Integration
+
+Run blast-radius analysis on pull requests to surface cross-repo impact before merge:
+
+```bash
+# In your CI pipeline
+cr blast --diff $PR_BASE..$PR_HEAD --format json > blast-report.json
+```
+
+This outputs a structured report of affected services and their estimated blast radius, which can be posted as a CI comment or gating check.
+
+## How Static Analysis Works
+
+CodeRadius uses tree-sitter to parse codebases into ASTs, then applies architecture-extraction rules. From the GitHub README:
+
+> Prevent cross-repo architectural breakage before merge. Architecture knowledge graph from static analysis, blast radius in CI, MCP server for AI agents.
+
+The static approach has a practical advantage: you do not need to run the application or deploy it to generate the graph. This makes it suitable for CI environments and for analyzing repositories you do not own.
+
+### Supported languages
+
+Tree-sitter powers language support, which means any language with a tree-sitter grammar works. Common targets include JavaScript, TypeScript, Python, Go, Rust, Java, and Ruby.
+
+### Graph storage
+
+Extracted architecture is stored in a connected graph database:
+
+- **Neo4j** — widely used graph database
+- **Memgraph** — open-source graph database, compatible with Neo4j's Cypher query language
+
+You can also export to GraphML for use in other tools.
+
+## Practical Evaluation Checklist
+
+The following checklist is based on reading the project page, GitHub README, and HN launch thread:
+
+- **Architecture extraction** — Does it handle multiple repos in one graph? Yes, per the product description.
+- **Blast-radius in CI** — Does it integrate with pull requests? Yes, `cr blast` is designed for CI use.
+- **MCP server** — Can AI agents query the graph? Yes, `cr serve --mcp` exposes the MCP protocol.
+- **Language coverage** — Is it language-agnostic? Yes, via tree-sitter.
+- **Graph export** — Can you move the data out? Yes, GraphML export supported.
+- **Cloud option** — Is there a managed service? The website does not clearly specify a hosted offering; local use is the primary mode described.
+- **GitHub stars** — 3 (as of 2026-07-13). Very early stage.
+- **Active development** — Last pushed 2026-07-13, indicating recent maintenance.
+
+## Security Notes
+
+Because CodeRadius runs entirely locally and performs static analysis, the attack surface is limited to reading source files. However:
+
+- The tool requires network access to fetch repository data and (optionally) connect to a graph database
+- If using Neo4j or Memgraph, credentials for those services should be managed securely — not hardcoded in CI environments
+- The install script (`curl ... | bash`) downloads and executes code from the project website. Review it before running if that is a concern
+
+## FAQ
+
+**Q: Does CodeRadius require a running application?**
+**A:** No. It performs static analysis on source code. There is no need to deploy or run the services being analyzed.
+
+**Q: Which languages are supported?**
+**A:** Any language with a tree-sitter grammar. The README does not list an explicit supported-language list; the tool uses tree-sitter parsers, which have broad ecosystem coverage.
+
+**Q: Can AI agents other than those supporting MCP query the graph?**
+**A:** The primary AI integration path is MCP. For other agents, the CLI (`cr graph`) can be invoked as a subprocess to extract structured data.
+
+**Q: Is there a cloud or hosted version?**
+**A:** The project website does not clearly advertise a managed cloud service. Local installation is the primary mode described. The "no signup, nothing leaves your machine" language on the homepage suggests self-hosted only at this stage.
+
+**Q: How does it compare to tools like Dependency Cruiser or Madge?**
+**A:** Dependency Cruiser and Madge operate within a single repository. CodeRadius is designed to span multiple repositories simultaneously, building a cross-repo blast-radius graph. It also includes MCP server support and CI integration as first-class features.
+
+## Conclusion
+
+CodeRadius tackles a real pain point in large engineering organizations: knowing the blast radius of a change before it reaches production. By building a deterministic architecture graph from static analysis rather than relying on LLM inference, it provides reliable cross-repo dependency mapping that integrates directly into developer workflows and AI coding agents.
+
+At 3 GitHub stars it is early-stage, but the core feature set is coherent — CLI for blast-radius analysis, MCP server for AI agents, CI integration, and graph export to Neo4j/Memgraph. If you manage a multi-repo architecture or are deploying coding agents across a large codebase, it is worth evaluating.
+
+**Project page:** [coderadius.ai](https://coderadius.ai)
+**Source:** [github.com/coderadius-ai/coderadius](https://github.com/coderadius-ai/coderadius)
