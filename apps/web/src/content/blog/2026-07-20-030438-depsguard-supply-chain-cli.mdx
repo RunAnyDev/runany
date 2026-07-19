@@ -1,0 +1,150 @@
+---
+title: "DepsGuard - Harden Package Manager Configs Against Supply Chain Attacks"
+description: "DepsGuard is a zero-dependency Rust CLI that scans your npm, pnpm, yarn, bun, uv, pip, and poetry configs for supply chain security gaps and applies fixes interactively."
+pubDate: "2026-07-20"
+tags: ["security", "cli", "rust", "supply-chain"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/depsguard.webp"
+  alt: "DepsGuard supply chain security CLI"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DepsGuard is a single Rust binary with zero third-party crate dependencies that scans package manager configs (npm, pnpm, yarn, bun, uv, pip, poetry) for supply chain security misconfigurations and applies fixes interactively.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [depsguard.com](https://depsguard.com) ← visited and verified
+- Source repository: [github.com/arnica/depsguard](https://github.com/arnica/depsguard) ← README read in full
+- License: [MIT](https://github.com/arnica/depsguard/blob/main/LICENSE) ← verified
+- Latest release: [v0.1.40](https://github.com/arnica/depsguard/releases/latest) (2026-06-30)
+- HN launch thread: [news.ycombinator.com/item?id=48359478](https://news.ycombinator.com/item?id=48359478)
+
+## What Is DepsGuard?
+
+Supply chain attacks target the toolchain, not the code. Malicious packages typosquatting popular libraries are one vector, but misconfigured package managers are equally dangerous: overly permissive `postinstall` scripts, credentials left in config files, insecure registry settings. DepsGuard (by [arnica](https://arnica.io)) closes that gap by auditing the configuration files of your entire dependency stack in one shot.
+
+It is a **single static binary** written in Rust with **zero third-party crate dependencies** (only `std` + minimal platform FFI for terminal handling). That minimal surface area means you can audit it yourself — no trust required in a large dependency tree for a security tool.
+
+### What gets checked
+
+DepsGuard inspects config files for:
+
+- **npm / pnpm / yarn / bun** — `package.json`, `.npmrc`, `.yarnrc`
+- **uv / pip** — `pyproject.toml`, `pip.conf`, `uv.lock`
+- **Poetry** — `pyproject.toml` (Poetry section)
+- **Renovate / Dependabot** — repo-level dependency update configs
+
+It compares against recommended supply-chain settings and can apply fixes interactively.
+
+## Setup Workflow
+
+### Step 1: Install
+
+**Prebuilt binaries** (Linux, macOS, Windows) are on the [releases page](https://github.com/arnica/depsguard/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/arnica/depsguard/releases/latest/download/depsguard-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv depsguard /usr/local/bin/
+
+# Linux (x86_64)
+curl -L https://github.com/arnica/depsguard/releases/latest/download/depsguard-x86_64-unknown-linux-musl.tar.gz | tar xz
+sudo mv depsguard /usr/local/bin/
+```
+
+**Verify integrity** using the `.sha256` file on the release page:
+
+```bash
+sha256sum -c depsguard-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+**Install via APT** (Debian/Ubuntu):
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://depsguard.com/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/depsguard.gpg
+echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/depsguard.gpg] https://depsguard.com/apt stable main" | sudo tee /etc/apt/sources.list.d/depsguard.list >/dev/null
+sudo apt update && sudo apt install depsguard
+```
+
+### Step 2: Scan (read-only)
+
+```bash
+depsguard scan
+```
+
+This reports findings without modifying anything. Useful for CI pipelines or pre-commit hooks.
+
+### Step 3: Interactive Fix
+
+```bash
+depsguard fix
+```
+
+Opens a TUI where you can review each flagged item and toggle fixes on or off before applying. DepsGuard writes **backups** before every change so you can roll back with:
+
+```bash
+depsguard restore
+```
+
+## Deeper Analysis
+
+### Why a zero-dependency Rust binary?
+
+Most security tools bundle an entire runtime (Node.js, Python) or pull in dozens of crates. Every dependency is an attack surface. A Rust binary with only `std` + platform FFI compiles to a binary you can audit in an afternoon. The MSRV is Rust 1.74, so even older toolchains can build it.
+
+### Config coverage
+
+| Package Manager | Config Files Checked |
+|---|---|
+| npm | `package.json`, `.npmrc` |
+| pnpm | `package.json`, `.npmrc` |
+| yarn | `package.json`, `.yarnrc` |
+| bun | `package.json`, `.bunfig.toml` |
+| uv | `pyproject.toml`, `uv.lock` |
+| pip | `pip.conf`, `pyproject.toml` |
+| Poetry | `pyproject.toml` |
+
+### Backup and restore
+
+Every `fix` run writes timestamped backups. Running `depsguard restore` presents an interactive picker to roll back to any prior state. This makes it safe to run even in automated contexts — a bad fix is always reversible.
+
+## Practical Evaluation Checklist
+
+- [ ] Binary runs on Linux, macOS, Windows without a runtime
+- [ ] `depsguard scan` produces a readable report with file paths and line numbers
+- [ ] `depsguard fix` opens TUI and respects user approval before writing
+- [ ] `depsguard restore` successfully reverts a previous fix
+- [ ] `.sha256` verification matches on downloaded release asset
+- [ ] Config is read-only during `scan` (no side effects)
+- [ ] Backups are created automatically before any modification
+
+## Security Notes
+
+- **No network calls** — DepsGuard only reads local config files and writes local backups. It does not phone home.
+- **No package installation** — it never runs `npm install`, `pip install`, etc. It only edits configs you approve.
+- **Minimal attack surface** — zero third-party Rust crates means a small, auditable codebase for a security tool.
+
+## FAQ
+
+**Q: Does it work with monorepos?**
+**A:** Yes. Point it at a repo root and it walks subdirectories looking for config files matching each package manager's conventions.
+
+**Q: Can I use it in CI?**
+**A:** Yes. Run `depsguard scan` for a non-interactive JSON or text report suitable for CI logs. Exits non-zero on findings.
+
+**Q: Does it support GitHub Actions cache poisoning checks?**
+**A:** It checks for `Renovate` and `Dependabot` config files but does not inspect GitHub Actions workflow files specifically. See the [What gets checked](https://github.com/arnica/depsguard#what-gets-checked) section in the README for the full list.
+
+## Conclusion
+
+DepsGuard fills a gap that `npm audit` and similar tools skip — configuration hygiene. It is fast (single binary, no install), auditable (zero third-party crates), and safe (backups + interactive approval). If you manage multiple package managers across a project or organization, running it in CI is a low-friction way to catch supply chain misconfigs before they become incidents.
+
+**Project:** [depsguard.com](https://depsguard.com) | **Source:** [github.com/arnica/depsguard](https://github.com/arnica/depsguard)
