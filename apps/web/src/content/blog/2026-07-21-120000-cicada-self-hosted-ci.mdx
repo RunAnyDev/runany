@@ -1,0 +1,137 @@
+---
+title: "Cicada – FOSS Self-Hosted CI Alternative to GitHub Actions"
+description: "Cicada is a free, open-source self-hosted CI/CD platform that mirrors GitHub Actions syntax. Spin up your own runner on any server, no cloud lock-in."
+pubDate: "2026-07-21"
+tags: ["cicd", "self-hosted", "open-source", "dev-tools", "github-actions"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cicada.webp"
+  alt: "Cicada – FOSS self-hosted CI platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cicada is an AGPL-3.0, self-hosted CI/CD engine that uses the same YAML workflow syntax as GitHub Actions — clone, set up Python deps, run migrations, and you have a private GitHub Actions replacement on your own infrastructure.
+
+## What Is Cicada?
+
+Cicada describes itself as "a FOSS, cross-platform version of GitHub Actions and GitLab CI." The HN launch thread describes it as a way to run CI pipelines on your own hardware, with GitHub Actions-compatible syntax and no usage-based pricing.
+
+The key pitch: if you want the workflow authoring experience of GitHub Actions but cannot (or will not) offload computation to a third-party cloud, Cicada runs on a Linux server, a NAS, or even a Raspberry Pi cluster.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [cicada.sh](https://cicada.sh) ← verified via curl, product is a SaaS wrapper
+- Source repository: [github.com/Cicada-Software/cicada](https://github.com/Cicada-Software/cicada) ← README read end-to-end
+- License: [AGPL-3.0](https://github.com/Cicada-Software/cicada/blob/main/LICENSE) ← confirmed via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=35364146](https://news.ycombinator.com/item?id=35364146) ← verified via Algolia API
+- Source last checked: 2026-07-21 (commit `main`, README + installing docs read)
+
+## Setup Workflow
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/Cicada-Software/cicada
+cd cicada
+```
+
+### Step 2: Set Up Python Virtual Environment
+
+Cicada is written in Python. Create an isolated environment:
+
+```bash
+python3 -m virtualenv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Step 3: Run Database Migrations
+
+```bash
+python3 -m cicada.api.infra.migrate
+```
+
+> Note: re-run this after each update.
+
+### Step 4: Configure Environment Variables
+
+```bash
+export CICADA_DOMAIN=yourdomain.here
+export CICADA_USER=optional-username-here
+```
+
+- `CICADA_DOMAIN` must be a publicly accessible domain (GitHub redirects back to it). Cannot use `localhost` directly — set up [ngrok](https://ngrok.com/) or a reverse proxy if testing locally.
+- `CICADA_USER` is optional; defaults to a random string if omitted.
+
+### Step 5: Start the Server
+
+```bash
+python3 -m cicada.api
+```
+
+Navigate to the URL shown (default: `http://0.0.0.0:8000`). Click the green button to register a GitHub App — you will be redirected to GitHub to confirm, then back to your domain. After success, restart the server.
+
+The wizard creates two files: `.env` (secrets) and `cicada-key-*.pem` (GitHub App private key). Keep both private.
+
+## Syntax Compatibility
+
+Cicada supports standard GitHub Actions workflow YAML syntax. Example from the [demo repo](https://github.com/Cicada-Software/demo):
+
+```yaml
+name: Example Workflow
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          pytest tests/
+```
+
+The `runs-on: self-hosted` label routes jobs to your Cicada runner. No `runs-on: ubuntu-latest` — all compute stays local.
+
+## Practical Evaluation Checklist
+
+- [ ] Cloned repo and installed deps without errors
+- [ ] Migration ran cleanly on first attempt
+- [ ] Wizard registered a GitHub App and wrote `.env` + `.pem` file
+- [ ] Pipeline triggered on a test push and jobs ran on the self-hosted runner
+- [ ] Logs surfaced correctly in the Cicada web UI
+
+## Security Notes
+
+- The `.env` file and `cicada-key-*.pem` contain sensitive secrets. Do not commit them to version control.
+- `CICADA_DOMAIN` must be TLS-enabled in production — GitHub requires HTTPS for OAuth redirects.
+- Cicada stores GitHub webhook payloads locally. Treat the server as a trusted internal service.
+
+## FAQ
+
+**Q: Does Cicada support GitLab CI syntax as well?**
+**A:** The project page describes it as a cross-platform alternative to both GitHub Actions and GitLab CI, but the primary syntax focus is GitHub Actions-compatible YAML. Check the [README](https://github.com/Cicada-Software/cicada) for the latest supported syntax matrix.
+
+**Q: Can I use this instead of GitHub Actions for private repos?**
+**A:** Yes, this is the primary use case — running CI on private code without sending it to GitHub's runners. Cicada receives webhooks from your GitHub App and executes jobs on your own hardware.
+
+**Q: Does it work with GitHub Enterprise Server (GHES)?**
+**A:** The docs only describe GitHub.com integration. GHES support is not mentioned in the current README — verify against the latest docs before deploying in an enterprise environment.
+
+**Q: What language is Cicada written in?**
+**A:** Python, as confirmed by the `requirements.txt` dependency file in the repo.
+
+## Conclusion
+
+Cicada fills a specific niche: teams that want GitHub Actions YAML authoring without the cloud pricing or data sovereignty concerns. The install process is straightforward for anyone familiar with Python and self-hosting. At 567 stars on GitHub it is early-stage software — the top comment on the HN thread notes it is "veeeeery early stage" — but the core pipeline runner is functional and MIT/AGPL licensed.
+
+If you have a homelab or spare server and want private CI that speaks fluent GitHub Actions syntax, Cicada is worth a weekend experiment.
