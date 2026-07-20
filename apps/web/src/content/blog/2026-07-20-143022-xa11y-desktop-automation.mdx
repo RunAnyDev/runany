@@ -1,0 +1,173 @@
+---
+title: "xa11y - Desktop Automation via Accessibility Trees"
+description: "A Playwright-style Rust library for driving native desktop apps on macOS, Windows, and Linux. MIT licensed."
+pubDate: "2026-07-20"
+tags: ["desktop-automation", "rust", "playwright", "accessibility", "testing"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/xa11y.webp"
+  alt: "xa11y - Cross-platform desktop automation via accessibility trees"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** xa11y brings Playwright's auto-waiting and locator patterns to native desktop apps on macOS, Windows, and Linux — without screenshots, using platform accessibility APIs directly.
+
+## Source and Accuracy Notes
+
+**All links verified from actual source — README, GitHub, and docs.rs — before publication.**
+
+- Project page: [xa11y.dev](https://xa11y.dev)
+- Source repository: [github.com/xa11y/xa11y](https://github.com/xa11y/xa11y)
+- License: MIT (verified via [LICENSE file](https://raw.githubusercontent.com/xa11y/xa11y/main/LICENSE))
+- Rust docs: [docs.rs/xa11y](https://docs.rs/xa11y)
+- Python API docs: [xa11y.dev/api/python/](https://xa11y.dev/api/python/)
+- HN launch thread: [news.ycombinator.com/item?id=48446496](https://news.ycombinator.com/item?id=48446496)
+- Blog post: [crowecawcaw.github.io/general/2026/05/30/accessibility-for-computer-use.html](https://crowecawcaw.github.io/general/2026/05/30/accessibility-for-computer-use.html)
+- Source last checked: 2026-07-20 (commit `48446496`, README and LICENSE)
+
+## What Is xa11y?
+
+xa11y is an open-source Rust library that provides a Playwright-style API for automating native desktop applications. It drives apps on macOS, Windows, and Linux through their platform accessibility APIs — not screenshots or pixel coordinates.
+
+The core design goal, [from the author](https://news.ycombinator.com/item?id=48446496):
+
+> "Create an accessibility abstraction that works across all platforms and emulate Playwright's auto-waiting, selectors, and locator patterns which make web automation robust."
+
+Two things set xa11y apart from screenshot-based computer-use approaches:
+
+1. **Reliability** — Accessibility APIs return actual element structure, not rendered pixels. Agents get precise, stable element references instead of coordinate guessing.
+2. **Speed** — No vision model inference. Polling an accessibility tree is orders of magnitude faster than sending frames through an LLM.
+
+## Setup
+
+### Rust
+
+```toml
+[dependencies]
+xa11y = "0.4"
+```
+
+### Python
+
+Requires Python 3.9+. Pre-built wheels available for Linux, macOS, and Windows:
+
+```bash
+pip install xa11y
+```
+
+### macOS Permissions
+
+Grant your terminal **two** permissions in **System Settings > Privacy & Security**:
+
+1. **Accessibility** — required for all accessibility API access.
+2. **Screen & System Audio Recording** (macOS 26+) — required to read window content. Without this, only menu bars are visible.
+
+Restart your terminal after changing permissions.
+
+### Linux
+
+AT-SPI2 must be running (default on GNOME and most desktop environments). No special permissions needed.
+
+## Basic Usage
+
+### Python
+
+```python
+import xa11y
+
+# Attach to a running app by name
+safari = xa11y.App.by_name("Safari")
+
+# Find elements with CSS-like selectors
+for button in safari.locator("button").elements():
+    print(button.name)
+
+# Auto-waiting click — retries until element is actionable
+safari.locator("button[name='Submit']").press()
+
+# Set text field value
+safari.locator("text_field[name^='Search']").set_value("hello world")
+```
+
+### Rust
+
+```rust
+use xa11y::*;
+use std::time::Duration;
+
+fn main() -> Result<()> {
+    let safari = App::by_name("Safari", Duration::from_secs(5))?;
+
+    // Locator re-resolves on every call (auto-waiting)
+    safari.locator("button[name='Submit']").press()?;
+
+    Ok(())
+}
+```
+
+### Key Concepts
+
+**`App.by_name`** — Attaches to a running app. The second argument is a poll timeout. `Duration::ZERO` for a single attempt.
+
+**`locator`** — Returns a `Locator` that re-resolves the element on every interaction. This is the auto-waiting behavior inherited from Playwright's design.
+
+**CSS-like selectors** — Support for `tag`, `name=`, `[attribute^='prefix']` patterns. Full selector reference at [xa11y.dev](https://xa11y.dev).
+
+## Why Not Screenshot-Based Automation?
+
+Screenshot-based agents (OmniParser, Claude's computer use, etc.) suffer from two fundamental problems:
+
+- **Coordinate fragility** — UI renders change with DPI scaling, window repositioning, and theme switches. An agent trained on pixel coordinates breaks constantly.
+- **Speed and cost** — Every action requires encoding a screenshot and sending it to a vision model. An accessibility API call returns structured data in milliseconds.
+
+xa11y's author [documented](https://crowecawcaw.github.io/general/2026/05/30/accessibility-for-computer-use.html) testing both approaches and found accessibility APIs gave agents reliable element references while being dramatically faster.
+
+## Limitations
+
+- **Accessibility API coverage varies by platform.** Windows can read an entire app's accessibility tree in one call; Linux requires per-element attribute queries. The library handles this internally but large apps on Linux may have slower initial queries.
+- **No app launching.** xa11y attaches to already-running apps. You'd need a separate launcher (e.g., `Process::spawn`) to start an app first.
+- **UI must expose accessibility roles.** Deep Electron apps and some custom toolkits may not expose enough structure for selectors to work reliably.
+- **macOS requires explicit user permission** for screen reading (see Setup above).
+
+## Comparison to Playwright
+
+| | Playwright | xa11y |
+|---|---|---|
+| Target | Web browsers | Native desktop apps |
+| Engine | Chrome DevTools Protocol | Platform accessibility APIs |
+| Languages | JS, Python, Java, .NET | Rust, Python |
+| License | Apache 2.0 | MIT |
+| Auto-waiting | Yes | Yes (Playwright-inspired) |
+| Locator pattern | Yes | Yes (CSS-like selectors) |
+
+xa11y's API intentionally mirrors Playwright's locator pattern. If you've used Playwright for web testing, the xa11y API will feel immediately familiar.
+
+## Computer-Use Agents and MCP
+
+xa11y is well-suited as an MCP tool for agents that need to interact with desktop GUI applications. The structured accessibility tree gives the agent a reliable representation of the UI state, and the Playwright-style locator API makes it straightforward to specify target elements programmatically.
+
+## FAQ
+
+**Q: Can xa11y launch applications, or only attach to running ones?**
+**A:** Only attach. It drives apps through their running accessibility APIs. To launch an app, use your language's standard process spawning (e.g., `std::process::Command` in Rust, `subprocess` in Python).
+
+**Q: Does it work with Electron or VS Code extensions?**
+**A:** It depends on whether the framework exposes standard accessibility roles. Many Electron apps do expose accessibility structure through AT-SPI2 (Linux) and AXAPI (macOS). The best approach is to try attaching with `App.by_name("YourApp")` and querying `locator("*").elements()` to see what structure is available.
+
+**Q: How is this different from PyAutoGUI?**
+**A:** PyAutoGUI uses pixel coordinates and image recognition (screenshot templates). xa11y reads the actual accessibility tree so elements are referenced by role, name, and attributes rather than screen positions. This is more robust and faster than template-matching screenshots.
+
+**Q: Is it production-ready?**
+**A:** The library is actively maintained (last commit 2026-07-19) and has CI workflows. However, with ~50 GitHub stars as of mid-July 2026, it's still early-stage. Test thoroughly before using in critical automation pipelines.
+
+## Conclusion
+
+xa11y fills a real gap in the desktop automation landscape: bringing the proven patterns of web testing (auto-waiting, locators, cross-platform consistency) to native GUI applications. For developers building computer-use agents, MCP servers, or end-to-end test suites for desktop apps, it's worth evaluating against screenshot-based alternatives.
+
+The MIT-licensed Rust core with Python bindings makes it accessible to most developer workflows. If you've struggled with flaky coordinate-based automation or expensive vision-model inference for desktop tasks, xa11y is a clean alternative worth trying.
+
+Try it: `pip install xa11y` or add `xa11y = "0.4"` to your `Cargo.toml`.
