@@ -1,0 +1,149 @@
+---
+title: "Sonarly - AI Agent Auto-Fixes Your Production Alerts"
+description: "Sonarly connects to Sentry, Datadog, and Slack to triage alerts, identify root causes, and trigger AI fixes — cutting a 180-alert daily firehose down to 5 actionable issues."
+pubDate: "2026-07-20"
+tags: ["ai-agent", "observability", "automation", "self-hosted", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sonarly-ai-agent-auto-fixes-alerts.webp"
+  alt: "Sonarly product thumbnail showing AI alert triage dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sonarly is an AI production engineer that connects to your existing observability stack (Sentry, Datadog, Slack), deduplicates and triages alerts, finds root causes, and triggers Claude Code to fix bugs automatically — reducing a real engineering team's 180 alerts per day to 5 actionable issues.
+
+## What Is Sonarly?
+
+Sonarly is a YC W26-backed AI agent that acts as a tireless on-call engineer. Instead of waking you up at 2am or sitting ignored in your notification queue, it:
+
+- Connects to your existing observability tools (Sentry, Datadog, Slack user feedback)
+- Deduplicates incoming alerts — grouping related errors so you see one issue, not 50 copies
+- Assigns severity based on actual user or infrastructure impact
+- Triggers Claude Code with the exact context needed to reproduce and fix the bug
+- Maintains a dynamic service map of your production architecture so the agent understands cross-service dependencies
+
+The core pitch: reduce MTTR (Mean Time To Repair) by replacing noise with signal, and signal with auto-resolved fixes.
+
+## How It Works
+
+### Step 1: Connect Your Stack
+
+Sonarly does not replace your monitoring tools — it sits above them. You connect via native integrations:
+
+```bash
+# Add Sonarly to your Sentry DSN alongside your existing Sentry config
+# No new tracker required; Sonarly reads from your existing Sentry stream
+
+# Datadog MCP integration for log retrieval
+# Slack webhooks for user-reported issues
+```
+
+### Step 2: Alert Triage — From 180 to 5 Per Day
+
+One Sonarly beta user on Sentry received approximately 180 alerts per day. After Sonarly's triage pipeline:
+
+1. **Deduplication** — grouped related errors reduced the volume from 180/day to 50/day
+2. **Severity scoring** — further filtered to ~5 high-priority, user-impacting issues per day
+3. **RCA generation** — each remaining issue gets a root cause analysis written in plain English
+
+The on-call engineer wakes up to 5 clear issues with context, not 180 notifications.
+
+### Step 3: AI Fix Execution
+
+When an issue is confirmed, Sonarly triggers Claude Code with:
+
+- The specific Sentry issue link and stack trace
+- Relevant logs fetched via MCP (using grep on Datadog/Grafana)
+- A dynamically updated service map showing how the issue connects across your microservices
+
+```python
+# Sonarly's internal service map format (updated dynamically)
+# services/
+#   api-gateway/    → logs: Datadog, metrics: Datadog
+#   auth-service/   → logs: Datadog, errors: Sentry
+#   payment-core/   → logs: Datadog, alerts: PagerDuty
+```
+
+### Step 4: Self-Serve Onboarding
+
+According to the HN launch thread, onboarding takes under 2 minutes with a large free tier available.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Sentry, Datadog, or Slack account (at least one required)
+- Claude Code installed and authenticated
+- MCP-compatible log infrastructure (optional for full fix automation)
+
+### Step 1: Connect Observability Tools
+
+Sign up at [sonarly.com](https://sonarly.com) and add your integrations:
+
+```bash
+# Example Sentry DSN configuration
+# Sonarly reads from your existing Sentry stream — no new SDK needed
+# Add to your existing Sentry config:
+SENTRY_DSN=https://abc123@o123456.ingest.sentry.io/654321
+SONARLY_DSN=https://abc123@o123456.ingest.sentry.io/654321?sonarly=true
+```
+
+### Step 2: Configure Alert Routing
+
+Set up routing rules for which alerts should trigger AI fixes vs. human notification:
+
+```yaml
+# sonarly.config.yaml
+triage:
+  dedup_window_minutes: 30
+  severity_threshold: high  # only auto-fix high-severity issues
+  exclude_patterns:
+    - "healthcheck"
+    - "liveness probe"
+
+fix:
+  auto_merge: false  # human review before PR merge
+  max_retries: 2
+  context_window: "4 hours"
+```
+
+### Step 3: Connect Claude Code via MCP
+
+```bash
+# Configure the Datadog MCP server for log retrieval
+claude code mcp add datadog -- npx -y @modelcontextprotocol/server-datadog
+```
+
+## Source and Accuracy Notes
+
+- Project page: [sonarly.com](https://sonarly.com)
+- HN launch thread: [news.ycombinator.com/item?id=47049776](https://news.ycombinator.com/item?id=47049776)
+- YC batch: W26 (2026)
+- License: Proprietary (free tier available)
+- Pricing: Free tier available (JSON-LD schema confirms `price: "0"`)
+- Source last checked: 2026-07-20 (HN thread + website)
+
+## FAQ
+
+**Q: Does Sonarly replace my existing monitoring tools?**
+**A:** No. Sonarly reads from your existing Sentry, Datadog, and Slack integrations. It sits above your stack as an AI triage layer, not a replacement.
+
+**Q: How does it avoid making things worse with bad auto-fixes?**
+**A:** The triage pipeline is conservative — it deduplicates and filters before triggering any code action. Auto-fix requires severity scoring to pass a threshold. PRs are not auto-merged by default; human review is required.
+
+**Q: What about multi-repo or microservice architectures?**
+**A:** Sonarly builds and maintains a dynamic service map in markdown format that tracks how logs, metrics, and services connect. This gives Claude Code the cross-service context needed for complex issues.
+
+**Q: Is there a self-hosted option?**
+**A:** The product is currently cloud-hosted (SaaS). Self-hosting is not mentioned in the launch announcement.
+
+**Q: How does it compare to just piping Sentry into Claude?**
+**A:** A commenter on the HN thread described building exactly this with a GitHub Action that polls Sentry and pipes JSON into Claude hourly. They report ~30% of PRs from that setup are mergeable. Sonarly's advantage is structured triage (180 to 5), dedicated MCP tooling, and a service map that gives the agent context a raw poll cannot.
+
+## Conclusion
+
+Sonarly tackles one of the most painful parts of modern engineering: the alert firehose that buries real issues in noise. By combining smart deduplication, severity scoring, and MCP-connected AI fix execution, it reduces the cognitive load on on-call engineers from hundreds of daily notifications to a handful of actionable items. The free tier and sub-2-minute self-serve onboarding make it easy to test on a real project. If you run Sentry or Datadog today and dread your on-call rotation, Sonarly is worth 2 minutes of setup.
