@@ -1,0 +1,154 @@
+---
+title: "Sanbox - Resumable MicroVM Sandboxes for AI Agents"
+description: "Run AI agents in isolated, resumable MicroVM sandboxes with persistent filesystems, live run events, and a CLI that works with Claude Code, Cursor, and Codex."
+pubDate: "2026-07-20"
+tags: ["ai-agent", "sandbox", "self-hosted", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sanbox.webp"
+  alt: "Sanbox product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sanbox runs AI agents in isolated, resumable MicroVM sandboxes with persistent filesystems and live run events. The CLI integrates with Claude Code, Cursor, Codex, and CI — with a self-hosting option.
+
+## What Is Sanbox?
+
+Sanbox is a platform for running AI agents in isolated, resumable sandboxes. Each sandbox is backed by a MicroVM that provides strong isolation from the host system, a persistent filesystem that survives agent restarts, and live run events so you can observe what the agent is doing in real time.
+
+The project was shared on Hacker News as "Show HN: Sanbox, batteries included sandboxes for AI agents" ([HN thread](https://news.ycombinator.com/item?id=48879908)).
+
+Key capabilities:
+
+- **MicroVM isolation** — each agent runs in its own lightweight VM, isolated from the host
+- **Resumable sandboxes** — a sandbox can be paused and resumed; the agent picks up where it left off
+- **Persistent filesystem** — files persist across runs without needing a shared volume
+- **Live run events** — stream agent activity in real time (file changes, tool calls, LLM responses)
+- **CLI-first** — works with Claude Code, Cursor, Codex, GitHub Actions, or a plain terminal
+- **Self-hosting option** — deploy Sanbox on your own infrastructure
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS, Linux, or a VPS with Docker (for self-hosted)
+- Node.js 18+ (for the CLI)
+
+### Step 1: Install the CLI
+
+```bash
+npm install -g @sanbox/cli
+```
+
+### Step 2: Authenticate
+
+```bash
+sanbox login
+```
+
+This opens a browser for OAuth. Cloud-hosted sandboxes require a free account.
+
+### Step 3: Create a sandbox and run an agent
+
+```bash
+sanbox run --agent claude-code "Summarize the files in this project"
+```
+
+Supported `--agent` values include `claude-code`, `cursor`, `codex`, and `terminal` (raw shell).
+
+### Step 4: Stream live events
+
+```bash
+sanbox events <sandbox-id>
+```
+
+Returns a real-time feed of file changes, tool invocations, and LLM responses as the agent works.
+
+### Step 5: Self-host (optional)
+
+The self-hosted option requires a Linux machine with KVM support. Docker is not used — Sanbox manages MicroVMs directly via firecracker.
+
+```bash
+sanbox server start --self-hosted
+```
+
+Point the CLI at your self-hosted endpoint:
+
+```bash
+sanbox config set endpoint https://your-server:3000
+```
+
+## How It Works
+
+### OpenCode SDK
+
+Sanbox uses the [OpenCode SDK](https://github.com/opencode-ai/opencode) as its agent harness. OpenCode is an open-source framework that connects coding agents to tool chains. Sanbox wraps OpenCode sandboxes in MicroVMs, adding isolation and resumability.
+
+OpenCode is the default harness, but you can bring your own:
+
+```bash
+sanbox run --harness custom -- your-harness-command
+```
+
+### Template System
+
+Sanbox supports reusable sandbox templates — pre-configured environments with specific tools, environment variables, and startup scripts.
+
+```bash
+# Save current sandbox as a template
+sanbox template save my-template
+
+# Launch from template
+sanbox run --template my-template "Analyze this dataset"
+```
+
+### Resumability
+
+When an agent task is interrupted (Ctrl+C, timeout, or crash), the sandbox state is preserved. Running the same sandbox ID resumes the agent with full memory of what it already did.
+
+```bash
+sanbox resume <sandbox-id>
+```
+
+## Practical Evaluation Checklist
+
+- Can you create a sandbox and run a Claude Code agent in under 2 minutes?
+- Does `sanbox events` show live output as the agent works?
+- Does `sanbox resume` restore the agent state after an interruption?
+- Is the self-hosted server able to start on a fresh Ubuntu 22.04 machine with KVM?
+- Are the persistent filesystem writes visible after a sandbox restart?
+
+## Security Notes
+
+MicroVM isolation means each sandbox has its own kernel, network stack, and filesystem — a compromised agent cannot access the host system. This is significantly stronger than container-based isolation (Docker), which shares the host kernel.
+
+Network access is controlled by per-sandbox ACLs. By default, outbound network is allowed; you can restrict it to specific domains.
+
+For self-hosted deployments, ensure KVM (`/dev/kvm`) is accessible to the Sanbox process and that the firewall blocks external access to port 3000 unless behind a reverse proxy with auth.
+
+## FAQ
+
+**Q: What is the difference between Sanbox and running Claude Code or Cursor locally?**
+**A:** Local agents run directly on your machine with full access to your filesystem and network. Sanbox sandboxes are isolated MicroVMs — an agent gone rogue cannot reach your home directory or internal services. Useful for testing untrusted agent code or running many agents in parallel without interference.
+
+**Q: Is there a free tier?**
+**A:** The website mentions 500 free sandboxes per month on the cloud-hosted plan, with self-hosting available at no cost on your own hardware.
+
+**Q: Does Sanbox work with other agents besides Claude Code and Cursor?**
+**A:** Yes. The CLI also supports OpenAI Codex and a plain terminal mode. Custom harnesses can be plugged in via the `--harness` flag.
+
+**Q: What does self-hosting require?**
+**A:** A Linux machine with KVM enabled (nested virt not required), at least 4 GB RAM per concurrent sandbox, and Ubuntu 22.04 or Debian 12. macOS is supported for the CLI only.
+
+**Q: How is resumability implemented?**
+**A:** The MicroVM state (memory snapshot + filesystem diff) is saved to disk between runs. On resume, the VM is restored from the snapshot and the filesystem diff is replayed, giving the agent a consistent view of its working environment.
+
+## Source and Accuracy Notes
+
+- Project page: [sanbox.cloud](https://sanbox.cloud)
+- HN launch thread: [news.ycombinator.com/item?id=48879908](https://news.ycombinator.com/item?id=48879908)
+- Source last checked: 2026-07-20
