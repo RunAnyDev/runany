@@ -1,0 +1,146 @@
+---
+title: "Driftcop - Open-Source MCP Security Scanner"
+description: "Driftcop detects drift, injection attacks, and CVEs in MCP servers with SigStore tracking — the SAST tool your AI agents need."
+pubDate: "2026-07-22"
+tags: ["mcp", "security", "saast", "open-source", "ai-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/driftcop.webp"
+  alt: "Driftcop MCP security scanner"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Driftcop is an open-source SAST tool that scans MCP server manifests, code, and dependencies for drift, typosquatting, prompt injection, and known CVEs — signing every change in SigStore for auditability.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/sudoviz/driftcop](https://github.com/sudoviz/driftcop)
+- Source repository: [github.com/sudoviz/driftcop](https://github.com/sudoviz/driftcop)
+- License: NOASSERTION (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=44843841](https://news.ycombinator.com/item?id=44843841)
+- npm package: [npmjs.com/package/drift-cop](https://www.npmjs.com/package/drift-cop)
+
+## What Is Driftcop?
+
+MCP servers are proliferating as the standard way to extend AI agents with tools and capabilities. But as external MCP packages proliferate in AI workflows, a new class of supply-chain risk emerges: the "MCP rug pull" — where a trusted server silently changes its manifest, dependencies, or behavior between versions, potentially exposing your agent to malicious tooling.
+
+Driftcop tackles this with a two-piece architecture:
+
+1. **mcp-sec** — A CLI security scanner that performs deep analysis of MCP server manifests, workspace code, and dependencies
+2. **mcp-sec-web** — A React dashboard providing real-time visualization and an approval workflow for security findings
+
+The core detection capabilities from the README include:
+
+- **Manifest validation** — Schema checking, permission audits, and typo detection in MCP server definitions
+- **Prompt injection detection** — Spots hidden characters and system manipulation patterns in tool definitions
+- **Typosquatting detection** — Uses Levenshtein distance and TF-IDF similarity to catch package names that look like trusted ones
+- **CVE scanning** — Checks known vulnerabilities in dependencies
+- **Semantic drift analysis** — Uses an LLM to detect mismatches between what a server claims to do and what it actually does
+- **SigStore integration** — Cryptographically signs every change in DSSE envelope format for audit trails
+
+Results are exportable as Markdown, JSON, or SARIF for CI/CD integration.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18 or later (for the CLI)
+- npm or pnpm
+
+### Step 1: Install the CLI
+
+```bash
+npm install -g drift-cop
+```
+
+Or use it without installing:
+
+```bash
+npx drift-cop scan --help
+```
+
+### Step 2: Scan an MCP Server
+
+```bash
+# Scan a local MCP server directory
+drift-cop scan ./my-mcp-server
+
+# Scan a published npm package
+drift-cop scan --package @modelcontextprotocol/server-filesystem
+
+# Output as SARIF for CI integration
+drift-cop scan ./my-mcp-server --format sarif --output results.sarif
+```
+
+### Step 3: Set Up the Web Dashboard
+
+The web UI runs alongside your existing mcp-sec installation:
+
+```bash
+npx mcp-sec-web
+# Opens dashboard at http://localhost:3000
+```
+
+The dashboard gives you real-time monitoring of configuration drifts and an interactive approval workflow — approve low-risk changes, flag high-risk ones for manual review.
+
+## Deeper Analysis
+
+### The Rug Pull Threat Model
+
+MCP servers extend AI agents with tools. A malicious or compromised MCP server can:
+
+1. **Change its manifest** — silently modify what tools it exposes, adding backdoors
+2. **Bump dependencies** — pull in a compromised package that was benign last week
+3. **Rewrite tool descriptions** — describe a tool as "safe file reader" when it actually exfiltrates data
+4. **Inject prompt content** — use hidden characters or system-level instructions to manipulate your agent's behavior
+
+Driftcop's semantic drift analysis specifically targets case 3 — it uses an LLM to compare what the server's documentation claims against what the actual tool code does.
+
+### SigStore for Auditability
+
+Every approved drift is signed with SigStore (specifically, a DSSE envelope). SigStore's transparency log means you can independently verify that a given drift was approved by your team at a specific time — useful for compliance and incident response.
+
+### Language Support
+
+The scanner uses Tree-sitter AST parsing to extract MCP tool definitions from over 10 programming languages. This means it works with MCP servers written in Python, TypeScript, Go, Rust, or any other supported language — not just servers that expose a JSON manifest.
+
+## Practical Evaluation Checklist
+
+- Does the tool detect a manifest-level drift (tool added/removed/changed)?
+- Does it catch a dependency version bump to a known CVE?
+- Does the LLM-based semantic analysis flag a tool whose description doesn't match its implementation?
+- Does the SARIF output integrate cleanly with GitHub Advanced Security?
+- Does the SigStore signature verify correctly against the transparency log?
+
+## Security Notes
+
+- Driftcop itself is open source — audit the source at [github.com/sudoviz/driftcop](https://github.com/sudoviz/driftcop) before trusting it in a security pipeline
+- The CLI requires network access to check CVE databases and SigStore
+- The web dashboard stores findings locally by default (zero-integration design — works without cloud dependencies)
+- Always pin your MCP server versions in a lock file and run Driftcop as part of your CI pipeline, not just as a one-off check
+
+## FAQ
+
+**Q: Does Driftcop work with any MCP server, or only those built with a specific framework?**
+**A:** Driftcop scans the final manifest and codebase output, so it works with any MCP server that follows the MCP protocol specification, regardless of how it was built.
+
+**Q: Is this for open-source MCP servers only?**
+**A:** No — you can scan both open-source and proprietary MCP servers. The scanner works on the manifest, code, and dependency files, not the deployment environment.
+
+**Q: How does semantic drift analysis work without sending my code to a third-party LLM?**
+**A:** The README indicates the LLM is used to compare tool descriptions against implementation — the exact architecture (local model vs. API) depends on your configuration. Check the project's docs for details on self-hosted LLM options.
+
+**Q: What is SigStore and why does it matter?**
+**A:** SigStore is an open-source project that provides cryptographic signing and transparency logs for software artifacts. DSSE (Detached Signatures for Executables) is the signature envelope format Driftcop uses. This lets you verify that a drift approval actually came from your team, not an attacker who compromised your pipeline.
+
+## Conclusion
+
+As MCP servers become a first-class part of AI agent architectures, the supply-chain security of those servers deserves the same scrutiny we apply to npm packages or Docker images. Driftcop brings SAST-style analysis — drift detection, injection scanning, CVE checking, and cryptographic audit trails — to the MCP ecosystem. If you're building with MCP, it's worth adding to your security toolbox.
+
+For now, the project is early-stage (11 stars on GitHub at time of writing) and the web dashboard is labeled version 0.1.0. Watch the repo for the 1.0 release with broader language support and tighter CI integrations.
