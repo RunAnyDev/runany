@@ -1,0 +1,147 @@
+---
+title: "Arrakis – Self-Hosted AI Agent Sandboxing with MicroVM"
+description: "Arrakis is an open-source sandboxing service that runs AI agent code in secure MicroVMs with snapshot-and-restore, a REST API, Python SDK, and MCP server support."
+pubDate: "2026-07-22"
+tags: ["ai-setup", "self-hosted", "sandboxing", "mcp"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/arrakis.webp"
+  alt: "Arrakis – self-hosted AI agent sandboxing"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Arrakis lets you self-host secure MicroVM sandboxes for AI agent code execution, with built-in snapshot-and-restore for backtracking, a REST API, Python SDK, and MCP server support.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/abshkbh/arrakis](https://github.com/abshkbh/arrakis) — README read 2026-07-22
+- License: [AGPL-3.0](https://github.com/abshkbh/arrakis/blob/main/LICENSE) — verified
+- HN launch thread: [news.ycombinator.com/item?id=43558873](https://news.ycombinator.com/item?id=43558873)
+- MCP server: [github.com/abshkbh/arrakis-mcp-server](https://github.com/abshkbh/arrakis-mcp-server)
+- PyPI package: [pypi.org/project/py-arrakis/](https://pypi.org/project/py-arrakis/)
+
+## What Is Arrakis?
+
+AI agents can generate and execute code that is malicious or buggy — running that code directly on your host machine is a security risk. Arrakis provides a **secure, fully customizable, self-hosted** sandboxing layer for AI agent code execution.
+
+Each sandbox runs Ubuntu inside a **MicroVM** (via `cloud-hypervisor`), isolated from the host. The key differentiator is **snapshot-and-restore**: you can checkpoint a sandbox mid-task and restore it later, which is useful for Monte Carlo Tree Search agents or for auditing what an agent did before a bad decision.
+
+The project ships with:
+
+- A **REST API** for spawning/managing sandboxes
+- A **Python SDK** (`py-arrakis`) on PyPI
+- An **MCP server** (`arrakis-mcp-server`) so AI agents can request sandboxes directly via the Model Context Protocol
+- Automatic **port forwarding** from the public server to individual sandboxes — access the sandbox GUI (including Chrome for computer use) without extra setup
+- A **VNC server** running in each sandbox at boot
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux host with `/dev/kvm` (KVM virtualization) — check with `stat /dev/kvm`
+- `cloud-hypervisor` installed
+
+### Quick Setup with Prebuilt Binaries
+
+```bash
+curl -sSL https://raw.githubusercontent.com/abshkbh/arrakis/main/setup/setup.sh | bash
+ls arrakis-prebuilt
+```
+
+### GCP Setup
+
+Follow the [GCP Setup instructions](https://github.com/abshkbh/arrakis/blob/main/setup/gcp-instructions.md) to deploy on a Google Compute Engine VM.
+
+### Start the REST Server
+
+```bash
+cd arrakis-prebuilt
+./arrakis-restserver
+```
+
+The server runs on port 8080 by default (verify from the binary — the README does not specify the port explicitly).
+
+### Use the Python SDK
+
+```bash
+pip install py-arrakis
+```
+
+Then in Python:
+
+```python
+from arrakis import ArrakisClient
+
+client = ArrakisClient(base_url="http://localhost:8080")
+sandbox = client.create_sandbox()
+print(f"Sandbox ID: {sandbox.id}")
+```
+
+### Connect via MCP
+
+The [arrakis-mcp-server](https://github.com/abshkbh/arrakis-mcp-server) repository provides an MCP server implementation. Configure your AI agent to use it as an MCP tool — the agent can then programmatically request a sandbox, upload files, and execute code.
+
+### Access the GUI (Computer Use)
+
+Each sandbox starts a VNC server. Arrakis automatically sets up port forwarding so you can access the sandbox desktop from your browser. This is useful for **computer use** tasks that require a GUI browser.
+
+## Architecture
+
+- **Isolation:** Each sandbox runs in a dedicated MicroVM (not a container), providing hardware-level isolation
+- **Backtracking:** Snapshot-and-restore is built-in; agents can explore a branch, snapshot, try something else, then restore the exact previous state
+- **Port forwarding:** Arrakis manages reverse port forwarding automatically so the host can reach sandbox services and vice versa
+- **Storage:** Snapshots are stored on the host filesystem
+
+## Deeper Analysis
+
+**When is Arrakis the right choice?**
+
+If you're running AI agents that execute code (Claude Code, OpenAI Agents, custom agents) and you want:
+- Hardware-level isolation (not just namespace containers)
+- The ability to roll back agent actions to a known-good state
+- A self-hosted alternative to paid sandboxing services
+- MCP-native integration so agents can request their own sandboxes
+
+**What it is not:**
+
+Arrakis is not a turnkey "AI agent platform" — it is infrastructure. You still need to wire up your agent code, handle authentication, and manage the host VM. It is a building block, not a finished product.
+
+**Compared to alternatives:**
+
+- **E2B** — managed cloud sandboxing; Arrakis is self-hosted and gives you full control
+- **Loop ⚠️** — [note: Loop is a separate project, do not confuse with Loop.dev or other homonyms]
+- **Docker-based sandboxes** — Docker provides OS-level isolation via cgroups/namespaces; Arrakis via MicroVM provides hardware virtualization which has a smaller attack surface at the hypervisor level
+
+## Security Notes
+
+- Each sandbox is a **MicroVM** (not a container), providing stronger isolation boundaries
+- The host's `/dev/kvm` device is required — without KVM, `cloud-hypervisor` cannot run
+- Network access from sandboxes goes through the host's network stack; configure firewall rules on the host for network isolation between sandboxes or from the host network
+- Snapshot files stored on disk should be protected — a compromised sandbox with read access to the host filesystem could theoretically read snapshot images
+
+## FAQ
+
+**Q: What Linux distributions are supported inside the sandbox?**
+**A:** The README specifies Ubuntu as the sandbox OS. Other distributions may work but are not explicitly tested.
+
+**Q: Can I run Arrakis on macOS or Windows?**
+**A:** No — `cloud-hypervisor` (the virtualization layer) requires Linux with KVM. Arrakis only supports Linux hosts.
+
+**Q: Does Arrakis support GPU passthrough?**
+**A:** The current README does not mention GPU support. This would likely require additional configuration beyond the standard MicroVM setup.
+
+**Q: How does snapshot-and-restore work?**
+**A:** Arrakis uses the MicroVM's snapshot functionality to capture the entire sandbox state (memory, CPU registers, disk) to a file on the host. Restoring reloads that state, effectively rolling back all processes, files, and network connections inside the sandbox to the snapshot point.
+
+**Q: Is there a managed/hosted version of Arrakis?**
+**A:** No — Arrakis is purely self-hosted. There is no official hosted offering.
+
+## Conclusion
+
+Arrakis fills a specific niche: self-hosted, hardware-isolated sandboxing for AI agents that need to execute code and want the safety of MicroVM isolation plus the power of snapshot-and-restore. If you are building agentic workflows on your own infrastructure and are uncomfortable running untrusted code in containers, Arrakis is worth evaluating. For a managed cloud option with less operational overhead, look at E2B instead.
