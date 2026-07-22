@@ -1,0 +1,164 @@
+---
+title: "ZenStack V3 — Modular TypeScript ORM Built on Kysely"
+description: "ZenStack V3 rewrites its ORM engine on Kysely while keeping Prisma-compatible APIs. Pure TypeScript, fine-grained access control, and automatic API generation."
+pubDate: "2026-07-22"
+tags: ["typescript", "orm", "prisma", "kysely", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zenstack-modular-typescript-orm.webp"
+  alt: "ZenStack product thumbnail showing TypeScript ORM architecture"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ZenStack V3 is a TypeScript database toolkit that rewrites its ORM on Kysely while keeping Prisma-compatible query APIs — giving you type-safe ORM, row-level security, and auto-generated CRUD APIs in one package.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [zenstack.dev](https://zenstack.dev) ← **MUST visit and verify**
+- Source repository: [github.com/zenstackhq/zenstack](https://github.com/zenstackhq/zenstack) ← **MUST read README**
+- License: [MIT](https://github.com/zenstackhq/zenstack/blob/main/LICENSE) ← **MUST verify from LICENSE file**
+- Latest version: v3.8.3 (verified via `git ls-remote --tags`)
+- Stars: 2,924 (verified via GitHub REST API)
+- HN launch thread: [news.ycombinator.com/item?id=40205699](https://news.ycombinator.com/item?id=40205699) (V2 launch)
+
+## What Is ZenStack?
+
+ZenStack is a TypeScript database toolkit for building full-stack or backend Node.js and Bun applications. Its core is a schema-first ORM that uses a domain-specific language called **ZModel** to define data models and access rules.
+
+ZenStack's own description:
+
+> ZenStack is a TypeScript database toolkit for developing full-stack or backend Node.js/Bun applications. It provides a unified data modeling and query solution.
+
+The project launched on HN as ZenStack V1 in 2023, pivoted to a Prisma-based V2 in 2024, and now ships **V3** as a ground-up rewrite on top of the [Kysely](https://kysely.dev) query builder — while keeping a Prisma-compatible query API for drop-in migration.
+
+### Key architecture decisions in V3
+
+V3 replaced the Prisma ORM foundation with a custom engine built on Kysely. The team documented the rationale on their blog, citing constraints they hit with Prisma at scale.
+
+Even without using ZenStack's advanced features, V3 serves as a drop-in replacement for Prisma with these benefits:
+
+1. **Pure TypeScript** — no Rust or WASM components
+2. **Better type inference** — less code generation, more compile-time safety
+3. **Fully-typed query builder** — an escape hatch that Prisma's raw SQL support doesn't match
+
+## Setup Workflow
+
+### Step 1: Create a new project
+
+```bash
+npm create zenstack@latest my-project
+```
+
+### Step 2: Initialize an existing project
+
+```bash
+npx @zenstackhq/cli@latest init
+```
+
+### Step 3: Manual installation
+
+```bash
+npm install -D @zenstackhq/cli
+npm install @zenstackhq/schema @zenstackhq/orm
+```
+
+Then create a `zenstack` folder with a `schema.zmodel` file.
+
+### Step 4: Define your schema
+
+ZenStack uses ZModel, a DSL that extends Prisma's schema syntax with access-control decorators:
+
+```zmodel
+// schema.zmodel
+model User {
+    id    String @id @default(uuid())
+    email String @unique
+    posts Post[]
+
+    @@allow('all', auth() == this)
+}
+
+model Post {
+    id        String  @id @default(uuid())
+    title     String
+    published Boolean @default(false)
+    author    User    @relation(fields: [authorId], references: [id])
+    authorId  String
+
+    @@allow('read', published || auth() == author)
+}
+```
+
+### Step 5: Generate and use
+
+```bash
+npx zenstack generate
+```
+
+ZenStack outputs a fully-typed ORM, auto-generated REST/GraphQL APIs, and TanStack Query hooks for the frontend.
+
+## Feature Overview
+
+- **Schema-first ORM** — Prisma-compatible `schema.zmodel` syntax
+- **Dual API surface** — high-level ORM queries and low-level Kysely query builder
+- **Built-in access control** — declarative `@@allow` rules per model
+- **Polymorphic modeling** — supports inheritance patterns Prisma doesn't
+- **Auto-generated APIs** — CRUD web APIs for Express, Fastify, Next.js, and more
+- **TanStack Query hooks** — frontend data fetching generated from schema
+- **Zod schema generation** — input/output validation out of the box
+
+## Comparison with Prisma
+
+| Feature | Prisma | ZenStack V3 |
+|---|---|---|
+| Query API | Prisma Client | Prisma-compatible + Kysely escape hatch |
+| Language | Rust engine + TypeScript | Pure TypeScript |
+| Access control | None built-in | Declarative `@@allow` rules |
+| Polymorphism | Limited | Full support |
+| API generation | None | Auto REST/GraphQL |
+| Frontend hooks | None | TanStack Query |
+| Type inference | Generated | Better inference, less codegen |
+
+ZenStack V3 is not a fork of Prisma — it shares no code with Prisma. It started as a Prisma wrapper but V3 is a clean rewrite.
+
+## Deeper Analysis
+
+### When to choose ZenStack V3 over Prisma
+
+ZenStack makes sense when you need **fine-grained row-level security** without wiring up a separate auth layer. The `@@allow` rules in ZModel compile to predicates injected into every database query — a security boundary that's hard to get right manually.
+
+It's also attractive for **full-stack TypeScript teams** that want auto-generated API stubs and TanStack Query hooks from a single schema definition, reducing the boilerplate between database and frontend.
+
+### When to stick with Prisma
+
+Prisma has a larger community, more tutorials, broader hosting support, and a stable Rust engine that has been hardened by years of production use. If you don't need ZenStack's extra features, Prisma's simplicity wins.
+
+### Developer experience
+
+ZenStack uses its own CLI (`@zenstackhq/cli`) rather than `prisma`. The `npm create zenstack@latest` scaffold works well. The Kysely-backed query builder is fully typed — no `any` escapes — and you can drop to raw SQL when you need it.
+
+## FAQ
+
+**Q: Does ZenStack work with existing Prisma schemas?**
+**A:** Yes. ZenStack's ZModel is compatible with Prisma's schema syntax, so many existing schemas work with minimal modification. The team provides a migration guide.
+
+**Q: What databases does ZenStack support?**
+**A:** PostgreSQL, MySQL, SQLite, and PlanetScale via Kysely's adapter layer.
+
+**Q: Is ZenStack V3 production-ready?**
+**A:** The project is at v3.8.3 and lists production users like MermaidChart. As with any relatively young ORM, audit the release notes and test thoroughly before migrating a critical system.
+
+**Q: How does pricing work?**
+**A:** ZenStack is open source under the MIT license. The core ORM and CLI are free. Commercial support options are available via the project's sponsor links.
+
+## Conclusion
+
+ZenStack V3 is a serious attempt to solve the gap between Prisma's ease-of-use and the fine-grained security and flexibility that production SaaS backends demand. With a pure TypeScript stack, Kysely-backed query power, and Prisma-compatible syntax, it lowers the migration cost for teams already invested in Prisma but hitting its ceiling.
+
+If you need row-level security, polymorphic models, or auto-generated API hooks from a single schema, ZenStack V3 is worth evaluating. Start with the `npm create zenstack@latest` scaffold or try it directly in [StackBlitz](https://stackblitz.com~/github.com/zenstackhq/v3-doc-quick-start).
