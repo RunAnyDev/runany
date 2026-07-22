@@ -1,0 +1,170 @@
+---
+title: "Libretto Browser Tools SDK – AI agent browser harness"
+description: "Six Playwright tools let AI agents open browsers, read pages, and act. 55% lower cost than alternatives."
+pubDate: "2026-07-22"
+tags: ["ai-setup", "browser-automation", "playwright", "agent-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/browser-tools-sdk.webp"
+  alt: "Libretto Browser Tools SDK product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Libretto Browser Tools SDK gives any AI agent a real browser through six focused Playwright tools — browser_snapshot reads page structure, browser_exec runs actions — at 55% lower cost than general-purpose browser automation alternatives.
+
+## What Is Libretto Browser Tools SDK?
+
+Libretto Browser Tools SDK is an open-source toolkit that gives coding agents a live browser they can control through a small, token-efficient tool set. It wraps Playwright so agents can inspect pages, run actions, and handle web interactions that break pure-API approaches — CAPTCHAs, dynamic content, session-scoped JavaScript, and multi-step workflows.
+
+> Libretto is a toolkit for building robust web integrations. It gives your coding agent a live browser and a token-efficient CLI to: inspect live pages with minimal context overhead, capture network traffic to reverse-engineer site APIs, record user actions and replay them as automation scripts, and debug broken workflows interactively against the real site.
+
+Six tools cover the full browser session lifecycle:
+
+| Tool | Role |
+|------|------|
+| `browser_open` | Start a local browser session |
+| `browser_snapshot` | Read a compact accessibility tree with stable refs |
+| `browser_exec` | Run Playwright code on the live page |
+| `browser_status` | List open pages and session state |
+| `browser_close` | Clean up when the job is done |
+
+## Why Agents Need a Browser Harness
+
+AI agents working through complex web interfaces face a recurring problem: the web was built for humans with eyes and hands, not APIs. General-purpose browser automation tools solve this but introduce two classes of cost:
+
+1. **Token overhead** — raw HTML snapshots or full DOM dumps burn context tokens on noise the agent does not need.
+2. **Dollar cost** — cloud browser providers charge per session-minute.
+
+Browser Tools SDK addresses both by keeping the tool surface small and the snapshot format lean. The `browser_snapshot` tool returns a compact accessibility tree rather than raw HTML. The `browser_exec` tool runs Playwright code the agent writes, so the agent decides what to interact with.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- Chromium (downloaded automatically via `npx libretto setup`)
+
+### Install
+
+```bash
+npm install libretto-browser-tools
+```
+
+### AI SDK integration
+
+```typescript
+import { LocalBrowserProvider } from "@libretto/browser-tools/local";
+import { createAiSdkBrowserTools } from "@libretto/browser-tools/ai-sdk";
+import { generateText } from "ai";
+
+const provider = new LocalBrowserProvider();
+const { tools } = createAiSdkBrowserTools(provider);
+
+const result = await generateText({
+  model,
+  tools,
+  prompt: "Find the top story on Hacker News",
+});
+```
+
+### Pi integration
+
+```typescript
+import { LocalBrowserProvider } from "@libretto/browser-tools/local";
+import { createPiBrowserTools } from "@libretto/browser-tools/pi";
+
+const provider = new LocalBrowserProvider();
+const tools = createPiBrowserTools(provider);
+```
+
+### Custom agent loop
+
+The base tools are framework-neutral. Wire them into any agent loop that speaks tool-calling:
+
+```typescript
+const tools = [
+  browserOpenTool(provider),
+  browserSnapshotTool(provider),
+  browserExecTool(provider),
+  browserStatusTool(provider),
+  browserCloseTool(provider),
+];
+```
+
+## How browser_snapshot and browser_exec Work Together
+
+Most browser tasks are a two-step loop: read the page, then act on it.
+
+**browser_snapshot** returns a compact accessibility tree with stable element references:
+
+```
+<page title="Hacker News">
+  heading "Hacker News"
+  link "Show HN: Browser Tools" [ref=l12]
+  link "42 comments" [ref=l13]
+```
+
+The agent uses these refs to target elements without guessing at CSS selectors.
+
+**browser_exec** runs Playwright TypeScript against the live page and returns a diff of what changed:
+
+```typescript
+browser_exec("await page.locator('.titleline > a').first().click()")
+// → { ok: true, snapshotDiff: "+ article [ref=l20]" }
+```
+
+The diff format keeps context cheap — the agent sees what happened, not the entire page.
+
+## Cost Comparison
+
+Measured across 26 tasks on public websites with GPT 5.6 Sol (best result from 3 runs):
+
+| Solution | Cost per task |
+|----------|---------------|
+| Browser Tools SDK | $0.106 |
+| dev-browser | $0.257 |
+| agent-browser | $0.235 |
+| playwright-cli | $0.293 |
+
+Browser Tools SDK came in 55% cheaper than the next-best alternative.
+
+## Supported Providers
+
+Run Chromium locally or connect to a cloud provider:
+
+- **LocalBrowserProvider** — local Chromium
+- **Libretto Cloud** — hosted browser sessions
+- **Browserbase** — cloud browser provider
+- **Kernel** — cloud browser provider
+- **Steel** — cloud browser provider
+
+## Security Notes
+
+Libretto does not send command arguments, URLs, project paths, session cookies, API keys, error messages, or email addresses to its telemetry endpoint. Each resolved command sends only an install ID, timestamp, command event name, error boolean, package version, build channel, and cloud user ID (when signed in). The install ID is stored in `~/.libretto/telemetry.json`.
+
+## FAQ
+
+**Q: Does Browser Tools SDK replace Playwright?**
+**A:** No. It wraps a small, stable subset of Playwright into six focused tools an agent can call. If you need Playwright's full API surface, use it directly.
+
+**Q: Which agent frameworks work with it today?**
+**A:** Adapters ship for AI SDK and Pi. The base tools are framework-neutral, so you can wire them into any agent loop that supports tool-calling.
+
+**Q: Does it work with headless browsers?**
+**A:** Yes. LocalBrowserProvider runs Chromium headless by default. Cloud providers run headless sessions in their infrastructure.
+
+**Q: What does browser_snapshot actually return?**
+**A:** A compact accessibility tree — not raw HTML. Elements have stable refs the agent uses to target them in subsequent browser_exec calls, keeping token usage low.
+
+## Source and Accuracy Notes
+
+- Project page: [libretto.sh/browser-tools](https://libretto.sh/browser-tools)
+- Source repository: [github.com/saffron-health/libretto](https://github.com/saffron-health/libretto)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- NPM package: `libretto-browser-tools`
+- HN launch thread: [news.ycombinator.com/item?id=48998262](https://news.ycombinator.com/item?id=48998262)
+- Source last checked: 2026-07-22 (commit `main`, pushed 2026-07-22T04:49:03Z)
