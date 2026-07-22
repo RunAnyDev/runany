@@ -1,0 +1,191 @@
+---
+title: "ReviewCerberus - AI Code Review via Docker or GitHub Action"
+description: "Open-source AI code review tool that analyzes git diffs and generates structured reports with severity ratings. Supports Anthropic, AWS Bedrock, Ollama."
+pubDate: "2026-07-22"
+tags: ["ai-setup", "dev-tools", "github-actions"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/reviewcerberus.webp"
+  alt: "ReviewCerberus AI code review tool thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** ReviewCerberus is an open-source AI code review tool that runs as a Docker container or GitHub Action, analyzing git branch diffs and generating structured reports with severity ratings across logic, security, and performance.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [hub.docker.com/r/kirill89/reviewcerberus](https://hub.docker.com/r/kirill89/reviewcerberus)
+- Source repository: [github.com/Kirill89/reviewcerberus](https://github.com/Kirill89/reviewcerberus)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=48851684](https://news.ycombinator.com/item?id=48851684)
+
+## What Is ReviewCerberus?
+
+ReviewCerberus is an AI-powered code review tool that analyzes git branch differences and generates comprehensive review reports with structured output. It was [launched on Show HN](https://news.ycombinator.com/item?id=48851684) in July 2026.
+
+The tool works as a Docker container you run locally, or as a GitHub Action that posts review comments directly on pull requests. It supports multiple LLM providers: Anthropic API, AWS Bedrock, Ollama, and Moonshot.
+
+Key differentiators from generic AI PR comments:
+- **Structured output** — issues organized by severity (Critical, High, Medium, Low) with a summary table
+- **Chain-of-Verification mode** — experimental feature that cross-checks findings against the [Chain-of-Verification research paper](https://arxiv.org/abs/2309.11495) to reduce false positives
+- **GitHub Action built-in** — no third-party CI marketplace apps needed; the action posts comments directly on your PR
+
+## Setup Workflow
+
+### Option 1: Docker (local CLI)
+
+```bash
+docker run --rm -it -v $(pwd):/repo \
+  -e MODEL_PROVIDER=anthropic \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  kirill89/reviewcerberus:latest \
+  --repo-path /repo --output /repo/review.md
+```
+
+The tool analyzes the diff between your current branch and the default branch, then writes a `review.md` report to the repo.
+
+**Custom target branch:**
+
+```bash
+docker run --rm -it -v $(pwd):/repo \
+  -e MODEL_PROVIDER=anthropic \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  kirill89/reviewcerberus:latest \
+  --repo-path /repo --target-branch develop --output /repo/review.md
+```
+
+**With custom review guidelines:**
+
+```bash
+docker run --rm -it -v $(pwd):/repo \
+  -e MODEL_PROVIDER=anthropic \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  kirill89/reviewcerberus:latest \
+  --repo-path /repo --instructions /repo/guidelines.md --output /repo/review.md
+```
+
+### Option 2: GitHub Action (automated PR reviews)
+
+Add to `.github/workflows/review.yml`:
+
+```yaml
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: Kirill89/reviewcerberus/action@v1
+        with:
+          model_provider: anthropic
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+The action posts review comments directly on the PR and adds a summary table with issue counts by severity.
+
+### Model Provider Configuration
+
+| Provider | Environment Variable |
+|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| AWS Bedrock | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` |
+| Ollama | `OLLAMA_BASE_URL` (default `http://localhost:11434`) |
+| Moonshot | `MOONSHOT_API_KEY` |
+
+For AWS Bedrock, set `MODEL_PROVIDER=bedrock` and configure your AWS credentials as environment variables or use an IAM role on the GitHub Action runner.
+
+## Deeper Analysis
+
+### What the review report looks like
+
+The output `review.md` is structured as:
+
+```markdown
+# Code Review Report
+
+## Summary
+| Severity | Count |
+|---|---|
+| Critical | 1 |
+| High | 3 |
+| Medium | 5 |
+| Low | 2 |
+
+## Critical Issues
+### [File] Function `processPayment`
+**Line 42**: SQL injection vulnerability — user input concatenated directly into query string.
+
+## ...more sections for High/Medium/Low
+```
+
+Each issue includes the file path, line number, and a plain-language explanation of the problem.
+
+### Chain-of-Verification mode
+
+The `--verification-mode` flag enables an experimental two-pass analysis:
+
+1. First pass: LLM identifies potential issues in the diff
+2. Second pass: LLM re-reads the original code context and verifies each flagged issue is a real bug, not a false positive from lacking context
+
+This adds latency but is designed to reduce the noise that plagues generic AI PR reviewers.
+
+### GitHub Action vs. marketplace bots
+
+The main alternatives are GitHub's own Copilot code review, Reviewnb, and Snyk. ReviewCerberus differs by:
+- Self-hosted (no data leaves your infrastructure when using Ollama)
+- No marketplace app install required — just a workflow YAML
+- Supports on-prem LLMs via Ollama
+
+The GitHub Action approach means reviews run without requiring you to grant a third-party app read access to your repos.
+
+## Practical Evaluation Checklist
+
+- Does it handle large diffs gracefully (tested with 50+ file changes)?
+- Ollama mode works fully offline — good for proprietary codebases
+- AWS Bedrock mode requires appropriate IAM permissions for the region
+- Chain-of-Verification adds noticeable latency on large PRs
+- The GitHub Action posts comments as the actor (GitHub App), not a personal account
+
+## Security Notes
+
+- API keys must be passed as environment variables, not baked into workflow files — use GitHub Secrets
+- For public repos, consider that sending code to third-party APIs may conflict with org security policy — Ollama mode is the self-hosted alternative
+- The Docker container runs with the UID of the caller and writes output to the mounted volume; verify your volume mount permissions
+
+## FAQ
+
+**Q: Does it work with GitHub Enterprise or GitLab?**
+**A:** The Docker CLI works with any Git host (GitHub, GitLab, Bitbucket) since it only needs a local git repo. The GitHub Action is specific to GitHub.
+
+**Q: How does it choose what to review?**
+**A:** By default it compares the current branch against the default branch. You can override with `--target-branch` or `--base-commit` / `--head-commit` for specific commit ranges.
+
+**Q: Can I use it with a self-hosted LLM?**
+**A:** Yes — set `MODEL_PROVIDER=ollama` and `OLLAMA_BASE_URL` to your Ollama server endpoint.
+
+**Q: What models are supported on AWS Bedrock?**
+**A:** Claude models available on Bedrock (Claude 3.5 Sonnet, etc.) — configure via `AWS_REGION` and let the tool pick the available model.
+
+## Conclusion
+
+ReviewCerberus fills the gap between noisy generic AI PR reviewers and manual code review. The GitHub Action approach is its strongest feature — it posts structured reports with severity ratings directly on PRs without requiring a marketplace app install. The Chain-of-Verification mode is worth testing if you find false positives from other tools annoying.
+
+For teams already using Anthropic or Bedrock for other tasks, this is a lightweight add-on. For fully offline or self-hosted workflows, Ollama support makes it viable for proprietary codebases where sending code externally is a non-starter.
