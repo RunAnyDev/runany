@@ -1,0 +1,153 @@
+---
+title: "pg-mcp – PostgreSQL MCP Server for AI Agents"
+description: "pg-mcp bridges PostgreSQL and AI agents through the Model Context Protocol, exposing schema introspection, read-only queries, and EXPLAIN analysis as tools any LLM can call."
+pubDate: "2026-07-22"
+tags: ["mcp", "postgresql", "ai-agents", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pg-mcp-server.webp"
+  alt: "pg-mcp PostgreSQL MCP Server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** pg-mcp is a Python MCP server that lets any MCP-compatible AI agent explore, query, and analyze PostgreSQL databases through structured tools — no SQL required on the developer's side.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [stuzero.github.io/pg-mcp](https://stuzero.github.io/pg-mcp/)
+- Source repository: [github.com/stuzero/pg-mcp-server](https://github.com/stuzero/pg-mcp-server) ← **README read in full**
+- License: [MIT](https://github.com/stuzero/pg-mcp-server/blob/main/LICENSE) ← **verified**
+- HN launch thread: [news.ycombinator.com/item?id=43520953](https://news.ycombinator.com/item?id=43520953) — 167 points, Show HN March 2025
+- Source last checked: 2026-07-22 (README + GitHub API + HN thread verified)
+
+## What Is pg-mcp?
+
+pg-mcp is a Model Context Protocol server for PostgreSQL. Where a traditional database driver exposes raw connection handles, pg-mcp exposes **structured tools** that an MCP-compatible AI agent can call directly — discovering schemas, running read-only queries, and analyzing execution plans without the agent needing to know SQL.
+
+The project was built by [stuzero](https://github.com/stuzero) and announced on HN in March 2025. Its distinguishing feature over the [reference Postgres MCP implementation](https://github.com/modelcontextprotocol/servers/tree/main/src/postgres) is its **multi-tenant, cloud-ready architecture** using HTTP/SSE transport (rather than stdio), making it suitable for production deployments where multiple AI agents connect concurrently.
+
+### Key features
+
+From the [README](https://github.com/stuzero/pg-mcp-server):
+
+- **Multi-database support** — connect to multiple PostgreSQL databases simultaneously
+- **Schema introspection** — exposes table structures, types, indexes, constraints, and column descriptions from `pg_catalog`
+- **Read-only query execution** via the `pg_query` tool
+- **EXPLAIN analysis** — analyze query execution plans before running
+- **Extension plugins** — YAML-based plugin system with built-in support for pgvector and PostGIS
+- **Server mode** — runs over HTTP/SSE, accepts concurrent connections from multiple agents
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.13+
+- A running PostgreSQL database
+- An MCP-compatible AI client (e.g., Claude Desktop, a custom agent)
+
+### Step 1: Clone and start the server
+
+```bash
+git clone https://github.com/stuzero/pg-mcp-server.git
+cd pg-mcp-server
+```
+
+### Step 2: Run with Docker Compose
+
+```bash
+docker-compose up -d
+```
+
+The server starts at `http://localhost:8000/sse`.
+
+### Step 3: Manual installation (no Docker)
+
+```bash
+# Install dependencies and create virtual environment
+uv sync
+
+# Activate
+source .venv/bin/activate
+
+# Run the server
+python -m server.app
+```
+
+### Step 4: Connect an MCP client
+
+Point your MCP-compatible client to the SSE endpoint at `http://localhost:8000/sse`. The server exposes these core tools:
+
+| Tool | Purpose |
+|---|---|
+| `pg_connect` | Register a connection string and receive a secure connection ID |
+| `pg_disconnect` | Close a database connection |
+| `pg_query` | Execute a read-only SQL query via connection ID |
+| `pg_explain` | Return a JSON execution plan for analysis |
+
+Schema resources are also available as MCP resources (not just tools): schemas, tables, columns, constraints, indexes, and extension context.
+
+## Deeper Analysis
+
+### Multi-tenancy and concurrency
+
+Unlike the reference Postgres MCP server which uses stdio transport and is designed for single-agent local use, pg-mcp is explicitly designed for concurrent multi-agent access. The author notes on HN:
+
+> "It does quite a few non-standard things in order to achieve the multi-tenancy. I encourage you to look at the code."
+
+Multiple AI agents can each bring their own LLM (via API key or local model) and query the same pg-mcp instance simultaneously, each with their own database connection.
+
+### Extension plugin system
+
+pg-mcp includes a YAML-based plugin architecture for PostgreSQL extensions. Built-in plugins cover:
+
+- **PostGIS** — spatial data types and functions
+- **pgvector** — vector similarity search functions and best practices
+
+Additional extensions can be added by dropping a YAML config file into the plugins directory.
+
+### Security considerations
+
+The `pg_query` tool executes **read-only** queries (`SELECT` only). However, as noted on the HN thread, deployment without authentication is a risk — the Docker Compose configuration exposes port 8000, which could be accessible on the internet if the host firewall is not configured. In production, wrap pg-mcp behind an auth proxy or VPN.
+
+## Practical Evaluation Checklist
+
+- [ ] Runs via Docker Compose in one command
+- [ ] Multiple concurrent agent connections work without interference
+- [ ] Schema introspection returns correct column types and descriptions
+- [ ] Read-only enforcement holds (no `INSERT`/`UPDATE`/`DELETE` via `pg_query`)
+- [ ] `pg_explain` returns valid JSON PostgreSQL execution plans
+- [ ] Extension plugins load correctly for pgvector and PostGIS
+- [ ] Connection pooling handles connection lifecycle cleanly
+
+## Security Notes
+
+- **Read-only by default** — `pg_query` only executes `SELECT` statements
+- **No built-in authentication** — pg-mcp does not include auth; deploy behind a VPN or auth proxy in production
+- **Connection strings** — store database credentials securely; do not hardcode in config files committed to version control
+- **HN community feedback** — a commenter noted exposing port 8000 without a firewall rule can lead to unauthorized access within 24 hours; treat it as an internet-facing port by default
+
+## FAQ
+
+**Q: How is this different from the official Postgres MCP server?**
+**A:** The reference implementation uses stdio transport and is designed for single-agent local use. pg-mcp uses HTTP/SSE for cloud deployments and supports concurrent multi-agent, multi-database connections. It also includes an extension plugin system and richer schema introspection.
+
+**Q: Does it support write operations?**
+**A:** No — `pg_query` is read-only and only executes `SELECT`. For write operations you would need a separate tool or modify the server.
+
+**Q: What PostgreSQL extensions are supported?**
+**A:** Out of the box: pgvector (vector similarity search) and PostGIS (spatial data). Additional extensions can be added via the YAML plugin system.
+
+**Q: Can I connect multiple AI agents simultaneously?**
+**A:** Yes. pg-mcp is designed for multi-tenant use, accepting concurrent connections from multiple agents over HTTP/SSE.
+
+## Conclusion
+
+pg-mcp fills the gap between lightweight MCP demos and production AI systems that need structured database access. Its HTTP/SSE transport, multi-tenant connection model, and extension plugin system make it a practical choice for teams building multi-agent systems that query Postgres in natural language. For developers already using MCP-compatible AI clients, adding database context is a configuration change rather than a code change.
+
+If you want to let Claude or another AI agent query your database without writing SQL, pg-mcp is worth a closer look.
