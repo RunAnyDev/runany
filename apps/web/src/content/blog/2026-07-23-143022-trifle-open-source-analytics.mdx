@@ -1,0 +1,218 @@
+---
+title: "Trifle – Time-Series Analytics Without the Infrastructure"
+description: "Trifle is an open-source time-series analytics library that stores aggregated counters instead of raw events, working with Postgres, Redis, MongoDB, MySQL, or SQLite you already have."
+pubDate: "2026-07-23"
+tags: ["analytics", "open-source", "ruby", "time-series"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/trifle-open-source-analytics.webp"
+  alt: "Trifle time-series analytics landing page"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Trifle is an open-source time-series analytics library that aggregates nested counters into pre-defined time buckets using the database you already run — Postgres, Redis, MongoDB, MySQL, or SQLite. No InfluxDB, no TimescaleDB, one gem call and you are tracking.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [trifle.io](https://trifle.io)
+- Source repository (Ruby): [github.com/trifle-io/trifle-stats](https://github.com/trifle-io/trifle-stats)
+- Source repository (Go): [github.com/trifle-io/trifle_stats_go](https://github.com/trifle-io/trifle_stats_go)
+- Source repository (Elixir): [github.com/trifle-io/trifle_stats](https://github.com/trifle-io/trifle_stats)
+- CLI: [github.com/trifle-io/trifle-cli](https://github.com/trifle-io/trifle-cli)
+- License: MIT (verified via LICENSE files in each repo)
+- HN launch thread: [news.ycombinator.com/item?id=49007574](https://news.ycombinator.com/item?id=49007574)
+- Source last checked: 2026-07-23
+
+## What Is Trifle?
+
+Trifle is a time-series analytics library that tracks nested counters and breakdowns without requiring a dedicated time-series database. Instead of ingesting raw events, you call `track` with aggregated values and Trifle writes them into pre-defined time buckets — one write, multiple rollups.
+
+The core idea, from the HN launch post:
+
+> "Aggregate counters into pre-defined time buckets, so a single write increments multiple buckets at once."
+
+Trifle started in 2015 as a Rails APM project. After two rebuilds over a decade, it now tracks approximately 1 billion events per day at the author's day job. The library is available in Ruby, Elixir, and Go, with a unified DSL across all three drivers.
+
+## Key Features
+
+- **No new infrastructure** — uses your existing Postgres, Redis, MongoDB, MySQL, or SQLite database
+- **Nested breakdowns** — track revenue by country by channel in a single `track` call
+- **Automatic rollup** — granularities of 1 minute, 6 hours, 1 day, 1 month handled automatically
+- **Multi-language** — Ruby, Elixir, and Go implementations with the same API surface
+- **MCP server** — AI agent integration via Model Context Protocol for metric payloads and execution tracing
+- **CLI tool** — terminal access to your metrics without a browser
+- **Agent Skills** — `npx -y @trifle-io/install` brings Trifle best practices to Claude Code, Cursor, Codex, and other coding agents
+
+## Supported Databases
+
+| Driver | Status |
+|---|---|
+| Postgres | Stable |
+| Redis | Stable |
+| MongoDB | Stable |
+| MySQL | Stable |
+| SQLite | Stable |
+
+## Setup
+
+### Ruby / Rails
+
+```ruby
+# Gemfile
+gem 'trifle-stats'
+```
+
+```ruby
+# config/initializers/trifle_stats.rb
+Trifle::Stats.configure do |config|
+  config.driver = Trifle::Stats::Driver::Postgres.new(ActiveRecord::Base.connection)
+  config.granularities = ['1h', '1d', '1w', '1mo']
+end
+```
+
+```ruby
+# Track an event
+Trifle::Stats.track(
+  key: 'orders',
+  at: Time.now,
+  values: {
+    count: 1,
+    revenue: 49_90,
+    revenue_by_country: { us: 49_90 },
+    revenue_by_channel: { organic: 49_90 }
+  }
+)
+```
+
+```ruby
+# Query aggregated values
+Trifle::Stats.values(
+  key: 'orders',
+  from: 1.week.ago,
+  to: Time.now,
+  granularity: :day
+)
+#=> { at: [Mon, Tue, Wed, ...], values: [{ "count" => 12, "revenue" => 598_80, ... }, ...] }
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "time"
+    stats "github.com/trifle-io/trifle_stats_go"
+)
+
+func main() {
+    driver := stats.NewPostgresDriver(db)
+    client := stats.NewClient(driver, []string{"1h", "1d", "1w", "1mo"})
+
+    client.Track("orders", time.Now(), map[string]interface{}{
+        "count":   1,
+        "revenue": 49_90,
+    })
+}
+```
+
+### Elixir
+
+```elixir
+defmodule MyApp.Analytics do
+  use Trifle.Stats
+
+  def track_order do
+    Trifle.Stats.track(
+      key: "orders",
+      at: DateTime.utc_now(),
+      values: %{
+        count: 1,
+        revenue: 49.90
+      }
+    )
+  end
+end
+```
+
+## How Nested Breakdowns Work
+
+The nested `values` hash is the core differentiator. A single call writes to multiple counter dimensions simultaneously:
+
+```ruby
+Trifle::Stats.track(
+  key: 'requests::aws::s3_uploads',
+  values: {
+    count: 1,
+    status: { request.response_code => 1 },
+    size: payload.bytes,
+    duration: { sum: request.duration, count: 1 }
+  }
+)
+```
+
+This increments the overall `count`, tracks the distribution of HTTP response codes, logs total bytes uploaded, and records duration metrics — all in one write. Querying the data later lets you slice by any dimension you tracked.
+
+## MCP Server for AI Agents
+
+Trifle ships an MCP server that lets AI coding agents interact with your metrics:
+
+```bash
+npx -y @trifle-io/install
+```
+
+This installs Trifle Skills for supported agents, providing:
+- Best practices for metric payload design
+- Execution tracing integration
+- CLI analytics access
+
+## Pricing
+
+The Trifle libraries (Ruby, Elixir, Go) are open-source and free to use. The CLI is also free. Trifle Cloud Pro is available for dashboards and hosted infrastructure:
+
+- **Cloud Pro**: $19/month (launch special — was $399/month)
+- Libraries and CLI: Free (MIT license)
+- Self-hosted: Free (run on your own infrastructure)
+
+## Comparison to Other Approaches
+
+| Approach | Infrastructure | Nested Counters | Languages |
+|---|---|---|---|
+| **Trifle** | Your existing DB | Yes | Ruby, Elixir, Go |
+| InfluxDB | Dedicated DB | Limited | Many |
+| TimescaleDB | Dedicated DB | No | SQL only |
+| AWS CloudWatch | Managed service | No | API only |
+
+## FAQ
+
+**Q: Does Trifle require a dedicated time-series database?**
+**A:** No. Trifle uses your existing Postgres, Redis, MongoDB, MySQL, or SQLite database as its storage layer.
+
+**Q: How does Trifle handle high write volumes?**
+**A:** The author reports that Trifle tracks about 1 billion events per day at their day job using Postgres as the backend.
+
+**Q: Which programming languages are supported?**
+**A:** Ruby (trifle-stats gem), Elixir (trifle_stats), and Go (trifle_stats_go) are all available with a unified DSL.
+
+**Q: Is there a managed cloud option?**
+**A:** Yes, Trifle Cloud Pro is available at $19/month (launch pricing). The libraries and CLI remain open-source and free.
+
+**Q: Can AI agents use Trifle?**
+**A:** Yes. The `@trifle-io/install` package provides MCP server integration for Claude Code, Cursor, Codex, and other agents that support the Model Context Protocol.
+
+## Conclusion
+
+Trifle solves a specific problem well: you want time-series analytics without deploying and maintaining a dedicated time-series database. By aggregating counters into pre-defined buckets at write time, it keeps queries fast even at high event volumes. The nested breakdown support is unusually powerful for a library this lightweight.
+
+If you are already running Postgres, Redis, or MongoDB, adding Trifle takes one gem install and a configuration block. The MIT license and multi-language support make it straightforward to embed in projects without vendor lock-in.
+
+- [Trifle project page](https://trifle.io)
+- [Ruby gem](https://github.com/trifle-io/trifle-stats)
+- [Go library](https://github.com/trifle-io/trifle_stats_go)
+- [HN Discussion](https://news.ycombinator.com/item?id=49007574)
