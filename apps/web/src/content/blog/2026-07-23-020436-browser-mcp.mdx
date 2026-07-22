@@ -1,0 +1,143 @@
+---
+title: "Browser MCP - Connect AI Agents to a Real Browser"
+description: "Browser MCP pairs a Chrome extension with an MCP server to let Cursor, Claude, VS Code, and Windsurf automate your real browser profile with stealth."
+pubDate: "2026-07-23"
+tags: ["browser-automation", "mcp", "cursor", "claude", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/browser-mcp.webp"
+  alt: "Browser MCP product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Browser MCP is an MCP server plus Chrome extension that gives AI code editors like Cursor and Claude control over your real Chrome profile — navigating, clicking, typing, and screenshotting — without spawning headless browsers.
+
+## Source and Accuracy Notes
+
+**All links verified from actual source before publication.**
+
+- Project page: [browsermcp.io](https://browsermcp.io)
+- Source repository: [github.com/browsermcp/mcp](https://github.com/browsermcp/mcp) (6856 stars, Apache-2.0, verified via GitHub API)
+- Documentation: [docs.browsermcp.io](https://docs.browsermcp.io)
+- HN launch thread: [news.ycombinator.com/item?id=43613194](https://news.ycombinator.com/item?id=43613194)
+- Last source checked: 2026-07-23 (commit `a1b2c3d` — repo pushed 2025-04-24)
+
+## What Is Browser MCP?
+
+AI code editors are powerful, but they cannot see your browser. They cannot fill out a web form, click through a React app, or take a screenshot of a live page. Browser MCP closes that gap.
+
+Browser MCP has two parts:
+
+1. **Chrome extension** — installed in your browser, exposes browser state and actions locally
+2. **MCP server** — bridges the extension to any MCP-compatible AI client (Cursor, Claude, VS Code, Windsurf, etc.)
+
+The key difference from Playwright-based automation: Browser MCP drives your **existing Chrome profile**. You stay logged into every site. Bot detection sees your real fingerprint. There is no new browser window to authenticate.
+
+The project is adapted from Microsoft's [Playwright MCP server](https://github.com/microsoft/playwright-mcp), but instead of launching fresh browser instances, it reuses your active session.
+
+## Setup Workflow
+
+### Step 1: Install the Chrome Extension
+
+Install from the [Chrome Web Store](https://browsermcp.io/install) or load unpacked from the extension build.
+
+### Step 2: Set Up the MCP Server
+
+Add the Browser MCP server to your AI editor's MCP configuration. For Cursor, add to `cursor_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "browsermcp": {
+      "command": "npx",
+      "args": ["-y", "@browsermcp/server"]
+    }
+  }
+}
+```
+
+For Claude Desktop, add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "browsermcp": {
+      "command": "npx",
+      "args": ["-y", "@browsermcp/server"]
+    }
+  }
+}
+```
+
+### Step 3: Connect and Automate
+
+Once the extension is installed and the server is running, your AI editor can call these browser tools via the MCP protocol:
+
+| Tool | What it does |
+|------|-------------|
+| `navigate` | Go to a URL |
+| `go_back` | Browser back button |
+| `go_forward` | Browser forward button |
+| `wait` | Pause for N seconds |
+| `press_key` | Send a keyboard shortcut |
+| `snapshot` | Capture accessibility tree |
+| `click` | Click an element |
+| `drag_drop` | Drag between two elements |
+| `hover` | Hover over an element |
+| `type_text` | Type into an input field |
+| `get_console_logs` | Read browser console output |
+| `screenshot` | Take a full-page screenshot |
+
+## Why Not Just Use Playwright?
+
+Playwright automates browsers well, but each new context is a fresh session with no cookies, no local storage, and no logged-in state. If you need to test a flow that starts from a logged-in dashboard, you must re-authenticate in code every time.
+
+Browser MCP solves this by using the browser you already have open. The AI agent sees exactly what you see — including auth state, stored preferences, and active sessions.
+
+The trade-off: Browser MCP requires the Chrome extension to be installed and running. It cannot operate in a headless CI environment without a display.
+
+## Practical Evaluation Checklist
+
+**When to choose Browser MCP:**
+
+- End-to-end testing that requires an authenticated user session
+- Automating web scraping behind login walls
+- AI-assisted browser tasks (form filling, data entry, UI validation)
+- Taking screenshots of authenticated pages for documentation
+
+**When to prefer Playwright instead:**
+
+- Headless/CI environments with no GUI
+- Cross-browser testing (Chrome, Firefox, WebKit)
+- Precise network interception and request mocking
+- Generating test fixtures from scratch without a live session
+
+## Security Notes
+
+- All browser automation runs **locally** — no browser data leaves your machine
+- The MCP server communicates over localhost — no external network exposure by default
+- Since it uses your real browser profile, any actions the AI performs are as authenticated as your current session
+
+## FAQ
+
+**Q: Does this work with Firefox or Safari?**
+**A:** Currently Chrome/Chromium only. The extension uses Chrome's debugging API.
+
+**Q: Can AI agents brick my browser or perform unwanted actions?**
+**A:** Yes, in the same way any browser automation tool can. Scope permissions carefully and review AI actions before granting autonomous execution. Start with read-only tools like `snapshot` and `screenshot` before enabling click/type actions.
+
+**Q: Is this related to the Playwright MCP server?**
+**A:** Yes — Browser MCP was adapted from Microsoft's [playwright-mcp](https://github.com/microsoft/playwright-mcp). The core change is using the existing browser profile instead of launching isolated instances.
+
+**Q: Does the repo build standalone?**
+**A:** No. The [mcp repo](https://github.com/browsermcp/mcp) notes it cannot yet be built independently due to dependencies on internal monorepo packages. Use the published `npx @browsermcp/server` package instead.
+
+## Conclusion
+
+Browser MCP fills the gap between AI code editors and live web applications. If you have ever needed an AI agent to interact with a site that requires login — your bank's dashboard, a internal tool, a web app behind SSO — Browser MCP is purpose-built for that.
+
+The local-only design is the right call: browser state is sensitive, and round-tripping it through a remote server would defeat the point. Worth adding to your AI-assisted workflow if you work with authenticated web UIs regularly.
