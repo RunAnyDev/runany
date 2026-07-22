@@ -1,0 +1,198 @@
+---
+title: "TimeTracker - Self-Hosted Time Tracking with Invoicing"
+description: "TimeTracker is an open-source, self-hosted time tracking app with timers, project management, and invoice generation. Deploy via Docker on any VPS."
+pubDate: "2026-07-22"
+tags: ["self-hosted", "time-tracking", "docker", "flask", "productivity"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/timetracker.webp"
+  alt: "TimeTracker product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** TimeTracker is an open-source, self-hosted time tracking app that runs on Docker with timers, project management, client billing, and PDF invoice generation built in.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [timetracker.drytrix.com](https://timetracker.drytrix.com)
+- Source repository: [github.com/DRYTRIX/TimeTracker](https://github.com/DRYTRIX/TimeTracker)
+- License: [GPL-3.0](https://github.com/DRYTRIX/TimeTracker/blob/main/LICENSE) (verified via GitHub API)
+- HN launch threads: [news.ycombinator.com/item?id=45436758](https://news.ycombinator.com/item?id=45436758), [news.ycombinator.com/item?id=46086086](https://news.ycombinator.com/item?id=46086086)
+- Source last checked: 2026-07-22 (commit verified via GitHub API, 608 stars)
+
+## What Is TimeTracker?
+
+TimeTracker is a **web-based, self-hosted time tracking application** built with Python Flask and PostgreSQL. It targets freelancers, small teams, and privacy-focused organizations that want full control over their data without paying for a SaaS subscription.
+
+The official description:
+
+> TimeTracker is a **self-hosted, web-based time tracking application** designed for freelancers, teams, and businesses who need professional time management with complete control over their data.
+
+**Perfect for:**
+- Freelancers tracking billable hours across multiple clients
+- Small teams managing projects and tracking productivity
+- Agencies needing detailed reporting and client billing
+- Privacy-focused organizations wanting self-hosted solutions
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose installed on your server
+- A domain or subdomain pointing to your VPS
+- At least 1 GB RAM and 10 GB disk space
+
+### Step 1: Deploy via Docker
+
+The fastest path is a single Docker command pulling the official image:
+
+```bash
+docker pull ghcr.io/drytrix/timetracker:latest
+```
+
+Or using Docker Compose. Save this as `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+services:
+  timetracker:
+    image: ghcr.io/drytrix/timetracker:latest
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - SECRET_KEY=your-secret-key-here
+      - DATABASE_URL=postgresql://user:pass@db:5432/timetracker
+    volumes:
+      - ./data:/app/data
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=timetracker
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+Start the stack:
+
+```bash
+docker-compose up -d
+```
+
+The app will be available at `http://your-server:5000`.
+
+### Step 2: Configure Reverse Proxy (Nginx)
+
+Point Nginx at the container port:
+
+```nginx
+server {
+    listen 80;
+    server_name timetracker.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+Obtain a certificate and enable HTTP/2:
+
+```bash
+certbot --nginx -d timetracker.yourdomain.com
+```
+
+### Step 3: Initial Setup
+
+Open `https://timetracker.yourdomain.com` in your browser. On first launch you will:
+
+1. Create an admin account (email + password)
+2. Add your first client
+3. Create a project and assign it to the client
+4. Start the timer from the Dashboard
+
+## Deeper Analysis
+
+### Technology Stack
+
+TimeTracker uses a conventional Python web stack:
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11+, Flask 3.0.0, SQLAlchemy 2.0.23 |
+| Frontend | HTML5, JavaScript (ES6+), Tailwind CSS 3.3.5 |
+| Real-time | Flask-SocketIO 5.3.6, Eventlet |
+| Database | PostgreSQL (production), SQLite (dev) |
+| PDF generation | WeasyPrint |
+| Deployment | Docker, Gunicorn, Nginx |
+
+### Feature Scope
+
+The README lists these core modules: Dashboard, Timer, Time entries, Projects, Reports (time/finance), Finance and Expenses, Invoices, Clients, and Settings. Recent releases (v5.9.x) added Kanban boards with WIP limits and checklists, a Comments system with @mention notifications, Calendar views with holiday overlays, and a Client Portal with native session handling.
+
+### Distribution Options
+
+Beyond Docker, TimeTracker supports:
+- **NAS deployment** — QNAP, Synology, Portainer via compose stack
+- **Cloud platforms** — Render (one-click deploy button), Fly.io, Railway, Coolify
+- **Docker Hub** — `drytrix/timetracker` (previously `driesp/timetracker`)
+- **GitHub Releases** — pre-built compose files and desktop/mobile binaries
+
+## Practical Evaluation Checklist
+
+- Self-hosted with no mandatory external dependencies
+- Docker-based deployment works on any VPS
+- Supports multiple users and clients
+- Includes invoice generation with PDF export
+- Kanban boards with WIP limits for project tracking
+- Real-time timer widget on the Dashboard
+- OAuth/OIDC authentication available via Authlib
+- Prometheus metrics endpoint for monitoring
+- Internationalization via Flask-Babel
+
+## Security Notes
+
+- SQLAlchemy 2.0 with parameterized queries guards against SQL injection
+- Flask-WTF provides CSRF protection on all forms
+- Optional Sentry SDK integration for error monitoring
+- Optional Grafana OTLP telemetry sink for observability
+- All sensitive configuration via environment variables
+- Database credentials should be stored in secrets management, not in `docker-compose.yml`
+
+## FAQ
+
+**Q: Does TimeTracker have a built-in billing system?**
+**A:** Yes. The Finance module handles invoicing and expense tracking, and WeasyPrint generates professional PDF invoices. You can create invoices from tracked time entries and send them directly to clients.
+
+**Q: Can I use SQLite instead of PostgreSQL?**
+**A:** SQLite works for development and small single-user deployments, but PostgreSQL is recommended for any shared or production environment due to its concurrency handling and reliability.
+
+**Q: Does it work on a Raspberry Pi or low-resource NAS?**
+**A:** Yes — the Docker image and SQLite backend run on ARM devices. For a NAS, use the dedicated NAS compose stack (QNAP, Synology, Portainer templates) documented in the repo.
+
+**Q: Is there a hosted SaaS version?**
+**A:** No. TimeTracker is exclusively self-hosted. There is no cloud offering. The project accepts voluntary support purchases to hide donate prompts in self-hosted instances.
+
+## Conclusion
+
+TimeTracker fills a specific niche: teams that want the power of a commercial time tracking tool like Harvest or Toggl, but need it fully self-hosted with no recurring cost. The Docker-based deployment makes it VPS-friendly, and the breadth of features (timers, Kanban, invoicing, reports) covers most freelancer and small-agency workflows out of the box.
+
+If you need a time tracker that you own end-to-end, TimeTracker is worth the 10-minute Docker setup. Check the [GitHub repo](https://github.com/DRYTRIX/TimeTracker) for the latest release and the [docs](https://github.com/DRYTRIX/TimeTracker/tree/main/docs) for advanced deployment guides.
