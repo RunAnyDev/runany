@@ -1,0 +1,220 @@
+---
+title: "Cactus – AI Inference on Your Smartphone"
+description: "Open-source edge AI engine that runs local LLMs on iOS, Android, and wearables using custom quantization, CPU/GPU kernels, and an OpenAI-compatible API."
+pubDate: "2026-07-24"
+tags: ["ai-setup", "mobile", "edge-ai", "llm", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cactus-mobile-ai-inference.webp"
+  alt: "Cactus – hybrid edge-cloud AI engine for mobile devices"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cactus is an open-source hybrid edge-cloud AI engine for mobile devices that runs quantized LLMs locally on iOS, Android, and wearables via an OpenAI-compatible API — no cloud dependency required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [cactus-compute.com](https://www.cactus-compute.com)
+- Source repository: [github.com/cactus-compute/cactus](https://github.com/cactus-compute/cactus)
+- Current version: v2.0.1 (verified via `git ls-remote --tags`)
+- License: Proprietary with source available (Copyright 2025 Cactus Compute, Inc.)
+- HN launch thread: [news.ycombinator.com/item?id=44524544](https://news.ycombinator.com/item?id=44524544)
+- Topics: ai, android, arm, edge, edge-ai, ios, llamacpp, llm, llm-inference, mobile, mobile-inference, on-device-ai, quantization, rag, smartphone, speech, whisper
+
+## What Is Cactus?
+
+Cactus is a hybrid edge-cloud AI engine purpose-built for mobile devices and wearables. Rather than routing every inference request to a remote GPU cluster, Cactus runs quantized LLMs directly on-device — iPhones, Android phones, tablets, and embedded hardware — with a fallback to cloud models when needed.
+
+The project frames itself as "Ollama for Smartphones," but it goes further: it includes a full computation graph runtime (`Cactus Graph`), custom CPU/GPU kernel implementations for ARM processors (Apple Silicon, Samsung, Pixel), a custom rotation-based quantization technique (`Cactus Quants`), and a transpiler that converts standard PyTorch models into on-device executables (`Cactus Transpiler`).
+
+At the core is an OpenAI-compatible API surface. If your app already talks to OpenAI or Ollama, swapping in Cactus as the backend requires minimal code changes — you point the client at the local endpoint and get latency benefits and privacy guarantees without server costs.
+
+## Architecture Overview
+
+Cactus divides its stack into five layers:
+
+```
+┌─────────────────┐
+│  Cactus Engine  │ ←── OpenAI-compatible APIs for text, speech, and vision.
+└─────────────────┘
+         │
+┌─────────────────┐
+│  Cactus Graph   │ ←── Zero-copy computation graph
+└─────────────────┘
+         │
+┌─────────────────┐
+│ Cactus Kernels  │ ←── CPU/GPU kernels for Apple, Samsung, Pixel, etc.
+└─────────────────┘
+         │
+┌─────────────────┐
+│ Cactus Quants   │ ←── Custom rotation-based quantization technique
+└─────────────────┘
+         │
+┌─────────────────┐
+│Cactus Transpiler│ ←── Transpiles PyTorch models to Cactus format
+└─────────────────┘
+```
+
+### Cactus Engine
+
+The Engine exposes an OpenAI-compatible API for text completion, chat, speech recognition, and vision tasks. It handles model loading, token generation, and the cloud handoff logic when a request exceeds on-device capability.
+
+```cpp
+#include "cactus_engine.h"
+
+cactus_model_t model = cactus_init(
+    "path/to/weight/folder",
+    "path to txt or dir of txts for auto-rag",
+    false
+);
+
+const char* messages = R"([
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "My name is Henry Ndubuaku"}
+])";
+
+const char* options = R"({
+    "max_tokens": 50,
+    "stop_sequences": ["<|im_end|>"]
+})";
+
+char response[4096];
+int result = cactus_complete(
+    model,            // model handle
+    messages,         // JSON chat messages
+    response,         // response buffer
+    sizeof(response), // buffer size
+    options,          // generation options
+    nullptr,          // tools JSON
+    nullptr,          // streaming callback
+    nullptr,          // user data
+    nullptr,          // pcm audio buffer
+    0                 // pcm buffer size
+);
+```
+
+A successful response includes per-token timing and memory usage:
+
+```json
+{
+    "success": true,
+    "error": null,
+    "cloud_handoff": false,
+    "response": "Hi there!",
+    "time_to_first_token_ms": 45.23,
+    "total_time_ms": 163.67,
+    "prefill_tps": 1621.89,
+    "decode_tps": 168.42,
+    "ram_usage_mb": 245.67,
+    "total_tokens": 78
+}
+```
+
+### Cactus Graph
+
+The computation graph (`Cactus Graph`) is a zero-copy intermediate representation that operators use to describe inference pipelines. Kernels for matmul, transpose, and activation functions consume this graph directly. This is analogous to how `llama.cpp` uses a model graph but with explicit support for heterogeneous hardware backends (CPU + GPU on the same device).
+
+```cpp
+#include "cactus_graph.h"
+
+CactusGraph graph;
+auto a = graph.input({2, 3}, Precision::FP16);
+auto b = graph.input({3, 4}, Precision::INT8);
+
+auto x1 = graph.matmul(a, b, false);
+auto x2 = graph.transpose(x1);
+auto result = graph.matmul(b, x2, true);
+
+float a_data[6] = {1.1f, 2.3f, 3.4f, 4.2f, 5.7f, 6.8f};
+float b_data[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+graph.set_input(a, a_data, Precision::FP16);
+graph.set_input(b, b_data, Precision::INT8);
+
+graph.execute();
+void* output_data = graph.get_output(result);
+graph.hard_reset();
+```
+
+### Cactus Kernels
+
+Hardware-specific kernels are provided for Apple (Apple Silicon, ANE), Samsung (Exynos NPU), and Google Pixel (Tensor Gx) processors. The kernels handle INT8 and FP16 mixed-precision matmul, activation functions, and attention ops — the hot paths for transformer inference.
+
+### Cactus Quants
+
+Cactus Quants is a custom quantization scheme based on rotation matrices rather than the standard GPTQ/AWQ approaches used in desktop/server contexts. The rotation step spreads quantization error across dimensions, which Cactus claims improves accuracy at 4-bit and lower precisions on ARM hardware. This is specifically designed for the asymmetric compute characteristics of mobile NPUs.
+
+### Cactus Transpiler
+
+The transpiler converts a standard PyTorch model (HuggingFace format, for example) into the Cactus binary format. This is analogous to `llama.cpp`'s conversion scripts but targets the mobile kernel runtime rather than CPU-only inference.
+
+## Setup on macOS
+
+Cactus provides a Homebrew tap for quick experimentation on Mac before targeting mobile:
+
+```bash
+brew install cactus-compute/cactus/cactus
+cactus run
+```
+
+On first run, Cactus downloads a default model and starts an OpenAI-compatible server locally. You can then query it with any OpenAI-compatible client:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma4-e2b",
+    "messages": [{"role": "user", "content": "What is 2+2?"}]
+  }'
+```
+
+## Mobile SDKs
+
+Cactus publishes SDKs for the major mobile platforms:
+
+- **iOS**: Swift SDK via Swift Package Manager — supports Apple Silicon (M-series chips) and the Neural Engine
+- **Android**: Kotlin SDK via Maven — supports ARM64 CPUs with NPU acceleration where available
+
+Both SDKs expose the same `cactus_init` / `cactus_complete` API as the C Engine, making it straightforward to port a desktop integration to mobile.
+
+## When to Use Cactus vs. Ollama vs. Cloud APIs
+
+| Factor | Cactus | Ollama | Cloud API |
+|---|---|---|---|
+| Hardware | iOS, Android, wearables | Desktop, server | Any |
+| Privacy | Fully offline | Fully offline | Data leaves device |
+| Latency | Local NPU/CPU | Local CPU/GPU | Network dependent |
+| Model support | Quantized custom format | Llama, Mistral, etc. | Any hosted model |
+| Cloud fallback | Yes | No | N/A |
+| Setup complexity | Moderate | Low | Minimal |
+
+Cactus fills the gap when you want Ollama-style local inference but on a device that Ollama was never designed for — a phone or wearable with a NPU, strict power budget, and no x86_64 CPU.
+
+## FAQ
+
+**Q: Does Cactus require internet?**
+**A:** No. Once the model weights are on-device, Cactus runs entirely offline. Cloud handoff is opt-in and only triggers when on-device resources are insufficient.
+
+**Q: What models work with Cactus?**
+**A:** The Cactus Transpiler accepts HuggingFace-format PyTorch models. After transpilation, models run in Cactus's binary format. Gemma, Llama variants, and Whisper are explicitly mentioned in the project topics.
+
+**Q: Is the source code open?**
+**A:** The repository is public and the source is available. The license is proprietary (Copyright 2025 Cactus Compute, Inc.) rather than MIT/Apache, so review the license terms before incorporating it into products.
+
+**Q: How does it compare to Apple's CoreML or Google's ML Kit?**
+**A:** Cactus is lower-level and model-agnostic. CoreML and ML Kit abstract hardware, but Cactus gives you direct control over quantization, kernel selection, and the computation graph — useful when you need to optimize for a specific NPU or when you want consistent behavior across iOS and Android.
+
+**Q: Does it support voice/speech?**
+**A:** Yes. The Engine exposes speech-to-text capabilities alongside text and vision. The project topics include `whisper` and `speech`.
+
+## Conclusion
+
+Cactus tackles a real gap in the on-device AI landscape. Ollama brought local LLMs to desktops and servers; Cactus brings them to phones and wearables without requiring a cloud round-trip. The OpenAI-compatible API makes migration straightforward, and the hybrid edge-cloud design means you are not sacrificing capability for privacy.
+
+If you are building a mobile AI feature and cannot afford the latency or privacy cost of a cloud API, Cactus is worth evaluating. The project is actively developed (v2.0.1 as of July 2026) and the GitHub repository has over 5,500 stars.
