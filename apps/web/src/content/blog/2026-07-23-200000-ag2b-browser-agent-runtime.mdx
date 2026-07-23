@@ -1,0 +1,142 @@
+---
+title: "AG2B – Client-Side AI Agent Runtime in the Browser"
+description: "AG2B runs the full agent loop in the browser with tools, scopes, and typed Zod handlers — no backend required for agent logic."
+pubDate: "2026-07-23"
+tags: ["ai-agent", "browser", "javascript", "mcp"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ag2b-browser-agent-runtime.webp"
+  alt: "AG2B browser agent runtime product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AG2B is a client-side agent runtime that lets AI agents execute tools directly in the browser — handlers are just TypeScript functions that run in your page's DOM context.
+
+## Source and Accuracy Notes
+
+- Project page: [ag2b.ai](https://ag2b.ai)
+- Source repository: [github.com/ag2b/ag2b](https://github.com/ag2b/ag2b)
+- License: MIT (verified via README LICENSE section)
+- HN launch thread: [news.ycombinator.com/item?id=48308148](https://news.ycombinator.com/item?id=48308148)
+
+## What Is AG2B?
+
+AG2B (Agent to Browser) is an open-source client-side runtime for AI agents. Instead of running agent logic on a server, AG2B executes the agent loop in the browser itself — tools are TypeScript functions that run in your page's DOM context.
+
+From the README:
+
+> **AG2B** (Agent to Browser) is a client-side agentic runtime.
+> The agent runs where your app does — in the browser. The server's role can range from a thin LLM proxy to a layer that extends the client runtime.
+
+Key capabilities:
+
+- **Agent primitives** — Tools and scopes as the building blocks of every agent
+- **Reuse existing code** — Click handlers, fetch wrappers, and DOM mutations become tools
+- **Live context via scopes** — Scopes feed your current UI state into every turn and gate which tools are available
+- **End-to-end typed** — Zod validates at runtime and types your handler inputs
+- **Own the loop** — Human-in-the-loop approvals, guardrails, retries, RAG, and logging all run client-side
+- **Provider-agnostic** — Built-in OpenAI and Anthropic providers, or bring your own LLM proxy
+- **Framework bindings** — React hooks (`@ag2b/react`) and Vue support, with a drop-in chat panel (`@ag2b/react-chat`)
+
+## Setup Workflow
+
+### Installation
+
+```bash
+npm i @ag2b/core zod
+```
+
+Requires `zod ^3.25.0 || ^4.0.0`. The package re-exports from `zod/v4` which works on both Zod v3 and v4.
+
+### Writing Your First Agent
+
+```typescript
+import { Agent, OpenAiProvider, Scope, Tool } from '@ag2b/core';
+import { z } from 'zod/v4';
+
+const setBackground = new Tool({
+  name: 'setBackground',
+  description: 'Change the page background color.',
+  parameters: z.object({
+    color: z.string().describe('Any valid CSS color (name, hex, rgb, etc.)'),
+  }),
+  handler: ({ color }) => {
+    document.body.style.backgroundColor = color;
+  },
+});
+
+const agent = new Agent({
+  provider: new OpenAiProvider({ baseURL: '/api/llm' }),
+});
+
+agent.scopes.register(new Scope({ name: 'appearance', tools: [setBackground] }));
+
+await agent.chat('Make the page feel like a sunset, use oklch.');
+// → LLM picks a color, the tool runs, the page changes.
+```
+
+### Integrating with React
+
+```bash
+npm i @ag2b/react
+```
+
+```typescript
+import { useAgent, useChat } from '@ag2b/react';
+```
+
+AG2B also ships a drop-in chat panel:
+
+```bash
+npm i @ag2b/react-chat
+```
+
+```typescript
+import { ChatPanel } from '@ag2b/react-chat';
+```
+
+### The WebMCP Plugin
+
+AG2B includes a [WebMCP](https://ag2b.ai/docs/plugins/webmcp) plugin that bridges tools into the browser's WebMCP API, allowing external agents to call browser-exposed tools over the web.
+
+## Deeper Analysis
+
+**Why client-side?** Traditional agent architectures run entirely on a server — the browser is just a terminal. AG2B flips this: the agent runs in the same JavaScript context as your UI, so tools can directly manipulate the DOM, access local state, and interact with browser APIs without a network roundtrip.
+
+**Tool scope gating** — Scopes let you control which tools are available at any point in the conversation. A scope can be "always available" or gated by conditions like "only when the user is on the settings page."
+
+**The LLM provider is swappable** — `OpenAiProvider`, `AnthropicProvider`, or any OpenAI-compatible API. The agent code stays the same.
+
+## Practical Evaluation Checklist
+
+- [ ] Install `@ag2b/core` and write a minimal tool that manipulates a DOM element
+- [ ] Register the tool in a scope and verify the LLM can call it
+- [ ] Try the React bindings with `@ag2b/react-chat`
+- [ ] Explore the WebMCP plugin for exposing browser tools to external agents
+- [ ] Experiment with scoped tool gating based on conversation state
+
+## Security Notes
+
+Because tools run in the browser's JavaScript context, they have the same access as the page itself. Only expose tools that are appropriate for the LLM's trust level — a malicious or hallucinating agent with DOM access can modify the page arbitrarily. Use human-in-the-loop confirmations for sensitive operations.
+
+## FAQ
+
+**Q: Does this work with any LLM provider?**
+**A:** AG2B ships with built-in OpenAI and Anthropic providers. For other providers, implement the provider interface or point `OpenAiProvider` at an OpenAI-compatible proxy.
+
+**Q: How is this different from a browser automation tool like Playwright?**
+**A:** Playwright runs on a server and controls a separate browser instance. AG2B runs inside the page itself — the agent shares the DOM with your application, making it ideal for building agent-native UIs rather than automating existing sites.
+
+**Q: Can I use this without a backend?**
+**A:** The agent loop runs client-side, but you still need an LLM provider. You can use OpenAI or Anthropic's APIs directly (keys exposed in the browser) or set up a thin proxy to route calls through your server.
+
+**Q: Is WebMCP the same as the MCP protocol by Anthropic?**
+**A:** No — AG2B's WebMCP is a browser plugin that exposes tools over a web-based protocol. It is not Anthropic's Model Context Protocol, though the naming overlap is unfortunate.
+
+## Conclusion
+
+AG2B is a fresh take on browser-based AI agents — moving the agent loop from server to client means tools become direct DOM operations and state mutations, not HTTP calls to a remote browser. For developers building agent-native web applications, this eliminates an entire class of latency and infrastructure complexity. The framework is young (3 GitHub stars at time of writing) but the API design is clean and the React integration is straightforward. Worth watching.
