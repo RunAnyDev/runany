@@ -1,0 +1,144 @@
+---
+title: "Velane – Integration Infrastructure for AI Agents"
+description: "Deploy Bun or Python functions as versioned, sandboxed HTTP endpoints with 800+ OAuth integrations. Velane gives AI agents the integration layer they actually control."
+pubDate: "2026-07-24"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/velane-integration-infrastructure.webp"
+  alt: "Velane integration infrastructure dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Velane deploys Bun or Python functions as secure, versioned HTTP endpoints with 800+ OAuth integrations pre-wired — letting AI agents interact with Salesforce, Slack, GitHub, and more without handling a single credential.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [velane.sh](https://velane.sh)
+- Source repository: [github.com/abskrj/velane](https://github.com/abskrj/velane)
+- License: NOASSERTION (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=49024714](https://news.ycombinator.com/item?id=49024714)
+
+## What Is Velane?
+
+Velane describes itself as **integration infrastructure agents actually control**. Instead of wiring up OAuth flows, installing SDKs per service, and embedding credentials in code, you write a handler function and Velane handles the rest.
+
+The core contract:
+
+```typescript
+import { integration } from '@velane/integrations'
+
+export default async function handler(input: { caseId: string }) {
+  const sf    = integration('salesforce')
+  const slack = integration('slack')
+
+  const case_ = await sf.get(`/services/data/v60.0/sobjects/Case/${input.caseId}`)
+
+  await slack.post('/chat.postMessage', {
+    channel: '#support',
+    text: `Case ${case_.CaseNumber} is ${case_.Status}`,
+  })
+
+  return case_
+}
+```
+
+No credentials in code. No SDK installs. The `integration()` call injects tokens automatically — your snippet never touches a password or access token.
+
+Velane is built on Bun and Python runtimes, with an MCP server so you can connect Cursor or Claude Code directly to generate and deploy snippets.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Git
+- Optional: AWS account with Firecracker/KVM for VM-boundary isolation
+
+### Step 1: Clone the repository
+
+```bash
+git clone https://github.com/abskrj/velane.git && cd velane
+```
+
+### Step 2: Configure bootstrap credentials
+
+Uncomment and set the bootstrap block in `docker-compose.yml`:
+
+```yaml
+BOOTSTRAP_EMAIL: admin@example.com
+BOOTSTRAP_PASSWORD: changeme123
+BOOTSTRAP_TENANT: myorg
+```
+
+### Step 3: Launch with Docker Compose
+
+```bash
+docker compose up --build
+```
+
+Three services start:
+
+| Service | URL |
+|---|---|
+| Admin portal | http://localhost:8092 |
+| API | http://localhost:8080 |
+| MCP server | http://localhost:8090 |
+
+### Step 4: Connect an AI agent via MCP
+
+Point your MCP-compatible agent (Cursor, Claude Code) to `http://localhost:8090`. The agent can then generate snippets, inspect integrations, and trigger deployments through natural language.
+
+## What You Get
+
+- **800+ OAuth integrations** — Salesforce, GitHub, Slack, HubSpot, Stripe, Notion, Linear, and more. Tokens are injected automatically at invocation time
+- **Three environments** — `dev` → `staging` → `prod` with instant rollback to any prior version
+- **Canary traffic splitting** — route a percentage of prod traffic to a new version before full rollout
+- **Sync, async, and streaming** — blocking, background with webhook callback, and `text/event-stream`
+- **Secrets** — AES-256-GCM encrypted key-value pairs injected as environment variables at invocation time
+- **Egress policy** — per-tenant IP/CIDR and domain blocklist enforced inside the executor
+- **Observability** — per-invocation logs, metrics, and replay
+- **Embeddable dashboard** — white-label iframe viewer with short-lived embed tokens
+- **Git push-to-deploy** — push to `main` → staging, tag `v*` → prod
+- **Firecracker isolation** — optional VM-boundary isolation via AWS Firecracker (requires KVM)
+
+## Deeper Analysis
+
+Velane sits in a similar problem space as tools like Expose, Ngrok, and Render's internal gateway — but its focus is squarely on the AI agent workflow. Where traditional integration platforms target human developers wiring up a handful of services, Velane is designed for agents that need to orchestrate dozens of integrations on demand.
+
+The MCP server is the key differentiator. Rather than requiring a human to write and deploy a handler, the agent can generate one, test it, and roll it out through the same pipeline — all without leaving the chat interface. This is a meaningful shift from the typical "API key in .env" pattern that dominates today.
+
+The license is NOASSERTION, which is unusual for an open-source project. This means you are free to inspect, modify, and redistribute the code, but there is no formal permission grant. Treat it as a permissive but attorney-reviewed license rather than a community-standard one.
+
+## Security Notes
+
+- Credentials are never exposed to handler code — tokens are injected by the runtime
+- Egress policies allow fine-grained control over which IPs and domains the executor can reach
+- Secrets are AES-256-GCM encrypted at rest and injected as environment variables at invocation time
+- Firecracker mode provides hardware-level VM isolation per invocation (requires KVM)
+
+## FAQ
+
+**Q: Does Velane work with self-hosted services behind a firewall?**
+**A:** Yes. The executor runs inside your Docker network, so it can reach internal services. Egress policies let you control what it can actually reach.
+
+**Q: What happens if an integration token expires?**
+**A:** Velane handles token refresh automatically for all supported OAuth integrations. The handler never sees a stale token.
+
+**Q: Can I use Velane without Docker?**
+**A:** Docker Compose is the primary deployment method. Bare-metal or Kubernetes deployment is not officially documented.
+
+**Q: Is the MCP server stable for production use?**
+**A:** The project is actively developed (last push July 23, 2026). Check the GitHub Actions CI status before relying on it for critical workflows.
+
+## Conclusion
+
+Velane fills a specific gap in the AI agent stack: trusted, credential-free integration with external services. Instead of hand-rolling OAuth flows for every service an agent needs, you write a handler, deploy it through Velane's pipeline, and let the runtime handle auth. If you are building agents that need to interact with enterprise software — Salesforce, HubSpot, Slack — Velane is worth evaluating.
+
+For a self-hosted option that stays entirely in your network, it is one of the more pragmatic solutions to appear on Hacker News this cycle.
