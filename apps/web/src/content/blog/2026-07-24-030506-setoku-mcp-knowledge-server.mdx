@@ -1,0 +1,128 @@
+---
+title: "Setoku MCP Server – Data Knowledge for AI Agents"
+description: "Setoku is a self-hosted MCP knowledge server that gives AI agents the metric definitions, schema context, and gotchas they need to query company data correctly — no AI runs on the server."
+pubDate: "2026-07-24"
+tags: ["mcp", "ai-setup", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/setoku-mcp-knowledge-server.webp"
+  alt: "Setoku MCP knowledge server product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Setoku is an open-source MCP server that sits between your AI and your company data, feeding it metric definitions and operational context before every query — so the AI computes numbers the way your business actually does, not by guessing from column names.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [setoku.com](https://setoku.com)
+- Source repository: [github.com/Hedgy-Labs/setoku](https://github.com/Hedgy-Labs/setoku) (7 stars, Apache-2.0, verified via GitHub API)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: not available (3 points on HN, no dedicated launch thread found)
+- Source last checked: 2026-07-24 (commit `main` pushed 2026-07-23)
+
+## What Is Setoku?
+
+Every company has knowledge that lives in people's heads: which metric is the real one, why "paying customer" is trickier than it looks, why a naive `COUNT(*)` returns the wrong number. AI agents never had that — they guess and get it confidently wrong.
+
+Setoku is the curated institutional memory layer underneath your AI. It holds metric definitions, data gotchas, and schema documentation, then feeds them to your AI right before it answers a question about your data. The agent looks up the context first, then queries, so it computes things the way your company actually does.
+
+The MCP server ships **tools, not models**. No AI inference runs on the Setoku server itself — the thinking happens in the AI you already pay for (Claude, Codex, or any MCP client). That means no added inference cost: a whole deployment is one small VPS.
+
+From the README:
+
+> Setoku = **set** (math) × **oku** (奥, innermost): the innermost layer underneath your AI.
+
+## Three Tool Categories
+
+Setoku exposes three kinds of MCP tools:
+
+### Context Tools
+
+- `find_context` — retrieve canonical metric definitions and data documentation
+- `get_metric` — fetch a specific metric with its definition and known gotchas
+- `report_correction` — propose a change to what Setoku knows (a human approves on the admin page, outside the agent loop)
+
+### Query Tools
+
+- `get_schema` — inspect the database schema
+- `run_query` — execute a read-only query against the analytics engine, with a row cap, statement timeout, and append-only audit log
+
+### App Tools
+
+- `publish_app` — turn an answer into a small self-contained web app on live data
+- `update_app` — update an existing published app
+
+## How Deployment Works
+
+Setoku runs on a single VPS. The README covers the full self-hosted setup:
+
+1. Deploy the server (one small VPS)
+2. Connect data sources (Postgres, MySQL, BigQuery, or a data lake)
+3. Define metrics and gotchas via the web admin console
+4. Share the MCP server URL with your team — each person gets per-source credentials, revocable from the web console
+
+The gateway never holds credentials to your production database. A mirror job does (read-only), and both read-only and per-source access are enforced by the database engine, not by parsing SQL in Setoku's code.
+
+## The Apps Feature
+
+Once your AI understands your data, it can build little things on top of it. Ask for a chart, a triage list, or a poll — the agent writes a self-contained app and hands you a URL. Non-technical teammates can describe what they want in plain language and edit it the same way.
+
+Apps run in a locked-down, no-network sandbox backed by live data through the same governed query path. A prompt-injected app can mess up its own notes but cannot write to your sources.
+
+## Security Model
+
+- **Read-only by design.** The agent only runs audited, read-only queries against a mirror of your database.
+- **Per-person credentials.** Connector URLs are per-person database connection strings, revocable from the web console.
+- **Human approval gate.** The agent can propose changes to metric definitions, but a human accepts them on the admin page — outside the agent loop.
+- **No production credentials on the gateway.** The gateway never holds a credential to your production database; a mirror job holds the read-only credential instead.
+
+Full details: [`SECURITY.md`](https://github.com/Hedgy-Labs/setoku/blob/main/SECURITY.md) in the repo.
+
+## Try the Live Demo
+
+Setoku hosts a public demo wired to a synthetic dataset for a fictional pro sports club, the **Bonita Bulldogs** — covering ticketing, CRM, sponsorship, merchandise, staffing, payroll, and more.
+
+To connect the demo to Claude (or any MCP client):
+
+1. Open **Settings → Connectors → Add custom connector**
+2. Paste this server URL:
+   ```
+   https://demo.setoku.com/mcp/fdb6bb54d746ba8e00d698ff2183228b682b8272bfef78e0
+   ```
+3. Ask a question in plain language, for example:
+   - _"How many unique fans do we have?"_ → **71,204** (deduped by normalized email, not the raw 92,118 a naive `COUNT(*)` returns)
+   - _"What was our ticket revenue this season?"_ → **$46.8M** (cents reconciled, refunds/exchanges/comps excluded)
+   - _"What's our season-ticket renewal rate?"_ → spans three seasons of ticketing history
+
+The demo data includes live published dashboards — [Sponsorship pricing table](https://demo.setoku.com/p/7e38381ced6517329947b14d) and [Fan lifetime value](https://demo.setoku.com/p/b059da830dcb3e70437d5dea).
+
+## FAQ
+
+**Q: Does Setoku run AI models on its server?**
+**A:** No. Setoku is a tools and context server only. No AI inference runs on the Setoku server; all reasoning happens in the AI client you already use. This keeps deployment cheap — a single small VPS, plus your existing AI seats.
+
+**Q: How does it differ from a direct database MCP server?**
+**A:** A plain database MCP server exposes raw tables and columns. Setoku adds a curated context layer: metric definitions, known gotchas, entity documentation. Before running a query, the AI receives the business logic it needs to compute numbers correctly instead of guessing from column names.
+
+**Q: Can I self-host it?**
+**A:** Yes. The server is open source (Apache-2.0) and deploys to a single VPS. Data source connectors support Postgres, MySQL, BigQuery, and data lakes.
+
+**Q: Can the AI rewrite the metric definitions?**
+**A:** No. The agent can propose corrections via `report_correction`, but a human must approve changes on the admin page. The agent cannot modify what Setoku knows without human oversight.
+
+**Q: What license is it released under?**
+**A:** Apache-2.0, verified via the GitHub repository `license.spdx_id` field.
+
+## Conclusion
+
+Setoku solves the "confidently wrong AI" problem for company data. By feeding metric definitions, schema context, and operational gotchas to your AI before every query, it turns naive `COUNT(*)` queries into business-accurate answers — without adding AI inference costs, since no model runs on the server itself.
+
+The MCP protocol means it works with any MCP client: Claude, Codex, or anything else. If your team asks AI questions about company data and has ever gotten a confidently incorrect answer, Setoku is worth a look.
+
+**Project:** [setoku.com](https://setoku.com) · [GitHub](https://github.com/Hedgy-Labs/setoku) · [Live Demo](https://demo.setoku.com)
