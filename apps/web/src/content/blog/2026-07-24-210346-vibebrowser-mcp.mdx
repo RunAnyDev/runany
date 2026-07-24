@@ -1,0 +1,171 @@
+---
+title: "VibeBrowser MCP – AI agents share your real browser"
+description: "VibeBrowser MCP connects Claude Code, Cursor, VS Code Copilot, and OpenCode to your actual Chrome profile — cookies, sessions, and all — via a hosted relay. No local browser install needed."
+pubDate: "2026-07-24"
+tags: ["browser-automation", "mcp", "ai-agents", "developer-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vibebrowser-mcp.webp"
+  alt: "VibeBrowser MCP – AI agent browser automation via MCP protocol"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** VibeBrowser MCP is an open-source MCP server that lets multiple AI coding agents — Claude Code, Cursor, VS Code Copilot, OpenCode — drive your real Chrome browser simultaneously, using your existing logged-in sessions with no extra install.
+
+## What Is VibeBrowser MCP?
+
+Browser automation tools for AI agents have a fundamental limitation: they run their own headless browser, separate from your logged-in Chrome. You re-authenticate every time. VibeBrowser MCP takes a different approach — it connects AI agents directly to your real Chrome via a browser extension and a hosted relay daemon.
+
+The core differentiator is **multi-agent concurrency**. Playwright MCP and BrowserMCP break when two agents try to drive the same browser. VibeBrowser MCP handles multiplexing through its relay architecture, letting Claude Desktop, Cursor, and VS Code Copilot all control the same browser session at once.
+
+The project is open source under Apache-2.0, published as an npm package.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [vibebrowser.app](https://www.vibebrowser.app) ← verified
+- Source repository: [github.com/VibeTechnologies/vibe-mcp](https://github.com/VibeTechnologies/vibe-mcp) ← verified
+- npm package: [npmjs.com/package/@vibebrowser/mcp](https://www.npmjs.com/package/@vibebrowser/mcp) ← verified
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47931565](https://news.ycombinator.com/item?id=47931565)
+
+## Setup Workflow
+
+### Step 1: Install the Vibe Browser Extension
+
+Install the Chrome extension from the Chrome Web Store, or load it unpacked from a developer release.
+
+**Option A — Chrome Web Store (recommended):**
+
+1. Visit the [Chrome Web Store listing](https://chromewebstore.google.com/detail/vibe-ai-browser-co-pilot/djodpgokbmobeclicaicnnidccoinado)
+2. Click **Add to Chrome**
+3. Pin the Vibe icon to your toolbar
+
+**Option B — Developer version:**
+
+1. Download the [latest release ZIP](https://github.com/VibeTechnologies/VibeWebAgent/releases/latest/download/vibe-ai-copilot-latest.zip) from GitHub
+2. Extract to a permanent folder
+3. Go to `chrome://extensions`, enable **Developer Mode**
+4. Click **Load unpacked** and select the extracted folder
+
+### Step 2: Get Your Relay Remote URL
+
+After installing the extension:
+
+1. Click the Vibe icon in your Chrome toolbar
+2. Go to **Settings → AI Agent Control → Remote (internet)**
+3. Copy the **Relay access** URL — a UUID or a `wss://relay.api.vibebrowser.app/<uuid>` URL
+
+This URL grants live control of your browser session. Treat it like a password.
+
+### Step 3: Configure Your AI Client
+
+**Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "@vibebrowser/mcp"]
+    }
+  }
+}
+```
+
+**Cursor** — edit `~/.cursor/mcp.json`:
+
+```json
+{
+  "vibe": {
+    "command": "npx",
+    "args": ["-y", "@vibebrowser/mcp"]
+  }
+}
+```
+
+**VS Code (GitHub Copilot):**
+
+```json
+{
+  "github.copilot.chat.mcpServers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "@vibebrowser/mcp"]
+    }
+  }
+}
+```
+
+### Step 4: Connect and Verify
+
+```bash
+npx -y @vibebrowser/cli@latest --remote "YOUR-EXTENSION-UUID" --json status --wait-for-extension --wait-timeout 20000
+```
+
+A successful response returns `extensionConnected: true`.
+
+## How It Works
+
+The architecture has four layers:
+
+```
+Claude Desktop  ←→  vibe-mcp  ←┐
+Cursor          ←→  vibe-mcp  ←┼─→  Relay Daemon  ←→  Vibe Extension  ←→  Your Chrome
+VS Code         ←→  vibe-mcp  ←┘
+OpenCode         ←→  vibe-mcp  ←┘
+```
+
+The **Relay Daemon** is auto-spawned by the MCP server and handles connection multiplexing — this is what allows multiple agents to share the same browser without port conflicts.
+
+A content-script based approach means no separate browser binary, no CDP port management, and your existing Chrome profile (cookies, sessions, extensions) is available to the agent.
+
+## Comparison With Alternatives
+
+| Feature | VibeBrowser MCP | Playwright MCP | BrowserMCP |
+|---|---|---|---|
+| Multi-agent support | Yes | No | No |
+| Uses your browser profile | Yes | No | No |
+| Logged-in sessions preserved | Yes | No | No |
+| No separate browser binary | Yes | No | Partial |
+| Local and private | Yes | Yes | Partial |
+| Content script based | Yes | No | No |
+
+The primary limitation: the relay daemon introduces a third-party relay hop. For fully local operation, the `--devtools` flag drives Chrome directly over the DevTools Protocol without the extension.
+
+## Security Notes
+
+The relay URL or extension UUID grants live control of your browser session. The README explicitly warns:
+
+> Never share it, paste it into a chat with untrusted parties, or commit it to a repo.
+
+The example UUIDs in documentation are non-routable placeholders. Always substitute your own secret value and store it in your agent's persistent workspace, not in version control.
+
+## Pricing
+
+The extension and MCP server are open source and free. The hosted relay is available in free and paid tiers. See [vibebrowser.app](https://www.vibebrowser.app) for current pricing.
+
+## FAQ
+
+**Q: Does this work with Firefox or Safari?**
+**A:** The extension targets Chromium browsers (Chrome, Brave, Edge). Firefox support is not documented.
+
+**Q: Can two agents control the browser at the same time without conflicts?**
+**A:** Yes — the relay daemon multiplexes connections, which is the core architectural difference from Playwright MCP and BrowserMCP.
+
+**Q: Is my browsing data sent to Vibe's servers?**
+**A:** The relay daemon runs locally and routes through Vibe's hosted relay. The extension's content script runs in your browser. Review the [privacy policy](https://www.vibebrowser.app/privacy) for specifics on what the relay sees.
+
+**Q: Can I run this fully offline?**
+**A:** Partially. The `--devtools` flag lets you drive Chrome directly without the extension or relay, but logged-in sessions require the extension. The MCP server itself runs locally via npx.
+
+## Conclusion
+
+VibeBrowser MCP solves the session-preservation problem for AI coding agents — you get your real logged-in Chrome without re-authenticating. The multi-agent concurrency angle is genuinely novel. For developers running multiple AI coding assistants simultaneously, this removes a meaningful friction point.
+
+If you want to try it, install the Chrome extension, grab your relay URL, and point your MCP config at `npx -y @vibebrowser/mcp`. The setup takes under five minutes.
