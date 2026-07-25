@@ -1,0 +1,170 @@
+---
+title: "LANCommander – Self-Hosted Game Distribution for LAN Parties"
+description: "LANCommander lets you self-host a digital game library and distribute games over your local network with no internet dependency. Docker-ready, MIT licensed, 434 stars on GitHub."
+pubDate: "2026-07-25"
+tags: ["self-hosted", "gaming", "docker", "lan-party", "open-source"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lancommander-self-hosted-gaming.webp"
+  alt: "LANCommander – Self-hosted game distribution platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** LANCommander is an open-source, self-hostable game distribution platform that lets you run a private game library over a LAN — no internet required. Docker image available, MIT licensed.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [lancommander.app](https://lancommander.app) ← verified
+- Source repository: [github.com/LANCommander/LANCommander](https://github.com/LANCommander/LANCommander) ← verified
+- License: [MIT](https://github.com/LANCommander/LANCommander/blob/main/LICENSE) ← verified via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=48467068](https://news.ycombinator.com/item?id=48467068) (v2.1.0)
+- Stars: 434 (GitHub API, 2026-07-25)
+- Source last checked: 2026-07-25 (commit verified)
+
+## What Is LANCommander?
+
+LANCommander is a self-hosted digital distribution platform for PC games, built primarily for LAN parties where internet access is unavailable. It consists of two parts:
+
+1. **Server** — a web-based backend (ASP.NET Blazor) that hosts game files, metadata, and user accounts
+2. **Launcher** — a cross-platform desktop client (Avalonia UI) that players use to browse, download, and launch games
+
+From the README:
+
+> **Self-hosted game distribution — no internet required.**
+> Host your own game library, distribute games across your local network, and let players browse and install from a polished desktop launcher.
+
+Games are packaged as archives and uploaded to the server. The launcher downloads them over the LAN at local network speeds — orders of magnitude faster than downloading from the internet.
+
+## Setup Workflow
+
+### Step 1: Deploy the Server via Docker
+
+The recommended way to run LANCommander is with Docker. A single `docker-compose.yml` gets you the server, web UI, and auto-discovery beacon:
+
+```yaml
+services:
+  lancommander:
+    image: lancommander/lancommander:latest
+    container_name: lancommander
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # Optional: install SteamCMD inside the container
+      # - STEAMCMD=1
+      # Optional: install WINE for Windows game compatibility layers
+      # - WINE=1
+    volumes:
+      - /path/to/app/data:/app/Data
+    ports:
+      - 1337:1337/tcp   # Web interface
+      - 35891:35891/udp # Beacon broadcast (auto-discovery)
+      - 213:213/udp     # IPX relay
+    restart: unless-stopped
+```
+
+All game archives and configuration live in `/app/Data` on the host.
+
+### Step 2: Connect the Launcher
+
+Download the latest launcher for your OS from the [Releases page](https://github.com/LANCommander/LANCommander/releases). The launcher auto-discovers LANCommander servers on your network via UDP beacon — no IP address needed.
+
+```
+Windows:  LANCommander_x.x.x_x64-setup.exe
+Linux:    LANCommander_x.x.x_x64.AppImage
+macOS:    LANCommander_x.x.x_x64.dmg
+```
+
+Open the launcher, find your server in the depot, and start downloading games.
+
+### Step 3: Package Your Own Games
+
+The Windows Packager tool walks you through creating a game package:
+
+1. **Search IGDB** — auto-fills game title, genre, and cover art from the Internet Game Database
+2. **Capture registry** — tracks installer-written keys
+3. **Monitor installer** — records files written and changes made
+4. **Upload directly** to your LANCommander server
+
+For redistributable runtimes (Visual C++, .NET, DirectX), LANCommander can bundle and auto-install these alongside the game.
+
+## Deeper Analysis
+
+### Who Is This For?
+
+LANCommander targets:
+- **LAN party organizers** — who need to distribute games to dozens of machines without burning bandwidth
+- **Offline networks** — military, remote sites, or events with restricted internet
+- **Home network gamers** — who want a private Steam-like experience without sharing files publicly
+- **Retro gaming enthusiasts** — preserving game libraries on closed networks
+
+### Architecture
+
+The server is a self-contained ASP.NET Blazor application. No external database dependency — game metadata and user accounts are stored locally in SQLite (or a configurable provider).
+
+The launcher is built with **Avalonia UI**, a cross-platform .NET UI framework similar to Qt. This gives it native performance on Windows, Linux, and macOS from a single codebase.
+
+Auto-discovery uses a **UDP broadcast** on port 35891. The server sends periodic beacons; clients listen for them and add servers to their list automatically.
+
+### Feature Highlights
+
+| Feature | Detail |
+|---|---|
+| Game distribution | Multi-part archive uploads with chunked transfer |
+| Metadata | IGDB + SteamGridDB for covers, icons, backgrounds |
+| Cloud saves | Automatic backup and restore of game save files |
+| User management | Registration approval, role-based access, OpenID Connect |
+| PowerShell hooks | Pre/post install and launch scripts with built-in editor |
+| RCON | Dedicated server remote console support |
+| Discord Rich Presence | Shows current game in Discord status |
+| SDK | Published on NuGet — build custom clients with .NET |
+
+### Platform Support
+
+The server runs on Windows (x64, arm64), Linux (x64, arm64), and macOS (x64, arm64). The Packager tool only runs on Windows (x86).
+
+The launcher is cross-platform but primarily tested on Windows. Linux and macOS builds are provided with limited functionality.
+
+## Practical Evaluation Checklist
+
+- [ ] Docker installed on host machine
+- [ ] Port 1337 (TCP) and 35891 (UDP) available on the host network
+- [ ] Static IP assigned to server (for reliable auto-discovery)
+- [ ] Games acquired as distributable archives (ISO, zip, etc.)
+- [ ] IGDB API key for automatic metadata (optional, manual entry also works)
+- [ ] OpenID provider configured if authentication is required (optional)
+
+## Security Notes
+
+- Game archives are served over plain HTTP on the LAN — not HTTPS. Do not expose the server ports to the public internet without a reverse proxy with TLS termination.
+- The Packager runs as a Windows desktop application with full filesystem access — only use it on trusted machines.
+- User management supports approval workflows; enable registration approval if hosting for untrusted users.
+
+## FAQ
+
+**Q: Does this replace Steam or GOG?**
+**A:** No. LANCommander does not distribute games — you must already own the game files. It is a distribution mechanism, not a storefront.
+
+**Q: Can it run games that need installation?**
+**A:** Yes. The Packager captures registry changes and installer output. Installed games can be launched through LANCommander with optional pre/post launch hooks.
+
+**Q: How does auto-discovery work across subnets?**
+**A:** UDP broadcast is limited to the local subnet. For multi-subnet LANs, you need to manually add the server IP address in the launcher.
+
+**Q: Does it support game saves?**
+**A:** Yes. Cloud save backup and restore is built into the launcher.
+
+## Conclusion
+
+LANCommander fills a specific niche — private, offline-capable game distribution — with a polished, well-thought-out toolchain. The Docker setup is trivial, the launcher looks solid, and the IGDB/SteamGridDB integration removes most of the manual metadata work.
+
+If you run LAN parties or manage closed networks with gaming needs, LANCommander is purpose-built for exactly that. It is MIT licensed, actively maintained (latest release 2026-07), and has a working SDK for custom integrations.
+
+- **Project page:** [lancommander.app](https://lancommander.app)
+- **GitHub:** [LANCommander/LANCommander](https://github.com/LANCommander/LANCommander)
