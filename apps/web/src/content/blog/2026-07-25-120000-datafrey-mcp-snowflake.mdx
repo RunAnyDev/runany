@@ -1,0 +1,163 @@
+---
+title: "DataFrey – MCP Server for Snowflake with Text-to-SQL Agent"
+description: "DataFrey connects Snowflake to Claude Code via MCP, letting you query databases with natural language using a built-in text-to-SQL planning agent."
+pubDate: "2026-07-25"
+tags: ["mcp", "snowflake", "sql", "claude-code", "ai-setup"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/datafrey.webp"
+  alt: "DataFrey product thumbnail showing MCP server for Snowflake"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DataFrey is a Python MCP server that connects Snowflake to Claude Code, adding a text-to-SQL planning agent so you can query databases in plain English.
+
+## What Is DataFrey?
+
+DataFrey is an open-source MCP server specifically for Snowflake, built by a data scientist who found Claude Code struggled with SQL without database context. It ships as a Python monorepo with three packages:
+
+- **datafrey-cli** — interactive CLI wizard for auth, DB connection, and Claude Code plugin setup
+- **datafrey-mcp** — the MCP server bridge
+- **datafrey-api** — shared Pydantic models
+
+The core value is the `plan` tool: when you ask a vague question, DataFrey runs a separate text-to-SQL agent that uses schema RAG, subagents for data exploration, and explicit planning to produce a reliable query.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.13 or higher
+- A Snowflake account (user with appropriate permissions)
+- Claude Code installed
+
+### Step 1: Install
+
+Install via pip:
+
+```bash
+pip install datafrey
+```
+
+Or with uv:
+
+```bash
+uv tool install datafrey
+```
+
+### Step 2: Authenticate and Connect
+
+Run the interactive CLI:
+
+```bash
+datafrey
+```
+
+This starts a wizard that handles:
+1. DataFrey login
+2. Snowflake connection (interactive, no manual config)
+3. Schema index sync
+4. Claude Code plugin installation
+
+### Step 3: Connect to Claude Code
+
+After installation, configure the Claude Code client:
+
+```bash
+datafrey client claude
+```
+
+Or for other MCP-compatible editors:
+
+```bash
+datafrey client cursor
+datafrey client mcp   # generic MCP config block
+```
+
+### Step 4: Query Your Database
+
+In Claude Code, use natural language:
+
+```
+/db write dbt model to rank leads
+```
+
+For complex questions, the `plan` tool kicks in automatically to work through the query step by step.
+
+## Deeper Analysis
+
+### How the Planning Agent Works
+
+The `plan` tool is the distinguishing feature. When you ask a complex question:
+
+1. **Schema RAG** — DataFrey indexes your Snowflake schema (tables, columns, sample values) during connection setup
+2. **Subagent exploration** — spawns lightweight agents to explore relevant tables before building the query
+3. **Planning step** — breaks down the question into sub-queries, executes them, and synthesizes results
+
+This differs from raw text-to-SQL in that it iterates rather than generating a single query and hoping it matches intent.
+
+### Security Design
+
+The author notes that database-as-MCP is a sensitive pattern. By default, the CLI prompts for SELECT-only permissions. The architecture separates the MCP bridge from direct query execution, giving you control over what actions the agent can perform.
+
+### Package Architecture
+
+The monorepo uses uv workspaces with four packages:
+
+| Package | Purpose |
+| --- | --- |
+| `datafrey-cli` | CLI wizard, auth, DB connection |
+| `datafrey-api` | Shared Pydantic models |
+| `datafrey-mcp` | MCP server implementation |
+| `datafrey-mock` | Local dev mock API |
+
+Only Snowflake is supported at launch, but the package structure suggests multi-database expansion is planned.
+
+## Practical Evaluation Checklist
+
+- Python 3.13+ required (not 3.12 or 3.11)
+- uv workspace monorepo — `uv` is the expected package manager
+- Interactive CLI wizard means zero manual config for Snowflake connection
+- Claude Code plugin installs as an MCP skill, not a native integration
+- Schema index is built locally during `datafrey index` — no cloud processing of your schema
+- No star history to evaluate (fresh repo, 0 stars)
+
+## Security Notes
+
+- Default CLI behavior requests SELECT-only permissions — you can escalate manually
+- Credentials stored via the CLI wizard, not hardcoded
+- Schema index is local; your database structure is not sent to an external service
+- For production use, review Snowflake role permissions before connecting
+
+## FAQ
+
+**Q: Does it support databases other than Snowflake?**
+**A:** No, only Snowflake at launch. The repo structure is designed for expansion, but no other database drivers are included yet.
+
+**Q: How does the schema index work?**
+**A:** During `datafrey index`, DataFrey reads your Snowflake schema metadata (tables, columns, types) and builds a local RAG index. This index is queried by the planning agent before generating SQL.
+
+**Q: Do I need a DataFrey cloud account?**
+**A:** The CLI wizard requires a DataFrey login for authentication. The query execution itself runs against your own Snowflake instance.
+
+**Q: Can I use this with editors other than Claude Code?**
+**A:** Yes. The `datafrey client mcp` command outputs a generic MCP config block you can use with any MCP-compatible editor. Cursor is explicitly supported.
+
+**Q: Is it open source?**
+**A:** Yes, Apache-2.0 license. Source is on GitHub at github.com/datafrey-ai/datafrey.
+
+## Conclusion
+
+DataFrey solves a real problem: Claude Code writing SQL blind, without schema context. The CLI wizard handles the annoying Snowflake connection setup, and the planning agent adds a layer of reliability for complex queries. Fresh repo with zero stars means it's early — worth watching if Snowflake query context is a pain point for your team.
+
+## Source and Accuracy Notes
+
+- Project page: [datafrey.ai](https://datafrey.ai) (unavailable during verification — DNS resolution failed)
+- Documentation: [docs.datafrey.ai](https://docs.datafrey.ai) (unavailable during verification)
+- Source repository: [github.com/datafrey-ai/datafrey](https://github.com/datafrey-ai/datafrey)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47853007](https://news.ycombinator.com/item?id=47853007)
+- Source last checked: 2026-07-25 (commit `9a3f1b7`, pushed 2026-07-11)
