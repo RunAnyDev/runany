@@ -1,0 +1,147 @@
+---
+title: "Kontext CLI – Authorization Platform for AI Agents"
+description: "Secure credential injection, policy enforcement, and audit trails for AI coding agents. Open-source Go CLI with Homebrew install, MIT licensed."
+pubDate: "2026-07-25"
+tags: ["ai-setup", "dev-tools", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kontext-cli.webp"
+  alt: "Kontext CLI product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kontext CLI is an open-source authorization platform for AI coding agents — injecting scoped credentials, enforcing access policies, and logging audit trails so agents can work securely without users pasting secrets into chat.
+
+## What Is Kontext?
+
+Kontext is an authorization platform purpose-built for tool-using AI agents. It addresses a concrete gap: when an AI agent needs to call external tools or APIs, the conventional approach is either to hardcode credentials, paste secrets into the chat, or leave nothing configured at all. None of those are production-safe.
+
+Kontext gives teams control over what agents can access through four core mechanisms:
+
+- **Scoped credential injection** — OAuth 2.0 RFC 8693 token exchange at runtime; agents get short-lived, least-privilege tokens for approved tools without seeing the underlying secrets.
+- **Deterministic policy enforcement** — allow/deny rules evaluated before tool execution, covering destructive commands, production resources, sensitive files, and credential access.
+- **Probabilistic risk detection** — a local judge layer for actions that pass deterministic policy but still carry risk, without sending full tool context to hosted services.
+- **Audit trails** — complete chain of custody: who instructed which agent, what it accessed, which tools it called, what policy decisions were made, and the outcome.
+
+Kontext runs local-first for developer agents, and scales to managed or self-hosted deployments for security-sensitive environments. The CLI itself is written in Go and open-sourced under MIT.
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS or Linux (self-serve setup currently macOS only; daemon-based workflows work cross-platform)
+- Homebrew (for the recommended install method)
+- A Kontext workspace (free self-serve account at kontext.security)
+
+### Step 1: Install the CLI
+
+```bash
+brew install kontext-security/tap/kontext
+```
+
+Verify the installation:
+
+```bash
+kontext --version
+```
+
+### Step 2: Connect Your Machine
+
+Generate an install token from your workspace's **Deployments** page, then run:
+
+```bash
+kontext setup
+```
+
+This streams agent activity from your machine into your team's Kontext dashboard. Re-run `kontext setup` to rotate the token, or `kontext setup --uninstall` to remove all stored config, hooks, LaunchAgent, and keychain entries.
+
+### Step 3: Inspect Daemon Health
+
+```bash
+kontext doctor
+```
+
+Sample healthy output:
+
+```
+Daemon version:  0.15.1
+Heartbeat:       alive
+Export backlog:  0 items
+```
+
+If upgrading from a release predating automatic stale-binary recovery, run `kontext doctor --fix` once if the doctor reports an old or unknown daemon version.
+
+### Step 4: Configure Policies
+
+Policy files live in your project's `.kontext/` directory. A minimal example that denies all production database access:
+
+```json
+{
+  "version": "1",
+  "rules": [
+    {
+      "action": "deny",
+      "resource": "postgres://prod-db.internal:5432/*",
+      "reason": "Production database access requires approval workflow"
+    }
+  ]
+}
+```
+
+Agents invoke tools through a hook that intercepts the call, classifies the action, applies policy, and either allows, blocks, or routes to the local judge before the tool executes.
+
+## How Kontext Fits Into an AI Coding Workflow
+
+When integrated with an AI coding agent (Claude, Cursor, etc.), the decision path looks like this:
+
+```
+Agent tool call
+  -> kontext agent hook
+  -> kontext daemon
+  -> action classification
+     -> deterministic policy check
+        -> allow  -> proceed
+        -> deny   -> block, log
+     -> probabilistic risk check (if allowed by policy)
+        -> allow  -> proceed
+        -> deny   -> block, log
+```
+
+The agent never sees the OAuth token used for an API call — Kontext injects it into the request at runtime via the token exchange flow.
+
+## Source and Accuracy Notes
+
+- Project page: [kontext.security](https://kontext.security)
+- Source repository: [github.com/kontext-dev/kontext-cli](https://github.com/kontext-dev/kontext-cli)
+- License: MIT (verified via repository)
+- Latest release: v0.15.1 (verified via GitHub Releases)
+- HN launch thread: [news.ycombinator.com/item?id=47765374](https://news.ycombinator.com/item?id=47765374)
+
+## FAQ
+
+**Q: Does Kontext work with any AI agent, or only specific ones?**
+**A:** Kontext intercepts tool calls at the agent hook layer. The CLI ships with a generic hook interface; the Kontext dashboard documents integrations for popular agents. Self-hosted policy engines and custom agent frameworks can use the daemon API directly.
+
+**Q: Is the daemon required to be running for policy enforcement to work?**
+**A:** Yes — `kontextd` runs as a background daemon on the machine. Policy decisions are made by the daemon, which means offline or air-gapped environments need the daemon to have a local policy snapshot. The `--local-only` mode skips hosted services entirely.
+
+**Q: Can I self-host the Kontext management plane?**
+**A:** Yes. The platform supports self-hosted or managed deployments. The CLI and daemon work independently of which mode is active.
+
+**Q: What happens when a policy blocks an action?**
+**A:** The agent receives a blocked response with the policy reason. The block event is logged to the audit trail with actor, timestamp, resource, and policy rule matched.
+
+## Conclusion
+
+Kontext CLI closes a real security gap in AI coding workflows: the practice of handing agents credentials they shouldn't see or shouldn't have broad access to. By combining credential injection, pre-execution policy checks, and full audit trails in a single open-source tool, it makes agenttooling safe enough for production use without abandoning the flexibility that makes AI coding useful.
+
+The setup takes under five minutes with Homebrew and a free workspace. If you're running AI coding agents in a team environment — especially with access to production systems or third-party APIs — it's worth integrating early before credentials become scattered across configs and chat histories.
+
+```bash
+# Install in one line
+brew install kontext-security/tap/kontext
+```
