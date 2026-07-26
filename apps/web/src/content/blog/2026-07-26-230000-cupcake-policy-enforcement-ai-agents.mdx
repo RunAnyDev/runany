@@ -1,0 +1,160 @@
+---
+title: "Cupcake – Policy Enforcement for AI Coding Agents"
+description: "A native policy enforcement layer for AI coding agents that intercepts actions and evaluates them against OPA/Rego policies, blocking unsafe operations before they execute."
+pubDate: "2026-07-26"
+tags: ["ai-setup", "dev-tools", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cupcake.webp"
+  alt: "Cupcake policy enforcement layer for AI coding agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cupcake is an open-source policy enforcement layer for AI coding agents that intercepts agent actions and evaluates them against OPA/Rego policies, allowing or blocking operations in real time without consuming model context.
+
+## What Is Cupcake?
+
+Cupcake describes itself as a native policy enforcement layer for AI coding agents — a middleware shim that sits between the agent and its runtime actions. Where traditional guardrails work by prompting the model to "be careful," Cupcake works at the infrastructure level: it intercepts actual tool calls and filesystem operations, evaluates them against user-defined rules written in OPA/Rego, and returns a deterministic Allow/Block/Modify/Warn decision before the action proceeds.
+
+The key architectural difference is **zero model-context cost**. Prompting a model to follow rules consumes valuable context tokens on every turn. Cupcake evaluates policy decisions in milliseconds via WebAssembly, independent of the model's context window.
+
+Cupcake targets production AI coding workflows — teams using Claude Code, Cursor, or Factory AI in environments where a misbehaving agent could push bad code, exfiltrate secrets, or run destructive commands.
+
+## How Cupcake Works
+
+Cupcake integrates via native hooks directly in the agent action path. The evaluation pipeline:
+
+```
+Agent → (proposed action) → Cupcake → (policy decision) → Agent runtime
+```
+
+1. **Interception**: The agent prepares to execute a tool call (e.g., `git push`, `fs_write`, `bash`).
+2. **Enrichment**: Cupcake gathers real-time Signals — environment facts such as the current Git branch, CI status, or database metadata.
+3. **Evaluation**: The action and signals are packaged into a JSON input and evaluated against Wasm-compiled OPA/Rego policies.
+4. **Decision**: One of five outcomes is returned: Allow, Modify, Block, Warn, or Context injection.
+
+### Supported Agent Harnesses
+
+Cupcake provides native integrations for:
+
+| Harness | Status |
+|---|---|
+| Claude Code | Fully Supported |
+| Cursor | Fully Supported |
+| Factory AI | Fully Supported |
+| OpenCode | Fully Supported |
+| AMP | Coming soon |
+| Gemini CLI | Coming soon |
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ (for TypeScript bindings)
+- A supported AI coding agent (Claude Code, Cursor, etc.)
+- OPA/Rego knowledge for writing custom policies (or use the interactive policy studio)
+
+### Step 1: Install Cupcake
+
+```bash
+# Claude Code integration
+npm install -g @cupcake/claude-code
+
+# Or use the TypeScript SDK for custom integrations
+npm install @cupcake/ts
+```
+
+### Step 2: Configure a Policy
+
+Policies live in harness-specific directories (`policies/claude/`, `policies/cursor/`). A simple blocking policy for `git push` on main:
+
+```rego
+package cupcake.claude.push
+
+deny[msg] {
+  input.action == "bash"
+  input.command == "git push"
+  input.branch == "main"
+  msg := "Direct push to main is not allowed. Use a pull request."
+}
+
+allow {
+  not deny
+}
+```
+
+### Step 3: Run with Policy Enforcement
+
+```bash
+# Claude Code with Cupcake enforcement active
+cupcake --policy ./policies/claude --harness claude-code
+```
+
+The agent's actions are now intercepted and evaluated against your policies before execution.
+
+## Deeper Analysis
+
+### Why OPA/Rego?
+
+Cupcake chose OPA/Rego over simpler rule formats because Rego is already the industry standard for policy-as-code (used by Kubernetes admission control, Terraform Sentinel, and OpenTelemetry). Writing agent policies in Rego means one language to learn for both infrastructure and AI policy. Compiling Rego to WebAssembly also delivers sub-millisecond evaluation — critical for interactive coding agents where latency matters.
+
+### Comparison with Claude Code Hooks
+
+Claude Code ships with a hooks feature that also allows pre-action interception. Cupcake goes further by providing a unified policy framework that works across multiple agents, richer signal enrichment (CI status, branch metadata, file context), and a structured decision model (Allow/Modify/Block/Warn/Context) rather than a simple allow/block. Cupcake's policy separation also means non-developers can audit security rules without reading agent prompts.
+
+### The Watchdog LLM Mode
+
+For policies that are hard to express as rules (e.g., "this code looks suspicious"), Cupcake includes a Watchdog mode that uses a secondary LLM to evaluate actions. This is opt-in and useful for higher-level security oversight where deterministic rules are insufficient.
+
+## Practical Evaluation Checklist
+
+**When to use Cupcake:**
+- Production coding environments with multiple developers sharing agent access
+- Regulatory or compliance requirements (audit trails, mandatory review gates)
+- Open-source projects where contributors use AI agents with varying levels of trust
+- Teams with security requirements beyond what built-in agent hooks provide
+
+**When to skip it:**
+- Solo developers on personal projects — overhead may not justify the benefit
+- Agents running in sandboxed environments with no access to sensitive systems
+- Situations where deterministic rules cannot cover the threat model (Watchdog adds cost and latency)
+
+## Security Notes
+
+- Cupcake evaluates policies locally via WebAssembly — no data leaves your environment
+- Policy decisions are logged, enabling security audit trails
+- The Modify and Context injection features can alter agent behavior in subtle ways; audit policies regularly
+- Watchdog mode sends action context to an external LLM if configured; be mindful of data residency
+
+## FAQ
+
+**Q: Does Cupcake slow down the agent?**
+**A:** Policy evaluation runs in milliseconds via Wasm, typically adding under 10ms per decision. Interactive coding sessions are unaffected.
+
+**Q: Can it block specific filesystem operations?**
+**A:** Yes. Policies can intercept any tool call the agent harness exposes, including filesystem reads/writes, bash commands, and API calls.
+
+**Q: How is this different from a system prompt that says "do not push to main"?**
+**A:** Prompt-based rules consume model context tokens, require the model to understand and follow them on every turn, and can be circumvented by jailbreaks. Cupcake enforces rules at the infrastructure level — the agent cannot bypass a policy decision regardless of what it writes in its internal monologue.
+
+**Q: Does Cupcake work with Cursor?**
+**A:** Yes, Cursor is listed as fully supported with a dedicated integration guide.
+
+## Source and Accuracy Notes
+
+- Project page: [cupcake.eqtylab.io](https://cupcake.eqtylab.io)
+- Source repository: [github.com/eqtylab/cupcake](https://github.com/eqtylab/cupcake)
+- License: Apache 2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
+- Stars: 281 (GitHub API, 2026-07-26)
+- Source last checked: 2026-07-26 (README.md v2025-12-10)
+
+## Conclusion
+
+Cupcake fills a real gap in the AI coding agent ecosystem: enterprise-grade policy enforcement without the context-token overhead of prompt-based guardrails. By evaluating actions against OPA/Rego policies via WebAssembly, it delivers deterministic security decisions in under 10ms per action. The Apache 2.0 license and support for Claude Code, Cursor, Factory AI, and OpenCode make it accessible to both open-source projects and commercial teams.
+
+If you run AI coding agents in environments where misbehaving agents could cause real damage — production codebases, regulated industries, multi-tenant development platforms — Cupcake is worth evaluating. The interactive Policy Studio lowers the barrier to writing your first custom policy.
