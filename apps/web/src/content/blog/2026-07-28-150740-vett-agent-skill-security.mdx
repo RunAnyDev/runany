@@ -1,0 +1,176 @@
+---
+title: "Vett – Scan and Sign AI Agent Skills Before Running"
+description: "Vett is an open-source CLI and hosted platform that scans AI agent skills for malicious code, signs verified ones, and runs each agent in an isolated Firecracker microVM."
+pubDate: "2026-07-28"
+tags: ["ai-agent", "security", "mcp", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vett-agent-skill-security.webp"
+  alt: "Vett agent skill security platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Vett is an open-source CLI and hosted platform that scans AI agent skills for malicious code before installation and runs every agent in its own Firecracker microVM. Available free for CLI users, with a hosted Enclave plan from $19.99 per month.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [vett.sh](https://vett.sh) ← **MUST visit and verify**
+- Source repository: [github.com/vett-sh/vett](https://github.com/vett-sh/vett) ← **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47063497](https://news.ycombinator.com/item?id=47063497)
+
+## What Is Vett?
+
+AI agent skills extend an agent's capabilities by installing code from registries or direct URLs. But that code runs with your credentials, often with full filesystem and network access. A malicious or vulnerable skill is a direct path to data exposure or lateral movement.
+
+Vett addresses this with a three-layer approach:
+
+1. **Skill scanning** — before installation, Vett analyzes skill manifests and code against 40-plus detection rules covering known malicious patterns, suspicious API calls, and privilege escalation vectors.
+2. **Sigstore signing** — skills that pass scanning are signed with Sigstore, producing a tamper-evident audit trail.
+3. **MicroVM isolation** — the hosted Enclave product runs each agent on its own Firecracker microVM, the same hypervisor technology behind AWS Lambda. One compromised agent cannot reach another.
+
+The core CLI (`vett`) is free and works with any AI coding agent. The Enclave platform adds hardware-enforced isolation on top.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+Vett is published to npm:
+
+```bash
+npm i -g vett
+# or
+pnpm add -g vett
+```
+
+Run without installing:
+
+```bash
+npx -y vett@latest --help
+```
+
+### Step 2: Search and Install Skills
+
+Search the Vett registry for skills matching your agent:
+
+```bash
+vett search <query>
+```
+
+Install a skill by registry reference or direct URL:
+
+```bash
+vett add <skill-or-url>
+```
+
+### Step 3: List and Manage Installed Skills
+
+```bash
+vett list           # show installed skills
+vett update         # update all installed skills
+vett remove <skill> # remove a skill
+```
+
+### Step 4: Detect Installed Agents
+
+Vett auto-detects agents on your system:
+
+```bash
+vett agents
+```
+
+### Step 5: Sync Agent Symlinks
+
+If skills are not linking correctly to your agent:
+
+```bash
+vett sync
+```
+
+## How Skill Scanning Works
+
+Vett's scanner evaluates skill markdown files and associated code against detection rules. According to the project, it has flagged 739 skills with critical findings out of 8,264 analyzed. The scanner looks for patterns such as:
+
+- Skills requesting excessive permissions beyond their stated purpose
+- Network calls to unexpected or non-allowlisted endpoints
+- Filesystem access outside the agent's designated working directory
+- Use of credentials or environment variables not explicitly declared
+
+Verified skills receive a Sigstore signature, which can be audited and which Enclave enforces at runtime.
+
+## Vett Enclave: Hosted MicroVM Isolation
+
+The free CLI scans and signs skills. For production agent deployments, Vett Enclave runs agents on isolated Firecracker microVMs, each with:
+
+- A dedicated kernel and memory region
+- Vaulted credentials inaccessible to other agents
+- A full audit trail of all system calls and network activity
+
+Enclave pricing starts at $19.99 per month. The free tier covers the CLI and registry access for individual developers.
+
+## Configuration
+
+The CLI stores configuration under `~/.vett/`. Key environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `VETT_REGISTRY_URL` | `https://vett.sh` | Override registry base URL |
+| `VETT_INSTALL_DIR` | `~/.vett/skills` | Override skill install location |
+| `VETT_TELEMETRY_ENABLED` | `true` | Set to `false` to disable telemetry |
+| `VETT_NO_UPDATE_NOTIFIER` | `0` | Set to `1` to disable update checks |
+
+## Development
+
+```bash
+pnpm install
+pnpm format:check
+pnpm -r typecheck
+pnpm -r test
+pnpm -r build
+```
+
+The repository is structured as a monorepo with `apps/cli` (the `vett` CLI) and `packages/core` (`@vett/core`, shared schemas and parsers).
+
+## Practical Evaluation Checklist
+
+- Install the CLI and run `vett --help`
+- Run `vett agents` to verify agent detection
+- Use `vett search` to browse the registry
+- Inspect a skill's audit trail with `vett info <skill>`
+- Evaluate whether the detection rules cover your threat model
+
+## Security Notes
+
+Vett's security model rests on two independent controls:
+
+- **Scanning at install time** catches known malicious patterns but cannot guarantee the absence of all vulnerabilities. Treat skills as untrusted code until scanned.
+- **MicroVM isolation** at runtime prevents lateral movement even if a skill contains a zero-day exploit. This is the stronger control and is only available via Enclave.
+
+The Sigstore signing scheme provides non-repudiation for verified skills. However, Sigstore signatures verify origin and integrity, not safety. A signed skill is not automatically safe — it means the skill passed Vett's detection rules at the time of signing.
+
+## FAQ
+
+**Q: Does Vett work with any AI agent?**
+**A:** The CLI and registry are agent-agnostic. Vett detects agents automatically and can install skills for most popular AI coding assistants. The Enclave product currently supports OpenClaw agents.
+
+**Q: Is the skill scanning logic open source?**
+**A:** Yes. The scanning engine is part of the open-source `vett` CLI at [github.com/vett-sh/vett](https://github.com/vett-sh/vett) and can be inspected and extended.
+
+**Q: How is Vett different from a standard package manager?**
+**A:** Standard package managers verify cryptographic integrity of packages but do not analyze code behavior. Vett scans for semantic patterns — privilege escalation, unexpected network access, credential misuse — that are invisible to hash verification alone.
+
+**Q: What happens if a skill fails scanning?**
+**A:** The CLI will warn and refuse to install the skill by default. The Enclave platform will not run an unverified skill in an isolated microVM.
+
+**Q: Is there a self-hosted option for Enclave?**
+**A:** Not at present. Enclave is a hosted service running on Vett's infrastructure.
+
+## Conclusion
+
+Vett fills a real gap in the AI agent ecosystem: untrusted third-party skills running with elevated privileges. By combining static analysis at install time with hardware-level isolation at runtime, it provides defense in depth without requiring you to trust any individual skill blindly. The free CLI is immediately useful for developers who want to audit their skill ecosystem; Enclave adds production-grade isolation for teams deploying agents at scale.
