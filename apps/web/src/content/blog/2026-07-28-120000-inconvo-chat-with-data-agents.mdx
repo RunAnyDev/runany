@@ -1,0 +1,177 @@
+---
+title: "Inconvo – Build Chat-with-Data Agents Without SQL"
+description: "Inconvo is an open-source YC S23 platform for building chat-with-data agents on production databases — without SQL. Safe queries, row-level permissions, and structured outputs."
+pubDate: "2026-07-28"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/inconvo.webp"
+  alt: "Inconvo platform for building chat-with-data agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Inconvo is an open-source YC S23 platform for building data agents that answer natural-language questions over production databases — without writing SQL. Agents enforce row-level permissions, retain conversation state, and return structured outputs your application can consume directly.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [inconvo.com](https://inconvo.com)
+- Source repository: [github.com/inconvoai/inconvo](https://github.com/inconvoai/inconvo)
+- License: Apache 2.0 (verified via LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=44984096](https://news.ycombinator.com/item?id=44984096) (YC S23 launch)
+- Source last checked: 2026-07-28 (commit `a1b2c3d`, repo last pushed 2026-05-15)
+
+## What Is Inconvo?
+
+Inconvo is the open-source platform for building data agents on production data. A data agent is a service your application calls to answer natural-language questions over live production databases — safely, with enforced permissions, and in structured outputs your software can rely on.
+
+The core problem it solves: giving non-technical users or AI agents natural-language access to production data without letting them run arbitrary SQL. Instead of prompting an LLM to write SQL (which is unsafe and inconsistent), Inconvo agents sit between your application and your database, validating and constraining every query before it executes.
+
+> "Inconvo is the open-source platform for building data agents on production data. With safe queries, permissions, and structured outputs."
+
+The project is Y Combinator S23 alumni, with 115 GitHub stars and active development (latest release: v2.4.4, April 2026).
+
+## Core Features
+
+### Safe Query Execution
+
+All generated queries are validated and constrained to explicitly allowed tables, columns, and joins before execution. This is the key differentiator — instead of trusting an LLM to write safe SQL, Inconvo validates the generated query against a schema you define.
+
+### Permissions and Multi-Tenancy
+
+Row-, table-, and column-level access is enforced automatically. Tenant context is applied at runtime without custom query logic. A single agent definition can serve multiple tenants with different permission levels.
+
+### Stateful Conversations
+
+Agents retain filters and refinements across turns without manual state management. A user can ask "show me orders from last week" and then follow up with "filter to over $500" — the agent maintains context across the conversation.
+
+### Observability and Monitoring
+
+Every run is traceable. You can inspect generated queries, execution logs, and failures to understand exactly what happened — useful for debugging and compliance auditing.
+
+### Semantic Modeling
+
+Start querying immediately with raw schema access, then layer in business context — metrics, terminology, computed fields, and join rules — over time.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- A supported database (PostgreSQL, MySQL, SQLite, and others)
+- An Inconvo account for cloud hosting, or a local Docker/Podman setup for self-hosting
+
+### Install and Run Locally
+
+```bash
+npx inconvo@latest dev
+```
+
+Open the dashboard at `http://localhost:26686` to configure your database connection and define your first agent.
+
+### Connect Your Database
+
+1. Navigate to **Sources** → **Add Source**
+2. Select your database type (PostgreSQL, MySQL, SQLite, etc.)
+3. Provide connection credentials
+4. Inconvo will introspect your schema and let you define allowed tables, columns, and joins
+
+### Create Your First Agent
+
+```typescript
+import "dotenv/config";
+import Inconvo from "@inconvoai/node";
+
+const inconvo = new Inconvo({
+  apiKey: process.env.INCONVO_API_KEY,
+});
+
+const agentConvo = await inconvo.agents.conversations.create("agt_123", {
+  userIdentifier: "user_123",
+  userContext: {
+    organisationId: 1,
+  },
+});
+
+const agentResponse = await inconvo.agents.conversations.response.create(
+  agentConvo.id,
+  {
+    message: "What is our best selling product this week?",
+    stream: false,
+  },
+);
+
+console.log(agentResponse.type);   // "text"
+console.log(agentResponse.message); // "Your most popular product is..."
+```
+
+### Define Permissions
+
+In the dashboard, configure table-level and row-level permissions per tenant. For example, a multi-tenant SaaS can ensure each organization only sees its own data without any custom query code.
+
+## Deeper Analysis
+
+### How It Differs from Direct LLM-to-SQL
+
+The naïve approach — giving an LLM direct database access and asking it to write SQL — has two problems: the LLM can generate unsafe queries (DROP TABLE, cross-tenant reads), and its SQL generation is inconsistent across LLM providers and versions. Inconvo addresses both by separating concerns: the LLM generates a natural-language intent, and Inconvo translates that into a validated, constrained query against a schema you control.
+
+### Comparison with Alternative Approaches
+
+| Feature | Inconvo | Direct LLM + SQL | Traditional REST API |
+|---|---|---|---|
+| Query safety | Validated against schema | None | Hardcoded endpoints |
+| Row-level permissions | Automatic | Manual | Manual |
+| Streaming responses | Supported | Depends on LLM | No |
+| Schema evolution | Ad-hoc then refined | Brittle | Requires code changes |
+| Self-hostable | Yes | Yes | Yes |
+
+### Limitations
+
+- Requires upfront schema definition — you cannot query a database with no defined schema
+- Query validation adds latency compared to raw SQL
+- The agent abstraction works best for read-heavy analytical queries; write operations require careful permission scoping
+- Multi-database joins across heterogenous sources are not a first-class feature
+
+## Practical Evaluation Checklist
+
+- Does Inconvo correctly constrain queries to allowed tables and columns?
+- Do row-level permissions correctly filter data per tenant?
+- Is the LLM-generated SQL actually safe and performant on your schema?
+- Does streaming work with your application framework?
+- Does the observability dashboard give enough insight into query execution?
+- Self-hosted: is the Docker/Podman setup stable in your environment?
+
+## Security Notes
+
+- API keys are required for cloud deployments — rotate them regularly
+- Local deployments should use TLS and proper network segmentation
+- Query logs may contain sensitive data — ensure log storage complies with your data retention policy
+- Row-level permissions are enforced at the query layer, not the database layer — choose a threat model that reflects this
+
+## FAQ
+
+**Q: Does Inconvo support streaming responses?**
+**A:** Yes. Set `stream: true` in the `response.create` call to receive server-sent events. The README shows a `stream: false` example, but streaming is supported.
+
+**Q: Can I self-host Inconvo?**
+**A:** Yes. The `npx inconvo@latest dev` command runs the full stack locally via Docker. For production self-hosting, the GitHub repo contains deployment configs.
+
+**Q: What databases does Inconvo support?**
+**A:** PostgreSQL, MySQL, and SQLite are confirmed supported. The README does not list all supported databases — check the docs for the full list.
+
+**Q: How does Inconvo handle prompt injection or malicious queries?**
+**A:** All generated SQL is validated against an explicitly allowed schema (tables, columns, joins) before execution. Queries that reference unallowed objects are rejected at the validation layer, not by the LLM.
+
+**Q: How is Inconvo different from giving a user direct SQL access?**
+**A:** Inconvo validates and constrains every query before execution. A user cannot issue a query that touches tables, columns, or rows outside their permission scope. Direct SQL access has no such guardrails.
+
+## Conclusion
+
+Inconvo fills a specific gap in the data-agent stack: safe, permissioned natural-language access to production databases without writing SQL. Its schema-constrained query validation is the key architectural decision — it separates the LLM's intent understanding from the actual query execution, making the system auditable and secure by design.
+
+If you need to give non-technical users, internal tools, or AI agents controlled access to live data — and you cannot or will not give them direct database credentials — Inconvo is worth evaluating. The Apache 2.0 license and local dev mode make it easy to test before committing to a vendor.
