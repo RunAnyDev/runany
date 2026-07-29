@@ -1,0 +1,198 @@
+---
+title: "LLMKube – Kubernetes Operator for Local LLM Inference"
+description: "LLMKube is an open-source Kubernetes operator that manages local LLM inference across NVIDIA, Apple Silicon Metal, and AMD GPUs from a single YAML spec, with an OpenAI-compatible API."
+pubDate: "2026-07-30"
+tags: ["llm", "kubernetes", "self-hosted", "inference", "apple-silicon"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/llmkube.webp"
+  alt: "LLMKube product thumbnail showing Kubernetes operator for local LLM inference"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** LLMKube is an open-source Kubernetes operator that manages local LLM inference across NVIDIA, Apple Silicon Metal, and AMD GPUs from a single YAML spec. Deploy a model with one CLI command and query it via an OpenAI-compatible endpoint.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [llmkube.com](https://llmkube.com)
+- Source repository: [github.com/defilantech/LLMKube](https://github.com/defilantech/LLMKube)
+- License: Apache 2.0 (verified via GitHub API `license.spdx_id`)
+- Latest release: v0.9.13 (verified via GitHub API, published 2026-07-29)
+- GitHub stars: 180 (as of 2026-07-30)
+- HN launch thread: [news.ycombinator.com/item?id=48247414](https://news.ycombinator.com/item?id=48247414)
+
+## What Is LLMKube?
+
+LLMKube is a Kubernetes operator that turns LLM deployment into a two-line YAML problem. Define a `Model` and an `InferenceService`, and the operator handles downloading, caching, GPU scheduling, health checks, scaling, and exposing an OpenAI-compatible API — all managed through standard Kubernetes tooling.
+
+The key differentiator is **heterogeneous hardware support**. Where most inference tools are NVIDIA-only or CPU-only for Apple Silicon, LLMKube manages NVIDIA GPUs, Apple Silicon Metal GPUs, and AMD GPUs in the same cluster through a unified CRD interface. A Mac Studio running local Metal inference and a cloud node with NVIDIA cards both surface as `InferenceService` objects to `kubectl`.
+
+LLMKube is written in Go and released under Apache 2.0. The current version is **v0.9.13** (published July 29, 2026).
+
+## Core Architecture
+
+LLMKube has two cooperating processes:
+
+1. **In-cluster controller** — owns Kubernetes-side desired state, watches `Model` and `InferenceService` custom resources, schedules runtime pods running llama.cpp, vLLM, or TGI
+2. **Metal Agent** (optional, Apple Silicon only) — runs as a native macOS process that spawns `llama-server` with full Metal GPU access, then registers endpoints back into the cluster
+
+```
+┌──────────────────────────────┐      ┌──────────────────────────────┐
+│ Linux Server / Cloud         │      │ Mac (Apple Silicon)          │
+│  Kubernetes                 │      │ Metal Agent                  │
+│  LLMKube Controller         │◄────►│ Watches K8s API               │
+│  InferenceService CRDs       │  LAN │ Spawns llama-server (Metal)  │
+│  NVIDIA Nodes (CUDA)        │      │ Full GPU + unified memory    │
+└──────────────────────────────┘      └──────────────────────────────┘
+```
+
+The Metal Agent is the distinctive piece. Apple Silicon Metal GPUs cannot be accessed from inside a container, so every container-native inference tool either ignores Macs or runs slow CPU-only inference. LLMKube inverts the model — the agent runs native on macOS and bridges back into Kubernetes.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+```bash
+brew install defilantech/tap/llmkube
+```
+
+### Step 2: Install the operator on any K8s cluster
+
+```bash
+helm repo add llmkube https://defilantech.github.io/LLMKube
+helm install llmkube llmkube/llmkube --namespace llmkube-system --create-namespace
+```
+
+Supported cluster types include kind, minikube, GKE with GPUs, MicroK8s on DGX Spark, and air-gapped environments.
+
+### Step 3: Deploy a model
+
+```bash
+llmkube deploy phi-4-mini
+```
+
+The operator downloads the model, creates the Deployment, sets up the Service, and exposes an OpenAI-compatible endpoint. The built-in model catalog contains tested defaults for common models.
+
+To deploy with GPU acceleration:
+
+```bash
+llmkube deploy llama-3.1-8b --gpu --gpu-count 1
+```
+
+### Step 4: Query the endpoint
+
+```bash
+kubectl port-forward svc/phi-4-mini 8080:8080 &
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello!"}],"max_tokens":100}'
+```
+
+Works with the OpenAI Python/Node/Go SDKs, LangChain, and LlamaIndex out of the box.
+
+### Deploy without the CLI (plain kubectl)
+
+```yaml
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: tinyllama
+spec:
+  source: https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  format: gguf
+---
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: tinyllama
+spec:
+  modelRef: tinyllama
+  replicas: 1
+  resources:
+    cpu: "500m"
+    memory: "1Gi"
+```
+
+```bash
+kubectl apply -f model.yaml
+```
+
+## Deeper Analysis
+
+### ModelRouter: Hybrid Local + Cloud Routing
+
+`ModelRouter` is a CRD that puts a policy-aware OpenAI-compatible endpoint in front of both local InferenceServices and external providers (Anthropic, OpenAI, LiteLLM). It enforces:
+
+- **Fail-closed for regulated data** — PII or PHI data is statically rejected at the Kubernetes-enforcement layer and refused at runtime with HTTP 503 if the local pool cannot serve the request
+- **Per-rule and per-backend timeout budgets** — strict policy tiers fast-fail; lenient tiers stay patient; context timeouts apply per attempt so a slow primary does not eat the fallback budget
+- **Policy-aware routing** — an agent running on a local model can selectively hand off complex steps to Claude or GPT without the agent code knowing where the model lives
+
+### Foreman: Agentic Coding on Your Own Fleet
+
+Foreman is an opt-in add-on that introduces CRDs for orchestrating coding agents across a heterogeneous LLM fleet. It ships its own Helm chart with four custom resources (`Workload`, `AgenticTask`, `Agent`, `FleetNode`). The v0.1 shape runs a three-node pipeline:
+
+1. Coder agent produces a branch
+2. Verifier agent runs `make fmt vet lint test`
+3. Reviewer agents score the diff against the issue body
+
+Foreman has shipped real DCO-signed branches to the LLMKube repository: [PR #508](https://github.com/defilantech/LLMKube/pull/508) and [PR #588](https://github.com/defilantech/LLMKube/pull/588).
+
+Foreman targets shops where on-prem hardware or sovereignty constraints make the cloud API model a poor fit — it is the control plane for fleets doing autonomous work, not a replacement for individual developer tools.
+
+### Comparison with Adjacent Tools
+
+| | LLMKube | vLLM / TGI | Ollama | KServe |
+|---|---|---|---|---|
+| Kubernetes-native CRDs | Yes | No | No | Yes |
+| Apple Silicon Metal GPU | Native (Metal Agent) | No | Local only | No |
+| NVIDIA GPU | Yes | Yes | Limited | Yes |
+| AMD GPU | Yes (Vulkan) | No | Limited | No |
+| Heterogeneous clusters | Yes | No | No | No |
+| Hybrid local + cloud routing | ModelRouter CRD | No | No | No |
+| OpenAI-compatible API | Built-in | Yes | Yes | Requires config |
+| Model catalog + deploy CLI | `llmkube deploy` | Manual | `ollama pull` | Manual |
+| Prometheus + Grafana | Included | External | No | External |
+
+## Practical Evaluation Checklist
+
+- [ ] Deploy to kind cluster in under 5 minutes using the Quick Start above
+- [ ] Verify OpenAI SDK streaming works against the local endpoint
+- [ ] Test Metal Agent on Apple Silicon if hardware is available
+- [ ] Deploy a ModelRouter with a PII rule and verify fail-closed behavior
+- [ ] Run the built-in throughput benchmark: `llmkube bench phi-4-mini`
+- [ ] Test Foreman Workload against a fork of a real repository
+
+## Security Notes
+
+- Metal Agent runs as a native macOS process, not a container — keep the macOS host secure as it has direct Metal GPU access
+- ModelRouter fail-closed enforcement is at the Kubernetes layer, not application code — audited rules in `spec.rules` are enforced even if the application code is compromised
+- Foreman agents run against your repository with whatever permissions the agent credentials carry — use scoped tokens
+- No built-in auth on the inference endpoint; wrap with your own authentication layer or network policies
+
+## FAQ
+
+**Q: Does LLMKube support GGUF models?**
+**A:** Yes. The `Model` CRD accepts any HuggingFace URL to a GGUF file via the `spec.source` field with `spec.format: gguf`.
+
+**Q: Can it route between local and cloud models based on data classification?**
+**A:** Yes. ModelRouter's `spec.rules[].match.dataClassification` with `spec.rules[].failClosed: true` enforces this at the proxy layer, rejecting routing for classified data to cloud backends.
+
+**Q: What Kubernetes versions are supported?**
+**A:** The operator targets Kubernetes 1.26 and later. Tested variants include kind, minikube, GKE, MicroK8s, and OpenShift.
+
+**Q: How does LLMKube compare to Ollama?**
+**A:** Ollama is simpler for a single machine. LLMKube is for teams that need Kubernetes-managed inference across multiple nodes and hardware types (NVIDIA + Apple Silicon + AMD) with unified observability and policy controls.
+
+## Conclusion
+
+LLMKube fills the gap between single-machine inference tools (Ollama) and enterprise NVIDIA-only serving stacks (vLLM on KServe). Its Kubernetes-native approach, heterogeneous hardware support, and built-in policy routing make it worth evaluating if you are running inference across mixed infrastructure. The Metal Agent alone justifies the project — no other Kubernetes LLM tool gives Apple Silicon its full GPU memory access.
+
+The ModelRouter and Foreman add-ons push LLMKube beyond simple inference hosting into the territory of platform-level AI infrastructure for regulated or air-gapped environments.
+
+Explore the project at [llmkube.com](https://llmkube.com) or deploy with `brew install defilantech/tap/llmkube` followed by `llmkube deploy` to get started.
