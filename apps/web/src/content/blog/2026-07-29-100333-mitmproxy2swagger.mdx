@@ -1,0 +1,162 @@
+---
+title: "mitmproxy2swagger – Capture Traffic, Get OpenAPI Spec"
+description: "Turn any app's HTTP traffic into an OpenAPI spec without reading a single line of code. mitmproxy2swagger reverse-engineers REST APIs from mitmproxy captures or browser HAR exports."
+pubDate: "2026-07-29"
+tags: ["reverse-engineering", "api", "openapi", "developer-tools", "http"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mitmproxy2swagger.webp"
+  alt: "mitmproxy2swagger project thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** mitmproxy2swagger captures HTTP traffic from any app via mitmproxy or browser DevTools and automatically generates an OpenAPI 3.0 specification — no API docs needed.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/alufers/mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
+- PyPI package: [pypi.org/project/mitmproxy2swagger](https://pypi.org/project/mitmproxy2swagger)
+- License: none listed (verified via GitHub API — no `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=31354130](https://news.ycombinator.com/item?id=31354130) (691 points, 38 comments)
+- Source last checked: 2026-07-29 (commit `master` branch)
+
+## What Is mitmproxy2swagger?
+
+mitmproxy2swagger is an open-source CLI tool that automatically reverse-engineers REST API endpoints from captured HTTP traffic. Instead of reading documentation or using a proxy manually, you point it at a traffic capture and get back a complete [OpenAPI 3.0](https://swagger.io/specification/) specification.
+
+The workflow is straightforward: run mitmproxy (or export HAR from browser DevTools), save the traffic, run mitmproxy2swagger twice, and edit a small config to select which endpoints to include. The tool supports both mitmproxy flow files and browser HAR exports, making it accessible even if you only use Chrome DevTools.
+
+## How It Works
+
+### Step 1 — Capture Traffic
+
+Start mitmproxy's web UI:
+
+```bash
+mitmweb
+# Web server listening at http://127.0.0.1:8081/
+# Proxy server listening at http://*:9999
+```
+
+Configure your target app or browser to route traffic through port `9999`, then use the app normally. When done, save the traffic from the **File → Save** menu.
+
+Alternatively, export HAR from Chrome DevTools: **Network tab → Export HAR**.
+
+### Step 2 — First Pass: Detect Endpoints
+
+```bash
+pip install mitmproxy2swagger
+mitmproxy2swagger -i captured_flows -o schema.yaml -p https://api.target.com/v1
+```
+
+This scans the traffic and generates a YAML skeleton with `ignore:` prefixes on each detected path. The tool also supports Docker:
+
+```bash
+docker run -it -v $PWD:/app mitmproxy2swagger \
+  mitmproxy2swagger -i <flow_file> -o schema.yaml -p <api_prefix>
+```
+
+### Step 3 — Select Endpoints
+
+Open `schema.yaml` and remove the `ignore:` prefix from paths you want to include. The tool uses greedy matching, so more specific paths closer to the top take precedence.
+
+### Step 4 — Second Pass: Generate Full Spec
+
+```bash
+mitmproxy2swagger -i captured_flows -o schema.yaml -p https://api.target.com/v1
+```
+
+Run it again with the same schema file. The tool now generates full endpoint descriptions with HTTP methods, parameters, and request/response structures. Pass `--examples` to embed sample data, or `--headers` to include request/response headers — use these carefully if the capture contains sensitive tokens or credentials.
+
+## Installation Options
+
+mitmproxy2swagger is available via pip, git, and Arch Linux's AUR:
+
+```bash
+pip install mitmproxy2swagger
+# or
+git clone git@github.com:alufers/mitmproxy2swagger.git
+cd mitmproxy2swagger
+docker build -t mitmproxy2swagger .
+```
+
+On Arch Linux:
+
+```bash
+pacman -S mitmproxy2swagger
+```
+
+Requires Python 3 and pip3. mitmproxy itself is a dependency for the mitmproxy capture mode; HAR export from DevTools requires only a browser.
+
+## HAR Support
+
+The tool automatically detects HAR files when passed via `-i`. To export HAR from Chrome:
+
+1. Open DevTools → **Network** tab
+2. Enable traffic capture
+3. Right-click → **Export HAR**
+
+Pass the exported HAR file to mitmproxy2swagger the same way you would a mitmproxy flow file. The tool handles the format automatically.
+
+## Deeper Analysis
+
+### What Makes This Different from Manual Approaches
+
+Traditional API reverse-engineering requires manually mapping each request, copying payloads, and writing OpenAPI by hand. mitmproxy2swagger automates the entire detection phase, handling request parameter extraction, response structure mapping, and content type detection automatically. The two-pass approach (detect → refine → generate) lets you stay in control of which endpoints appear in the final spec.
+
+### Accuracy Considerations
+
+The tool captures actual runtime traffic, so the generated spec reflects real behavior — including any undocumented endpoints, version differences, or app-specific quirks that written documentation might miss. Because it works from live captures, it's particularly useful for mobile apps, desktop clients, and proprietary internal tools that lack public API documentation.
+
+### Limitations
+
+- Only handles REST APIs (HTTP traffic). SOAP/WSDL requires a different approach.
+- Capturing traffic from apps with certificate pinning (like mobile banking apps) requires additional setup to bypass SSL verification.
+- The generated spec quality depends on traffic coverage — endpoints not exercised during capture won't appear in the output.
+- Does not overwrite existing endpoint descriptions; delete them before re-running if you want fresh generation.
+
+## Practical Evaluation Checklist
+
+- [ ] Install via pip and run help flag (`mitmproxy2swagger --help`)
+- [ ] Capture traffic from a familiar app or website
+- [ ] Run first pass and inspect the generated YAML
+- [ ] Edit paths to include the endpoints you care about
+- [ ] Run second pass and verify the OpenAPI output
+- [ ] Validate the spec with [Swagger Editor](https://editor.swagger.io/) or `swagger-cli validate`
+- [ ] Try with HAR export from DevTools if you prefer not to run mitmproxy
+
+## Security Notes
+
+**Passing `--examples` or `--headers` embeds actual request/response data into the schema.** Before sharing the generated OpenAPI spec publicly, scrub any tokens, API keys, passwords, or personal information that appeared in the captured traffic. Treat the flow files and generated specs as sensitive artifacts.
+
+Capturing traffic from apps with security controls (certificate pinning, TLS client certificates) requires additional mitmproxy configuration and may not work for all applications.
+
+## FAQ
+
+**Q: Does this work with apps that use certificate pinning?**
+**A:** mitmproxy can intercept most HTTPS traffic, but apps with strict certificate pinning will fail to connect. Disabling pinning on mobile typically requires a rooted/jailbroken device or additional mitmproxy TLS configuration.
+
+**Q: Can I generate a spec from traffic alone without editing the YAML?**
+**A:** The first pass always generates all paths with `ignore:` prefixes. You need to edit the file to select which endpoints to include — this is intentional to avoid including irrelevant paths by default.
+
+**Q: What's the difference between mitmproxy flow files and HAR?**
+**A:** Both are supported identically. mitmproxy flow files (`.flow`) come from the mitmproxy tool and contain rich metadata. HAR files are a browser-native format exportable from any browser's DevTools. HAR is often more convenient since no additional tool is needed.
+
+**Q: Does it work with WebSocket or gRPC traffic?**
+**A:** No. mitmproxy2swagger only handles HTTP REST API traffic captured as plain requests and responses.
+
+## Conclusion
+
+mitmproxy2swagger solves a real problem: undocumented APIs that nonetheless expose functionality you need to integrate with. By automating the tedious parts of API discovery, it lets you go from "I wonder what this app calls internally" to a shareable OpenAPI spec in minutes. It's particularly valuable for working with internal tools, mobile apps, or third-party services that don't publish developer documentation.
+
+Whether you're building an SDK, testing an integration, or exploring how a closed platform works, this tool deserves a spot in your API reverse-engineering toolkit.
+
+**Links:**
+- GitHub: [github.com/alufers/mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
+- PyPI: [pypi.org/project/mitmproxy2swagger](https://pypi.org/project/mitmproxy2swagger)
