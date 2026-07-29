@@ -1,0 +1,168 @@
+---
+title: "Colibri – Run GLM-5.2 on Your Machine (Pure C, 25 GB RAM)"
+description: "Colibri is a pure-C MoE runtime that streams 744B-parameter GLM-5.2 from disk to consumer hardware. Zero Python, zero GPU required — ~25 GB RAM and you are running a frontier model locally."
+pubDate: "2026-07-30"
+tags: ["ai-setup", "local-llm", "open-source", "c", "moe"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/colibri-glm-local-inference.webp"
+  alt: "Colibri - Run GLM-5.2 locally on consumer hardware"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Colibri is an open-source pure-C runtime that lets you run the 744B-parameter GLM-5.2 MoE model on a regular machine with ~25 GB RAM — streaming experts from disk instead of loading the whole model into memory.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [justvugg.github.io/colibri](https://justvugg.github.io/colibri)
+- Source repository: [github.com/JustVugg/colibri](https://github.com/JustVugg/colibri)
+- License: Apache-2.0 (verified via GitHub API)
+- Latest release: [v1.2.0](https://github.com/JustVugg/colibri/releases/tag/v1.2.0) (published 2026-07-28)
+- HN launch thread: [news.ycombinator.com/item?id=48842459](https://news.ycombinator.com/item?id=48842459)
+
+## What Is Colibri?
+
+Frontier AI models are typically locked inside cloud datacenters — too large to run locally. Colibri challenges that assumption. It is a lightweight, quality-preserving Mixture-of-Experts (MoE) runtime written in pure C that treats VRAM, RAM, and NVMe storage as one unified memory hierarchy.
+
+The key insight: a 744B-parameter MoE model like GLM-5.2 activates only ~40B parameters per token, and only ~11 GB of those change token-to-token (the routed experts). Colibri exploits this sparsity by streaming experts from disk on demand, keeping only the dense attention layers and shared experts resident in RAM.
+
+From the README:
+
+> **Tiny engine, immense model.** Run **GLM-5.2 (744B-parameter MoE)** on a consumer machine with ~25 GB of RAM — in pure C, with zero dependencies, by streaming experts from disk.
+
+### Core Technical Properties
+
+The Colibri engine ships as a single C file (`c/glm.c`) plus small headers. No BLAS, no Python runtime, no GPU driver dependencies at inference time.
+
+The three-tier memory design:
+
+| Tier | Technology | What lives here |
+|------|-----------|-----------------|
+| VRAM | GPU memory | Hot experts — optional, improves speed |
+| RAM | System memory | Dense part (~17B params at int4, ~9.9 GB) |
+| Disk | NVMe/SSD | 19,456 routed experts (~370 GB) — streamed on demand |
+
+The router runs one layer ahead of execution, prefetching the next expert so disk latency is hidden behind computation.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Linux or macOS (C compiler: `gcc` or `clang`)
+- ~25 GB free RAM
+- ~400 GB free disk space for the model weights
+- Optional: GPU with VRAM for hot-tier acceleration
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/JustVugg/colibri.git
+cd colibri
+```
+
+### Step 2: Build
+
+```bash
+make
+# produces: ./coli
+```
+
+### Step 3: Download GLM-5.2 Weights
+
+Place quantized weights in your model directory. The engine looks for weights at the path set in `COLI_MODEL`:
+
+```bash
+COLI_MODEL=/path/to/glm52_i4 ./coli chat
+```
+
+### Step 4: Run the Chat Interface
+
+```bash
+./coli chat
+# colibri v1.1.0 — GLM-5.2 · 744B MoE · int4 · streaming CPU
+#  › ciao!
+#  ◆ Ciao!  Come posso aiutarti oggi?
+```
+
+### Optional: Web Dashboard
+
+```bash
+./coli web
+# serves a live dashboard showing:
+#   - tok/s throughput and TTFT
+#   - per-expert routing heat
+#   - VRAM/RAM/disk tier bar
+```
+
+### Optional: Dual-SSD Setup
+
+If you have a second SSD, mirror the model for double the read bandwidth:
+
+```bash
+COLI_MODEL=/fast/glm52_i4 COLI_MODEL_MIRROR=/second/glm52_i4 ./coli chat
+```
+
+## Deeper Analysis
+
+### Why This Is Technically Interesting
+
+Most local LLM runtimes (llama.cpp, ollama, etc.) focus on dense models. Colibri targets MoE sparsity — the same architecture class as Mistral, Mixtral, and now GLM-5.2. The engineering challenge is fundamentally different: instead of quantizing and splitting a massive dense matrix, you build a routing-aware caching system that predicts which of thousands of experts will fire next.
+
+The Colibri approach makes an analogy to a JIT compiler: a JIT watches what code actually runs and compiles hot paths on demand. Colibri watches which experts actually route and stages those in faster storage. Both systems treat memory as a bet on temporal locality.
+
+### Expert Atlas
+
+One distinctive feature is the **Atlas page** in the web dashboard — a 3-D visualization of 13,260 characterized experts, clustering by measured topic affinity (poetry, law, SQL, Chinese, etc.). The positions are routing affinity measurements, not learned embeddings. It is one of the more honest looks at what actually happens inside a MoE router.
+
+### Comparison with llama.cpp
+
+llama.cpp is the dominant pure-C inference engine, but it targets dense models. For MoE models:
+
+- **llama.cpp**: loads entire model into memory, works best for models up to ~70B parameters on high-end consumer hardware
+- **Colibri**: streams experts from disk, theoretically supports arbitrarily large MoE models with bounded RAM
+
+If you have 400 GB of NVMe and 25 GB of RAM, you can run a 744B MoE model that would be impossible to fit in VRAM with llama.cpp's approach.
+
+## Practical Evaluation Checklist
+
+- [x] Runs on CPU-only (no GPU required for basic inference)
+- [x] Single C file — no Python, no complex toolchain
+- [x] Disk-streaming architecture for MoE sparsity
+- [x] Live web dashboard with routing visualization
+- [x] Dual-SSD support for doubled read bandwidth
+- [x] Expert affinity measurements published
+- [x] Apache-2.0 license
+- [x] Actively maintained (v1.2.0 released July 28, 2026)
+
+## Security Notes
+
+Colibri runs inference locally — your prompts and data never leave your machine. The model weights are downloaded separately and stored on your disk. No telemetry or outbound connections are made by the engine itself.
+
+As with any local inference setup, ensure your model weights are from a trusted source (the GLM-5.2 weights from the official Zhipu AI release).
+
+## FAQ
+
+**Q: What hardware do I need to run GLM-5.2?**
+**A:** The README specifies ~25 GB of available RAM for the dense layers, plus ~400 GB of NVMe/SSD storage for the expert weights. A GPU is optional — it improves speed (hot-tier residency) but is not required.
+
+**Q: How fast is it?**
+**A:** The README shows ~4 tok/s on 6x RTX 5090 with a full expert hot tier. On CPU-only with NVMe streaming, expect lower throughput. The authors note that insufficient fast memory may reduce speed but the default policy never silently changes model precision.
+
+**Q: Is this production-ready?**
+**A:** Colibri is an open-source research/runtime project. For production deployments of GLM-5.2 you would typically use Zhipu AI's official API. For local experimentation it is a legitimate choice.
+
+**Q: How is this different from llama.cpp?**
+**A:** llama.cpp optimizes for dense models by quantizing the entire weight matrix into VRAM/RAM. Colibri optimizes for MoE sparsity by streaming only the active experts from disk. They target different model architectures.
+
+**Q: Does it support other MoE models besides GLM-5.2?**
+**A:** The current release is designed around GLM-5.2's architecture. Support for other MoE architectures would require modifications to the routing logic in `c/glm.c`.
+
+## Conclusion
+
+Colibri is a proof-of-concept that frontier-scale MoE models do not require frontier-scale infrastructure. By streaming experts from disk instead of loading the full model, it brings 744B-parameter inference to hardware you can actually own. The pure-C implementation is a refreshing departure from the Python-heavy AI stack — if you have been curious about how MoE routing actually works under the hood, the Colibri source code and its live expert atlas are worth exploring.
