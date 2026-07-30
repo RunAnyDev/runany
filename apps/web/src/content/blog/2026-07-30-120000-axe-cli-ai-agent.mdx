@@ -1,0 +1,202 @@
+---
+title: "Axe – a 12MB binary replacing AI frameworks"
+description: "Axe is a lightweight CLI for running single-purpose LLM agents defined in TOML. Pipe stdin, trigger from git hooks, chain agents, no daemon needed."
+pubDate: "2026-07-30"
+tags: ["dev-tools", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/axe-cli-ai-agent.webp"
+  alt: "Axe CLI tool banner"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Axe is a 12MB Go binary that runs LLM agents defined in TOML files. Pipe any tool's output into an agent, chain agents together, or trigger them from git hooks and cron — no daemon, no framework to buy into.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/jrswab/axe](https://github.com/jrswab/axe) — **verified README**
+- Source repository: [github.com/jrswab/axe](https://github.com/jrswab/axe) — **verified, 832 stars**
+- License: Apache 2.0 — **verified from LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=47350516](https://news.ycombinator.com/item?id=47350516) — 227 points
+
+## What Is Axe?
+
+Most AI tooling assumes you want a chatbot — a long-running session with a massive context window doing everything at once. Axe rejects that assumption. It treats LLM agents the same way Unix treats programs: small, focused, composable binaries that do one thing well.
+
+Axe orchestrates agents defined via TOML configuration files. Each agent has its own system prompt, model selection (Anthropic, OpenAI, Ollama, OpenCode, AWS Bedrock), skill files, persistent memory, and sub-agent delegation. You define it in TOML, trigger it from the command line, and pipe data in and out.
+
+## Setup Workflow
+
+### Step 1: Install
+
+**Pre-built binary (no Go required):**
+
+```bash
+# macOS/Linux
+curl -sSL https://raw.githubusercontent.com/jrswab/axe/main/install.sh | bash
+
+# Or download from GitHub Releases
+curl -L https://github.com/jrswab/axe/releases/latest/download/axe_darwin_arm64 -o axe
+chmod +x axe && sudo mv axe /usr/local/bin/
+```
+
+**Via Go:**
+
+```bash
+go install github.com/jrswab/axe@latest
+```
+
+Requires Go 1.25+ if building from source.
+
+### Step 2: Initialize config
+
+```bash
+axe config init
+```
+
+Creates `$XDG_CONFIG_HOME/axe/` with a sample skill and default `config.toml`.
+
+### Step 3: Scaffold an agent
+
+```bash
+axe agents init my-agent
+axe agents edit my-agent
+```
+
+Edit the generated TOML to set the system prompt, model, and skills.
+
+### Step 4: Run
+
+```bash
+axe run my-agent
+```
+
+### Step 5: Pipe data in
+
+```bash
+git diff --cached | axe run pr-reviewer
+cat error.log | axe run log-analyzer
+```
+
+### Step 6: Connect MCP servers (optional)
+
+Axe supports MCP servers via SSE or streamable-HTTP transport. Add server config to your agent TOML:
+
+```toml
+[mcp]
+servers = ["http://localhost:8080/sse"]
+```
+
+## Deeper Analysis
+
+### Design philosophy
+
+Axe is the executor, not the scheduler. It deliberately does not handle workflow orchestration, scheduling, or GUI state. Instead, it slots into existing Unix tooling — cron triggers it, git hooks call it, pipes feed it data. This makes it genuinely composable rather than another layer of abstraction on top of everything.
+
+### Multi-provider support
+
+Agents can target different models per invocation or globally:
+
+```toml
+[model]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+```
+
+Switching to OpenAI or a local Ollama instance requires only a config change.
+
+### Sub-agent delegation
+
+Agents can call other agents via LLM tool use, with configurable depth limits and parallel execution:
+
+```toml
+[delegation]
+max_depth = 3
+allow_parallel = true
+```
+
+### Persistent memory with GC
+
+Axe maintains timestamped markdown logs per agent. An LLM-assisted garbage collector identifies stale patterns and trims memory automatically, keeping context relevant without manual management.
+
+### Built-in tools
+
+Agents get sandboxed file operations (read, write, edit, list), shell command execution, URL fetching, and web search — all scoped to the working directory.
+
+### SSRF protection
+
+`url_fetch` and `web_search` can be restricted to specific hostnames via an allowlist. Private and reserved IP ranges are always blocked, regardless of allowlist configuration.
+
+### Token budgeting
+
+```toml
+[budget]
+max_tokens = 4096
+```
+
+Or use `--max-tokens` at runtime for per-invocation limits.
+
+## Practical Evaluation Checklist
+
+- [x] Multi-provider: Anthropic, OpenAI, Ollama, OpenCode, AWS Bedrock
+- [x] TOML-based agent configuration (version-controllable)
+- [x] Sub-agent delegation with depth limiting
+- [x] Persistent memory + LLM-assisted GC
+- [x] stdin piping for integration with existing CLI tools
+- [x] MCP server support (SSE + streamable-HTTP)
+- [x] Token budget enforcement
+- [x] SSRF protection via hostname allowlisting
+- [x] Configurable retry (exponential, linear, fixed backoff)
+- [x] Dry-run mode for inspecting resolved context
+- [x] JSON output with metadata for scripting
+- [x] Docker image for hardened container execution
+
+## Security Notes
+
+**Shell command execution** — Axe agents can execute arbitrary shell commands via the built-in tool. Scope agent TOML files to trusted sources only. Do not expose agent TOML configs from untrusted repositories without review.
+
+**SSRF protections** — The built-in `url_fetch` and `web_search` tools block private/reserved IPs regardless of allowlist. This is enforced at the network level, not just in config.
+
+**MCP server trust** — MCP servers run as subprocesses and have access to whatever tools the server exposes. Only connect to MCP servers you control or have audited.
+
+**Docker isolation** — The official Docker image runs agents under a non-root user (`home/axe`) with a minimal filesystem. Use the Docker image when running agents from untrusted TOML configs.
+
+## FAQ
+
+**Q: What providers does Axe support?**
+**A:** Anthropic (Claude), OpenAI (GPT-4o, o3), Ollama (local models), OpenCode, and AWS Bedrock. Configuration is per-agent TOML or via environment variables.
+
+**Q: How is this different from LangChain, AutoGen, or other agent frameworks?**
+**A:** LangChain and AutoGen are orchestration platforms with their own abstractions, schedulers, and memory management built in. Axe is a single binary that executes one agent per invocation and relies on external tools (cron, git hooks, pipes) for orchestration. It is the Unix philosophy applied to AI agents, not another platform.
+
+**Q: Can I run local models?**
+**A:** Yes, via the Ollama provider. Set `provider = "ollama"` and point `model` at your local endpoint (default `http://localhost:11434`).
+
+**Q: Is it production-ready?**
+**A:** The project is actively maintained (Apache 2.0 license) and the feature set is solid. As with any young open-source project, audit the release you deploy and test your specific agent configurations before rolling into critical pipelines.
+
+**Q: Does it need an API key?**
+**A:** Yes, for cloud providers. Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc. in your environment or in `config.toml`. Ollama and OpenCode (local) require no API key.
+
+**Q: Can agents share state?**
+**A:** Not directly — each agent run is independent. Shared context is achieved by piping output from one agent into another, or by mounting a shared directory as a working directory.
+
+## Conclusion
+
+Axe is a genuinely different approach to AI agent tooling. Instead of another abstraction layer with its own scheduler and memory model, it gives you a 12MB binary that slots into the Unix toolbox you already use. Define agents in TOML, trigger them from cron, pipe output between them, and compose freely.
+
+The multi-provider support, sub-agent delegation, and MCP server integration cover most production use cases without forcing you into a monolithic framework. Token budgets, SSRF protection, and Docker-hardened execution give you control over cost and security.
+
+If you want agents that are small, composable, and respect the Unix philosophy, Axe is worth a look.
+
+```bash
+# Quick install (macOS)
+curl -L https://github.com/jrswab/axe/releases/latest/download/axe_darwin_arm64 -o axe
+chmod +x axe && sudo mv axe /usr/local/bin/
+```
