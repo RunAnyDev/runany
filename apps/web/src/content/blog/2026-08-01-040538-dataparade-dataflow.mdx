@@ -1,0 +1,159 @@
+---
+title: "DataParade – Generate Dataflow Diagrams from Code"
+description: "DataParade CLI scans your codebase and outputs a JSON dataflow graph showing how data moves between files — useful for privacy reviews, security audits, and compliance documentation."
+pubDate: "2026-08-01"
+tags: ["security", "dev-tools", "open-source", "dataflow"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dataparade-dataflow.webp"
+  alt: "DataParade dataflow diagram showing nodes connected by arrows"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The DataParade CLI (`@dataparade/cli`) statically analyzes your codebase and produces a JSON dataflow graph — showing which files read, transform, and expose data — making privacy and security reviews faster to conduct and easier to document.
+
+## Source and Accuracy Notes
+
+- Project page: [dataparade.io](https://dataparade.io)
+- Documentation: [app.dataparade.io/docs/cli-import-and-zip](https://app.dataparade.io/docs/cli-import-and-zip)
+- Source repository: [github.com/DataParade-io/dataparade-cli](https://github.com/DataParade-io/dataparade-cli)
+- License: GPL-3.0-or-later (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=49007529](https://news.ycombinator.com/item?id=49007529)
+- Source last checked: 2026-08-01
+
+## What Is DataParade?
+
+DataParade is a code analysis tool that produces structured dataflow graphs from source code. Instead of manually tracing how data enters a system, flows through processing steps, and reaches an output, DataParade infers this automatically by running a static analysis pipeline across your codebase.
+
+The primary output is a `dataflow.json` file containing a `DiagramGraphJson` — a graph of nodes (files or data operations) connected by directional edges (data flow relationships). You can import this directly into the DataParade web app to visualize and annotate the graph, share it with auditors, or embed it in compliance documentation.
+
+**Core workflow:**
+
+```bash
+npx @dataparade/cli scan .
+```
+
+The CLI walks the target path through a pipeline: ingest → analyzers → classifier → data-flow detector → graph mapper. On completion it writes `dataflow.json` in the current working directory.
+
+**What it supports (as of the current release):**
+
+| Language / Format | Notes |
+|---|---|
+| TypeScript / JavaScript | via static analysis |
+| Python | via static analysis |
+| Terraform | Infrastructure-as-code files |
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18 or later (for `npx`)
+- Or `pnpm` / `yarn` / `npm` to run the CLI
+
+### Step 1: Run a Scan
+
+```bash
+npx @dataparade/cli scan .
+```
+
+You will see output like:
+
+```text
+[scan] starting scan for .
+[scan] output: Scan complete.
+[dataflow.json] written to /path/to/dataflow.json
+```
+
+To scan a specific directory and name the output:
+
+```bash
+npx @dataparade/cli scan path/to/your/project --output my-project-dataflow.json
+```
+
+### Step 2: Upload to the Dashboard (Optional)
+
+By default, the CLI auto-uploads `dataflow.json` to the DataParade web app after a scan. You can:
+
+- **With a workspace API key** — set `DATAPARADE_WORKSPACE_API_KEY` from **Workspace → Access keys**. The CLI prints a direct dashboard link.
+- **Without a key** — it prints a sign-up link with a token (`/preview/cli/<token>`) that opens a preview draft in the web app.
+- **Opt out entirely** — use `--skip-auto-upload` or set `DATAPARADE_SKIP_AUTO_UPLOAD=true`.
+
+### Step 3: Configure the Scan
+
+For project-specific behavior, place a `dataparade.config.json` at the project root:
+
+```json
+{
+  "scan": {
+    "path": ".",
+    "output": "dataflow.json",
+    "skipAutoUpload": false
+  }
+}
+```
+
+Run `npx @dataparade/cli --help` and `npx @dataparade/cli scan --help` for the full flag reference.
+
+## Deeper Analysis
+
+### What the dataflow.json Contains
+
+The output is a JSON wrapper around a `DiagramGraphJson` object. The wrapper includes:
+
+- `schemaVersion` — format version for compatibility
+- `graph` — nodes and edges with viewport metadata
+- `metadata` — files scanned, scan duration, analyzer version
+
+Nodes represent data operations (sources, transforms, sinks). Edges represent directional data flow. Most node properties default to `null` until you enrich them in the Preview & Edit view on the web app.
+
+### AI Inference
+
+DataParade has an AI inference feature (separate from the core static analysis) that can annotate or classify nodes automatically. This is documented in the [AI inference docs](https://app.dataparade.io/docs/cli-import-and-zip/ai-inference) and may consume additional quota depending on your plan.
+
+### Practical Evaluation Checklist
+
+- [ ] Scan a small project with 2–3 source files first to understand the graph output
+- [ ] Review the generated `dataflow.json` to verify nodes match your mental model of data flow
+- [ ] Try the dashboard import to see the visual graph representation
+- [ ] Test with TypeScript and Python in the same repo if applicable
+- [ ] Check if the Terraform analyzer picks up your infrastructure code correctly
+- [ ] If working with sensitive data, test `--skip-auto-upload` to avoid accidental external transfer
+
+## Security Notes
+
+- The CLI performs **static analysis only** — it reads source code but does not execute it.
+- By default, auto-upload sends `dataflow.json` to DataParade's servers. If your codebase is proprietary or subject to data residency requirements, use `--skip-auto-upload` and process the file locally.
+- No credential or secret content is included in the JSON output by default, but the graph may reveal internal data flow architecture that should be treated as sensitive internal documentation.
+- The CLI itself is open source (GPL-3.0) and can be audited in [github.com/DataParade-io/dataparade-cli](https://github.com/DataParade-io/dataparade-cli).
+
+## FAQ
+
+**Q: Is DataParade free to use?**
+**A:** The CLI itself is open source under GPL-3.0. The web app has a free tier with usage limits; workspace API keys are available on paid plans. Specific pricing is on the [DataParade pricing page](https://dataparade.io).
+
+**Q: Which languages are supported?**
+**A:** TypeScript, JavaScript, Python, and Terraform as of the current release. Support for additional languages is in progress — check the repo for updates.
+
+**Q: Does it work on monorepos?**
+**A:** The CLI scans a given path. For monorepos, run it against individual packages rather than the root to get meaningful per-package graphs.
+
+**Q: Is my source code sent anywhere?**
+**A:** Only if you use auto-upload (on by default). With `--skip-auto-upload` or `DATAPARADE_SKIP_AUTO_UPLOAD=true`, the JSON stays local.
+
+**Q: What is the difference between the CLI and the web app?**
+**A:** The CLI does the static analysis and produces `dataflow.json`. The web app provides visualization, annotation, sharing, and the AI inference features. You can also import existing `dataflow.json` files into the web app without running a new scan.
+
+**Q: How is this different from a dependency graph tool like `dependency-cruiser`?**
+**A:** DataParade focuses on **data flow** (how data moves through operations) rather than import/export dependency relationships. It classifies nodes as sources, analyzers, classifiers, and sinks — making it more oriented toward privacy and security review workflows than build dependency tracking.
+
+## Conclusion
+
+DataParade fills a specific niche: teams that need to document or audit how personal, financial, or sensitive data moves through their codebase. Rather than manual code review or grep-based tracing, it produces a machine-readable graph you can review, share, and track over time.
+
+The CLI is lightweight enough for ad-hoc use and the dashboard adds collaboration for team reviews. If you are working on GDPR/CCPA compliance documentation, a security architecture review, or a privacy impact assessment, this workflow maps well — scan, visualize, annotate, export.
+
+Start with `npx @dataparade/cli scan .` on a small project to see what the graph looks like before integrating it into a larger review process.
