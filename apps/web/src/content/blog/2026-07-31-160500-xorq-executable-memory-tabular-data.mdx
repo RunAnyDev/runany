@@ -1,0 +1,162 @@
+---
+title: "Xorq – Executable Memory for Tabular Data Agents"
+description: "Xorq turns ephemeral pandas scripts and ML pipelines into durable, composable, executable catalog entries any AI agent can discover and reuse."
+pubDate: "2026-07-31"
+tags: ["data-agents", "ml", "open-source", "sql"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/xorq.webp"
+  alt: "Xorq – executable memory system for tabular data"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Xorq is a git-native executable memory system for tabular data that lets AI coding agents and data teams turn ad-hoc pandas scripts into durable, discoverable, reusable catalog entries.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [xorq.dev](https://xorq.dev) ← verified 2026-07-31
+- Source repository: [github.com/xorq-labs/xorq](https://github.com/xorq-labs/xorq) ← verified via GitHub API
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Documentation: [docs.xorq.dev](https://docs.xorq.dev)
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306) — Show HN 2025-07-29
+- Stars: 538 (GitHub API, 2026-07-31)
+- Source last checked: 2026-07-31 (commit `main` branch, pushed 2026-07-31)
+
+## What Is Xorq?
+
+Xorq is an executable memory system for tabular data work. The core problem it solves: coding agents are great at accomplishing closed-loop tasks, but in the process accumulate technical debt and non-reproducible artifacts.
+
+> "If you ask a coding agent to build a dashboard, you are more likely than not to get a folder of one-off Python scripts that import each other in non-obvious ways, an embedded JSON holding intermediate state, and a requirements.txt that was last regenerated two sessions ago."
+
+Xorq gives agents a catalog of **executable pipelines** instead of markdown notes. Any future agent or human can discover, reproduce, and reuse those pipelines without rewriting them.
+
+### Key Concepts
+
+**The Entry** — the unit of executable memory. Each entry includes a manifest plus the environment needed to run it: a wheel file, pinned `requirements.txt`, and metadata YAML sidecars.
+
+**The Catalog** — a git repository of entries. Agents discover entries straight from the catalog filesystem — no service required.
+
+**The Expression Graph** — each pipeline is a directed graph of operators (read, filter, aggregate, join, etc.) with full lineage tracking. Rename a column upstream and the graph flags downstream breakages before they ship.
+
+**Ibis** as the expression system — declarative dataframe expressions that compile to multiple execution engines (DataFusion for embedded compute, DuckDB, Polars, etc.).
+
+**uv** for reproducible environments — each entry ships with a wheel and pinned requirements, resolved by the `uv` package manager.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10 or later
+- `uv` package manager
+
+### Install
+
+```bash
+pip install xorq[examples]
+```
+
+### Initialize a catalog
+
+```bash
+xorq init -t penguins
+```
+
+### Run a pipeline
+
+```bash
+xorq run builds/<entry-hash> -o out.parquet
+```
+
+### List catalog entries
+
+```bash
+xorq catalog list
+xorq catalog list-aliases
+```
+
+## Claude Code Integration
+
+Xorq ships a Claude Code plugin that adds four slash commands:
+
+```
+/plugin marketplace add xorq-labs/claude-plugins
+/plugin install xorq@xorq-plugins
+```
+
+| Command | What it does |
+|---|---|
+| `/xorq:init` | Load CSV or Parquet files as catalog entries |
+| `/xorq:catalog-explore` | Browse existing catalog entries |
+| `/xorq:composer` | Combine entries into joined/aliased entries |
+| `/xorq:builder` | Assemble ML pipelines and semantic-layer entries |
+
+## Deeper Analysis
+
+### Git-Native Storage
+
+The catalog is a plain git repository. `metadata/*.yaml` sidecars sit next to zipped entry files. Listing, filtering, and lookup by alias or hash all work with plain file reads — no database, no service to run. Git-annex handles large binary assets.
+
+This makes the catalog fully distributed: every clone of the repo is a full backup with full history.
+
+### Lineage Tracking
+
+The expression graph records every operator's inputs, outputs, and transformations. This means:
+
+- Column rename upstream → downstream models flagged at build time
+- Reproducibility: re-run any entry with the same inputs, get the same outputs
+- Auditability: trace any output row back to its source data and transformations
+
+### Portable Execution Environments
+
+Each entry ships as a self-contained wheel with pinned requirements. Running `xorq run` in any environment with the same catalog produces byte-identical results, because the environment is part of the entry's identity.
+
+### Multi-Engine Compute
+
+Via Ibis, Xorq expressions compile to DataFusion (in-process SQL/UDF), DuckDB, Polars, or any Ibis-supported backend. The expression graph is engine-agnostic; the same catalog entry can run on a laptop or in a production Spark cluster.
+
+## Practical Evaluation Checklist
+
+- [ ] Installed via `pip install xorq[examples]` without errors
+- [ ] Initialized a catalog with `xorq init`
+- [ ] Loaded a CSV as a catalog entry
+- [ ] Ran a pipeline and got the expected output
+- [ ] Listed entries with `xorq catalog list`
+- [ ] Verified lineage graph with `xorq catalog inspect <entry>`
+- [ ] Tested Claude Code plugin if using the agent workflow
+- [ ] Verified expression portability: ran same entry with different Ibis backends
+
+## Security Notes
+
+- Entries are zip archives + Python wheels. Only install entries from trusted catalogs.
+- The catalog is a git repository — review `git log` and `xorq catalog inspect` before running unfamiliar entries.
+- No network access is required for catalog operations; the execution environment is fully local.
+
+## FAQ
+
+**Q: How is this different from just saving pandas scripts to a folder?**
+**A:** Saved scripts are imperative and stateful. Xorq entries are declarative expression graphs with lineage tracking, portable environments, and a typed schema. Two agents can independently run the same entry and get byte-identical results — not possible with ad-hoc scripts.
+
+**Q: Does it work with existing pandas or Polars code?**
+**A:** Yes. Xorq uses Ibis as its expression layer, which can wrap existing pandas/Polars DataFrames. The pipeline author decides the execution engine at compose time, not at authoring time.
+
+**Q: Is a git repository required for the catalog?**
+**A:** The catalog format is git-native by design, but you can use any git hosting (GitHub, Gitea, a local `.git` directory). The key property is that catalog state is content-addressed by git SHA, not by a service.
+
+**Q: What happens when an upstream data source changes schema?**
+**A:** The expression graph validates schema compatibility at load time. If a column is renamed or dropped upstream, downstream entries that depend on it will fail schema validation and report the exact breakage point.
+
+## Conclusion
+
+Xorq solves the reproducibility and discoverability problem that plagues AI coding agents working with data. By turning ad-hoc scripts into typed, versioned, lineage-tracked catalog entries, it makes tabular data work durable and reusable across agent sessions and team members. The git-native catalog means no new infrastructure, and the Ibis expression system means the same pipeline runs anywhere from a laptop to a production cluster.
+
+If you're building data agents or managing a data team that works with LLMs, Xorq is worth evaluating. The Claude Code plugin makes it a natural fit for agentic workflows.
+
+- [xorq.dev](https://xorq.dev)
+- [docs.xorq.dev](https://docs.xorq.dev)
+- [github.com/xorq-labs/xorq](https://github.com/xorq-labs/xorq)
