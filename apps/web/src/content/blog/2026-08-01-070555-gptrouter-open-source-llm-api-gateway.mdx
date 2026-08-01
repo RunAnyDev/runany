@@ -1,0 +1,149 @@
+---
+title: "GPTRouter - Open-Source Multi-LLM API Gateway"
+description: "GPTRouter is an open-source API gateway that routes requests across OpenAI, Anthropic, Azure, and other LLMs with automatic fallbacks."
+pubDate: "2026-08-01"
+tags: ["dev-tools", "ai-setup", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gptrouter-open-source-llm-api-gateway.webp"
+  alt: "GPTRouter - Open-Source Multi-LLM API Gateway"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** GPTRouter is an open-source API gateway that unifies OpenAI, Anthropic, Azure, and other LLMs behind a single endpoint with automatic failover, retries, and streaming support.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [gpt-router.writesonic.com](https://gpt-router.writesonic.com)
+- Source repository: [github.com/Writesonic/GPTRouter](https://github.com/Writesonic/GPTRouter)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=38733891](https://news.ycombinator.com/item?id=38733891)
+
+## What Is GPTRouter?
+
+GPTRouter is an open-source API gateway from Writesonic that lets you route AI requests across multiple LLM providers — OpenAI, Azure OpenAI, Anthropic, Replicate, Cohere, and more — through a single unified API endpoint. It was [launched on Hacker News](https://news.ycombinator.com/item?id=38733891) and has garnered attention as an open-source alternative to building vendor-specific integrations.
+
+The core problem it solves: production AI applications become fragile when they depend on a single provider. When OpenAI has an outage or latency spike, your app goes down. GPTRouter lets you define fallback chains so that if one model fails, the request automatically routes to the next available provider — no code changes required.
+
+## Key Features
+
+The project's README highlights three primary capabilities:
+
+- **Universal API** — One endpoint to connect to OpenAI, Azure OpenAI, Anthropic, Replicate, Stable Diffusion, Cohere, and more
+- **Smart Fallbacks** — Automatically switches to alternative models if the primary choice is unavailable
+- **Automatic Retries** — Intelligently retries failed requests without manual intervention
+
+### Supported Models
+
+| Provider | Completion | Streaming | Async Completion |
+|---|---|---|---|
+| OpenAI | Yes | Yes | Yes |
+| Azure OpenAI | Yes | Yes | Yes |
+| Anthropic | Yes | Yes | Yes |
+| Replicate | Yes | Yes | Yes |
+| Stable Diffusion | Yes | No | Yes |
+| Dalle-3 | Yes | No | Yes |
+| Cohere | Yes | Yes | Yes |
+
+Streaming is not available for image generation models (Stable Diffusion, Dalle-3), which is expected behavior.
+
+## Setup
+
+### Prerequisites
+
+GPTRouter requires Python 3.10 or later.
+
+### Install the Python SDK
+
+```bash
+pip install gptrouter
+```
+
+Or via conda:
+
+```bash
+conda install gptrouter -c conda-forge
+```
+
+### Run the Server Locally
+
+The project provides a local development server. Follow the [official getting started guide](https://gpt-router.writesonic.com/docs/Getting%20Started/Developing%20Locally) for the full local setup instructions.
+
+Once running, you point your application at the local server's base URL.
+
+### Use the Preview Deployment
+
+Writesonic also hosts a preview deployment at `https://gpt-router-preview.writesonic.com/`. Get an API key by filling out the form on the [GPTRouter website](https://gpt-router.writesonic.com/#APIKey).
+
+### Python SDK Usage Example
+
+```python
+from gpt_router.client import GPTRouterClient
+from gpt_router.models import ModelGenerationRequest, GenerationParams
+from gpt_router.enums import ModelsEnum, ProvidersEnum
+
+client = GPTRouterClient(base_url='your_base_url', api_key='your_api_key')
+
+messages = [
+    {"role": "user", "content": "Write me a short poem"},
+]
+prompt_params = GenerationParams(messages=messages)
+claude2_request = ModelGenerationRequest(
+    model_name=ModelsEnum.CLAUDE_INSTANT_12,
+    provider_name=ProvidersEnum.ANTHROPIC.value,
+    order=1,
+    prompt_params=prompt_params,
+)
+
+response = client.generate(ordered_generation_requests=[claude2_request])
+print(response.choices[0].text)
+```
+
+## Deeper Analysis
+
+### When GPTRouter Makes Sense
+
+GPTRouter is most useful when you are building production AI applications that need to be resilient to provider outages. If you are running critical workloads on a single LLM provider today, adding GPTRouter as a routing layer means a provider outage does not automatically mean user-facing downtime.
+
+The project also simplifies multi-provider workflows. If your application needs to compare outputs from different models, or you want to optimize cost by routing lower-stakes requests to cheaper models, a gateway approach is cleaner than managing multiple SDK integrations in your codebase.
+
+### Limitations
+
+- Streaming support varies by provider and model type (image models do not support streaming)
+- The JavaScript client is still under development; the Python SDK is the most complete option today
+- No built-in rate limiting or cost analytics in the open-source version
+- The preview hosted deployment is useful for evaluation but is not production-grade infrastructure
+
+### Project Status
+
+The project is actively maintained with regular updates. The GitHub repository shows active development across multiple provider integrations. The roadmap mentions future Langchain and LlamaIndex integrations.
+
+## Security Notes
+
+GPTRouter requires an API key to authenticate requests. When self-hosting, follow standard API security practices: never expose the server publicly without authentication, use HTTPS in production, and rotate API keys regularly.
+
+## FAQ
+
+**Q: Does GPTRouter work with local models?**
+**A:** The current release focuses on cloud providers (OpenAI, Azure, Anthropic, Replicate). Local model support via LlamaIndex or similar is on the roadmap but not yet available.
+
+**Q: Can I use GPTRouter without an API key?**
+**A:** No. Authentication is required. For the preview deployment you request an API key via the Writesonic website; for self-hosting you generate your own keys.
+
+**Q: Does it support Langchain or LlamaIndex?**
+**A:** Integrations with Langchain and LlamaIndex are listed as on the horizon in the project roadmap. They are not yet implemented.
+
+**Q: How does failover work in practice?**
+**A:** You define an ordered list of model providers in your request. If the primary model returns an error or times out, GPTRouter automatically tries the next provider in the list. This is configured per-request via the `order` field on each `ModelGenerationRequest`.
+
+## Conclusion
+
+GPTRouter fills a real gap for teams running multi-provider AI stacks. The open-source gateway pattern removes the operational burden of building and maintaining your own failover logic, and the unified API surface means you can swap providers without touching application code.
+
+The project is lightweight enough to evaluate quickly (pip install and a local server), making it a practical addition to any production AI toolchain that wants resilience without vendor lock-in.
