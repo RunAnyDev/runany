@@ -1,0 +1,172 @@
+---
+title: "RamaLama SDK – Run LLMs Locally via Python and OCI Containers"
+description: "The RamaLama SDK brings containerized LLM inference to Python, letting you run models locally on any hardware that supports Docker or Podman."
+pubDate: "2026-08-02"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ramalama-sdk.webp"
+  alt: "RamaLama SDK – Python SDK for AI Containers"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The RamaLama SDK wraps local LLM inference in a Pythonic interface backed by OCI containers, letting you swap between Ollama, HuggingFace, and ModelScope models with a single line of code.
+
+## Source and Accuracy Notes
+
+- Project page: [ramalama.ai](https://ramalama.ai)
+- Source repository: [github.com/ramalama-labs/ramalama-sdk](https://github.com/ramalama-labs/ramalama-sdk)
+- License: MIT (verified via GitHub API)
+- HN launch thread: [news.ycombinator.com/item?id=46769775](https://news.ycombinator.com/item?id=46769775)
+
+## What Is RamaLama?
+
+RamaLama is an open-source container orchestration system that makes working with AI models straightforward and familiar, using OCI containers as the deployment unit. The [RamaLama SDK](https://github.com/ramalama-labs/ramalama-sdk) is the official Python binding: a lightweight wrapper around the RamaLama runtime that exposes a clean `RamalamaModel` interface for chat, multiturn conversation, and model management.
+
+The core promise is **"programmable AI on any device"** — if your machine can run Docker or Podman, you can run any supported model locally without a separate inference server process.
+
+Key characteristics:
+
+- Runs LLMs entirely on-device. No API calls leave your machine.
+- Supports model sources: HuggingFace, Ollama, ModelScope, any OCI registry, local files, and direct URLs.
+- Chat API with full history support for multiturn conversations.
+- System prompt support via the history parameter.
+- MIT-licensed, maintained by the containers org.
+
+## Setup Workflow
+
+### Requirements
+
+- Docker or Podman running locally
+- Python 3.10 or higher
+
+### Install the SDK
+
+```bash
+pip install ramalama-sdk
+```
+
+### Basic Chat
+
+```python
+from ramalama_sdk import RamalamaModel
+
+with RamalamaModel(model="tinyllama") as model:
+    response = model.chat("How tall is Michael Jordan")
+    print(response["content"])
+```
+
+```text
+Michael Jordan is 6 feet 6 inches (1.98 m) tall.
+```
+
+### Multiturn Conversation
+
+The chat method accepts a `history` argument for conversation context:
+
+```python
+sys_prompt = {
+    "role": "system",
+    "content": "Respond to all conversations as if you were a dog with variations of bark and woof."
+}
+history = [sys_prompt]
+
+with RamalamaModel(model="tinyllama") as model:
+    response = model.chat("How tall is Michael Jordan?", history)
+    print(response["content"])
+```
+
+```text
+Woof woof. Bark bark bark. Rrr-woooooof.
+Arf arf arf arf arf arf. Ruff!
+```
+
+### Pulling Models from Different Sources
+
+RamaLama uses URI prefixes to select the model source. The README documents the full set:
+
+| Transport | Prefixes | Description |
+|---|---|---|
+| HuggingFace | `huggingface://`, `hf://`, `hf.co/` | HuggingFace model hub |
+| ModelScope | `modelscope://`, `ms://` | ModelScope |
+
+Pulling a model from HuggingFace GGUF format:
+
+```python
+with RamalamaModel(model="hf://ggml-org/gpt-oss-20b-GGUF") as model:
+    response = model.chat("Explain quantum entanglement")
+    print(response["content"])
+```
+
+## Deeper Analysis
+
+### How It Works
+
+RamaLama sits between your Python code and the container runtime. When you create a `RamalamaModel`, the SDK boots the specified model inside a container managed by the RamaLama runtime. Model files are pulled from the source (HuggingFace, Ollama, etc.) on first use and cached locally.
+
+Because the runtime is containerized, switching from `tinyllama` to a larger model is just a line-of-code change — no server restarts, no port management, no CUDA configuration.
+
+### Scope and Limitations
+
+The SDK is focused on **inference** — chat completions in the OpenAI-comparable `{"content": "...", "role": "..."}` response format. It does not currently offer:
+
+- Fine-tuning or training pipelines
+- Streaming responses (chat method returns a single response object)
+- Batching or concurrent request handling
+- A hosted/API service mode
+
+If you need streaming or a REST API around your local models, RamaLama pairs well with [Ollama](/blog/ollama-local-llm/) or [text-generation-webui](/blog/text-generation-webui-llm-ui/) which expose HTTP APIs natively.
+
+### Comparison with Alternatives
+
+| Feature | RamaLama SDK | Ollama Python | LocalAI |
+|---|---|---|---|
+| Container-native | Yes | No | Partial |
+| Multi-source model pulling | Yes (HF, Ollama, ModelScope, OCI) | Ollama only | Limited |
+| System prompts | Via history | Native | Native |
+| Streaming | No | Via `/api/chat` | Yes |
+| MIT license | Yes | Yes | Yes |
+
+## Practical Evaluation Checklist
+
+- Can install via `pip install ramalama-sdk` without a Git checkout.
+- Podman or Docker daemon must be running before importing.
+- `tinyllama` model pulls and runs without GPU (CPU inference).
+- Multiturn history passes correctly between turns.
+- Switching model source by URI prefix works (e.g. `hf://...` vs `ollama://...`).
+- Response format is consistent: `{"content": str, ...}`.
+
+## Security Notes
+
+- All inference runs locally. No telemetry, no outbound API calls beyond initial model pulls from HuggingFace/OCI registries.
+- Model files are cached under the RamaLama data directory. Verify your container runtime sandboxing matches your trust posture for downloaded model artifacts.
+- The SDK itself has no authentication layer — it is a local process wrapper, not a network service.
+
+## FAQ
+
+**Q: Does RamaLama require a GPU?**
+**A:** No. The SDK runs on CPU by default. GPU acceleration works when the container runtime has CUDA/PROC access, but it is not required.
+
+**Q: Can I use models not on HuggingFace or Ollama?**
+**A:** Yes. RamaLama supports OCI registries, local file paths, and direct download URLs as model sources.
+
+**Q: How is this different from just calling the Ollama API?**
+**A:** Ollama runs as a separate server process you communicate with over HTTP. RamaLama wraps the container lifecycle directly in Python — no background server, no port to manage, no API authentication to configure.
+
+**Q: Does it support streaming responses?**
+**A:** Not in the current SDK release. The `chat()` method returns a complete response object. For streaming, you would need to interact with the RamaLama runtime API directly.
+
+## Conclusion
+
+The RamaLama SDK is a clean, minimal Python interface for running LLMs locally via OCI containers. Its strength is simplicity — `pip install`, one Python class, zero config files. The container abstraction means you can target `tinyllama` for fast local testing or a full 20B GGUF model for more serious tasks, without changing your code.
+
+If you want to embed local LLM inference in a Python application without owning a model-serving infrastructure, it is worth a look. Pair it with a HuggingFace GGUF model for a fully self-contained setup.
+
+**Next steps:**
+- Browse supported model prefixes in the [README](https://github.com/ramalama-labs/ramalama-sdk).
+- Try swapping `model="tinyllama"` for `model="hf://..."` to pull a quantized model from HuggingFace.
+- Explore the [RamaLama runtime](https://github.com/containers/ramalama) itself for CLI-based model management.
