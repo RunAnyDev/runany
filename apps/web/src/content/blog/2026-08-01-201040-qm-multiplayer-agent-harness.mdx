@@ -1,0 +1,132 @@
+---
+title: "qm – Multiplayer Agent Harness for Work"
+description: "qm is an open-source multiplayer AI agent harness that runs in Slack and on the web. Each employee gets an isolated workspace, and teams collaborate in shared channels and projects."
+pubDate: "2026-08-01"
+tags: ["ai-agents", "multi-agent", "slack", "dev-tools", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/qm-multiplayer-agent-harness.webp"
+  alt: "qm web UI showing two concurrent agent sessions with sidebar"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** qm is an open-source multiplayer AI agent harness that gives every employee an isolated workspace while enabling real-time team collaboration through Slack and a web app.
+
+## Source and Accuracy Notes
+
+- Project page: [qm.ai](https://qm.ai) — verified
+- Source repository: [github.com/yc-software/qm](https://github.com/yc-software/qm) — README read in full
+- License: MIT (verified via `LICENSE` file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=49126604](https://news.ycombinator.com/item?id=49126604)
+
+## What Is qm?
+
+Most AI coding agents are designed for solo use. qm reimagines the agent as a **shared work tool** for startups. Every employee gets their own isolated workspace — personal memory, files, crons, keychain, and skills — while still being able to collaborate in Slack channels, group messages, and shared projects.
+
+The core runs TypeScript on Node.js with Fastify. It is model-agnostic: Pi, OpenCode, Codex, and Claude Code all drive the same core, so you are not locked into a single vendor. A Postgres database holds session history, user data, and durable state.
+
+Key architectural primitives:
+
+- **Headless core** — the API, identity layer, policy engine, and scheduler
+- **Agent loop** — swappable harness (Pi, OpenCode, Claude Code, etc.)
+- **Per-scope sandbox** — isolated filesystem, tools, and logged-in services per user or channel
+- **Plugin layer** — optional Slack (via Bolt) and web UI (via Vite + Lit) over the HTTP API
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 20 or later
+- PostgreSQL 15 or later
+- npm or yarn
+
+### Step 1: Initialize a deployment
+
+```bash
+npm exec --yes --package=@yc-software/qm@latest -- \
+  qm init . --org <your-org> --target <fly-or-aws>
+npm install
+```
+
+The `qm init` command walks through infrastructure setup, web sign-in, connector credentials, optional Slack access, deployment, and live verification. No source checkout required.
+
+### Step 2: Add your model provider
+
+```bash
+# Keys stay on the host, never enter a sandbox
+qm keys add openrouter
+qm keys add github
+```
+
+Providers are routed through the gateway with per-sandbox token substitution. Supported routes include OpenAI, Anthropic, OpenRouter, GitHub, and Stripe. Custom routes accept a base URL and auth header.
+
+### Step 3: Connect Slack (optional)
+
+During init, grant Slack workspace access. Every Slack channel maps to a shared scope in qm. Members can invoke the agent directly in channel, and everything is audited under the running user's identity.
+
+### Step 4: Invite your team and assign scopes
+
+Each employee gets a personal scope on first login. Admin controls let you set org-wide configuration, security posture, and which harnesses and models are available. Scopes narrow from the org baseline — they cannot widen it.
+
+## Core Concepts
+
+### Personal and shared scopes
+
+Personal scopes are fully private. Shared scopes (Slack channels, projects) accumulate their own memory, files, and skills. A user's personal scope and any shared scopes they belong to are all accessible from one session.
+
+### Security postures
+
+Every org picks one of three postures that narrower scopes can only tighten:
+
+- **Strict** — every harness tool call pauses for human approval, except turn-enders with no side effects
+- **Auto** (default) — a classifier screens external data and tool results before they reach the model
+- **Dangerous** — no content screening, no pauses
+
+A predeclared command policy applies in every posture, blocking destructive operations like recursive deletes.
+
+### Skills
+
+Skills are scope-owned and shareable by explicit grant. Admins can promote a skill org-wide, or import skill packs from any git repository. Skills are human-written text descriptions, not code — see the contributing guidelines for the workflow.
+
+### Background work
+
+Crons and watches run work on a schedule or in response to file changes. A dashboard shows live CPU, memory, and cost per sandbox.
+
+## Practical Evaluation Checklist
+
+- Works with Claude Code, OpenCode, Codex, and Pi
+- Slack integration via Bolt, no custom Slack app config needed
+- Web UI is optional plugin — the core is fully headless
+- Per-sandbox tokens mean API keys never enter a sandbox
+- Deploys to your own cloud account (Fly.io or AWS); no shared infrastructure
+- Org-wide and per-scope security posture enforcement
+- Skills are human-written specs, not code patches
+
+## Security Notes
+
+qm follows the same trust model as local coding agents: the agent acts as the person it is running for, with their credentials and permissions. Every action is audited.
+
+The gateway substitutes a per-sandbox short-lived token for real API keys on every outbound request. This works for any provider that uses an HTTP header for auth — including OpenAI, Anthropic, OpenRouter, GitHub, and Stripe.
+
+Not protected: Postgres, Redis, and other protocols that embed credentials in the wire handshake rather than an HTTP header. AWS SigV4 and other request-signing schemes are also not reachable by the gateway since the signing happens locally.
+
+## FAQ
+
+**Q: How is qm different from giving everyone their own Claude Code instance?**
+**A:** qm provides shared collaboration spaces (Slack channels, projects) with scoped memory, team-wide skills, and org-level policy enforcement. A standalone coding agent instance cannot be invoked by a teammate or contribute to a shared workflow.
+
+**Q: Can I self-host qm without Slack?**
+**A:** Yes. The Slack plugin is optional. The web UI and admin panel work entirely independently over the HTTP API.
+
+**Q: Does qm work with local models?**
+**A:** The core is model-agnostic. Any harness that implements the agent loop interface can be plugged in, including local inference setups.
+
+## Conclusion
+
+qm fills the gap between personal coding agents and full enterprise platforms. It is MIT-licensed, runs on your own infrastructure, and ships with first-class Slack and web collaboration built in. If your team is running ChatGPT or Claude through a shared Slack channel with no audit trail and no isolation, qm is a direct upgrade.
+
+Deploy with `qm init` and point it at Fly.io or AWS. The gateway handles API key rotation, spend caps, and per-sandbox token isolation automatically.
