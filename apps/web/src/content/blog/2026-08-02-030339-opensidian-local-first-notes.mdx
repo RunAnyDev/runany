@@ -1,0 +1,151 @@
+---
+title: "Opensidian – Local-First Notes with a POSIX Shell"
+description: "Opensidian is an open-source browser-based notes app built on Yjs CRDTs, featuring a built-in POSIX shell with 80+ Unix commands, end-to-end encryption, and Cloudflare Durable Objects sync."
+pubDate: "2026-08-02"
+tags: ["local-first", "notes", "crdt", "yjs", "developer-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/opensidian-local-first-notes.webp"
+  alt: "Opensidian local-first notes app with POSIX shell thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Opensidian is a browser-based, MIT-licensed notes app that stores everything as Yjs CRDTs, exposes a POSIX-like filesystem shell (bash in TypeScript), and syncs via Cloudflare Durable Objects with end-to-end XChaCha20-Poly1305 encryption.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [opensidian.com](https://opensidian.com) — verified
+- Source repository: [github.com/EpicenterHQ/epicenter](https://github.com/EpicenterHQ/epicenter) — verified, MIT licensed (packages/apps split)
+- License: MIT (verified via LICENSE file in repo — packages/workspace, apps/opensidian)
+- HN launch thread: [news.ycombinator.com/item?id=47676461](https://news.ycombinator.com/item?id=47676461) — 2 points, April 2026
+- Source last checked: 2026-08-02 (commit `main`, 4731 stars)
+
+## What Is Opensidian?
+
+Opensidian is an open-source, browser-based notes application from [EpicenterHQ](https://github.com/EpicenterHQ/epicenter). It was inspired by Obsidian but built from the ground up with local-first principles: your data lives in CRDTs (Conflict-free Replicated Data Types) powered by [Yjs](https://github.com/yjs/yjs), syncs through Cloudflare Durable Objects, and is encrypted end-to-end before it ever leaves your device.
+
+The headline feature is the built-in POSIX-like shell: a bash interpreter implemented entirely in TypeScript (`just-bash`) that runs against the same CRDT data the editor uses. This means commands and the UI share the same underlying data model — no separate sync layer, no conflict resolution logic to worry about.
+
+From the HN launch post:
+
+> What happens when you store notes as Yjs CRDTs, sync them across servers, encrypt them end-to-end, and put a POSIX-like filesystem on top?
+
+The project is MIT licensed. The underlying infrastructure (`@epicenter/workspace` for typed CRDT tables, `@epicenter/filesystem` for the POSIX layer) is designed to be reusable — anyone can build local-first apps (notes, task managers, knowledge bases) on the same foundation.
+
+## Setup
+
+Opensidian runs entirely in the browser. No install needed for the basic demo.
+
+**Quick start from source:**
+
+```bash
+git clone https://github.com/EpicenterHQ/epicenter.git
+cd epicenter/apps/opensidian
+npm install
+npm run dev
+```
+
+The app will be available at `http://localhost:5173`.
+
+**Key dependencies:**
+
+- **Yjs** (`yjs`) — CRDT engine, isomorphic (browser + Node.js)
+- **CodeMirror 6** — Editor with Yjs collaboration binding
+- **`just-bash`** — Bash interpreter in TypeScript (80+ Unix commands: awk, sed, grep, jq, find, sqlite3, curl, etc.)
+- **Cloudflare Durable Objects** — Persistence for the Yjs protocol update log
+- **XChaCha20-Poly1305** — End-to-end encryption; keys derived via HKDF-SHA256
+
+## How the Shell Works
+
+Once the app is running, you get a file tree on the left and a terminal on the right. The shell is a first-class interface — not an afterthought plugin.
+
+```bash
+# Create a note
+$ echo "# Meeting notes" > /notes/2026-04-06.md
+
+# Create a directory
+$ mkdir /notes/archive
+
+# Move the note
+$ mv /notes/2026-04-06.md /notes/archive/
+
+# Open it in the editor
+$ open /notes/archive/2026-04-06.md
+```
+
+All of these commands modify the same CRDT tables that the editor reads from. Files created in the shell immediately appear in the file tree; files edited in the editor are readable from the shell. There is no "sync" step — the data layer is shared.
+
+**Internal links** use `[[` syntax and store file IDs rather than path strings, so renaming or moving files does not break backlinks.
+
+## Architecture: CRDT Tables + Filesystem Layer
+
+Under the hood, Opensidian uses a two-layer design:
+
+1. **`@epicenter/workspace`** — Typed CRDT tables with versioning, migrations, encryption, and sync. Each table row is versioned and conflict-free.
+2. **`@epicenter/filesystem`** — A virtual POSIX filesystem interface on top of the CRDT tables. Exposes directories and files; directory metadata (name, parent, timestamps) lives in the versioned CRDT table, while document content lives in a separate `Y.Doc` per file.
+
+This separation means the directory index syncs without pulling every document body — a lightweight sync that only fetches file metadata by default.
+
+**Encryption:** All content is encrypted end-to-end with XChaCha20-Poly1305. The sync server (Cloudflare Durable Objects) stores only ciphertext; it never sees plaintext or encryption keys. Keys are derived via HKDF-SHA256 from a user secret.
+
+**Sync protocol:** Yjs protocol over WebSocket, with Durable Objects persisting an append-only SQLite update log. Because Yjs is isomorphic, the same sync infrastructure works in both browser and server-side contexts.
+
+## Practical Evaluation Checklist
+
+**Local-first / offline:**
+- All data is local-first by design — CRDTs allow offline editing with automatic merge on reconnect
+- End-to-end encryption means the server cannot read your data
+
+**Editor features:**
+- CodeMirror 6 with Yjs collaboration binding
+- `[[internal links]]` with ID-based references (rename-safe)
+- SQLite FTS5 full-text search
+- Vim mode
+
+**AI features:**
+- AI chat with tool-call approval UI (agent can call shell commands with user confirmation)
+
+**Developer extensibility:**
+- `@epicenter/workspace` and `@epicenter/filesystem` are published as npm packages — can be used to build other local-first apps
+- The toolkit's dependency closure is entirely MIT, so libraries can be embedded in closed-source products
+
+**Current limitations (from author):**
+- UI is "rough" compared to Obsidian
+- Feature set is thin — this is positioned as a proof-of-concept, not an Obsidian replacement today
+
+## Security Notes
+
+- **Encryption at rest and in transit**: XChaCha20-Poly1305 with HKDF-SHA256 key derivation
+- **Server sees only ciphertext**: Cloudflare Durable Objects store encrypted updates; the sync server cannot decrypt content
+- **CRDT conflict resolution**: Yjs handles merge conflicts mathematically — no data loss on concurrent edits
+- **Open-source codebase**: The entire stack is auditable (MIT licensed packages)
+
+## FAQ
+
+**Q: How does this compare to Obsidian?**
+**A:** Obsidian is not open source and uses a local-file-plus-vault-sync model. Opensidian is fully open source, stores everything in Yjs CRDTs (enabling richer merge semantics than file-based sync), and exposes a POSIX shell interface. The author explicitly positions it as a proof-of-concept, not a production Obsidian replacement.
+
+**Q: Can I self-host the sync server?**
+**A:** The sync infrastructure (Cloudflare Durable Objects + Yjs protocol) is the reference implementation. The author has not yet documented self-hosting options for the sync layer. The underlying `@epicenter/workspace` packages could theoretically be wired to a different persistence backend.
+
+**Q: Does it work offline?**
+**A:** Yes — Yjs CRDTs allow full offline editing. Changes merge automatically when reconnecting.
+
+**Q: Is there a mobile app?**
+**A:** Not currently. The app runs in a browser on mobile, but no dedicated mobile app is mentioned.
+
+## Conclusion
+
+Opensidian is a compelling proof-of-concept for what local-first, CRDT-powered productivity tools can look like when paired with a proper shell interface. The POSIX filesystem layer on top of Yjs CRDTs is architecturally elegant — the shell and the editor share the same data model without a translation layer.
+
+It's early-stage software with a rough UI and a thin feature set, but the underlying architecture (`@epicenter/workspace`, `@epicenter/filesystem`) is the real product — a reusable toolkit for building any local-first app with end-to-end encryption and conflict-free sync.
+
+If you want to experiment with CRDT-based local-first apps or extend the filesystem/shell layer, the EpicenterHQ repo (4731 stars, actively maintained) is worth a look.
+
+**Source repository:** [github.com/EpicenterHQ/epicenter](https://github.com/EpicenterHQ/epicenter)
