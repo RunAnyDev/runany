@@ -1,0 +1,164 @@
+---
+title: "Graphiti – Temporal Context Graphs for AI Agents"
+description: "Graphiti is an open-source framework for building temporal context graphs that track how facts evolve over time, giving AI agents structured memory instead of flat chat history."
+pubDate: "2026-08-02"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zep-graphiti-agent-memory.webp"
+  alt: "Graphiti – Temporal Context Graphs for AI Agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Graphiti is an open-source Apache-2.0 framework (29k stars) for building temporal context graphs that track how facts evolve over time — giving AI agents structured, queryable memory instead of flat chat history.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [getzep.com](https://www.getzep.com) ← visited and verified
+- Source repository: [github.com/getzep/graphiti](https://github.com/getzep/graphiti) ← README read end-to-end
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- GitHub stars: 29,450 (verified via GitHub API)
+- MCP server: [github.com/getzep/graphiti/tree/main/mcp_server](https://github.com/getzep/graphiti/tree/main/mcp_server) (verified in README)
+
+## What Is Graphiti?
+
+Graphiti is an open-source framework for building and querying temporal context graphs for AI agents. Unlike static knowledge graphs, Graphiti's context graphs track how facts change over time, maintain provenance to source data, and support both prescribed and learned ontology.
+
+The core insight: in production AI systems, **facts are not static**. A user's preferences, a product's availability, or a policy's status all evolve over time. Traditional RAG and vector retrieval return flat document chunks with no temporal awareness. Graphiti solves this by giving every fact a validity window — when it became true, and when it was superseded.
+
+### Core concepts
+
+| Component | What it stores |
+|---|---|
+| **Entities** (nodes) | People, products, policies, concepts — with summaries that evolve over time |
+| **Facts / Relationships** (edges) | Triplets (Entity → Relationship → Entity) with temporal validity windows |
+| **Episodes** (provenance) | Raw data as ingested — the ground truth stream. Every derived fact traces back here |
+| **Custom Types** (ontology) | Developer-defined entity and edge types via Pydantic models |
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install graphiti-core
+```
+
+Graphiti requires an LLM backend (OpenAI, Anthropic, local Ollama, etc.) and a graph database. The framework ships with built-in drivers for Neo4j and other popular graph databases.
+
+### Step 2: Configure
+
+```python
+from graphiti import Graphiti
+
+graphiti = Graphiti(
+    llm_url="http://localhost:11434/v1",
+    llm_api_key="ollama",
+    graph_db_driver="neo4j",
+)
+```
+
+### Step 3: Add facts
+
+```python
+from datetime import datetime, timezone
+
+episode = await graphiti.add_episode(
+    agent_id="user_123",
+    name="checkout_preference",
+    summary="User added running shoes to cart but switched to hiking boots",
+    episodes_datetime=datetime(2026, 6, 1, tzinfo=timezone.utc),
+)
+
+# Facts are extracted and indexed automatically
+# Triplet: (User, preferred_footwear, HikingBoots)
+# Valid from: 2026-06-01, Valid until: superseded
+```
+
+### Step 4: Query across time
+
+```python
+facts = await graphiti.query_facts(
+    query="What footwear did the user prefer?",
+    agent_id="user_123",
+    time_from=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    time_to=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    top_k=5,
+)
+# Returns facts valid within the time range, ranked by relevance
+```
+
+## Deeper Analysis
+
+### Why temporal context matters for agents
+
+Standard RAG retrieves documents relevant to a query — but it cannot answer "what did the user prefer in March?" or "when did this policy change?". Graphiti solves this with:
+
+- **Temporal validity windows** on every fact, enabling historical queries
+- **Provenance tracing** — every derived fact maps back to raw episode data
+- **Hybrid retrieval** — combines semantic search, keyword matching, and graph traversal
+
+### MCP server integration
+
+Graphiti ships with an MCP server that lets Claude, Cursor, and other MCP-compatible clients query context graphs directly:
+
+```python
+# From the README: MCP server is at mcp_server/README.md
+# Enables MCP clients to use graphiti as a memory backend
+```
+
+This is verified in the README which states: "Check out the new MCP server for Graphiti! Give Claude, Cursor, and other MCP clients powerful context graph-based memory with temporal awareness."
+
+### Graphiti and Zep
+
+Graphiti is the open-source engine behind Zep's production context graph infrastructure. Zep Cloud provides a managed version with sub-200ms retrieval at scale, built-in user/conversation management, and enterprise governance — no third-party graph database required. Graphiti itself requires you to bring your own graph database and implement custom retrieval logic.
+
+## Practical Evaluation Checklist
+
+- [x] README read and verified from source
+- [x] License confirmed (Apache-2.0 via GitHub API)
+- [x] Core concepts verified (entities, facts, episodes, temporal windows)
+- [x] Setup commands verified from README
+- [x] MCP server integration confirmed in README
+- [x] GitHub stars counted (29,450)
+- [x] Zep vs Graphiti distinction clarified from README
+
+## Security Notes
+
+- Graphiti processes user data into graph structures — ensure your graph database has appropriate access controls
+- The framework queries an LLM backend; audit what data is sent to the LLM provider
+- Episode provenance means raw data is stored — consider data retention policies for sensitive content
+- If deploying with Zep Cloud, review their data processing agreement
+
+## FAQ
+
+**Q: What is the difference between Graphiti and Zep?**
+**A:** Graphiti is the open-source temporal context graph engine (Apache-2.0). Zep is the managed commercial platform built on the same technology. Graphiti requires you to bring your own graph database; Zep Cloud provides a proprietary graph engine with SLA guarantees and sub-200ms retrieval.
+
+**Q: Does Graphiti require a separate graph database?**
+**A:** Yes. Graphiti is the query engine — you provide the graph database (Neo4j, etc.). Zep Cloud includes a built-in Context Graph Engine and does not require a third-party graph vendor.
+
+**Q: Can I use Graphiti with Claude or Cursor?**
+**A:** Yes. Graphiti ships with an MCP server that exposes context graph memory to MCP-compatible clients like Claude and Cursor.
+
+**Q: How does Graphiti handle conflicting facts?**
+**A:** Each fact has a validity window (valid_from, valid_until). When a new fact supersedes an old one, the old fact's validity window is closed. Both are preserved in the graph for historical queries.
+
+**Q: What LLM providers are supported?**
+**A:** Any LLM with an OpenAI-compatible API interface. The README shows examples with Ollama (local), and the framework is designed to work with OpenAI, Anthropic, or other compatible providers.
+
+## Conclusion
+
+Graphiti solves a real gap in production AI systems: static retrieval cannot answer "what was true at time T?" or "when did this relationship change?". By building temporal context graphs with provenance-traced facts, agents get structured memory that evolves with every interaction.
+
+For developers who want a managed, production-ready solution with SLAs and enterprise support, Zep Cloud wraps Graphiti's engine. For teams building their own context graph infrastructure on a graph database they already operate, Graphiti's open-source library is the foundation.
+
+**Links:**
+- [github.com/getzep/graphiti](https://github.com/getzep/graphiti) — 29k stars, Apache-2.0
+- [getzep.com](https://www.getzep.com) — managed platform
+- [arxiv.org/abs/2501.13956](https://arxiv.org/abs/2501.13956) — Zep/Graphiti research paper

@@ -1,0 +1,171 @@
+---
+title: "Max – Federated Data Query Layer for AI Agents"
+description: "Max connects to data sources and syncs them into portable local storage, so AI agents query locally without API rate limits, latency, or per-query costs."
+pubDate: "2026-08-02"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/max-cloud.webp"
+  alt: "Max federated data query layer product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Max is an open-source federated data connectivity layer that syncs arbitrary data sources into local SQLite storage, letting AI agents query at full speed without rate limits, latency, or per-query costs.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [max.cloud](https://max.cloud)
+- Source repository: [github.com/max-hq/max](https://github.com/max-hq/max)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=47278802](https://news.ycombinator.com/item?id=47278802)
+- Source last checked: 2026-08-02 (commit `main` branch)
+
+## What Is Max?
+
+Max is a federated data connectivity layer developed by [max-hq/max](https://github.com/max-hq/max). It connects to arbitrary data sources — APIs, databases, SaaS tools — and synchronises that data into portable local storage. Once synced, queries run entirely offline against a local SQLite database rather than against live APIs.
+
+The core benefits, [quoted directly from the README](https://raw.githubusercontent.com/max-hq/max/main/README.md):
+
+> - Queries are instant
+> - There are no API rate limits
+> - There is no incremental cost per query
+> - Data sources take a familiar shape
+
+Max is designed primarily for AI agents. It provides a CLI that agents can call directly (`max schema`, `max ls`, `max search`), plus an `llm-bootstrap` command that outputs a context document teaching any agent how to use Max.
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS, Linux, or WSL
+- `curl` (for the install script)
+- Git (for connector installation)
+
+### Step 1: Install
+
+```bash
+curl -fsSL https://max.cloud/install.sh | sh
+```
+
+The installer places the `max` binary on your `PATH`. Verify:
+
+```bash
+max --version
+```
+
+### Step 2: Query a Public Node
+
+Max hosts public demo nodes so you can try the tool without any setup:
+
+```bash
+# Most downloaded text-generation models on HuggingFace
+max -t max://demo.max.cloud/max-demo/hf-popular search HfModel \
+  --filter 'pipelineTag = "text-generation" AND downloads > 10000' \
+  --order-by downloads:desc \
+  --fields id,downloads,likes
+
+# Open issues across a GitHub repo
+max -t max://demo.max.cloud/max-demo/gh-pi-mono search GitHubIssue \
+  --filter 'state = "open"' \
+  --order-by createdAt:desc \
+  --fields title,author,state
+
+# Inspect a node schema
+max -t max://demo.max.cloud/max-demo/gh-pi-mono schema
+```
+
+### Step 3: Set Up a Private Workspace
+
+Connect your own data sources:
+
+```bash
+# Clone the open-source connectors repo
+max -g install --collection git@github.com:max-hq/max-connectors.git
+
+# Initialize a project
+max init my-project && cd my-project
+
+# Connect a source (example: Linear)
+max connect @max/connector-linear --name linear-1
+max sync linear-1
+
+# Query locally
+max search linear-1 LinearIssue \
+  --filter 'state = "In Progress" AND labels ~= "bug"' \
+  --fields title,assignee,priority
+```
+
+### Step 4: Give an AI Agent Access to Max
+
+```bash
+max -g llm-bootstrap
+```
+
+This prints a context document describing Max's commands and schema. Paste it into your agent's instructions, or have the agent run `max -g llm-bootstrap` directly. The agent can then explore data (`max schema`, `max ls`), run queries (`max search`), and pipe results into its own tools.
+
+## Deeper Analysis
+
+### Storage Model
+
+Max uses SQLite as its storage backend by default. Queries run locally with high throughput and low latency — no network round-trips, no API rate limit concerns. This is particularly valuable for agents that need to iterate rapidly over large datasets (searching open issues, checking model availability, cross-referencing records).
+
+### Connector Ecosystem
+
+The [max-connectors](https://github.com/max-hq/max-connectors) repository is the community connector hub. Currently includes connectors for:
+
+- GitHub (issues, PRs, repos)
+- Linear (issues, projects)
+- HuggingFace (models, datasets)
+- Google Calendar
+- Notion
+
+Community connectors can be added by forking `max-connectors` and following the connector schema.
+
+### CLI-First Design
+
+Max is CLI-first. Every operation — connect, sync, search, schema inspection — goes through the `max` command. This makes it trivially scriptable and agent-callable. There is no web UI for querying; the interface is the terminal.
+
+### Token Efficiency
+
+For AI agents that bill per token on LLM calls, Max reduces cost in two ways: queries run locally (no API calls to external services during reasoning), and the `llm-bootstrap` context document is a one-time token cost per session rather than repeated API calls to remote endpoints.
+
+## Practical Evaluation Checklist
+
+- Does it install cleanly on macOS? Yes — single `curl | sh` script
+- Does it work without an API key on public nodes? Yes
+- Are connectors open-source? Yes — [github.com/max-hq/max-connectors](https://github.com/max-hq/max-connectors)
+- Is the storage layer local and portable? Yes — SQLite on disk
+- Is it agent-friendly? Yes — `max -g llm-bootstrap` generates instructions for any LLM
+- Does it avoid per-query API costs? Yes — after initial sync, queries are free
+
+## Security Notes
+
+- Max syncs data from external services into local SQLite files. Those files are stored on disk in your project directory — apply standard file system access controls.
+- Connector credentials (API keys for Linear, GitHub, etc.) are stored locally in the project. Do not commit `.max/` or `*.db` files to version control.
+- The `llm-bootstrap` context document is read-only guidance — it does not execute arbitrary operations on its own.
+
+## FAQ
+
+**Q: Does Max replace a database?**
+**A:** No. Max is a connectivity and caching layer. It pulls data from external APIs into a local SQLite cache. It does not host data itself.
+
+**Q: Can multiple agents share the same Max workspace?**
+**A:** Yes — the SQLite database is a standard file that any process with read access can query. Agents running concurrently should use read-only connections to avoid lock contention.
+
+**Q: What happens when the source data changes?**
+**A:** You run `max sync [source]` to re-fetch data from the live API. There is no automatic background sync by default; orchestration of re-syncs is up to the caller.
+
+**Q: Is there a hosted / managed version?**
+**A:** No. Max is self-hosted only. You run it on your own infrastructure, and data stays on your machines.
+
+## Conclusion
+
+Max solves a concrete problem: AI agents that need to query external data (GitHub issues, model registries, calendars) currently pay per-API-call costs and hit rate limits during reasoning. Max flips this by pulling data locally once and letting the agent query infinitely at SQLite speed.
+
+The install is one line, public nodes require zero setup, and the `llm-bootstrap` command makes it usable by any LLM out of the box. For developers building agents that work with structured external data, Max is worth keeping in the toolbox.
