@@ -1,0 +1,148 @@
+---
+title: "PlanBridge – Code Review for AI Agent Plans"
+description: "PlanBridge intercepts your AI coding agent's plan before any code is written, letting you annotate and approve line-by-line. MIT licensed, runs locally."
+pubDate: "2026-08-03"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/planbridge.webp"
+  alt: "PlanBridge product thumbnail showing the plan review interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** PlanBridge hooks into Claude Code and Codex CLI to intercept agent plans, opens your browser for line-by-line annotation, and feeds your edits back before a single file is written.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [plan.contextbridge.ai](https://plan.contextbridge.ai) ← verified product homepage
+- Source repository: [github.com/contextbridge/planbridge](https://github.com/contextbridge/planbridge) ← read README end-to-end
+- License: MIT (verified via `LICENSE` file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=48139177](https://news.ycombinator.com/item?id=48139177) — Show HN, 2025
+- Source last checked: 2026-08-03
+
+## What Is PlanBridge?
+
+When an AI coding agent starts writing code, the first thing it does is produce a plan. Traditional workflows accept or reject the plan as a whole — but a plan can have 50 steps, and the agent is wrong about step 23. PlanBridge solves this by letting you annotate any individual line before the agent acts.
+
+> Quote from the README: "PlanBridge intercepts your AI coding agent's plan so you can mark up any line and leave precise feedback. The agent adjusts before writing the first line of code."
+
+It runs locally. No account, no API keys, no data leaves your machine (anonymous telemetry can be disabled).
+
+## Supported AI Coding Harnesses
+
+| Harness | Hook mechanism |
+|---|---|
+| Claude Code | `PermissionRequest:ExitPlanMode` |
+| Codex CLI | `Stop` |
+
+Any agent that can read from stdin and write to a file can pipe plan content to `contextbridge plan` directly. The developers document integrations for Cursor, Aider, opencode, Gemini CLI, and Aether.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+Install via the official script:
+
+```bash
+/bin/sh -c "$(curl -fsSL https://downloads.contextbridge.ai/cli/install.sh)"
+```
+
+The script detects Homebrew and uses it when available; otherwise it drops a binary into `$HOME/.local/bin`. After the binary lands, it runs `contextbridge install` to detect and wire up any supported AI coding harness on your system.
+
+Manual install via Homebrew:
+
+```bash
+brew install contextbridge/tap/cli
+contextbridge install
+```
+
+### Step 2: Connect Your Harness
+
+The `contextbridge install` command auto-detects Claude Code and Codex CLI and adds the necessary review hooks. For Claude Code, it hooks into the `PermissionRequest:ExitPlanMode` event; for Codex CLI it uses the `Stop` hook.
+
+After installation, run your agent as you normally would. When the agent enters plan mode, PlanBridge opens your browser automatically.
+
+### Step 3: Review and Annotate
+
+When a plan is ready, your browser opens to an interactive review UI. You can:
+
+- Mark individual lines as approved or needs-change
+- Leave inline comments on specific steps
+- Approve the plan in full, or request a rewrite
+
+Your annotations flow back to the agent, which adjusts before executing any step. Nothing is written to disk until you sign off.
+
+### Step 4: Verify the Binary (Optional)
+
+PlanBridge ships GitHub build provenance attestations. Verify a macOS download:
+
+```bash
+gh attestation verify contextbridge_<version>_darwin_arm64.tar.gz --repo contextbridge/planbridge
+```
+
+macOS binaries are also Apple-notarized.
+
+## Privacy
+
+PlanBridge sends anonymous product analytics and crash reports by default. Opt out with:
+
+```bash
+DO_NOT_TRACK=1 contextbridge ...
+# or
+CONTEXTBRIDGE_TELEMETRY_DISABLED=1 contextbridge ...
+```
+
+No plan content is ever transmitted. See [Privacy & Telemetry](https://plan.contextbridge.ai/privacy/).
+
+## Deeper Analysis
+
+### Why PlanBridge Fills a Real Gap
+
+Most AI coding tools treat planning as a fast, throwaway step. The actual value of an agent is in the execution — but a bad plan means wasted minutes running code you then delete. PlanBridge addresses the coordination cost between human intent and agent action.
+
+The model is straightforward: instead of a chat loop where you iteratively correct the agent after seeing its output, you correct it before the output exists. For teams with established code standards, style guides, or architectural constraints, this is meaningfully better than reviewing and reversing generated code.
+
+### Comparison to Existing Workflows
+
+The closest analog is `claude-code` manual review mode, where you approve each step interactively. PlanBridge works at the plan level rather than the step level — you are not approving individual shell commands, you are approving the entire approach before the agent commits to it.
+
+Aider users typically rely on a system prompt to enforce conventions. PlanBridge is more direct: instead of describing the convention in the prompt, you annotate the specific plan line that violates it.
+
+### Limitations
+
+- Only Claude Code and Codex CLI have first-class hooks. Other agents require the `contextbridge plan` stdin/stdout interface.
+- Browser-based review requires a display and network access (for the local web UI — no external backend).
+- Telemetry is on by default; must be explicitly disabled with env vars.
+
+## Practical Evaluation Checklist
+
+- [ ] Install: does the one-line script work on macOS and Linux?
+- [ ] Harness detection: does `contextbridge install` auto-detect your Claude Code or Codex CLI?
+- [ ] Plan interception: does the browser open when the agent enters plan mode?
+- [ ] Annotation feedback: does the agent receive and act on your line-level comments?
+- [ ] Privacy: confirm `DO_NOT_TRACK=1` actually disables all outbound calls
+- [ ] Telemetry verification: run `contextbridge --help` and check for unexpected network calls during install
+
+## FAQ
+
+**Q: Does PlanBridge work with Cursor or Aider?**
+**A:** Not via auto-detection like Claude Code. Both can use `contextbridge plan` via stdin/stdout — pipe the agent's plan to the command and parse the JSON response. See [Other agents](https://plan.contextbridge.ai/usage/other-agents/).
+
+**Q: Does it work offline?**
+**A:** The PlanBridge UI is a local web server. No internet required for the review step. The initial install script needs network access unless you manually download the binary from the releases page.
+
+**Q: Is my plan content sent anywhere?**
+**A:** No. Plan content stays on your machine. The CLI sends anonymous telemetry (off by default with `DO_NOT_TRACK=1` or `CONTEXTBRIDGE_TELEMETRY_DISABLED=1`).
+
+**Q: How does it integrate with Claude Code specifically?**
+**A:** It hooks into Claude Code's `PermissionRequest:ExitPlanMode` event. When the model produces a plan and waits for approval, PlanBridge intercepts it, opens the browser UI, and sends the annotated response back as the approval signal.
+
+## Conclusion
+
+PlanBridge is a lightweight, local-first tool that inserts a human review gate into AI coding agent workflows. It is MIT-licensed, runs entirely on your machine, and integrates with the two most widely-used CLI coding agents (Claude Code and Codex CLI) out of the box. If you find yourself frequently correcting agent-generated code because the approach was wrong, not the execution, PlanBridge is worth trying — it moves the correction upstream.
