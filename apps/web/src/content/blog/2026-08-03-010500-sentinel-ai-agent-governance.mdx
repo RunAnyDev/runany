@@ -1,0 +1,200 @@
+---
+title: "Sentinel – Zero-Trust Governance for AI Agent Tool Calls"
+description: "Intercept, approve, and audit every LLM tool call with one Python decorator. Fail-secure by default."
+pubDate: "2026-08-03"
+tags: ["ai-setup", "security", "python"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sentinel-ai-agent-governance.webp"
+  alt: "Sentinel AI agent governance layer product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sentinel wraps your AI agent tool calls with a `@protect` decorator that enforces JSON-configurable policies and requires human approval for high-risk actions — failing securely by default.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/azdhril/Sentinel](https://github.com/azdhril/Sentinel)
+- Source repository: [github.com/azdhril/Sentinel](https://github.com/azdhril/Sentinel)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=44183166](https://news.ycombinator.com/item?id=44183166) (same thread as Taskade MCP post)
+- Source last checked: 2026-08-03 (README verified via `raw.githubusercontent.com`)
+
+## What Is Sentinel?
+
+When an AI agent has access to tools that can transfer money, send emails, delete records, or execute code, a single hallucination can become a costly mistake. Sentinel is a lightweight Python governance layer that puts a human in the loop without rewriting your agent logic.
+
+The core primitive is the `@protect` decorator. Add it to any async function and Sentinel intercepts the call, evaluates your JSON rules, and either allows it to proceed or halts for human approval. If the rules engine or network fails, the action is **blocked** — not allowed through.
+
+```python
+from sentinel import protect, SentinelConfig
+
+config = SentinelConfig(rules_path="rules.json")
+
+@protect(config)
+async def transfer_funds(amount: float, destination: str) -> str:
+    return f"Transferred ${amount} to {destination}"
+```
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install agentic-sentinel
+
+# With optional extras
+pip install agentic-sentinel[dashboard]    # Streamlit UI
+pip install agentic-sentinel[langchain]    # LangChain integration
+```
+
+### Step 2: Define Your Rules
+
+Create a `rules.json` file. Sentinel's rule engine matches function names against patterns and evaluates conditions on parameters:
+
+```json
+{
+  "version": "1.0",
+  "default_action": "allow",
+  "rules": [
+    {
+      "id": "financial_limit",
+      "function_pattern": "transfer_*",
+      "conditions": [
+        { "param": "amount", "operator": "gt", "value": 100 }
+      ],
+      "action": "require_approval",
+      "message": "Amount exceeds $100 threshold"
+    },
+    {
+      "id": "delete_block",
+      "function_pattern": "delete_*",
+      "conditions": [],
+      "action": "block",
+      "message": "Delete operations require explicit approval"
+    }
+  ]
+}
+```
+
+### Step 3: Apply the Decorator
+
+Wrap any async function that your agent calls. Sentinel handles the rest — policy evaluation, approval routing, and audit logging:
+
+```python
+@protect(config)
+async def delete_user(user_id: int) -> str:
+    return f"Deleted user {user_id}"
+
+@protect(config)
+async def send_email(to: str, subject: str, body: str) -> str:
+    return f"Sent email to {to}"
+```
+
+### Step 4: Run and Approve
+
+When a guarded function is called and triggers a rule, Sentinel pauses execution and waits for approval:
+
+```
+============================================================
+🛡️ SENTINEL APPROVAL REQUIRED
+============================================================
+Agent: sales-agent
+Function: transfer_funds
+Amount: $5,000.00
+Context:
+  current_balance: $10,000.00
+  daily_limit_remaining: $3,000.00
+
+Reason: Amount exceeds $100 threshold
+------------------------------------------------------------
+Approve? [y/n]: _
+```
+
+Approval can come from the terminal, a webhook, or the built-in Streamlit dashboard (`pip install agentic-sentinel[dashboard]`).
+
+## Deeper Analysis
+
+### Fail-Secure by Default
+
+Most security systems fail open — an error means the action proceeds. Sentinel fails closed: if the rules engine crashes, network times out, or configuration is unreadable, the action is blocked. This is the right trade-off for agentic systems where a single unauthorized call can have real-world consequences.
+
+### LangChain Integration
+
+If you are already running LangChain agents, Sentinel provides a `protect_tools()` wrapper that converts any LangChain tool into a guarded equivalent without changing your existing agent definition:
+
+```python
+from sentinel.langchain import protect_tools
+from langchain.agents import initialize_agent
+
+guarded_tools = protect_tools(tools, config)
+agent = initialize_agent(guarded_tools, llm, agent="zero-shot-react-description")
+```
+
+### Anomaly Detection
+
+Beyond static rules, Sentinel can analyze call patterns statistically and block actions that deviate from established norms — for example, a transfer to a new recipient that is much larger than historical averages.
+
+### Audit Logging
+
+Every call — approved, blocked, or anomalous — is logged to a JSONL file with full context for compliance review:
+
+```json
+{
+  "timestamp": "2026-01-25T14:32:11Z",
+  "agent": "sales-agent",
+  "function": "transfer_funds",
+  "params": { "amount": 5000, "destination": "vendor@example.com" },
+  "action": "approved",
+  "approver": "ops-team",
+  "latency_ms": 234
+}
+```
+
+## Practical Evaluation Checklist
+
+- Python 3.11+ required
+- MIT license — no commercial restrictions
+- Installs from PyPI: `pip install agentic-sentinel`
+- No external services required for core functionality
+- Supports terminal, webhook, and Streamlit dashboard for approvals
+- Compatible with LangChain, CrewAI, and any async callable
+- 205 tests with 85% coverage
+
+## Security Notes
+
+Sentinel is designed to be a guard rail, not a complete security solution. Consider these complementary measures:
+
+- **Network-level isolation:** Run agents in network namespaces or containers with minimal egress.
+- **Secrets management:** Do not store API keys in plain-text rules files.
+- **Audit log rotation:** Set up log rotation on the JSONL output to manage disk usage.
+- **Fail-open risk:** If you configure `fail_mode: "allow"` in `SentinelConfig`, errors will permit the action instead of blocking it — understand this trade-off before changing the default.
+
+## FAQ
+
+**Q: Does Sentinel work with non-LangChain agents?**
+**A:** Yes. Any async Python function can be wrapped with `@protect`. LangChain integration is optional and provided as a convenience wrapper.
+
+**Q: How does approval work in production?**
+**A:** The default is terminal (human at a keyboard). For automated pipelines, configure `approval_interface: "webhook"` and point Sentinel at your own approval endpoint. The dashboard extra provides a Streamlit UI for browser-based approve/deny.
+
+**Q: What happens if the rules file is malformed?**
+**A:** Sentinel fails to load and raises a configuration error at startup — it does not silently fall back to allowing all actions.
+
+**Q: Is there a cloud-hosted version?**
+**A:** No. Sentinel is a self-hosted Python library. All data stays in your environment.
+
+**Q: Does it support multi-agent scenarios?**
+**A:** The decorator is per-function. For multi-agent setups, apply it to each agent's tools independently. The audit log includes an `agent` field so you can correlate actions across agents.
+
+## Conclusion
+
+Sentinel solves a specific problem: your AI agent has access to real tools with real consequences, and you need a human in the loop without rewriting everything. The `@protect` decorator is the entire API surface — add it to any function, point it at a JSON rules file, and you get policy enforcement, human approval routing, and a full audit trail.
+
+If you are building agentic workflows with LangChain, CrewAI, or a custom framework, Sentinel is worth a look. It is MIT-licensed, has no external service dependencies, and installs in one line.
