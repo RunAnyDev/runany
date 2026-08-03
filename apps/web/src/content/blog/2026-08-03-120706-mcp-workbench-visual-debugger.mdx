@@ -1,0 +1,178 @@
+---
+title: "MCP Workbench – Visual Debugger for MCP Servers"
+description: "Inspect JSON-RPC traffic, test tools, explore resources and prompts — MCP Workbench is a visual debugger and test client for Model Context Protocol servers."
+pubDate: "2026-08-03"
+tags: ["mcp", "debugging", "developer-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "/blog/thumbnails/mcp-workbench.webp"
+  alt: "MCP Workbench – Visual debugger for MCP servers"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** MCP Workbench is an open-source visual debugger for MCP servers — connect over Streamable HTTP, inspect JSON-RPC traffic in real time, execute tools via auto-generated forms, and verify protocol compliance without guessing.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [mcp-workbench.ai](https://www.mcp-workbench.ai) — verified via direct fetch
+- Source repository: [github.com/conductor-oss/mcp-workbench](https://github.com/conductor-oss/mcp-workbench) — README read end-to-end
+- License: [MIT](https://github.com/conductor-oss/mcp-workbench/blob/main/LICENSE) (verified via GitHub API `license.spdx_id`)
+- HN launch thread: not available — submission predates 90-day HN archive window
+
+## What Is MCP Workbench?
+
+MCP Workbench is a browser-based visual debugger and test client for servers built on the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). If you are building or maintaining an MCP server, this tool gives you a live view of everything the protocol is doing — handshake, capabilities, message flow, and tool responses — without writing throwaway test scripts.
+
+The README describes it as "a control panel" for MCP server development. That is accurate.
+
+## Features
+
+The tool is organized around three layers of MCP interaction:
+
+**1. Protocol Inspector**
+MCP Workbench connects to a server over Streamable HTTP and displays the raw JSON-RPC traffic as it happens. Every request and response is visible in real time, which is the fastest way to spot where a server diverges from the spec.
+
+**2. Tool Executor**
+Instead of constructing JSON payloads by hand, MCP Workbench auto-generates input forms from each tool's JSON Schema. You fill in the fields, execute the call, and inspect the raw response — useful for verifying that your server's schema and actual behavior are aligned.
+
+**3. Resource and Prompt Browser**
+Servers can expose resources (structured data) and prompts (canned request templates). The Workbench lists both, lets you fetch resources directly, and lets you execute prompt templates with custom variables.
+
+**Authentication Support**
+The tool handles both OAuth 2.0 (Authorization Code flow with popup) and API key authentication via custom headers — covering the two most common MCP server deployment patterns.
+
+**Multi-Server Configs**
+You can save and switch between multiple server connection profiles. This is useful when you maintain more than one MCP server or are testing the same server in different environments.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js **18+**
+- npm or yarn
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/conductor-oss/mcp-workbench.git
+cd mcp-workbench
+npm install
+```
+
+### Step 2: Start the Dev Server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+### Step 3: Connect to an MCP Server
+
+1. In the Workbench UI, select **Streamable HTTP** as the transport.
+2. Enter your MCP server URL (e.g., `http://localhost:3001/mcp`).
+3. If your server requires authentication, configure it under **Settings** before connecting.
+4. The Workbench will complete the MCP handshake and display server capabilities.
+
+### Step 4: Connect to Local Stdio Servers (Node.js / Python)
+
+Local MCP servers running over stdio cannot be reached directly over HTTP. MCP Workbench includes a Bridge script for this:
+
+```bash
+# For a Node.js stdio server
+node scripts/stdio-bridge.js "node my-server.js"
+
+# For a Python stdio server
+node scripts/stdio-bridge.js "uv run main.py"
+```
+
+The bridge prints a URL like `http://localhost:3001/mcp`. Paste that into the Workbench as your server URL.
+
+### Step 5: Inspect Traffic and Execute Tools
+
+Once connected:
+- Select the **Traffic** tab to watch live JSON-RPC messages.
+- Select the **Tools** tab to see available tools and fill in auto-generated forms.
+- Select the **Resources** or **Prompts** tab to browse server-exposed data.
+
+## CORS Handling
+
+If requests fail silently in the browser, your MCP server likely has CORS misconfigured. The server **must** allow cross-origin requests from the Workbench origin (`http://localhost:5173` during development).
+
+Safari requires an additional header for localhost:
+
+```text
+Access-Control-Allow-Private-Network: true
+```
+
+Add this to your server's CORS middleware. Chrome and Firefox are more permissive with private network CORS.
+
+## Deeper Analysis
+
+MCP Workbench sits in a specific niche: it is not an MCP server itself, and it is not a general API client (like Postman). It is a purpose-built MCP protocol viewer and interaction tool.
+
+### What makes it different from curl or a generic HTTP client?
+
+A generic HTTP client lets you send any request. MCP Workbench understands the MCP protocol specifically — it handles the session layer (`MCP-Session-Id` header), knows how to parse server capabilities during handshake, and renders tool input schemas as forms rather than making you write raw JSON.
+
+### What it is not
+
+It does not help you build an MCP server. It does not generate MCP server code or scaffold projects. It is purely a client-side debugging viewer.
+
+### When to use it
+
+- Verifying that your MCP server produces spec-compliant responses during development
+- Debugging why a client library is failing to communicate with a server
+- Manually testing tools and resources without writing a throwaway test script
+- Checking that OAuth 2.0 or API key authentication flows work end-to-end before integrating a client
+
+## Practical Evaluation Checklist
+
+- [ ] Server completes MCP handshake without errors in Workbench
+- [ ] JSON-RPC traffic appears in the Traffic tab when tools are called
+- [ ] Auto-generated tool forms match the server's JSON Schema
+- [ ] OAuth 2.0 popup flow completes if server uses OAuth
+- [ ] API key auth works when configured via custom header
+- [ ] Stdio bridge correctly proxies a local stdio server over HTTP
+- [ ] Safari CORS header (`Access-Control-Allow-Private-Network`) is accepted by server
+- [ ] Multi-server profile switching works correctly
+
+## Security Notes
+
+- Workbench runs entirely in the browser. No telemetry or request data leaves your machine unless you are actively using it against a remote server.
+- OAuth 2.0 authentication uses a popup window. Verify your browser's popup blocker is not interfering.
+- When connecting to local stdio servers via the bridge script, traffic is routed over localhost only and is not exposed externally.
+
+## FAQ
+
+**Q: Does it work with MCP servers that do not support Streamable HTTP?**
+**A:** No — the Workbench only supports Streamable HTTP as the transport. Servers that only support stdio or Server-Sent Events require the stdio bridge script to proxy them.
+
+**Q: Can I use this to test an MCP server running on a remote machine?**
+**A:** Yes, as long as the server is reachable over HTTP/HTTPS and has appropriate CORS headers configured.
+
+**Q: Does it work with MCP servers built with different SDKs (Python, Go, TypeScript)?**
+**A:** Yes — the Workbench is transport-agnostic. Any MCP server that implements the Streamable HTTP transport can be connected and debugged.
+
+**Q: Is there a hosted version?**
+**A:** No — MCP Workbench is self-hosted only. Clone the repo and run `npm run dev`.
+
+## Conclusion
+
+MCP Workbench fills a specific gap in the MCP ecosystem: there was no dedicated visual client for inspecting and testing MCP servers. If you are building an MCP server or debugging an existing one, this tool is worth adding to your workflow.
+
+It is MIT-licensed, actively maintained, and requires only Node.js 18 to run locally.
+
+**Source and Accuracy Notes**
+
+- Project page: [mcp-workbench.ai](https://www.mcp-workbench.ai)
+- Source repository: [github.com/conductor-oss/mcp-workbench](https://github.com/conductor-oss/mcp-workbench)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- README fetched from `raw.githubusercontent.com/conductor-oss/mcp-workbench/main/README.md`
+- Source last checked: 2026-08-03
