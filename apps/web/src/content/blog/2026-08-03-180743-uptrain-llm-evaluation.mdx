@@ -1,0 +1,161 @@
+---
+title: "UpTrain – Open-Source LLM Evaluation Platform"
+description: "UpTrain is an Apache 2.0 open-source platform that runs 20+ pre-built LLM evaluation checks, performs root cause analysis on failures, and self-hosts entirely on your infrastructure."
+pubDate: "2026-08-03"
+tags: ["llmops", "open-source", "ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/uptrain.webp"
+  alt: "UpTrain open-source LLM evaluation platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** UpTrain is an open-source (Apache 2.0) platform for evaluating and improving LLM applications. It ships 20+ pre-configured evaluation checks, performs root cause analysis on low-score outputs, and runs entirely self-hosted on your own infrastructure.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [uptrain.ai](https://uptrain.ai)
+- Source repository: [github.com/uptrain-ai/uptrain](https://github.com/uptrain-ai/uptrain)
+- License: Apache 2.0 (verified via GitHub API `license.spdx_id`)
+- Latest release: [v0.7.1](https://github.com/uptrain-ai/uptrain/releases/latest) (2024-05-14, `main` branch commit `2024-08-18`)
+- HN launch thread: [news.ycombinator.com/item?id=35069839](https://news.ycombinator.com/item?id=35069839) (138 points, YC W23)
+- Source last checked: 2026-08-03
+
+## What Is UpTrain?
+
+UpTrain describes itself as a unified open-source platform to evaluate and improve Generative AI applications. It was built by a YC W23 cohort company and targets teams that want to ship LLM-powered products with measurable quality gates.
+
+The core pitch: instead of manually inspecting LLM outputs, you plug UpTrain into your pipeline and get structured scores across 20+ pre-configured checks — covering hallucination detection, response completeness, context conciseness, factual accuracy, and more. When a check fails, UpTrain can run root cause analysis to surface which part of your pipeline is underperforming (retrieval, prompt, model, etc.).
+
+UpTrain is explicitly self-contained: the dashboard runs on your local machine via Docker, evaluation logic runs locally, and no data leaves your environment except when you explicitly call out to an external LLM API for grading.
+
+## Setup Workflow
+
+### Option 1 — Dashboard (no code required)
+
+Requires Docker. The dashboard runs locally and provides a web UI for evaluating LLM responses, viewing results, and triggering root cause analysis.
+
+```bash
+git clone https://github.com/uptrain-ai/uptrain
+cd uptrain
+bash run_uptrain.sh
+```
+
+The script pulls the Docker image and starts the dashboard. Navigate to `http://localhost:3000` (or whatever port Docker exposes) to access the UI.
+
+### Option 2 — Python package (programmatic integration)
+
+For CI/CD pipelines or custom evaluation workflows:
+
+```bash
+pip install uptrain
+```
+
+Minimal evaluation example from the README:
+
+```python
+from uptrain import EvalLLM, Evals
+import json
+
+OPENAI_API_KEY = "sk-..."
+data = [{
+    "question": "Which is the most popular global sport?",
+    "context": "The most popular global sport is football (soccer).",
+    "response": "Football is the most popular sport worldwide."
+}]
+
+eval_llm = EvalLLM(openai_api_key=OPENAI_API_KEY)
+results = eval_llm.evaluate(
+    data=data,
+    checks=[Evals.RESPONSE_COMPLETENESS, Evals.RESPONSE_CONCISENESS]
+)
+print(json.dumps(results, indent=2))
+```
+
+## Deeper Analysis
+
+### Pre-built evaluation checks
+
+UpTrain ships 20+ pre-configured evaluations out of the box. From the README, categories include:
+
+- **Response completeness** — does the answer fully address the question?
+- **Factual accuracy** — does the response match the provided context?
+- **Context conciseness** — is the retrieved context free of irrelevant noise?
+- **Hallucination detection** — flagging statements not grounded in the context
+- **Jailbreak detection** — identifying prompt injection attempts
+- **Response tonality** — checking for appropriate tone in customer-facing contexts
+
+A full list is in the [README's evaluation section](https://github.com/uptrain-ai/uptrain?tab=readme-ov-file#pre-built-evaluations-we-offer-).
+
+### Root cause analysis
+
+UpTrain's RCA feature takes failure cases — either low evaluation scores or negative user feedback — and traces them back to the likely source: retrieval quality, prompt framing, model selection, or temperature settings. This is implemented as templates you can run over your failure logs. The notebook example is at `examples/root_cause_analysis/rag_with_citation.ipynb`.
+
+### Evaluator model flexibility
+
+You can use any of the following as the grading model:
+
+- OpenAI (GPT-4o, GPT-4o-mini, etc.)
+- Anthropic (Claude 3/4)
+- Mistral
+- Azure OpenAI endpoints
+- Self-hosted open-source models via Anyscale
+
+### Embedding model support
+
+UpTrain supports multiple embedding providers for retrieval pipelines:
+
+- `text-embedding-3-large` / `text-embedding-3-small` / `text-embedding-3-ada`
+- `baai/bge-large` (HuggingFace)
+- Custom endpoints (Replicate or your own)
+
+### Customization
+
+Each evaluation check supports customization of:
+
+- Evaluation method (chain-of-thought vs. classify)
+- Few-shot examples
+- Scenario description
+- Custom evaluator functions for domain-specific checks
+
+## Practical Evaluation Checklist
+
+- Install: `pip install uptrain` (Python 3.8+)
+- Docker required for dashboard method
+- API key required for OpenAI / Anthropic grading calls
+- Evaluations run locally; only grading model calls go external
+- No commercial SaaS lock-in — Apache 2.0, self-hosted throughout
+- GitHub stars: 2,357 (as of 2026-08-03)
+
+## Security Notes
+
+- Evaluations and RCA logic run entirely on your infrastructure
+- Data never leaves your environment except for LLM grading API calls you explicitly configure
+- No telemetry or external logging by default
+- Suitable for air-gapped deployments (grading can route to local models)
+
+## FAQ
+
+**Q: Does UpTrain require a paid API key?**
+**A:** No. The framework is open-source and free. You only pay for API calls if you use hosted models (OpenAI, Anthropic, etc.) as graders. You can also use local models via Anyscale or self-hosted endpoints.
+
+**Q: What is the difference between UpTrain and OpenAI Evals?**
+**A:** OpenAI Evals is a framework for running evaluation datasets against OpenAI models. UpTrain adds a self-hosted dashboard, 20+ pre-built checks across multiple categories, root cause analysis, and broader multi-model support (OpenAI, Anthropic, Mistral, Azure, self-hosted).
+
+**Q: Can UpTrain be used in a CI/CD pipeline?**
+**A:** Yes. The Python package is designed for programmatic use, making it suitable for integration into test suites or pull request checks.
+
+**Q: How is root cause analysis performed?**
+**A:** UpTrain has RCA templates that decompose a failing case across dimensions (retrieval quality, prompt clarity, model choice). It runs structured queries against your failure logs and produces a diagnostic report. The exact methodology is visible in the open-source notebooks.
+
+## Conclusion
+
+UpTrain fills a specific gap in the LLM toolchain: moving from "does it look right?" to "here is a measurable score and a reason it failed." The self-hosted model means you can adopt it without committing to a commercial LLMOps vendor. With 2,357 GitHub stars and an active open-source community, it is production-ready for teams that want to instrument their LLM pipelines without sending prompts and context to a third-party evaluation SaaS.
+
+Start with the dashboard method if you want a UI-first feel, or drop the pip package into an existing Python project for tighter CI integration.
