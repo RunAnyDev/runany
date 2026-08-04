@@ -1,0 +1,138 @@
+---
+title: "Covalence - Cross-Client Memory for Claude, Cursor, and MCP"
+description: "A native macOS app that gives AI agents persistent semantic memory, so what you teach one tool is remembered by all others automatically."
+pubDate: "2026-08-04"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://runany.dev/blog/thumbnails/covalence-app.webp"
+  alt: "Covalence product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Covalence is a macOS menu bar app that acts as a shared MCP memory server for Claude, Cursor, and any MCP-capable AI tool — so context stored in one client is instantly available in all others, entirely offline.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [covalence.app](https://covalence.app)
+- Source repository: [github.com/darronz/covalence](https://github.com/darronz/covalence) (main app), [github.com/darronz/covalence-website](https://github.com/darronz/covalence-website) (marketing site)
+- License: Unknown (repo not publicly accessible at time of writing)
+- HN launch thread: [news.ycombinator.com/item?id=47794883](https://news.ycombinator.com/item?id=47794883)
+- Release: [covalence.app/releases/Covalence-latest.dmg](https://covalence.app/releases/Covalence-latest.dmg)
+
+## What Is Covalence?
+
+If you use multiple AI coding tools daily — Claude Desktop, Claude Code, Cursor, or any MCP client — you have likely hit this wall: context you carefully explained in one session vanishes the moment you open another tool. Covalence solves this by running a local MCP server that acts as a shared memory bank for every AI client on your Mac.
+
+> "I use Claude Desktop, Claude Code, and Cursor daily. They all have memory now, but none of them share it. Something I explained in Claude Desktop doesn't exist when I open Cursor."
+
+The author, darronz, built Covalence out of frustration with existing solutions that required Docker, external databases, or cloud accounts — all overkill for a personal context store.
+
+Covalence is a native macOS menu bar app. You install it, configure your AI clients to connect via MCP, and done. Every client shares the same SQLite-backed memory store.
+
+## How It Works
+
+### Architecture
+
+Covalence bundles three components into a single download:
+
+- **MCP server** — any MCP-capable AI client connects to it as a tool server
+- **SQLite + sqlite-vec** — local vector database stores semantic embeddings
+- **nomic-embed-text-v1.5 via CoreML** — embeddings computed entirely on-device, no API keys, no network calls
+
+### Memory Storage
+
+Each MCP client runs as a separate connection. The author solved the concurrency problem by using SQLite in WAL (Write-Ahead Logging) mode, which allows multiple readers and writers safely without deadlocks.
+
+### Retrieval
+
+Covalence uses **hybrid BM25 + vector search** with recency weighting. When you ask for something, it finds what you mean, not just what you typed. You can pin your most important memories so they always surface first.
+
+## Setup Workflow
+
+### Step 1: Download and Install
+
+Download the latest release from the Covalence website:
+
+```bash
+open https://covalence.app/releases/Covalence-latest.dmg
+```
+
+Mount the DMG and drag Covalence to your Applications folder.
+
+### Step 2: Add the MCP Server to Your AI Client
+
+Open Covalence. The app displays an MCP snippet tailored to your setup. For Claude Desktop, add it to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "covalence": {
+      "command": "npx",
+      "args": ["-y", "@covalence/mcp-server"]
+    }
+  }
+}
+```
+
+The exact snippet varies by client — Covalence generates the correct one for your setup. Paste it into your AI client's MCP configuration file.
+
+### Step 3: Paste the Behavioral Prompt
+
+Covalence also provides a behavioral prompt that tells your AI when to store and search memories. Paste this into your AI client's system prompt or instructions.
+
+### Step 4: Start Using It
+
+That's it. Store a memory in Claude Code, retrieve it in Cursor. Both connect to the same Covalence instance.
+
+## Key Features
+
+- **Semantic search** — finds what you mean, not just keyword matches. Hybrid vector + BM25 with recency weighting
+- **Core Memories** — pin the most important knowledge; always surfaced first across every client
+- **Cross-client sync** — Claude Desktop, Claude Code, Cursor, and any MCP-capable agent share the same memory simultaneously
+- **On-device embeddings** — nomic-embed-text-v1.5 runs via CoreML on your hardware. No API keys, no per-call cost, no data leaves your machine
+- **Menu bar app** — one-click capture, global hotkey opens search from any window
+- **Data ownership** — everything lives in a single SQLite file on hardware you own. Export as markdown or JSON anytime. No accounts, no telemetry
+
+## Under the Hood
+
+```
+Retrieval pipeline:
+1. Query → embed with nomic-embed-text-v1.5 (CoreML, local)
+2. Hybrid search: sqlite-vec (vector) + BM25 (keyword)
+3. Results ranked with recency weighting
+4. Return top-K memories to the AI client
+```
+
+The hard part was concurrency. Multiple AI sessions writing to the same MCP server would deadlock on a normal SQLite setup. WAL mode lets each MCP client hold a separate connection safely.
+
+## FAQ
+
+**Q: Does Covalence require an internet connection?**
+**A:** No. All embeddings run on-device via CoreML. There are no API calls, no external dependencies, and no data transmitted anywhere.
+
+**Q: What AI clients does Covalence support?**
+**A:** Any MCP-capable client — Claude Desktop, Claude Code, Cursor, and any other tool that implements the MCP specification.
+
+**Q: Is there a cloud or hosted version?**
+**A:** No. Covalence is a local-only macOS app. Your data never leaves your machine.
+
+**Q: How is it different from just using Claude's built-in memory?**
+**A:** Built-in memory is siloed per-client. Covalence is shared across all your AI tools simultaneously. What you teach Claude Code is immediately available in Cursor — without re-explaining.
+
+**Q: What does the setup require beyond the DMG?**
+**A:** Just the MCP configuration snippet that Covalence generates for you. No Docker, no database setup, no cloud account.
+
+## Conclusion
+
+Covalence fills a real gap in the AI toolchain: persistent, shared context across multiple clients. If you bounce between Claude Desktop, Claude Code, and Cursor — or any combination of MCP agents — you know the pain of re-explaining your stack every time you switch tools.
+
+The on-device CoreML embedding approach is the right call — no API keys, no per-call cost, no privacy concerns. The SQLite WAL concurrency fix is also elegant: the hard problem of multi-client writes is solved without a separate server process.
+
+Download at [covalence.app/releases](https://covalence.app/releases/Covalence-latest.dmg).
