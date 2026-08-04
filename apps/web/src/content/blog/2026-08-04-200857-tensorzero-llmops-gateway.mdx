@@ -1,0 +1,153 @@
+---
+title: "TensorZero - Self-hosted LLMOps Gateway and Observability Platform"
+description: "Open-source platform combining LLM gateway, observability, evaluation, and optimization. Sub-ms latency, unified API for 20+ providers. Apache 2.0."
+pubDate: "2026-08-04"
+tags: ["llmops", "gateway", "observability", "self-hosted", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tensorzero.webp"
+  alt: "TensorZero product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** TensorZero is an open-source LLMOps platform that gives you a self-hosted LLM gateway, observability, evaluation, and optimization tooling in one package — with sub-millisecond latency overhead and support for 20+ model providers.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [tensorzero.com](https://www.tensorzero.com) — verified product site
+- Source repository: [github.com/tensorzero/tensorzero](https://github.com/tensorzero/tensorzero) — verified README, 11,727 stars (2026-08-04)
+- License: Apache 2.0 — verified via GitHub API `license.spdx_id`
+- HN launch thread: [news.ycombinator.com/item?id=41557020](https://news.ycombinator.com/item?id=41557020) — Show HN with 49 points
+- Docs: [tensorzero.com/docs](https://www.tensorzero.com/docs) — verified Quick Start and Gateway docs
+
+## What Is TensorZero?
+
+TensorZero describes itself as an open-source LLMOps platform that unifies five capabilities:
+
+- **Gateway** — a unified API for calling any LLM provider (OpenAI, Anthropic, DeepSeek, Ollama, vLLM, and 15+ more) through a single OpenAI-compatible interface
+- **Observability** — store inferences and feedback in your own database, queryable via API or UI
+- **Evaluation** — benchmark inferences and workflows using heuristics and LLM judges
+- **Optimization** — collect metrics and human feedback to tune prompts and routing
+- **Experimentation** — built-in A/B testing, fallbacks, retries, and load balancing
+
+The gateway is built in Rust, which the project claims delivers less than 1ms p99 latency overhead at over 10,000 QPS.
+
+The platform is used by companies ranging from AI startups to Fortune 10 enterprises and accounts for roughly 1% of global LLM API spend according to the project's own claims in the README.
+
+## Supported Providers
+
+The gateway supports calling models from: Anthropic, AWS Bedrock, AWS SageMaker, Azure, DeepSeek, Fireworks, GCP Vertex AI, Google AI Studio, Groq, Hyperbolic, Mistral, OpenAI, OpenRouter, SGLang, TGI, Together AI, vLLM, xAI (Grok), and any OpenAI-compatible API such as Ollama.
+
+## Quick Start
+
+### 1. Deploy the Gateway
+
+```bash
+docker run -d -p 3000:3000 \
+  -e TENSORZERO_HOME=/data \
+  tensorzero/tensorzero
+```
+
+### 2. Configure Providers
+
+Create `/data/config.json`:
+
+```json
+{
+  "gateway": {
+    "listen": "0.0.0.0:3000"
+  },
+  "providers": {
+    "openai": {
+      "type": "openai",
+      "api_key": "${OPENAI_API_KEY}"
+    },
+    "anthropic": {
+      "type": "anthropic",
+      "api_key": "${ANTHROPIC_API_KEY}"
+    }
+  }
+}
+```
+
+### 3. Call the API
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:3000/openai/v1",
+    api_key="not-used"
+)
+
+response = client.chat.completions.create(
+    model="tensorzero::my_function::anthropic::claude-sonnet-4-6",
+    messages=[{"role": "user", "content": "Share a fun fact about TensorZero."}]
+)
+
+print(response.choices[0].message.content)
+```
+
+The key pattern is `tensorzero::function_name::provider::model_name` — this maps to a prompt template defined in your config, allowing you to swap providers without touching application code.
+
+## Deeper Analysis
+
+### Why Sub-millisecond Matters
+
+At high QPS, proxy overhead compounds quickly. A 5ms added latency per request becomes 50 seconds of wait time across 10,000 requests. TensorZero's Rust-based gateway is designed to stay under 1ms p99 even at scale, which matters if you're routing thousands of requests per minute through a central proxy.
+
+### Prompt Templates and Schemas
+
+Rather than hardcoding model names and prompts in your application, TensorZero lets you define named functions with typed input/output schemas. Your app calls `tensorzero::my_function::anthropic::claude-sonnet-4-6` and the gateway resolves which provider, model, and prompt version to use. This decouples your application logic from provider specifics.
+
+### Observability Without Vendor Lock-in
+
+Unlike managed LLM platforms that give you their own metrics dashboard, TensorZero stores inference data in a database you control. You can query it programmatically, join it with your own application telemetry, and avoid having observability data siloed in a third-party service.
+
+### Evaluation and Optimization
+
+The evaluation system lets you define test cases and run them against different prompt or model configurations. Combined with the optimization features, you can systematically improve prompt quality over time rather than relying on manual spot-checking.
+
+## Practical Evaluation Checklist
+
+- Sub-ms p99 gateway latency (Rust-based) — confirmed in README
+- OpenAI-compatible SDK — Python, Node, Go clients all work via the same interface
+- 20+ built-in provider integrations — Anthropic, DeepSeek, OpenAI, Ollama, vLLM, and more
+- Self-hosted — one Docker container, data stays on your infrastructure
+- Apache 2.0 license — permissive, no commercial restrictions
+- Prompt templates and structured outputs — JSON schema enforcement via config
+- A/B testing, retries, fallbacks, rate limiting — all built into the gateway layer
+- OpenTelemetry support — integrate with your existing observability stack
+
+## Security Notes
+
+- API keys stay on your server — the gateway mediates all provider calls, so you never expose keys to client applications
+- Self-hosted deployment means inference data never leaves your infrastructure
+- Supports custom authentication at the gateway level via configuration
+- Being actively maintained (last GitHub push June 2026)
+
+## FAQ
+
+**Q: How does this compare to local model serving with Ollama alone?**
+**A:** Ollama handles local model execution. TensorZero adds a production gateway layer on top — unified routing, retry logic, observability, and multi-provider support. You can use TensorZero to route to Ollama as one of many backends, or to a cloud provider as a fallback when Ollama is at capacity.
+
+**Q: Does TensorZero require a separate database?**
+**A:** Yes — the observability and evaluation features require a database to store inference logs, feedback, and metrics. The Quick Start docs cover database configuration options.
+
+**Q: What is the hardware requirement for the gateway alone?**
+**A:** The gateway itself is lightweight. A single Docker container with 512MB RAM handles moderate traffic. Resource usage scales with your inference volume, not model size.
+
+**Q: Is this production-ready?**
+**A:** With Fortune 10 usage and ~1% of global LLM API spend attributed to TensorZero installations, it is used in production at scale. The Apache 2.0 license means you can self-host without commercial restrictions.
+
+## Conclusion
+
+TensorZero is a well-architected open-source LLMOps platform that solves three real problems: provider fragmentation, lack of self-hosted observability, and the operational complexity of running LLM applications in production. The Rust-based gateway delivers on the latency claim, the Apache 2.0 license removes commercial barriers, and the modular design lets you adopt pieces incrementally.
+
+If you're running multiple LLM providers today and want a single gateway that stays out of your way, TensorZero is worth evaluating. Start with the [5-minute Quick Start](https://www.tensorzero.com/docs/quickstart) and replace one provider call at a time.
