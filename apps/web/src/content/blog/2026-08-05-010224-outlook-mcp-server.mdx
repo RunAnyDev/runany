@@ -1,0 +1,170 @@
+---
+title: "OutlookMCP - Microsoft 365 for Mail, Calendar & Files"
+description: "A Model Context Protocol server that gives Claude Desktop access to Microsoft 365 mail, calendar, OneDrive and SharePoint via the Graph API."
+pubDate: "2026-08-05"
+tags: ["mcp", "claude", "microsoft-365", "productivity"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+draft: false
+---
+
+> **TL;DR:** OutlookMCPServer is an open-source MCP server that bridges Claude Desktop to Microsoft 365 — giving it read and write access to your mail, calendar, OneDrive and SharePoint through the Microsoft Graph API.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/Norcim133/OutlookMCPServer](https://github.com/Norcim133/OutlookMCPServer)
+- Source repository: [github.com/Norcim133/OutlookMCPServer](https://github.com/Norcim133/OutlookMCPServer) ← **README read in full**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=44641755](https://news.ycombinator.com/item?id=44641755)
+
+## What Is OutlookMCPServer?
+
+OutlookMCPServer is an MCP server built with [`FastMCP`](https://github.com/jlowin/fastmcp) that exposes Microsoft 365 services — mail, calendar, OneDrive and SharePoint — as MCP tools to any MCP-compatible client, most notably Claude Desktop.
+
+The project was shared on Hacker News as a Show HN post titled *"I accidentally made the best email assistant"* by user `Norcim133`.
+
+## Prerequisites
+
+- macOS (currently the only tested platform)
+- Python 3.10+
+- An Azure-registered application with admin consent for the required Graph scopes
+- Claude Desktop (or any MCP-compatible client)
+
+> **Important:** You must have **admin access to an Azure tenant** to register the application. The Graph scopes required (such as `Mail.Read`, `Calendars.Read`) are not user-consentable by default in most organizations.
+
+## Setup Workflow
+
+### Step 1: Clone and Set Up the Environment
+
+```bash
+git clone https://github.com/Norcim133/OutlookMCPServer.git
+cd OutlookMCPServer
+uv venv
+uv sync
+```
+
+The project uses [`uv`](https://github.com/astral-sh/uv) for fast Python dependency management.
+
+### Step 2: Register an Azure Application
+
+1. Go to the [Azure Portal](https://portal.azure.com) → **App registrations** → **New registration**
+2. Set a name (e.g. `OutlookMCP`) and select **Accounts in this organizational directory only**
+3. Under **Certificates & secrets** → **New client secret**, then copy the secret value
+4. Under **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**:
+   - `User.Read`
+   - `Mail.Read`
+   - `Mail.Send`
+   - `Mail.ReadWrite`
+   - `Calendars.Read`
+   - `Calendars.ReadWrite`
+   - `Files.Read`
+   - `Files.ReadWrite`
+5. Grant admin consent for the tenant
+
+### Step 3: Configure Environment Variables
+
+```bash
+mkdir -p auth_cache
+touch .env
+```
+
+Add the following to `.env`:
+
+```bash
+AZURE_CLIENT_ID=<your-client-id-from-Azure-portal>
+AZURE_TENANT_ID=<your-tenant-id-from-Azure-portal>
+AZURE_CLIENT_SECRET=<your-client-secret>
+AZURE_GRAPH_SCOPES=User.Read Mail.Read Mail.Send Mail.ReadWrite
+```
+
+For file services (OneDrive/SharePoint), additional scope variables are required — see the README.
+
+### Step 4: Connect to Claude Desktop
+
+Add the following to your Claude Desktop configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "outlook": {
+      "command": "uv",
+      "args": ["run", "python", "main.py"]
+    }
+  }
+}
+```
+
+Then restart Claude Desktop.
+
+On first run, the application uses the `DeviceCodeCredential` flow and creates an `auth_record.json` in the `auth_cache` folder automatically.
+
+### Step 5: Verify
+
+You should now see MCP tools available in Claude for:
+
+- **Mail** — compose, reply, search, filter and analyze your inbox
+- **Calendar** — list events, create and update calendar entries
+- **OneDrive** — search files and get metadata
+- **SharePoint** — load drives and search files
+
+## Deeper Analysis
+
+### Why This Is Different From Other MCP Email Tools
+
+Most MCP email integrations only support IMAP/SMTP or Gmail API. OutlookMCPServer uses the **Microsoft Graph API** directly, which means it has full access to the Microsoft 365 ecosystem — not just mail, but also calendar, OneDrive files and SharePoint document libraries, all under the same OAuth2 flow.
+
+### Authentication Model
+
+The project uses `azure.identity` with `DeviceCodeCredential`, which means:
+
+- No browser redirect required after initial setup
+- Device code flow is displayed in the terminal
+- Tokens are persisted to `auth_record.json` via `TokenCachePersistenceOptions`
+
+### Limitations
+
+- **macOS only** — the project notes Linux/Windows are not tested
+- **Admin consent required** — you cannot self-serve the Azure app registration in most enterprise tenants
+- **Claude Desktop only** — while technically any MCP client works, the project is documented for Claude Desktop specifically
+
+## Practical Evaluation Checklist
+
+- [ ] Azure app registered with correct Graph scopes
+- [ ] Admin consent granted for all scopes
+- [ ] `.env` file populated with client ID, tenant ID and secret
+- [ ] `uv sync` completes without errors
+- [ ] `uv run python main.py` starts without errors (test in MCP Inspector first)
+- [ ] Claude Desktop connects to the MCP server on restart
+- [ ] Mail search and calendar read work from a Claude conversation
+- [ ] Compose and send mail works
+- [ ] Token refresh works across sessions (check `auth_record.json` persists)
+
+## Security Notes
+
+- The `auth_record.json` file stores OAuth2 tokens on disk — treat it as sensitive
+- The `.env` file contains your Azure client secret — never commit it to version control
+- The `auth_cache` folder is gitignored by default, but ensure it has correct filesystem permissions
+- Scopes requested are broad (`Mail.ReadWrite`, `Calendars.ReadWrite`) — use a dedicated Azure app registration for this tool rather than a shared one
+
+## FAQ
+
+**Q: Can I use this with Cursor or other MCP clients?**
+**A:** Yes. Any client that supports the MCP protocol can connect. The README is written for Claude Desktop but the server itself is client-agnostic.
+
+**Q: Does it work with personal Microsoft accounts (Outlook.com)?**
+**A:** The README targets Microsoft 365 / Azure AD accounts. Personal Microsoft accounts use a different OAuth2 flow and are not explicitly tested.
+
+**Q: My admin won't grant consent. Can I work around it?**
+**A:** Not without admin consent — the required Graph scopes for mail read/write and calendar read/write are classified as high-privilege and cannot be user-consented in standard Azure tenants.
+
+**Q: How do I debug if it is not working?**
+**A:** Run `mcp dev main.py` to start the MCP Inspector first. This lets you test tool calls directly without going through Claude Desktop, making it easier to isolate whether the issue is authentication or the MCP client connection.
+
+## Conclusion
+
+OutlookMCPServer fills a specific gap: Claude Desktop users in Microsoft 365 environments who want their AI assistant to actually touch their inbox, calendar and files — not just read them. The setup requires Azure admin access and a fair bit of OAuth2 configuration, but once running it provides a genuinely useful bridge between Claude's reasoning and Microsoft's productivity stack.
+
+If you are already deep in the Microsoft ecosystem and use Claude Desktop, this is worth the setup effort. If you need a lighter-weight or cross-platform solution, look at the broader MCP server ecosystem first.
