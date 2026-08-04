@@ -1,0 +1,197 @@
+---
+title: "Bruin Data DAC – Dashboard-as-Code for AI Agents"
+description: "Build interactive dashboards using YAML and TSX with a built-in semantic layer. Define metrics once, reference everywhere. Designed for AI agents to ship standardized, reviewable dashboards."
+pubDate: "2026-08-04"
+tags: ["dev-tools", "ai-setup", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bruin-data-dac.webp"
+  alt: "DAC dashboard-as-code tool interface showing YAML and TSX dashboard definitions"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DAC is an open-source dashboard-as-code tool that lets you build interactive dashboards using YAML or TSX, with a built-in semantic layer so AI agents can produce standardized, reviewable dashboards without guesswork.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [bruindata.com/dac](https://www.bruindata.com/dac) ← visited and verified
+- Source repository: [github.com/bruin-data/dac](https://github.com/bruin-data/dac) ← README read end-to-end
+- License: AGPL-3.0 (verified via LICENSE file)
+- HN launch thread: [news.ycombinator.com/item?id=47949066](https://news.ycombinator.com/item?id=47949066)
+- Latest release: v0.11.0 (verified via GitHub API, 2026-08-03)
+
+## What Is DAC?
+
+DAC stands for **Dashboard-as-Code**. Instead of dragging and dropping widgets in a GUI, you define dashboards in YAML or TSX and render them through DAC's runtime. The pitch: if you treat dashboards as code, you get version control, code review, and reproducibility — things a GUI-based BI tool cannot offer.
+
+The tool targets two audiences:
+
+1. **Human developers** who want a lightweight alternative to heavy BI platforms
+2. **AI agents** that need to produce consistent, reviewable dashboards as part of an automated workflow
+
+The README puts it plainly: *"It is built for AI agents to build dashboards in a reliable and reviewable way."*
+
+### The semantic layer
+
+DAC's most distinctive feature is its built-in semantic layer. You define metrics and dimensions once in a `semantic/` folder, then reference them from any widget. DAC generates the SQL for you. This means:
+
+- A metric like `Total Revenue` is defined once, not copy-pasted across every chart
+- When the underlying column name changes, you update it in one place
+- Agents generate dashboards by composing semantic objects rather than writing raw SQL
+
+### Supported databases
+
+From the README, DAC connects to: Postgres, MySQL, Snowflake, BigQuery, Redshift, and Databricks — via the Bruin data platform.
+
+## Setup Workflow
+
+### Step 1: Install DAC
+
+DAC is installed via a shell script. On macOS, Linux, or WSL:
+
+```bash
+curl -LsSf https://getbruin.com/install/dac | sh
+```
+
+The install script fetches the latest release binary for your platform. No Node.js or Python runtime required.
+
+### Step 2: Connect a database
+
+You point DAC at a database via a named connection string in your `dac.yaml` project file:
+
+```yaml
+name: Sales Overview
+connection: my_warehouse
+```
+
+DAC reads credentials from environment variables or a local `.env` file, matching the pattern used by most CLI tools.
+
+### Step 3: Define your first widget in YAML
+
+```yaml
+name: Revenue Dashboard
+connection: warehouse
+
+rows:
+  - widgets:
+      - name: Total Revenue
+        type: metric
+        sql: SELECT SUM(amount) AS value FROM sales
+        value:
+          field: value
+          type: number
+          format: "$,.2f"
+        col: 4
+```
+
+Run `dac serve` to render the dashboard locally.
+
+### Step 4: Use the semantic layer
+
+Define your metrics once:
+
+```yaml
+# semantic/revenue.yaml
+metrics:
+  - name: total_revenue
+    sql: SELECT SUM(amount) FROM sales
+    description: Sum of all transaction amounts
+```
+
+Then reference `total_revenue` in any widget, letting DAC inject the SQL automatically.
+
+## Deeper Analysis
+
+### Why YAML-first matters for AI agents
+
+The GUI-to-code gap is a real problem for AI agent workflows. A GUI returns a visual result; code returns a diff. When an agent needs to update a dashboard, it must either:
+
+- Manipulate a proprietary GUI API (often nonexistent or poorly documented)
+- Generate SQL directly (fragile, database-coupled)
+- Generate YAML/TSX (text-based, diffable, reviewable)
+
+DAC takes the third path. An agent can produce a dashboard PR the same way it produces a code PR — write the YAML, open a GitHub pull request, let a human reviewer approve the metric definitions.
+
+### Where it fits vs. established BI tools
+
+Tools like Metabase, Grafana, and Superset have large feature sets and dedicated UI teams. DAC is deliberately minimal — it is a runtime that reads declarative files and renders dashboards. If you need a full BI platform with an embedded SQL editor, data scheduling, and multi-tenant permissions, look elsewhere.
+
+If you want a lightweight, code-first dashboard layer that fits into a developer or AI agent workflow, DAC is purpose-built for that.
+
+### TSX support for complex dashboards
+
+For dashboards that need conditional logic, loops, or custom layout, DAC supports TSX:
+
+```tsx
+export default (
+  <Dashboard name="Sales Overview" connection="my_db">
+    <Row>
+      <Metric
+        name="Total Revenue"
+        col={4}
+        sql="SELECT SUM(amount) AS value FROM sales"
+        value={{ field: "value", type: "number", format: "$,.2f" }}
+      />
+    </Row>
+  </Dashboard>
+)
+```
+
+The TSX approach gives you full programmatic control over layout and behavior while still compiling down to DAC's runtime model.
+
+## Practical Evaluation Checklist
+
+- [ ] Install DAC and verify binary is in PATH
+- [ ] Connect to a local Postgres or test database
+- [ ] Render a single-widget YAML dashboard with `dac serve`
+- [ ] Define a semantic metric and reference it from two separate widgets
+- [ ] Verify the generated SQL is correct
+- [ ] Try the TSX approach for a dashboard with multiple rows and conditional visibility
+- [ ] Check that `dac validate` catches an invalid SQL query
+- [ ] Review the GitHub releases page for the roadmap and breaking-change policy
+
+## Security Notes
+
+- Database credentials should live in environment variables or a `.env` file, not in the YAML project file committed to version control
+- DAC renders dashboards server-side; credentials are never exposed to the browser
+- As an AGPL-3.0 project, you are entitled to the source code but should audit it if deploying in a security-sensitive environment
+
+## FAQ
+
+**Q: Does DAC host the dashboards for me, or do I need my own server?**
+
+**A:** DAC is a local runtime. You run `dac serve` to render dashboards. For production hosting, you deploy the DAC runtime alongside your own web server — the tool does not include a hosted SaaS offering.
+
+**Q: Can I use DAC without the Bruin data platform?**
+
+**A:** Yes. The README shows DAC connecting to Postgres, MySQL, Snowflake, BigQuery, Redshift, and Databricks directly. Bruin is optional.
+
+**Q: How does DAC compare to writing a simple Python Flask app that renders Chart.js?**
+
+**A:** DAC handles the layout engine, semantic layer, and SQL generation out of the box. Writing it yourself from scratch means reinventing those pieces. If you need a quick custom dashboard without the semantic layer, a Flask + Chart.js approach is lighter but less maintainable.
+
+**Q: Does DAC support live data refresh?**
+
+**A:** The YAML/TSX definitions are static; the runtime executes the SQL on each page load. For streaming or real-time dashboards, you would need to add a polling or WebSocket layer on top.
+
+**Q: Is there a hosted version of DAC?**
+
+**A:** Not at this time. DAC is self-hosted only. The Bruin data platform offers related data connectivity tools but not a hosted DAC product.
+
+## Conclusion
+
+DAC fills a specific niche: teams that want dashboard definitions as versioned, reviewable code rather than a GUI export or a bespoke internal tool. The semantic layer is its strongest feature — defining metrics once and referencing them everywhere reduces duplication and makes dashboards easier to audit.
+
+The tool is young (v0.11.0 as of August 2026) and intentionally minimal. If you need a full BI suite, look at Metabase or Grafana. If you want a developer-friendly, AI-agent-friendly dashboard runtime that fits into a code review workflow, DAC is worth a look.
+
+Install it with:
+
+```bash
+curl -LsSf https://getbruin.com/install/dac | sh
+```
