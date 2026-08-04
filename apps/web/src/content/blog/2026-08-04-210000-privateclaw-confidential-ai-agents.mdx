@@ -1,0 +1,129 @@
+---
+title: "PrivateClaw – AI Agents in Confidential VMs You Can Verify"
+description: "PrivateClaw runs AI agents inside AMD SEV-SNP Trusted Execution Environments, keeping prompts and outputs encrypted at the hardware level—no more trusting hosted platforms with plaintext."
+pubDate: "2026-08-04"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/privateclaw.webp"
+  alt: "PrivateClaw product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** PrivateClaw runs OpenClaw-based AI agents inside AMD SEV-SNP Trusted Execution Environments, so prompts and outputs are encrypted by the hardware itself—not just by policy. Access via a single `ssh privateclaw.dev` command.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [privateclaw.dev](https://privateclaw.dev)
+- HN launch thread: [news.ycombinator.com/item?id=47891569](https://news.ycombinator.com/item?id=47891569)
+- Source code: **Not publicly available** — this is a hosted service, not an open-source project. No GitHub repository exists.
+- License: Proprietary (no open-source license)
+- Source last checked: 2026-08-04 (HN API + direct site fetch)
+
+## What Is PrivateClaw?
+
+When you use a hosted AI agent platform, you are trusting that provider with your prompts and responses in plaintext. Even if the provider is honest, a compromised host OS, a rogue hypervisor, or a subpoena can expose that data. PrivateClaw addresses this at the hardware layer.
+
+PrivateClaw runs AI agents inside **Trusted Execution Environments (TEEs)** backed by **AMD SEV-SNP** (Secure Nested Paging). This is the same technology used in cloud confidential computing. From the HN launch thread:
+
+> "We built PrivateClaw because the hosted OpenClaw platforms on the market today require you to trust them with plaintext. PrivateClaw removes that requirement at the hardware layer."
+
+SEV-SNP enforces memory encryption and integrity at the CPU level. The AMD Secure Processor—which runs outside the host OS trust boundary—handles the encryption keys. The host OS cannot read the agent's memory contents, even if it is fully compromised.
+
+The inference engine itself also runs inside the TEE, so both the model weights and the data being processed remain encrypted in hardware.
+
+## Setup Workflow
+
+### Prerequisites
+
+- An SSH client (OpenSSH, PuTTY, etc.)
+- No additional software needed on the client side
+
+### Step 1: Connect via SSH
+
+PrivateClaw is accessed through a single SSH command:
+
+```bash
+ssh privateclaw.dev
+```
+
+On first connection, the remote host's TEE attestation is verified automatically. The `ssh` command copies this fingerprint:
+
+```
+$ ssh privateclaw.dev
+PrivateClaw, powered by Confidential AI
+```
+
+### Step 2: Interact with Your Agent
+
+Once connected, you interact with your OpenClaw-based agent normally. All prompt and response data flows through the TEE. You do not need to configure anything—attestation is handled by the SSH layer.
+
+### Step 3: Inspect Attestation (Optional)
+
+Advanced users can inspect the TEE attestation details to verify the remote hardware is genuinely enforcing confidentiality. This uses the AMD SEV-SNP remote attestation mechanism built into the secure connection.
+
+## Deeper Analysis
+
+### Why Hardware-Level Confidentiality Matters
+
+Software-based access controls (authentication, encryption in transit, RBAC) all depend on the host OS behaving correctly. If an attacker gains root on the host—or if the cloud provider itself is compelled to disclose data—those controls offer no protection.
+
+SEV-SNP makes the hardware the trusted entity, not the software stack above it:
+
+- **Memory encryption** — Agent memory pages are encrypted with a per-VM key managed by the AMD Secure Processor.
+- **Integrity protection** — The CPU rejects any attempts to replay or modify encrypted memory pages.
+- **Attestation** — Remote parties can verify the TEE is genuine AMD hardware before sending any data.
+
+### How It Compares to Standard OpenClaw Hosting
+
+| | Standard hosted OpenClaw | PrivateClaw |
+|---|---|---|
+| Prompt confidentiality | Trust the provider | Hardware-enforced (SEV-SNP) |
+| Inference confidentiality | Trust the provider | Hardware-enforced (SEV-SNP) |
+| Attestation | None | AMD SEV-SNP remote attestation |
+| Access | Web UI / API | SSH |
+| Source | Usually open-source | Proprietary |
+
+### Limitations
+
+- **Proprietary** — No open-source code or self-hosted option. You must connect to `privateclaw.dev`.
+- **AMD only** — SEV-SNP is an AMD feature. Intel TDX is not supported.
+- **Performance** — TEE overhead adds latency. workloads requiring maximum throughput may be affected.
+- **No local verification** — You cannot self-host or audit the TEE implementation; you trust AMD's hardware and PrivateClaw's software.
+
+## Practical Evaluation Checklist
+
+- [ ] SSH connection to `privateclaw.dev` succeeds
+- [ ] Attestation is displayed or verifiable on connect
+- [ ] Agent responds to prompts normally
+- [ ] Understand the trust model (AMD hardware + PrivateClaw software)
+- [ ] Evaluate pricing for production use
+
+## Security Notes
+
+- **Trust boundary** — You trust AMD's SEV-SNP implementation and PrivateClaw's software stack. You do not trust the host OS.
+- **No E2E encryption for inference** — While prompt memory is encrypted, the model inference itself runs on PrivateClaw's hardware. The computation is protected by the TEE, not client-side.
+- **SSH key management** — Standard SSH key-based authentication protects access to your session.
+
+## FAQ
+
+**Q: How is this different from using a VPN or encrypting my prompts?**
+**A:** A VPN encrypts data in transit but not at rest or during computation. The hosting provider's OS can still read plaintext in memory. PrivateClaw's TEE encrypts data in use—neither the host OS nor the cloud provider can access it.
+
+**Q: Can I self-host PrivateClaw?**
+**A:** No. PrivateClaw is a hosted service. Self-hosting OpenClaw agents on your own AMD SEV-SNP hardware is technically possible but requires significant setup and is not what PrivateClaw offers.
+
+**Q: Does this protect against government subpoenas?**
+**A:** Hardware-level protection makes it significantly harder for a cloud provider to comply with data demands by accessing your agent's memory. However, PrivateClaw as a company could still be compelled to provide access in certain jurisdictions. The protection is technical, not legal.
+
+## Conclusion
+
+PrivateClaw solves a real problem: hosted AI agents require you to trust the host with your data. By running OpenClaw agents inside AMD SEV-SNP TEEs, it makes the hardware—not the software—the trust anchor. For enterprise users with strict data residency or confidentiality requirements, this is a meaningful step forward. Access it with a single `ssh privateclaw.dev` command—no configuration needed.
+
+If you need full auditability over your agent infrastructure and cannot accept the trust model of standard hosted AI, PrivateClaw is worth evaluating.
