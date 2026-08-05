@@ -1,0 +1,138 @@
+---
+title: "attn – Native Markdown Viewer from the Terminal"
+description: "attn opens markdown files in a native desktop window from the CLI, with live reload, collaborative review via encrypted invite links, and no Electron runtime."
+pubDate: "2026-08-05"
+tags: ["rust", "markdown", "developer-tools", "cli", "collaboration"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/attn.webp"
+  alt: "attn markdown viewer showing collaborative review"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** attn is a Rust + Svelte 5 CLI tool that opens markdown in a native macOS/Linux window from the terminal, with live reload, interactive editing, and optional end-to-end encrypted collaboration — no Electron, no browser tab.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [attn.day](https://attn.day) ← redirect, actual site is the GitHub README
+- Source repository: [github.com/lightsofapollo/attn](https://github.com/lightsofapollo/attn)
+- License: [MIT](https://github.com/lightsofapollo/attn/blob/main/LICENSE) — verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=47263402](https://news.ycombinator.com/item?id=47263402)
+
+## What Is attn?
+
+attn is a native markdown viewer and editor that launches from the terminal. You run `attn .` in any directory and it opens a native macOS or Linux window displaying your markdown files with a file tree, live reload, and a ProseMirror-based editor toggle.
+
+The core pitch: markdown lives in your repo, but review usually moves somewhere else — screenshots, pasted docs, exported PDFs, or a SaaS editor that copies your source. attn keeps the source of truth local and makes review a layer over the file you already have.
+
+The binary for macOS ARM64 is under 20MB. Linux x64 is also available. No Electron, no browser runtime.
+
+## Setup Workflow
+
+### Step 1: Install
+
+Download the latest release from the [attn releases page](https://github.com/lightsofapollo/attn/releases/tag/v0.8.0):
+
+```bash
+# macOS ARM64 — dmg
+curl -L -o ~/Downloads/attn.dmg https://github.com/lightsofapollo/attn/releases/download/v0.8.0/attn-v0.8.0-darwin-arm64.dmg
+open ~/Downloads/attn.dmg && cp -r /Volumes/attn/*.app /Applications/
+
+# macOS ARM64 — direct binary
+curl -L -o /usr/local/bin/attn https://github.com/lightsofapollo/attn/releases/download/v0.8.0/attn-v0.8.0-darwin-arm64
+chmod +x /usr/local/bin/attn
+
+# Linux x64
+curl -L -o /usr/local/bin/attn https://github.com/lightsofapollo/attn/releases/download/v0.8.0/attn-v0.8.0-linux-x64
+chmod +x /usr/local/bin/attn
+```
+
+### Step 2: Launch
+
+```bash
+attn .
+```
+
+attn opens a native window showing the current directory's file tree and renders `README.md` or the first markdown file it finds.
+
+### Step 3: Live Reload
+
+Edit your markdown in any editor — Vim, VS Code, Zed, Obsidian — and the native window updates immediately. No save button, no export step.
+
+### Step 4: Collaborative Review (Optional)
+
+1. Hit **Share** (button, breadcrumb menu, or `Cmd+Shift+S`)
+2. Choose between an `attn://review/...#key=...` link or an `npx attnmd ...` command
+3. Send the invite link to a reviewer
+4. The reviewer can comment, suggest edits, and co-edit from the same markdown surface
+
+The room key is in the URL fragment (`#key=...`), not on the relay — the relay only sees encrypted bytes. No account required.
+
+## Deeper Analysis
+
+### What makes it different from existing markdown tools?
+
+Most markdown workflows split into "write locally, review remotely." You export a PDF, paste into Google Docs, or share a Notion link. attn collapses this:
+
+- **No copy** — the file you review is the file in your repo
+- **No Electron** — a native Cocoa window on macOS, GTK on Linux. Memory footprint is a fraction of Electron equivalents
+- **Encrypted collaboration** — the relay (`attnd.com`) never sees plaintext. Even the host can't read reviewer comments without the fragment key
+
+### Editor capabilities
+
+Toggle the built-in ProseMirror editor with `Cmd+E`. Interactive checkboxes (`- [ ]`) are clickable and write back to the file. Tables, task lists, math blocks, Mermaid diagrams, and syntax-highlighted code blocks are all rendered in the reader view.
+
+### File tree and navigation
+
+The project browser lazy-loads large repos. Fuzzy search (`Cmd+P`) jumps to any file. Multiple files open as tabs. Workspaces are remembered between sessions.
+
+## Practical Evaluation Checklist
+
+- [ ] Binary installs without a package manager
+- [ ] `attn .` opens the current directory
+- [ ] File tree navigates to subdirectories
+- [ ] Live reload fires when editing in an external editor
+- [ ] `Cmd+E` toggles prose editor
+- [ ] Clicking a task checkbox writes to the file
+- [ ] Share button generates an invite link
+- [ ] Reviewer can open the link and add a comment without an account
+- [ ] Suggestion accept/reject works end-to-end
+- [ ] Native window renders math (`$...$`) and Mermaid diagrams
+- [ ] `Cmd+W` closes the current tab, not the app
+- [ ] `attn` from a second terminal opens a new tab, not a new window
+
+## Security Notes
+
+attn's collaboration model is designed around the principle that the relay should see as little as possible:
+
+- The relay receives only encrypted bytes — it cannot read comments, suggested edits, or document content
+- Invite links encode the room key in the URL fragment, which is never sent to the relay
+- No account, no stored session — the review room exists only as long as the host window is open
+
+The tradeoff: if you lose the invite link, there is no recovery mechanism. The relay does not store messages. Reviewers who close the tab and lose the link need a new invite.
+
+## FAQ
+
+**Q: Does attn work on Windows?**
+**A:** As of v0.8.0, only macOS (ARM64) and Linux (x64) binaries are provided. Windows support has not been announced.
+
+**Q: How does live reload work on large files?**
+**A:** attn watches the file via inotify (Linux) or FSEvents (macOS). The ProseMirror editor can handle documents in the megabyte range, though very large repos may benefit from narrowing the file tree scope.
+
+**Q: Is the review relay self-hostable?**
+**A:** The README mentions a "hybrid transport" with peer-to-peer fallback when direct connection is possible. Self-hosting the relay is not documented as of v0.8.0.
+
+**Q: What happens to comments if the host disconnects?**
+**A:** Comments are ephemeral in the relay. If the host window closes, the review room is gone. Reviewers should export or apply their feedback before the session ends.
+
+## Conclusion
+
+attn solves a narrow but real problem: markdown that needs collaborative review but shouldn't leave the repo. The native binary approach (under 20MB, no Electron) makes it fast and lightweight. The end-to-end encrypted invite links mean you can share with external reviewers without setting up accounts or trusting a third-party SaaS.
+
+If your team writes a lot of markdown — design docs, RFCs, runbooks — and keeps losing the loop between the source file and the review tool, attn is worth a look. Grab the [v0.8.0 release](https://github.com/lightsofapollo/attn/releases/tag/v0.8.0) and run `attn .` in your project root.
