@@ -1,0 +1,154 @@
+---
+title: "Let's Seal – Let's Encrypt for Document Signing, Free and Self-Hosted"
+description: "Let's Seal is an open standard and free tool for proving any file is real, unaltered, and sealed. Supports PDF, images, email, XML, and any file. Self-hosted option available."
+pubDate: "2026-08-05"
+tags: ["self-hosted", "document-signing", "open-source", "security", "cryptography"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/letsseal.webp"
+  alt: "Let's Seal product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Let's Seal is an open standard (SEAL) and free reference implementation for cryptographically proving any file is unaltered, existed at a point in time, and was sealed by a known certificate — think Let's Encrypt, but for document signing.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [letsseal.org](https://letsseal.org)
+- Source repository: [github.com/letsseal/letsseal](https://github.com/letsseal/letsseal)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=42219596](https://news.ycombinator.com/item?id=42219596)
+- Live verification portal: [verify.letsseal.org](https://verify.letsseal.org)
+- Live sealing app: [app.letsseal.org](https://app.letsseal.org)
+- Source last checked: 2026-08-05 (commit `23a5f6b`, main branch)
+
+## What Is Let's Seal?
+
+Let's Seal describes itself as "the Let's Encrypt of document proof." It created the **SEAL standard** (Sealed Evidence Anchored to a Ledger) and runs the free reference implementation that issues and verifies seals. Everything — the engine, SDKs, and the standard itself — is open source under Apache-2.0.
+
+The core guarantee SEAL proofs establish:
+
+- **Unaltered** — the file has not changed by a single byte since sealing. One byte different and the signature breaks.
+- **Time** — the file existed by a certain date, anchored to Bitcoin through OpenTimestamps, with no trust in Let's Seal as a timestamping authority.
+- **Issuer** — the seal carries the domain of the certificate that issued it, verifiable against a published root.
+
+A seal is **not** notarisation. It does not assert a person's real-world identity. The identity field binds a provider-verified email at seal time, which is useful for supply-chain integrity but is not a legal identity claim.
+
+### What SEAL seals
+
+SEAL uses format-native delivery so any standard validator can verify the proof — no bespoke tooling required by the reader:
+
+| File type | Seal format | Verification method |
+|---|---|---|
+| PDF | PAdES / X.509 signature embedded in the file | Any standard PAdES validator |
+| Image, video, audio | C2PA (Content Credentials) manifest | Any C2PA reader |
+| XML | Enveloped W3C XML-DSig | Any XML-DSig validator |
+| Email | S/MIME `multipart/signed` (RFC 8551) | `openssl smime -verify` |
+| Any other file | Detached CAdES / CMS `.sig` sidecar | `openssl cms -verify` |
+| Software / containers | Signature + in-toto / DSSE attestation | Standard artifact-signing tools |
+
+Every seal is also written to a public Certificate Transparency log (RFC 6962) with a Bitcoin-anchored root, making the record of what was sealed itself tamper-evident.
+
+## Setup Workflow
+
+### Option 1 — Web app (no install)
+
+Seal and verify directly in the browser at [app.letsseal.org](https://app.letsseal.org). No account required for basic sealing. The app also supports remote and in-person document signing, and issues branded certificates.
+
+### Option 2 — CLI (Node.js)
+
+Install the `sealbot` CLI:
+
+```bash
+npm i -g sealbot
+# or run without installing:
+npx sealbot
+```
+
+Seal and verify a document:
+
+```bash
+sealbot seal contract.pdf          # seal a PDF or any file
+sealbot verify contract.sealed.pdf # verify a seal, fully offline
+```
+
+Other available commands: `sealbot issue`, `sealbot anchor`, `sealbot watch`.
+
+### Option 3 — Self-hosted
+
+Run the entire signing engine under your own certificate authority:
+
+```bash
+git clone https://github.com/letsseal/letsseal.git
+cd letsseal
+cd web && npm install && cp .env.example .env   # fill in the values
+npx prisma migrate deploy && npm run dev         # http://localhost:3000
+```
+
+The web app is a Next.js application backed by a REST API and SDKs (Python and TypeScript). The OpenAPI schema lives in the `sdk/` directory.
+
+A self-contained Rust CLI build also lives in `cli-rs/` for environments where Node.js is not desired.
+
+## Deeper Analysis
+
+### Why this matters
+
+Traditional document signing services charge per-document fees and hold the trust anchor themselves — you rent their authority. Let's Seal makes the trust anchor a public good: the SEAL root is published and auditable, and the verification step never requires an account or a payment.
+
+The Bitcoin-anchored timestamping via OpenTimestamps is particularly notable. Rather than trusting Let's Seal's clock, timestamps are proveable against a public blockchain. If Let's Seal disappears tomorrow, existing seals remain verifiable.
+
+### Format-native design
+
+The design choice to embed seals in native file formats (PAdES for PDF, C2PA for media, XML-DSig for XML) is significant. A sealed PDF is still a normal PDF — it opens in any PDF reader. The proof rides along inside the file rather than requiring a separate verification toolchain. This is the opposite of vendor-lock-in: the sealed artifact is self-contained and format-compliant.
+
+### Comparison with similar tools
+
+Notarisation services (DocuSign, Adobe Sign) require a centralised authority and charge per-envelope. SSL/TLS certificates from Let's Encrypt proved you don't need to pay a CA for basic infrastructure — SEAL aims to do the same for document integrity. Unlike DocuSign, there is no per-document fee and no vendor dependency for verification.
+
+## Practical Evaluation Checklist
+
+- Seal a PDF using the web app and verify it opens in a standard PDF reader
+- Verify a sealed document at [verify.letsseal.org](https://verify.letsseal.org) without creating an account
+- Install `sealbot` and run the full seal/verify cycle from the CLI
+- Check the Certificate Transparency log for a sealed document to see the Bitcoin anchor
+- Review the [SPEC.md](https://github.com/letsseal/letsseal/blob/main/SPEC.md) to understand the cryptographic chain
+- Self-host the web app on a VPS and issue seals under your own certificate authority
+
+## Security Notes
+
+- SEAL does not assert real-world identity — it establishes file integrity, time, and issuer certificate only
+- Provider-verified email binding is useful for supply-chain verification but is not a legal identity mechanism
+- The Bitcoin anchor via OpenTimestamps is external to Let's Seal's infrastructure — the timestamping guarantee is decentralised
+- Self-hosting gives you full control of the certificate authority, eliminating dependency on Let's Seal's root certificate
+- The transparency log (RFC 6962) means the record of what was sealed is itself publicly auditable and tamper-evident
+
+## FAQ
+
+**Q: Is Let's Seal a replacement for DocuSign or Adobe Sign?**
+**A:** No. SEAL proves a file was unaltered and existed at a point in time. It does not collect signatures from specific individuals or assert legal identity. For signature workflows that require signatory intent and legal enforceability, you still need a qualified trust service provider (e.g. eIDAS-compliant QTSP).
+
+**Q: How is the timestamp proven without trusting Let's Seal's server?**
+**A:** SEAL timestamps are anchored to Bitcoin through OpenTimestamps. The proof is cryptographic and verifiable independently of Let's Seal's infrastructure.
+
+**Q: Can I self-host the entire sealing infrastructure?**
+**A:** Yes. The `web/` directory contains the full Next.js application, API, and SDKs. Run it under your own certificate authority to issue seals that chain to your own root.
+
+**Q: Does sealing a file require sending it to Let's Seal's servers?**
+**A:** For generic files, no — the detached CAdES `.sig` sidecar means the file's bytes never leave your machine. For PDF and other format-native seals, the file is processed locally; only the seal record is submitted to the transparency log.
+
+**Q: What happens if Let's Seal shuts down?**
+**A:** Existing seals remain verifiable because verification is decentralised (OpenTimestamps + Certificate Transparency). The reference verifier at [verify.letsseal.org](https://verify.letsseal.org) is one option; you can also run it offline on your own machine.
+
+## Conclusion
+
+Let's Seal fills a genuine gap: cryptographic proof of file integrity and timestamp, free and open, without per-document fees or vendor lock-in. Its format-native approach means sealed files remain standard files — they don't require a proprietary viewer. The self-hosting option makes it viable for organisations that can't trust an external CA for their document attestations.
+
+If you need to prove that a document was unaltered at a specific point in time — for contracts, software releases, audit records, or media provenance — this is the open, free path. No signup, no per-seal fee, no vendor dependency.
+
+Explore the standard at [letsseal.org](https://letsseal.org), try the [verification portal](https://verify.letsseal.org), or run the [CLI](https://github.com/letsseal/letsseal) locally to get started.
