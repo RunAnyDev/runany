@@ -1,0 +1,216 @@
+---
+title: "SemanticTest – Open-Source AI Testing Framework"
+description: "Test AI agents with semantic validation using composable HTTP, parsing, and LLM-judge blocks in pipeline-based JSON test definitions."
+pubDate: "2026-08-05"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/semantictest.webp"
+  alt: "SemanticTest – AI agent testing framework with semantic validation"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** SemanticTest is an open-source Node.js testing framework for AI systems that uses composable pipeline blocks and LLM-backed semantic validation instead of brittle exact-match assertions.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [semantictest.dev](https://www.semantictest.dev) ← verified
+- Source repository: [github.com/blade47/semantic-test](https://github.com/blade47/semantic-test) ← README read in full
+- License: MIT ← verified via repository
+- HN launch thread: [news.ycombinator.com/item?id=45491864](https://news.ycombinator.com/item?id=45491864) ← Show HN launch
+- Docs: [docs.semantictest.dev](https://docs.semantictest.dev)
+- Source last checked: 2026-08-05 (README commit verified via curl)
+
+## What Is SemanticTest?
+
+Testing AI systems breaks traditional testing tooling. Responses are non-deterministic, exact-match strings are meaningless, and what matters is semantic correctness — did the model *understand* the intent?
+
+SemanticTest, built by [blade47 on GitHub](https://github.com/blade47/semantic-test), is a pipeline-based testing framework for AI systems and APIs. It ships as an npm package and defines tests as composable JSON pipelines.
+
+From the README:
+
+> A composable, pipeline-based testing framework for AI systems and APIs. Build complex test scenarios using simple, reusable blocks with semantic validation.
+
+**Core features:**
+- Pipeline architecture: tests chain together named blocks (HTTP requests, parsers, validators, AI judges)
+- LLM Judge: uses GPT-4 to evaluate whether a response is semantically correct
+- JSON test definitions: version-controllable and human-readable
+- Block library: HttpRequest, JsonParser, ValidateContent, Loop, LLMJudge, and more
+- Setup/teardown hooks for test data management
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+npm install @blade47/semantic-test
+```
+
+Requires Node.js 18+.
+
+### Step 2: Create a test definition
+
+```json
+{
+  "name": "API Test",
+  "version": "1.0.0",
+  "context": {
+    "BASE_URL": "https://api.example.com"
+  },
+  "tests": [
+    {
+      "id": "get-user",
+      "name": "Get User",
+      "pipeline": [
+        {
+          "id": "request",
+          "block": "HttpRequest",
+          "input": {
+            "url": "${BASE_URL}/users/1",
+            "method": "GET"
+          },
+          "output": "response"
+        },
+        {
+          "id": "parse",
+          "block": "JsonParser",
+          "input": "${response.body}",
+          "output": "user"
+        },
+        {
+          "id": "validate",
+          "block": "ValidateContent",
+          "input": {
+            "from": "user.parsed.name",
+            "as": "text"
+          },
+          "config": {
+            "contains": "John"
+          },
+          "output": "validation"
+        }
+      ],
+      "assertions": {
+        "response.status": 200,
+        "user.parsed.id": 1,
+        "validation.passed": true
+      }
+    }
+  ]
+}
+```
+
+### Step 3: Run it
+
+```bash
+npx semtest test.json
+```
+
+## Deeper Analysis
+
+### How pipelines work
+
+Each block in a pipeline:
+1. Reads inputs from named slots on the DataBus
+2. Performs one operation
+3. Writes output to a named slot for the next block
+
+The DataBus is the shared state between blocks. A typical flow:
+
+```
+HttpRequest → JsonParser → ValidateContent → Assert
+```
+
+Data flows through named slots (`response`, `user`, `validation`) rather than return values, making pipelines readable and debuggable.
+
+### Semantic validation with LLM Judge
+
+The LLMJudge block lets you validate semantic correctness using GPT-4:
+
+```json
+{
+  "block": "LLMJudge",
+  "input": {
+    "expected": {
+      "expectedBehavior": "Should confirm meeting is scheduled for 2 PM"
+    }
+  }
+}
+```
+
+This avoids brittle exact-match assertions. Instead of checking for the literal string `"The meeting is scheduled for 2:00 PM"`, you describe the expected *behavior* and let the LLM judge whether the response satisfies it.
+
+### Retry loops
+
+```json
+{
+  "id": "retry",
+  "block": "Loop",
+  "config": {
+    "target": "attempt",
+    "maxIterations": 3
+  }
+}
+```
+
+Blocks can be wrapped in a Loop for retry logic — useful when testing flaky APIs or multi-step agent workflows that may need backoff.
+
+### Setup and teardown
+
+```json
+{
+  "setup": [
+    { "id": "create-test-data", "block": "..." }
+  ],
+  "tests": [ /* ... */ ],
+  "teardown": [
+    { "id": "delete-test-data", "block": "..." }
+  ]
+}
+```
+
+Proper cleanup hooks ensure tests do not leave residual state.
+
+## Practical Evaluation Checklist
+
+- Installable via npm: `npm install @blade47/semantic-test` — verified
+- Pipeline-based block architecture: confirmed in README
+- LLM Judge uses GPT-4 for semantic evaluation — confirmed
+- JSON test definitions are human-readable and version-controllable — confirmed
+- Available blocks: HttpRequest, JsonParser, ValidateContent, Loop, LLMJudge — confirmed
+- MIT license — confirmed
+- Open source on GitHub with 10 stars at time of writing — confirmed via GitHub API
+- HN Show HN launch: yes (ID 45491864)
+
+## Security Notes
+
+- Tests execute HTTP requests to arbitrary URLs — isolate test environments from production
+- LLM Judge calls external GPT-4 API — be mindful of data passed to OpenAI
+- No authentication mechanism built in; handle credentials via environment variables in `context`
+- The `context` block supports variable interpolation `${VAR}` — do not expose sensitive values in committed test files
+
+## FAQ
+
+**Q: Does SemanticTest require an OpenAI API key?**
+**A:** Yes, if you use the LLMJudge block. It calls GPT-4 for semantic evaluation. Other blocks (HttpRequest, JsonParser, ValidateContent) do not require an API key.
+
+**Q: Can I test streaming responses?**
+**A:** The README shows a pipeline architecture designed for non-streaming HTTP responses. Streaming support would need custom block development — the framework is extensible via the BlockRegistry.
+
+**Q: How does it compare to standard unit testing?**
+**A:** Traditional unit tests assert exact values. SemanticTest asserts semantic correctness using named pipeline blocks and optional LLM-backed evaluation. It is complementary to, not a replacement for, conventional test suites.
+
+**Q: Is there a hosted or managed version?**
+**A:** No — SemanticTest is a self-hosted, open-source npm package. You run it in your own CI/CD environment.
+
+## Conclusion
+
+SemanticTest addresses the gap between traditional API testing and AI system evaluation. Its pipeline-based block architecture makes complex multi-step test scenarios composable and readable, while the LLMJudge block enables semantic validation that exact-match assertions cannot handle.
+
+Install it with `npm install @blade47/semantic-test` and define your first test in JSON. The framework is MIT-licensed, open source, and lives at [github.com/blade47/semantic-test](https://github.com/blade47/semantic-test).
