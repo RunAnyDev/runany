@@ -1,0 +1,151 @@
+---
+title: "Tokenless – Cut Your LLM Inference Bill in Half"
+description: "Tokenless is a YC S26 model router that fans out API calls to multiple models, selects the best responder, and cancels the rest — dropping costs by 50 percent with no quality loss."
+pubDate: "2026-08-05"
+tags: ["llm", "inference", "cost-optimization", "api-tool", "yc"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tokenless.webp"
+  alt: "Tokenless product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tokenless is a YC S26 model router that acts as a drop-in OpenAI/Anthropic API replacement — fans requests across multiple models, selects the best answer, and cancels the rest, cutting inference costs in half.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [usetokenless.com](https://usetokenless.com/) ← visited and verified
+- HN launch thread: [news.ycombinator.com/item?id=48600911](https://news.ycombinator.com/item?id=48600911) ← YC S26 batch
+- License: No open-source version listed (SaaS only)
+
+## What Is Tokenless?
+
+Tokenless is a **model routing layer** from Y Combinator's S26 batch. It sits in front of OpenAI and Anthropic API calls and acts as a drop-in replacement for both. When you send a request, Tokenless fans it out to multiple models simultaneously, watches them reason, and — once a model is clearly on track — selects it and cancels the remaining requests. You only pay for the model that actually responded.
+
+The pitch on the site is direct:
+
+> "Same quality, half the cost. Most calls do not need a frontier model."
+
+It exposes an OpenAI-compatible endpoint and an Anthropic-compatible endpoint. Switching existing code means changing your base URL — the SDK calls work as-is.
+
+## How the Routing Works
+
+Traditional API routing sends every request to a single model (usually GPT-4o or Claude Opus). Tokenless breaks this pattern:
+
+1. Your app calls `api.tokenless.dev` (or the Anthropic-compatible endpoint) instead of the vendor directly.
+2. Tokenless fans the request to a group of models at once.
+3. As models respond, Tokenless evaluates whether the answer is on track.
+4. Once a model is clearly winning, it cancels the others — you pay only for the selected model's output.
+
+This is speculative execution in reverse: instead of guessing which model to call upfront, you let them race and only pay for the winner.
+
+## Setup Workflow
+
+### Step 1: Get an API Key
+
+Sign up at [usetokenless.com](https://usetokenless.com/) — the site mentions "Book a demo" and "Sign up" with no free tier visible in the landing page text. Pricing appears to be a success-based model where you pay only for completed responses.
+
+### Step 2: Point Your SDK at Tokenless
+
+For OpenAI-compatible code, swap the base URL:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-tokenless-key",
+    base_url="https://api.tokenless.dev/v1"  # instead of api.openai.com/v1
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Summarize this article"}]
+)
+```
+
+For Anthropic-compatible code:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="your-tokenless-key",
+    base_url="https://api.tokenless.dev/anthropic"  # instead of api.anthropic.com
+)
+```
+
+### Step 3: Monitor Savings
+
+Tokenless cancels slow or off-track models before they finish generating a full response. The savings come from two places: cheaper models handling easy requests, and partial-token billing from cancelled runs.
+
+## Deeper Analysis
+
+### Why Model Routing Matters Now
+
+Frontier model pricing is still high. GPT-4o runs at roughly $2.50 per million input tokens and $10 per million output tokens. For most requests — summarization, classification, rewrite — a smaller model performs identically at a fraction of the cost. The problem is you never know which requests need the frontier until you've already sent them.
+
+Tokenless solves this by running the race after the fact. It doesn't guess; it lets models self-select.
+
+### Comparison with Direct API Calls
+
+| Aspect | Direct OpenAI/Anthropic | Tokenless |
+|---|---|---|
+| Model selection | Manual per-request | Automatic per-request |
+| Cost for easy tasks | Full frontier price | Smaller model price |
+| Cancelled runs | N/A | Partial billing |
+| SDK compatibility | Native | Drop-in replacement |
+| Latency | Baseline vendor latency | Parallel fan-out, first-response wins |
+
+### Cancellation Model
+
+The key mechanism is **mid-generation cancellation**. When Tokenless determines one model's response is clearly correct, it terminates the others. You are billed only for the tokens the selected model actually generated — not for the full context window or the full generation of cancelled models.
+
+This differs from cached completions (which bill for all tokens) and from speculative decoding (which bills for all tokens regardless).
+
+## Practical Evaluation Checklist
+
+- Is your existing codebase using the OpenAI or Anthropic SDK?
+- Do most of your requests actually need a frontier model, or are many of them simple tasks a smaller model could handle?
+- Are you currently paying per-token with no routing layer?
+- Do you have latency SLA requirements? Fan-out adds overhead on the first-token time (parallel generation) but can reduce time-to-last-token for the selected model.
+- Is the service reliable enough for production? No open-source version means you are dependent on Tokenless infrastructure.
+
+## Security Notes
+
+- API keys are passed through to Tokenless's infrastructure. Ensure your key rotation policy accounts for a third-party routing layer.
+- No open-source version is available — audit the vendor's data handling and retention policies directly before sending production traffic.
+- The service observes your prompts and completions in cleartext to perform routing decisions. If prompt confidentiality is a hard requirement, this may not be suitable.
+
+## FAQ
+
+**Q: Does Tokenless work with any model, or only OpenAI and Anthropic?**
+**A:** The current endpoints are OpenAI-compatible and Anthropic-compatible. Support for additional providers is not documented on the landing page.
+
+**Q: How much does Tokenless cost?**
+**A:** The site states "half the cost" versus direct API calls. Exact pricing tiers are not publicly listed — the site prompts visitors to "Book a demo" or "Sign up."
+
+**Q: Is this open source?**
+**A:** No. Tokenless is a closed SaaS product with no self-hostable version.
+
+**Q: What happens if a model fails mid-generation?**
+**A:** Tokenless fans out to multiple models simultaneously. If the selected model fails, the next-best model wins automatically. You are billed only for the final selected model's tokens.
+
+**Q: Does this increase latency?**
+**A:** It fans out in parallel, so first-token time is roughly the latency of the fastest model. Time-to-last-token can be lower if a smaller model wins the race and generates faster than a larger model would.
+
+## Conclusion
+
+Tokenless attacks the inference cost problem from the routing layer rather than the model layer. By running multiple models in parallel and paying only for the winner, it removes the need to pre-commit to a model tier. The drop-in SDK compatibility makes the switch trivial for existing applications.
+
+If you are running production LLM workloads today and paying frontier prices for every request, Tokenless is worth a look. The YC S26 backing gives it credibility, and the cancellation billing model is a genuine differentiator.
+
+**Next steps:**
+- Sign up at [usetokenless.com](https://usetokenless.com/)
+- Run a small percentage of production traffic through Tokenless and compare per-token costs
+- Evaluate whether the latency profile meets your SLA requirements
