@@ -1,0 +1,150 @@
+---
+title: "Parseable Prism - Unified Open Source Observability"
+description: "Parseable Prism is an open source observability platform that unifies logs, metrics, traces and events in a single Rust-built data lake. This guide covers setup, key features and how it compares to the ELK stack and Grafana."
+pubDate: "2026-08-05"
+tags: ["observability", "open-source", "self-hosted", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/prism-parseable.webp"
+  alt: "Parseable Prism observability dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Parseable Prism is an open source, columnar observability platform built in Rust that ingests logs, metrics, traces and events via OpenTelemetry or standard logging agents, storing everything in a data lake architecture that scales independently.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [parseable.com](https://parseable.com) ← verified
+- Source repository: [github.com/parseablehq/parseable](https://github.com/parseablehq/parseable) ← README read
+- License: AGPL-3.0 (verified via LICENSE file on main branch)
+- HN launch thread: [news.ycombinator.com/item?id=43953924](https://news.ycombinator.com/item?id=43953924) (3 points, Show HN)
+
+## What Is Parseable Prism?
+
+Parseable Prism is the observability layer built on top of Parseable, an open source columnar data lake platform written in Rust. The project positions itself as a unified alternative to stitching together the ELK stack, Prometheus, Jaeger, and separate storage backends.
+
+From the README:
+
+> Parseable is an open source, columnar data lake platform - purpose built for observability. Send logs, metrics & traces to Parseable via popular logging agents, OpenTelemetry, Kafka, eBPF or other integrations.
+
+Key claims from the project:
+- Single binary, no external dependencies for the core server
+- Columnar storage reduces observability data footprint by up to 90% versus row-based formats
+- Native OpenTelemetry support — drop-in replacement for existing OTel Collector setups
+- PromQL and SQL query support for alerting and dashboards
+- Agent-ready: can observe AI agents and use LLMs to analyze telemetry data natively
+
+## Setup Workflow
+
+### Step 1: Install the Binary
+
+```bash
+curl -fsSL https://logg.ing/install | bash
+```
+
+For Windows:
+
+```pwsh
+powershell -c "irm https://logg.ing/install-windows | iex"
+```
+
+The installer downloads the appropriate binary for your OS. No container or Kubernetes setup is required for local evaluation.
+
+### Step 2: Start the Server
+
+After installation, run the binary directly:
+
+```bash
+parseable serve
+```
+
+The server starts on port 8000 by default. Access the web UI at http://localhost:8000. The default credentials are `admin` / `admin`.
+
+### Step 3: Ingest Sample Data
+
+```bash
+curl --location --request POST 'http://localhost:8000/api/v1/ingest' \
+  --header 'X-P-Stream: demo' \
+  --header 'Authorization: Basic YWRtaW46YWRtaW4=' \
+  --header 'Content-Type: application/json' \
+  --data-raw '[
+    {
+        "id": "434a5f5e-2f5f-11ed-a261-0242ac120002",
+        "datetime": "24/Jun/2022:14:12:15 +0000",
+        "host": "153.10.110.81"
+    }
+  ]'
+```
+
+### Step 4: Connect an OpenTelemetry Collector
+
+For production use, point your OTel Collector config at Parseable:
+
+```yaml
+exporters:
+  otlphttp/parseable:
+    endpoint: http://localhost:8000
+    tls:
+      insecure: true
+```
+
+## Deeper Analysis
+
+### Architecture
+
+Parseable uses a stateless compute over object storage model. The compute layer (the binary you run) scales independently from the storage layer (S3-compatible object storage). This means you are not paying for compute to grow storage or vice versa.
+
+### Query Capabilities
+
+- **PromQL** — Prometheus-style metric queries
+- **SQL** — Direct SQL queries against ingested data
+- **Log search** — Full-text search with field extraction
+- **Trace visualization** — Distributed tracing with trace ID correlation
+
+### Storage Efficiency
+
+The columnar format stores each field separately, enabling per-column compression. For high-cardinality timestamp fields and repeated log level strings, this produces significantly smaller on-disk footprints than row-based formats like newline-delimited JSON.
+
+## Practical Evaluation Checklist
+
+- Single binary install, no JVM or external services required
+- Default credentials must be changed before production use
+- Object storage backend (S3-compatible) required for multi-node deployments
+- OpenTelemetry is the recommended ingestion path for new setups
+- The web UI provides log exploration, basic dashboards, and alerting configuration
+- No built-in user authentication in the open source version (auth is at the object storage layer)
+- Kubernetes Helm chart available at [github.com/parseablehq/helm-charts](https://github.com/parseablehq/helm-charts)
+
+## Security Notes
+
+- Default credentials `admin` / `admin` must be changed in production
+- The web UI has no built-in role-based access control in the open source edition
+- Network access to port 8000 should be restricted via firewall rules
+- For multi-tenant setups, use separate object storage buckets or stream-level isolation
+- TLS termination should be handled by a reverse proxy (nginx, Cloudflare Tunnel, etc.)
+
+## FAQ
+
+**Q: How does Parseable compare to Grafana Loki?**
+**A:** Loki is purpose-built for log aggregation and uses a chunk-based storage model. Parseable uses a columnar format that covers logs, metrics, and traces in a single platform. Loki has a larger ecosystem and more community integrations; Parseable aims for simpler operational footprint with broader data type coverage.
+
+**Q: Does Parseable require Kafka or Elasticsearch?**
+**A:** No. For single-node evaluation, Parseable runs as a standalone binary with local storage. For distributed production use, you connect it to any S3-compatible object storage (MinIO, AWS S3, GCS, Azure Blob). Kafka is an optional ingestion path, not a requirement.
+
+**Q: Is there a managed cloud version?**
+**A:** Yes, [parseable.com](https://app.parseable.com) offers a cloud tier with a 14-day free trial and no credit card required. The cloud version handles the infrastructure layer; the open source binary is identical in features.
+
+**Q: What language is Parseable written in?**
+**A:** Rust. The project emphasizes memory safety and performance, with benchmarks on their docs showing sub-100ms query response times on billion-row datasets.
+
+## Conclusion
+
+Parseable Prism fills a gap between point-solution observability tools and full enterprise platforms. For teams running self-hosted infrastructure who want OpenTelemetry-native telemetry without managing a Kafka + Elasticsearch + Grafana stack, it is worth evaluating. The single-binary distribution makes local testing straightforward, and the columnar storage model keeps storage costs manageable at scale.
+
+Start at [parseable.com/docs](https://parseable.com/docs) or try the cloud tier at [app.parseable.com](https://app.parseable.com).
