@@ -1,0 +1,159 @@
+---
+title: "Permit.io MCP Gateway – Fine-Grained Authorization for AI"
+description: "The drop-in trust layer for MCP — authentication, fine-grained authorization, consent, and audit for AI agents. Zero standing permissions. Enterprise-grade security."
+pubDate: "2026-08-06"
+tags: ["mcp", "ai-setup", "security"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/permit-mcp-gateway.webp"
+  alt: "Permit.io MCP Gateway product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Permit.io MCP Gateway adds authentication, fine-grained authorization, consent management, and audit logging directly into the Model Context Protocol — so AI agents can only do what they are explicitly allowed to do at action time.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [permit.io/mcp-gateway](https://www.permit.io/mcp-gateway) — verified description and features from live page
+- Source repository: [github.com/permitio/permit-node](https://github.com/permitio/permit-node) — SDK with MIT license, 46 stars, latest release v2.7.6
+- License: [MIT](https://github.com/permitio/permit-node/blob/main/LICENSE) — verified via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=47426690](https://news.ycombinator.com/item?id=47426690)
+
+## What Is Permit.io MCP Gateway?
+
+The Permit.io MCP Gateway is a drop-in trust and authorization layer that sits alongside any MCP-compatible AI agent. MCP (Model Context Protocol) is becoming the standard way to connect AI models to external tools and data sources — but by default, an MCP-enabled agent can reach any tool or data it can find. Permit.io adds four things on top:
+
+1. **Authentication** — verifies the identity of the agent and its principals before any tool call executes
+2. **Fine-grained authorization** — evaluates each tool call against policy rules at action time, not beforehand
+3. **Consent management** — ensures data access is consented to and auditable
+4. **Audit logging** — records every tool call decision for compliance and incident response
+
+The core philosophy is **zero standing permissions**: agents do not retain access by default. Every action is checked against current policy at execution time. Permit calls this a "deny-by-default, check-at-action" model.
+
+## Setup Workflow
+
+### Step 1: Install the Permit Node.js SDK
+
+```bash
+npm install permit
+# or
+pnpm add permit
+```
+
+The SDK is at version 2.7.6 and communicates with Permit.io's hosted control plane.
+
+### Step 2: Configure the MCP Gateway
+
+```javascript
+import { Permit } from 'permit';
+
+const permit = new Permit({
+  token: process.env.PERMIT_TOKEN,
+  pdp: 'https://cloud.permit.io/pdp',
+});
+```
+
+Environment variable `PERMIT_TOKEN` is provisioned from the Permit.io dashboard.
+
+### Step 3: Wrap MCP Tool Calls
+
+```javascript
+// Every MCP tool call goes through permit.check() before execution
+const result = await permit.check({
+  user: agentIdentity,
+  action: 'read',
+  resource: 'customer-record',
+  context: { department: 'sales' },
+});
+
+if (!result.allowed) {
+  throw new Error('Unauthorized: agent cannot perform this action');
+}
+// Proceed with tool call
+```
+
+The `permit.check()` call queries Permit.io's Policy Decision Point (PDP) and returns an allow/deny verdict in milliseconds.
+
+### Step 4: Define Policies in the Dashboard
+
+Policies are defined in YAML or via the Permit.io dashboard. A minimal policy:
+
+```yaml
+resource: customer-record
+actions:
+  - read
+  - write
+  - delete
+principals:
+  - user:agent-001
+rules:
+  - action: read
+    condition: "resource.department == principal.department"
+  - action: delete
+    condition: "principal.role == 'admin'"
+```
+
+## Key Features
+
+### Action-Time Authorization
+
+Unlike traditional RBAC where permissions are granted upfront, Permit.io evaluates each tool call at action time. An agent session with a stolen token cannot accumulate privileges — every call re-verifies against current policy.
+
+### Agent Identity Awareness
+
+The gateway tracks not just *what* tool was called but *which* agent, acting on behalf of *which* user, in *which* context. This enables attributes like department-scoped access, time-window restrictions, and IP-based controls.
+
+### Sandproof Design
+
+The documentation specifically calls out protection against:
+- Shared client sessions leaking between agents
+- Reused permissions that accumulate silently
+- Invisible privilege escalation through chain-of-thought prompts
+
+### Audit Trail
+
+Every `permit.check()` call is logged with full context. Logs are queryable from the dashboard and exportable to SIEM tools.
+
+## How It Differs from a Simple API Key
+
+A raw MCP setup authenticates the agent but not the individual tool calls. A tool call like `delete_all_customers()` requires no extra check after the agent is authenticated. Permit.io gates each action individually — the agent can be fully authenticated and still be denied for a specific operation.
+
+## Practical Evaluation Checklist
+
+- Works with any MCP-compatible agent (LangChain, LlamaIndex, custom)
+- PDP latency: Permit targets under 100ms for authorization checks
+- Self-hosted PDP option available for air-gapped environments
+- Supports OPA (Open Policy Agent) as a backend for custom policies
+- Integrates with IdPs: Okta, Auth0, Keycloak for human-to-agent identity mapping
+- No code changes required to the underlying MCP tool — authorization wraps the call
+
+## Security Notes
+
+- `PERMIT_TOKEN` should be treated as a secret — never committed to source control
+- Use short-lived tokens where possible; rotate periodically from the dashboard
+- The PDP call is an outbound HTTPS request from your infrastructure to Permit.io cloud — allowlist `cloud.permit.io` if using a strict egress firewall
+- Self-hosted PDP (Permit Tunnel) is available for on-prem deployments
+
+## FAQ
+
+**Q: Does this work with any MCP server, or only Permit.io's own?**
+**A:** Any MCP-compatible server. Permit.io's gateway wraps the existing MCP protocol, so tools from public MCP servers or custom internal servers are protected without modification.
+
+**Q: What happens if the Permit.io cloud PDP is unreachable?**
+**A:** The default behavior is to deny. You can configure a local OPA fallback or cached policy mode for resilience.
+
+**Q: Is there an open-source version?**
+**A:** The Permit Node.js SDK is MIT-licensed (46 stars on GitHub). The cloud PDP and dashboard are hosted services with free and enterprise tiers.
+
+**Q: How is this different from Kvlar?**
+**A:** Both evaluate agent tool calls against policy. Kvlar is a self-hosted Rust binary with YAML-based policies. Permit.io is a hosted-first service with a managed PDP, identity mapping to enterprise IdPs, and MCP-native integration.
+
+## Conclusion
+
+Permit.io MCP Gateway solves a concrete gap in MCP deployments: authentication without authorization. When agents can invoke any tool an MCP server exposes, you need a layer that checks each call against current policy at action time. The drop-in model means you do not rewrite your MCP tools — you wrap the call boundary. If you are deploying MCP-based agents in production and have not thought about per-call authorization, this is worth a look.
