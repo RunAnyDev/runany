@@ -1,0 +1,180 @@
+---
+title: "Hot Dev – Backend Workflows and AI Agents in One Open-Source Platform"
+description: "Hot Dev is an open-source platform for building backend workflows—events, schedules, AI agents, and MCP tools—with a custom language, local dev runtime, and one-command deploys."
+pubDate: "2026-08-07"
+tags: ["workflow-automation", "backend", "open-source", "ai-agents", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hot-dev.webp"
+  alt: "Hot Dev platform — backend workflows and AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Hot Dev is an open-source platform for backend workflows—events, schedules, AI agents, and MCP tools—built around a custom language called Hot, with a local dev runtime and one-command production deploys.
+
+## What Is Hot Dev?
+
+Hot Dev is an open-source platform for building backend workflows and AI agents. The project describes itself as:
+
+> "Open source platform for backend workflows: events, schedules, AI agents, MCP tools, long-running tasks, and service orchestration. It includes execution tracing, a local dev runtime, and single-command deploys."
+
+The core is a language called **Hot**, shipping as a compiler, VM, and standard library. On top sits the full platform: a CLI, REST API, web app, scheduler, event worker, task worker, and LSP server. The public Hot packages live under `hot/pkg`, including `hot-std` and provider or tool integrations.
+
+**License:** Apache-2.0 (verified from the LICENSE file in the repository).
+
+## Setup Workflow
+
+### Prerequisites
+
+- macOS, Linux, or WSL2
+- `curl` for the installer
+- Or `cargo` if building from source
+
+### Step 1: Install the CLI
+
+The quickest path is the official installer script:
+
+```bash
+curl -fsSL https://get.hot.dev/install.sh | sh
+```
+
+This installs the `hot` binary globally.
+
+### Step 2: Build from Source (optional)
+
+If you prefer building from the repo:
+
+```bash
+git clone https://github.com/hot-dev/hot.git
+cd hot
+cargo build --release --bin hot
+# Binary lands at target/release/hot
+```
+
+### Step 3: Create Your First Workflow
+
+A Hot workflow file (`.hot`) wires webhooks, events, schedules, and MCP tools through a shared `meta` mechanism:
+
+```hot
+::myapp ns
+::http ::hot::http
+::uri ::hot::uri
+
+// Receive a webhook, then fan out through an event.
+on-signup
+meta {
+    webhook: {service: "leads", path: "/signup"},
+    on-event: "lead:new",
+}
+fn (request) {
+    send("lead:new", request.body)
+    {ok: true}
+}
+
+// React to the event: score the lead and route it.
+qualify-lead
+meta {on-event: "lead:new"}
+fn (event) {
+    score score-lead(event.data)
+    if(gte(score, 0.7),
+        send("lead:qualified", event.data),
+        send("lead:nurture", event.data))
+}
+
+// Run on a schedule.
+weekly-summary
+meta {schedule: "every monday at 9am"}
+fn (event) {
+    post-pipeline-summary()
+}
+
+// Expose a function as an MCP tool.
+get-forecast
+meta {
+    mcp: {
+        service: "weather",
+        description: "Get the weather forecast for a location",
+    },
+}
+fn (location: Str): Vec {
+    loc ::uri/encode(location)
+    response ::http/get(`https://wttr.in/${loc}?format=j1`)
+    response.body.weather
+}
+```
+
+### Step 4: Run Locally
+
+```bash
+hot run myapp.hot
+```
+
+The local runtime starts the event worker, scheduler, and HTTP listener in one process. Changes to `.hot` files reload on save.
+
+### Step 5: Deploy to Production
+
+```bash
+hot deploy
+```
+
+This connects to Hot Dev Cloud and pushes your workflow. The platform handles event routing, scheduled runs, and MCP tool hosting.
+
+## Deeper Analysis
+
+### The Hot Language
+
+Hot is a domain-specific language designed for backend orchestration. It uses a functional style with explicit metadata blocks (`meta {}`) for declaring triggers—webhooks, events, schedules, or MCP interfaces. This separates the "what triggers this" from "what this does", making workflows easier to reason about.
+
+### MCP Tool Integration
+
+The MCP (Model Context Protocol) integration lets you expose any Hot function as a tool an AI agent can call. The example above shows a `get-forecast` function exposed as an MCP tool under the `weather` service. This is a practical pattern for giving AI agents real-time data access without building a custom API layer.
+
+### Event-Driven Architecture
+
+The `send` / `on-event` pattern lets workflows fan out from a single trigger. A webhook fires once; the event bus dispatches to any number of handlers independently. This is the same model as Cloudflare Workers' `queue` + `consumer` or AWS EventBridge, but self-hosted and language-native.
+
+### Execution Tracing
+
+The platform includes execution tracing out of the box. Each run records inputs, outputs, and timing. This is valuable for debugging event-driven workflows that span multiple handlers.
+
+## Practical Evaluation Checklist
+
+- [ ] Install the CLI (`curl -fsSL https://get.hot.dev/install.sh | sh`)
+- [ ] Clone the repo and build from source
+- [ ] Run a webhook-triggered workflow locally
+- [ ] Wire two handlers to the same event
+- [ ] Deploy with `hot deploy`
+- [ ] Verify tracing output in the web app
+
+## Security Notes
+
+- Hot is open source under Apache-2.0. Audit the source at [github.com/hot-dev/hot](https://github.com/hot-dev/hot) before running in production.
+- The local runtime executes Hot code in the VM. Network access, file access, and external tool calls are controlled by the standard library (`::hot::http`, `::hot::uri`, etc.).
+- For self-hosted deployments, the event worker and scheduler run as long-lived processes—apply standard OS-level hardening.
+
+## FAQ
+
+**Q: Is Hot Dev tied to Hot Dev Cloud, or can I self-host everything?**
+**A:** The core Hot language, compiler, VM, CLI, API, scheduler, event worker, task worker, and LSP are all open source and self-hostable. Hot Dev Cloud is the hosted deployment option.
+
+**Q: What languages can I use for custom tools and integrations?**
+**A:** There are official Hot packages for JavaScript/TypeScript (`hot-js`), Python (`hot-python`), and Go (`hot-go`), plus demo repositories for each.
+
+**Q: How does Hot compare to Trigger.dev or Inngest?**
+**A:** Hot is a custom language (not a YAML/JSON DSL), supports MCP natively, and is fully self-hostable. Trigger.dev and Inngest are hosted-first. If you want full control over your event infrastructure without learning a new general-purpose language, Hot is a closer match.
+
+**Q: Does it work on Windows?**
+**A:** The CLI targets macOS and Linux directly, with WSL2 as the recommended Windows path.
+
+## Source and Accuracy Notes
+
+- Project page: [hot.dev](https://hot.dev)
+- Source repository: [github.com/hot-dev/hot](https://github.com/hot-dev/hot)
+- License: Apache-2.0 (verified from LICENSE file in the repository)
+- Install script: [get.hot.dev/install.sh](https://get.hot.dev/install.sh)
+- HN launch thread: [news.ycombinator.com/item?id=46797907](https://news.ycombinator.com/item?id=46797907)
+- Source last checked: 2026-08-07
