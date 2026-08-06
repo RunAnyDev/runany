@@ -1,0 +1,158 @@
+---
+title: "VoltAgent – TypeScript AI Agent Framework with Observability"
+description: "Open-source TypeScript framework for building production AI agents with built-in memory, MCP support, guardrails, RAG, voice, and a full observability console."
+pubDate: "2026-08-07"
+tags: ["ai-agent", "typescript", "open-source", "mcp", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/voltagent-ai-agent-framework.webp"
+  alt: "VoltAgent – TypeScript AI Agent Framework"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** VoltAgent is an open-source TypeScript framework for building production AI agents, with memory, MCP tools, guardrails, RAG, voice, and a built-in observability console — all in one platform.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [voltagent.dev](https://voltagent.dev)
+- Source repository: [github.com/VoltAgent/voltagent](https://github.com/VoltAgent/voltagent) — **read end-to-end before writing**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=43888290](https://news.ycombinator.com/item?id=43888290)
+- Source last checked: 2026-08-07 (commit `main`, 10,296 stars)
+
+## What Is VoltAgent?
+
+VoltAgent is an end-to-end AI Agent Engineering Platform built in TypeScript. According to the project README:
+
+> "VoltAgent is an end-to-end AI Agent Engineering Platform that consists of two main parts: Open-Source TypeScript Framework + VoltOps Console."
+
+The **open-source framework** handles the core agent logic. The **VoltOps Console** (cloud or self-hosted) adds production-grade observability, automation, deployments, evals, guardrails, and prompt management.
+
+Key capabilities from the README:
+
+- **Core Runtime** (`@voltagent/core`) — define agents with typed roles, tools, memory, and model providers
+- **Workflow Engine** — describe multi-step automations declaratively
+- **Supervisors & Sub-Agents** — run teams of specialized agents under supervisor coordination
+- **Tool Registry & MCP** — ship Zod-typed tools with lifecycle hooks; connect to Model Context Protocol servers
+- **LLM Compatibility** — swap between OpenAI, Anthropic, Google, and other providers by changing config
+- **Memory** — attach durable memory adapters (LibSQL, etc.) for cross-run context
+- **Resumable Streaming** — clients can reconnect to in-flight streams after refresh
+- **RAG** — plug in retriever agents for grounded responses
+- **Voice** — text-to-speech and speech-to-text via OpenAI, ElevenLabs, or custom providers
+- **Guardrails** — intercept and validate input/output at runtime
+- **Evals** — run agent eval suites alongside workflows
+
+## Setup Workflow
+
+### Step 1: Create a new project
+
+The fastest way to get started is the `create-voltagent-app` CLI:
+
+```bash
+npm create voltagent-app@latest
+```
+
+This scaffolds a project with a starter agent and an example workflow.
+
+### Step 2: Define an agent
+
+```typescript
+import { VoltAgent, Agent, Memory } from "@voltagent/core";
+import { LibSQLMemoryAdapter } from "@voltagent/libsql";
+import { createPinoLogger } from "@voltagent/logger";
+import { openai } from "@ai-sdk/openai";
+
+// Optional persistent memory
+const memory = new Memory({
+  storage: new LibSQLMemoryAdapter({ url: "file:./.voltagent/memory.db" }),
+});
+
+// Define your agent
+const agent = new Agent({
+  name: "my-agent",
+  instructions: "A helpful assistant for various tasks",
+  model: openai("gpt-4o-mini"),
+  tools: [weatherTool],
+  memory,
+});
+
+// Initialize VoltAgent
+new VoltAgent({
+  agents: { agent },
+  workflows: { expenseApprovalWorkflow },
+}).start();
+```
+
+### Step 3: Connect an MCP server
+
+```bash
+npm install @voltagent/mcp-docs-server
+```
+
+```typescript
+import { mcpDocsServer } from "@voltagent/mcp-docs-server";
+
+// Use VoltAgent's own docs as an MCP server for AI coding assistants
+const server = mcpDocsServer({});
+```
+
+### Step 4: Run the agent
+
+```bash
+npm run dev
+```
+
+## Deeper Analysis
+
+VoltAgent sits in the same space as LangChain.js, crewAI, and AutoGen — but with two meaningful differentiators.
+
+**First, it is TypeScript-native from the ground up.** While LangChain.js has TypeScript support, VoltAgent was designed around TypeScript conventions: Zod-typed tools, typed agent roles, and first-class `npm` package distribution via the `@voltagent/*` namespace. If you are already writing TypeScript, the friction is minimal.
+
+**Second, the observability console is built in, not bolted on.** The VoltOps Console provides tracing, eval suites, guardrail configuration, and prompt management without requiring a separate Datadog or LangSmith subscription. For teams that want production visibility without stitching together multiple SaaS tools, this is a meaningful time savings.
+
+The framework supports multi-agent supervisor patterns where a supervisor runtime routes tasks between specialized sub-agents. This is useful for complex workflows where different agents handle different stages (e.g., one agent retrieves data, another synthesizes, a third validates).
+
+## Practical Evaluation Checklist
+
+- [ ] `npm create voltagent-app@latest` works and produces a runnable starter
+- [ ] Agent responds to a basic query with memory across sessions
+- [ ] MCP server connection works with a tool call
+- [ ] Guardrails intercept a test invalid input
+- [ ] Workflow engine correctly sequences multi-step tasks
+- [ ] Supervisor pattern routes a task to the correct sub-agent
+- [ ] RAG retrieval grounds a response in a provided document
+
+## Security Notes
+
+VoltAgent's guardrails feature intercepts input and output at runtime, allowing you to enforce content policies before data reaches the LLM or leaves the agent. For production deployments:
+
+- Run the VoltOps Console in self-hosted mode if data isolation is required
+- Use standard secrets management for model API keys — never hardcode them in agent configs
+- The MCP server connection should be over TLS in production environments
+- Review guardrail rules for your specific use case; default rules may not cover all threat vectors
+
+## FAQ
+
+**Q: Does VoltAgent require a specific LLM provider?**
+**A:** No. It is provider-agnostic via the AI SDK integration. Swap between OpenAI, Anthropic, Google, and others by changing the model config — no rewrite of agent logic needed.
+
+**Q: How does VoltAgent compare to LangChain.js?**
+**A:** VoltAgent is TypeScript-first with an opinionated structure (agents, workflows, supervisors), while LangChain.js offers more flexibility but also more complexity. VoltAgent also includes the VoltOps Console as a bundled observability layer, whereas LangChain.js typically requires a separate LangSmith subscription for equivalent features.
+
+**Q: Can I self-host the observability console?**
+**A:** Yes. The VoltOps Console supports both cloud and self-hosted deployment modes.
+
+**Q: What database does memory use?**
+**A:** The default adapter is LibSQL (`@voltagent/libsql`), which backs onto SQLite. Other adapters can be implemented for PostgreSQL, MySQL, or other stores.
+
+## Conclusion
+
+VoltAgent is a well-structured TypeScript framework for teams that want to build production AI agents without assembling a bespoke stack from scratch. The combination of typed agents, declarative workflows, MCP connectivity, and a built-in observability console covers most of what a production deployment needs. With 10,296 GitHub stars and an active Discord community, it has clear momentum.
+
+If you are building in TypeScript and want a framework that ships with observability rather than requiring you to wire it in yourself, VoltAgent is worth evaluating.
