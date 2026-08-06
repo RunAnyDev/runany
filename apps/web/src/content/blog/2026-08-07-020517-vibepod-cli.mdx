@@ -1,0 +1,173 @@
+---
+title: "VibePod CLI – Run AI Coding Agents in Docker"
+description: "VibePod is a zero-config CLI that runs Claude, Codex, Devstral, Gemini and other AI coding agents inside isolated Docker or Podman containers. No setup required."
+pubDate: "2026-08-07"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "/blog/thumbnails/vibepod.webp"
+  alt: "VibePod CLI product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** VibePod is a single `pip install vibepod` away — one CLI to run Claude, Codex, Devstral, Gemini, and other AI coding agents inside isolated Docker or Podman containers, with zero required configuration and a built-in local analytics dashboard.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [vibepod.dev](https://vibepod.dev) — verified via `curl`
+- Source repository: [github.com/VibePod/vibepod-cli](https://github.com/VibePod/vibepod-cli) — README read end-to-end
+- PyPI package: [pypi.org/project/vibepod](https://pypi.org/project/vibepod/) — version 0.19.0, MIT license verified
+- HN launch thread: [news.ycombinator.com/item?id=47235521](https://news.ycombinator.com/item?id=47235521)
+- Docs: [vibepod.dev/docs](https://vibepod.dev/docs/)
+
+## What Is VibePod?
+
+VibePod is a unified CLI (`vp`) for running AI coding agents in isolated Docker or Podman containers. It targets developers who want the convenience of a one-command agent runner without managing individual tool configurations or worrying about environment conflicts between agents.
+
+The core promise is zero-config: `vp run <agent>` just works. The tool handles container provisioning, agent lifecycle, and output streaming while keeping each agent's environment completely isolated.
+
+Supported agents at the time of writing (from the README):
+
+| Agent | CLI alias | Auto-approval flag |
+|---|---|---|
+| Claude | `claude` | `--dangerously-skip-permissions` |
+| Gemini | `gemini` | `--approval-mode=yolo` |
+| Devstral / Vibe | `vibe` | `--auto-approve` |
+| Codex | `codex` | `--dangerously-bypass-approvals-and-sandbox` |
+| Copilot | `copilot` | `--yolo` |
+| Pi | `pi` | `--approve` |
+| Auggie | `auggie` | — |
+| OpenCode | `opencode` | — |
+| Tau | `tau` | — |
+| Jcode | `jcode` | — |
+| Antigravity | `antigravity` | — |
+
+The project is MIT-licensed and written in Python, distributed via PyPI.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10 or later
+- Docker or Podman (VibePod auto-detects which is available)
+
+### Step 1: Install
+
+```bash
+pip install vibepod
+```
+
+The package is a single `vp` executable. No additional dependencies are required — container runtime detection happens at runtime.
+
+### Step 2: Run an Agent
+
+```bash
+vp run claude
+```
+
+To pass arguments through to the agent itself, use `--` as a separator so VibePod does not consume them as its own flags:
+
+```bash
+vp run claude -- --dangerously-skip-permissions "write a hello world in Rust"
+```
+
+### Step 3: Use IKWID Mode for Auto-Approval
+
+Agents that support permission-skipping can be launched with `--ikwid`, which appends the correct flag automatically:
+
+```bash
+vp run claude --ikwid
+vp run codex --ikwid
+vp run gemini --ikwid
+```
+
+This is the recommended mode for unattended or scripted runs.
+
+### Step 4: Skills — Reusable Prompt Recipes
+
+Install community or project-specific prompt recipes:
+
+```bash
+vp skills add <skill-name>
+```
+
+Skills are stored per-user or per-project and can be composed into agent invocations. The docs cover the skill format at [vibepod.dev/docs/skills](https://vibepod.dev/docs/skills/).
+
+### Step 5: Project Overlays — Custom Base Images
+
+For project-specific toolchains or environment variables, drop a Dockerfile fragment into `.vibepod/overlay/`. VibePod auto-builds a cached, content-addressed image layer on top of the agent's base image without requiring a full `Dockerfile`. See the [overlays docs](https://vibepod.dev/docs/overlays/) for the full format.
+
+### Step 6: Analytics Dashboard
+
+After running agents, open the local dashboard to view usage metrics, HTTP traffic per agent, and token counts:
+
+```bash
+vp dashboard
+```
+
+All data is stored locally under `~/.vibepod/`. Nothing is transmitted to a remote server — the project emphasises privacy-first local collection.
+
+## Deeper Analysis
+
+### Container Isolation
+
+Each `vp run` invocation spins up a fresh container. This is the main differentiator from simply aliasing agent CLIs: agents cannot pollute the host environment or conflict with each other's dependencies. If one agent run goes wrong, the container is discarded and the next run starts clean.
+
+VibePod supports both Docker and Podman transparently. If both are installed, Docker takes priority; this is configurable via the optional YAML config file.
+
+### Agent Comparison
+
+The `vp compare` subcommand (accessible via the dashboard) lets you run multiple agents against the same task and view side-by-side metrics. This is useful for evaluating which agent performs best on a given codebase or problem type.
+
+### Herdr Integration
+
+Running `vp run` inside a [herdr](https://herdr.dev/) pane automatically reports agent state. herdr is a terminal workspace multiplexer — when combined with VibePod, agent output streams directly into a herdr pane alongside your other terminal sessions.
+
+## Practical Evaluation Checklist
+
+- [ ] Install via `pip install vibepod` — verify PyPI package resolves
+- [ ] Confirm Docker or Podman is running: `docker info` or `podman info`
+- [ ] Run `vp run claude` — verify container starts and CLI streams output
+- [ ] Test `--ikwid` with Claude — verify auto-approval flag is appended
+- [ ] Run `vp dashboard` after a session — verify local metrics file is created
+- [ ] Check overlay docs if your project needs custom env vars or tools
+
+## Security Notes
+
+- Agent auto-approval flags (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, etc.) are exactly as dangerous as they sound. Only use `--ikwid` in isolated environments you control.
+- VibePod does not send telemetry. All metrics stay in `~/.vibepod/` on the host.
+- Container networking is not restricted by default — agents can make outbound HTTP requests freely. Restrict network access with your container runtime's flags if needed.
+
+## FAQ
+
+**Q: Does VibePod work with local models or only hosted APIs?**
+**A:** VibePod is designed for CLI-based coding agents that accept command-line invocations (claude, codex, etc.). Whether those agents call local or remote models depends on the agent's own configuration. VibePod itself does not directly handle model inference.
+
+**Q: Can I use VibePod without Docker or Podman installed?**
+**A:** No. Container isolation is the core feature. If neither runtime is available, `vp run` will fail with a clear error.
+
+**Q: How is this different from just installing agents directly via pip?**
+**A:** Direct installation puts all agents' dependencies in the same Python environment, risking conflicts. VibePod isolates each agent run into its own container with a consistent base image, preventing dependency clashes and keeping the host clean.
+
+**Q: Is there a way to persist agent state between runs?**
+**A:** Project overlays (`.vibepod/overlay/`) let you pre-populate a container with files and environment variables. For full state persistence across runs, mount a host directory as a volume — the docs cover volume mounting in the advanced configuration section.
+
+**Q: What is the "IKWID" mode?**
+**A:** IKWID stands for "I Know What I'm Doing". It is a convenience flag (`--ikwid`) that appends the correct auto-approval flag for whichever agent you are running, since each agent uses a different flag name for the same concept.
+
+## Conclusion
+
+VibePod is a well-scoped tool that solves a real problem: managing multiple AI coding agents without environment chaos. The zero-config model lowers the barrier to trying new agents, and the built-in analytics dashboard adds immediate value without requiring a separate observability setup.
+
+The MIT license and pure-Python implementation make it easy to inspect, fork, or extend. If you regularly evaluate different coding agents — or want a clean way to run Claude Code alongside Codex in the same project — VibePod is worth a look.
+
+```bash
+pip install vibepod
+vp run claude
+```
