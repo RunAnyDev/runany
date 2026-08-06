@@ -1,0 +1,161 @@
+---
+title: "HyperProbe – AI On-Call Agent for Production Debugging"
+description: "HyperProbe lets AI coding agents debug live production services in real time. Zero redeploys, zero disruption, read-only probes with MCP integration."
+pubDate: "2026-08-05"
+tags: ["ai-agent", "debugging", "dev-tools", "yc-s26"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hyperprobe.webp"
+  alt: "HyperProbe product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** HyperProbe embeds an AI-native debugging agent into your production runtime — probes capture live variables and stack traces without pausing execution or requiring a redeploy.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [hyperprobe.co](https://www.hyperprobe.co)
+- Pricing page: [hyperprobe.co/pricing](https://www.hyperprobe.co/pricing)
+- Docs: [docs.hyperprobe.co](https://docs.hyperprobe.co)
+- HN launch thread: [news.ycombinator.com/item?id=49185389](https://news.ycombinator.com/item?id=49185389)
+- YC batch: S26 (verified via HN thread title)
+
+## What Is HyperProbe?
+
+HyperProbe is an AI on-call agent for production debugging. Instead of adding print statements, restarting services, or opening support tickets, you drop an SDK into your runtime and let an AI coding agent — Cursor, Claude Code, Codex, or any MCP-compatible agent — inspect live variables, trace call stacks, and inject logs on demand.
+
+The core guarantee is **read-only, non-disruptive debugging**: probes capture what they need and clear themselves automatically. No side effects, no latency spikes beyond a bounded overhead cap, no redeploys.
+
+The product was founded by the team behind [ShailendraHT](https://news.ycombinator.com/user?id=shailendraht) and backed by Y Combinator (S26 batch).
+
+## Setup Workflow
+
+### Step 1: Install the VS Code Extension
+
+Search for **HyperProbe** in the VS Code Marketplace and install it. Alternatively, use Quick Open (`Ctrl+P` / `Cmd+P`) and run:
+
+```
+ext install hyperprobe.hyperprobe-extension
+```
+
+Click the HyperProbe debug icon in the Activity Bar, then click **Login**. You'll be redirected to the dashboard at [app.hyperprobe.co](https://app.hyperprobe.co) to sign in via SSO and create a service.
+
+### Step 2: Configure Your Service
+
+Copy your **Service UUID** from the dashboard. Create a `.hprc` file at the repository root:
+
+```json
+{
+  "serviceId": "<service-uuid-from-dashboard>"
+}
+```
+
+### Step 3: Add the SDK Dependency
+
+**Node.js:**
+
+```bash
+npm install @hyperprobe/node-sdk
+# or
+pnpm add @hyperprobe/node-sdk
+# or
+yarn add @hyperprobe/node-sdk
+```
+
+**Java:** Download the agent JAR from your dashboard:
+
+```bash
+curl -O https://hyperprobe-assets.s3.ap-south-1.amazonaws.com/static/hyperprobe-agent.jar
+```
+
+### Step 4: Initialize the SDK
+
+**Node.js (TypeScript)** — create `src/hyperprobe.ts` and import it early in your main entrypoint:
+
+```typescript
+import { HyperProbe } from '@hyperprobe/node-sdk';
+
+HyperProbe.start({
+  serviceId: '<service-uuid-from-dashboard>',
+  environment: process.env.NODE_ENV,
+  brokerUrl: 'https://logger.app.hyperprobe.co',
+  commitSha: process.env.GIT_COMMIT,
+  distLocation: 'dist',
+  sourceMapDir: './dist'
+});
+```
+
+**Java (JVM):** Initialize the agent in your launch routine per the [docs](https://docs.hyperprobe.co/quickstart).
+
+### Step 5: Connect Your AI Agent
+
+HyperProbe ships an **MCP server** that any MCP-compatible AI coding agent can connect to directly. The agent gets live access to probe configuration, capture history, and variable inspection — without leaving the terminal or editor.
+
+## Pricing
+
+Priced per **service** (one running application, however many instances):
+
+| Plan | Price | Services | Capture history |
+|------|-------|----------|-----------------|
+| **Free** | $0 forever | 1 | 7 days |
+| **Professional** | $99/service/month (annual: $79) | Unlimited | 30 days |
+| **Enterprise** | Custom annual | Unlimited | Custom |
+
+All plans include **unlimited probes and captures** — nothing about debugging is metered. Probe bounds (TTL, rate limit, hit expiry) are set by the operator, not the vendor.
+
+## How Probes Are Controlled
+
+Every probe is bounded by controls you define:
+
+- **TTL** — probe clears itself after N seconds/minutes, whether or not it fired
+- **Rate limit** — caps how often a probe captures, keeping high-traffic lines bounded
+- **Hit expiry** — probe clears itself after N captures, auto-cleanup after data is collected
+
+Enterprise plans add **org-level policy ceilings**: your security team sets maximum TTL and mandatory expiry at the organization level so no developer can place a probe outside policy.
+
+## Practical Evaluation Checklist
+
+- [ ] VS Code Extension installs and connects to dashboard
+- [ ] `.hprc` maps local workspace to service UUID correctly
+- [ ] Node.js SDK initializes without restart
+- [ ] Probe placed and captures variable snapshot within TTL
+- [ ] Probe clears itself after TTL / hit limit
+- [ ] MCP server connects in Cursor / Claude Code / Codex
+- [ ] Capture history persists across team members (Professional)
+- [ ] PII redaction rules applied correctly
+
+## Security Notes
+
+- **Read-only by default** — probes never write to your application state
+- **Immutable audit log** — all probe placements are logged
+- **PII redaction** — configurable rules redact sensitive fields before capture
+- **RBAC** — Professional and Enterprise support role-based access control and SSO (Google, GitHub, SAML)
+- **Self-hosted / private VPC** — Enterprise plan supports on-premises deployment
+
+## FAQ
+
+**Q: Does HyperProbe introduce latency to my production service?**
+**A:** HyperProbe is designed for minimal overhead. The agent activates a cooldown shield if overhead exceeds 15ms or free memory drops below 15%, preventing the probe from interfering with production performance.
+
+**Q: Can I use HyperProbe with any runtime?**
+**A:** Node.js and JVM (Java agent) are officially supported. The MCP server is runtime-agnostic and works with any MCP-compatible AI agent including Cursor, Claude Code, Codex, and opencode.
+
+**Q: Who can place probes?**
+**A:** On Free and Professional plans, any team member with dashboard access can place probes. Enterprise plans add org-level policy ceilings so security teams can enforce maximum probe bounds organization-wide.
+
+**Q: Is there a self-hosted option?**
+**A:** Yes, Enterprise plans support self-hosted deployment or private VPC. Contact HyperProbe for details.
+
+## Conclusion
+
+HyperProbe closes the loop between AI coding agents and production debugging. Instead of guessing from logs or adding instrumentation that requires a redeploy, your agent can directly inspect live state through bounded, self-clearing probes. The Free tier is genuinely useful for single-service hobby projects; the Professional tier unlocks team collaboration and longer capture history at $99/service/month.
+
+If you run production services and your team uses AI coding agents, HyperProbe is worth integrating into your on-call workflow.
+
+**HN thread:** [news.ycombinator.com/item?id=49185389](https://news.ycombinator.com/item?id=49185389)
