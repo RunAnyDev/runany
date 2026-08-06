@@ -1,0 +1,168 @@
+---
+title: "MCPS – Cryptographic Identity and Message Signing for MCP Agents"
+description: "MCPS adds ECDSA P-256 + SHA-256 signing, replay protection, and tool integrity verification to the Model Context Protocol. Drop-in secure replacement for the MCP SDK."
+pubDate: "2026-08-07"
+tags: ["mcp", "security", "cryptography", "ai-agents", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mcps.webp"
+  alt: "MCPS cryptographic identity and message signing for MCP agents"
+---
+
+## TL;DR
+
+> **TL;DR:** MCPS (MCP Secure) is a drop-in secure replacement for the MCP SDK that adds ECDSA P-256 + SHA-256 cryptographic signing, replay protection, tool integrity verification, and audit trails to every MCP tool call.
+
+## What Is MCPS?
+
+MCPS — short for **MCP Secure** — is a security layer built on top of the Model Context Protocol. It was born out of a specific problem: when an MCP agent calls a remote tool, there is no cryptographic proof of who sent the request, whether the message was tampered with, or whether the tool definition itself has been mutated.
+
+MCPS addresses this with a protocol-level signing scheme. Every MCP message gets signed with an ECDSA P-256 private key. The server verifies the signature before executing any tool. This gives MCP a trust layer comparable to mTLS — but without needing a PKI bootstrap.
+
+The project is the reference implementation of [IETF Internet-Draft `draft-sharif-mcps-secure-mcp`](https://datatracker.ietf.org/doc/draft-sharif-mcps-secure-mcp/), which means the wire format and semantics are standardized, not vendor-locked.
+
+## Core Features
+
+### Cryptographic Identity (Passports)
+
+MCPS introduces the concept of a **Passport** — a signed attestation that identifies an agent and its trust level. A passport contains:
+
+- `ID` — a unique agent identifier (e.g. `payment-bot-001`)
+- `TrustLevel` — one of `TrustIdentified`, `TrustVerified`, or custom levels
+- `IssuedAt` / `ExpiresAt` — time-bounded validity
+- A signature binding all fields together
+
+```go
+passport := &mcps.Passport{
+    ID:         "payment-bot-001",
+    TrustLevel: mcps.TrustVerified,
+    IssuedAt:   time.Now().Unix(),
+    ExpiresAt:  time.Now().Add(1 * time.Hour).Unix(),
+}
+```
+
+### Message Signing
+
+Any MCP JSON-RPC message can be signed with the agent's ECDSA P-256 private key:
+
+```go
+msg := json.RawMessage(`{"method":"tools/call","params":{"name":"search_entities"}}`)
+signed, _ := mcps.SignMessage(msg, kp, passport)
+```
+
+The resulting signed message includes the original payload, the passport, and the ECDSA signature. Servers call `mcps.VerifyMessage(signed, agentPublicKey)` before executing anything.
+
+### Replay Protection
+
+A naive signature scheme is vulnerable to replay attacks — an interceptor replaying a valid signed message. MCPS solves this with a **nonce + timestamp** mechanism:
+
+```go
+nonces := mcps.NewNonceStore(5 * time.Minute)
+err = nonces.Check(signed.Nonce, signed.Timestamp)
+```
+
+The nonce store tracks used nonces for a configurable window (default: 5 minutes). Replayed messages get rejected with error code `MCPS-005`.
+
+### Tool Integrity (Pin Verification)
+
+One of the more subtle attack vectors MCPS addresses is **tool poisoning** — where an attacker modifies a tool definition between discovery and execution, causing the agent to call a different function than intended.
+
+MCPS lets servers **pin tool definitions** at discovery time and verify them on every call:
+
+```go
+pins := mcps.NewToolPinStore()
+pins.PinTool("watchman", "search_entities", toolDefinition)
+
+err := pins.VerifyTool("watchman", "search_entities", toolDefinition)
+// ErrToolIntegrity means the tool definition was mutated
+```
+
+### HSM / KMS Support
+
+Signing keys can be loaded from disk, environment variables (for Docker/K8s secrets), or any HSM that implements MCPS's pluggable `Signer` interface:
+
+```go
+type Signer interface {
+    Sign(hash []byte) (r, s *big.Int, err error)
+    PublicKey() *ecdsa.PublicKey
+}
+signed, _ := mcps.SignMessageWithSigner(msg, myHSMSigner, passport)
+```
+
+## Implementation in Go
+
+The Go reference implementation is at [`razashariff/mcps-go`](https://github.com/razashariff/mcps-go). Install it with:
+
+```bash
+go get github.com/razashariff/mcps-go
+```
+
+Persistent key pairs across reboots:
+
+```go
+// First boot: generate and save to disk
+kp, _ := mcps.GenerateAndSaveKeyPair("watchman.key", "watchman.pub")
+
+// Subsequent boots: load from disk
+kp, _ = mcps.LoadKeyPair("watchman.key", "watchman.pub")
+```
+
+## Implementations in Other Languages
+
+MCPS is not Go-only. Official implementations are available:
+
+- [mcp-secure](https://www.npmjs.com/package/mcp-secure) — JavaScript / Node.js (npm), version 2.0.1
+- [mcps-secure](https://pypi.org/project/mcps-secure/) — Python (PyPI)
+
+The Go, JS, and Python implementations are interoperable — a JS-signed passport verifies correctly in Go and vice versa.
+
+## Relationship to OWASP MCP Security Cheat Sheet
+
+MCPS is referenced in the [OWASP MCP Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html) under Section 7 (Cryptographic Integrity). The cheat sheet recommends exactly the threat model MCPS addresses: message signing, replay protection, and tool integrity pinning.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [mcp-secure.dev](https://mcp-secure.dev) ← site did not respond to HTTP requests during verification; content confirmed via GitHub README and IETF draft
+- Reference repository: [github.com/razashariff/mcps-go](https://github.com/razashariff/mcps-go)
+- License: Business Source License 1.1 (verified from LICENSE file in repo)
+- IETF Draft: [datatracker.ietf.org/doc/draft-sharif-mcps-secure-mcp](https://datatracker.ietf.org/doc/draft-sharif-mcps-secure-mcp/)
+- OWASP Reference: [cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html](https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html)
+- JS package: [npmjs.com/package/mcp-secure](https://www.npmjs.com/package/mcp-secure) (v2.0.1)
+- Python package: [pypi.org/project/mcps-secure](https://pypi.org/project/mcps-secure/)
+- HN launch thread: [news.ycombinator.com/item?id=47367404](https://news.ycombinator.com/item?id=47367404)
+
+## Practical Evaluation Checklist
+
+- [ ] Sign an MCP message with a generated key pair and verify it
+- [ ] Attempt to replay a signed message — confirm it is rejected within the nonce window
+- [ ] Pin a tool definition, mutate it, and confirm `ErrToolIntegrity` fires
+- [ ] Load keys from environment variables instead of disk
+- [ ] Integrate with LangChain via `razashariff/langchain-mcps` and verify a LangChain agent passes MCPS verification
+- [ ] Exchange a signed message between the Go and JS implementations and confirm cross-language verification works
+
+## FAQ
+
+**Q: How does MCPS compare to mTLS for MCP servers?**
+**A:** mTLS authenticates connections at the transport layer. MCPS operates at the message layer — it proves not just which machine is talking, but which agent sent the request, whether the payload was modified in transit, and whether the tool being called matches what the agent originally discovered. They are complementary, not substitutes.
+
+**Q: Does MCPS require changes to the MCP server?**
+**A:** The server must include the MCPS verification library and call `VerifyMessage` before executing tools. The Go, JS, and Python implementations make this a single function call. If you control the server, the integration is minimal. If the server is a third-party MCP endpoint you cannot modify, MCPS cannot help at that layer — it only works between parties that both speak the MCPS protocol.
+
+**Q: What happens if a key is compromised?**
+**A:** MCPS passports are time-bounded. Shorter expiration windows reduce the window of exposure. For high-security environments, keys should be stored in an HSM or KMS and loaded via the pluggable `Signer` interface. Compromised keys cannot forge signatures for other agents' identities without also compromising the private key.
+
+**Q: Is the Business Source License restrictive?**
+**A:** BSL 1.1 permits use and modification for internal purposes. Commercial products shipping MCPS as a dependency should review the license terms carefully. The IETF draft is published as open content and does not carry the BSL restriction.
+
+## Conclusion
+
+MCPS fills a real gap in the MCP security model. The Model Context Protocol has seen rapid adoption as the standard way to connect AI agents to tools — but the base protocol has no built-in cryptographic identity or integrity layer. MCPS adds exactly that, with a clean passport/signature abstraction and reference implementations in Go, JS, and Python.
+
+If you are building MCP agents that call third-party tools, or running an MCP server that processes requests from external agents, MCPS is worth evaluating. The integration surface is small, the threat model is well-specified, and the IETF draft means the protocol is on a standards track rather than a vendor road map.
+
+For LangChain users, the [`razashariff/langchain-mcps`](https://github.com/razashariff/langchain-mcps) integration provides a one-line wrapper to add MCPS verification to any LangChain agent or chain.
