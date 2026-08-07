@@ -1,0 +1,120 @@
+---
+title: "cMCP - Confidential MCP Runtime with Hardware Attestation"
+description: "cMCP is an open-source gateway that enforces MCP tool-call policy inside a Trusted Execution Environment, with signed TRACE claims for auditability."
+pubDate: "2026-08-07"
+tags: ["ai-setup", "security", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cmcp.webp"
+  alt: "cMCP – Confidential MCP Runtime product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** cMCP intercepts every MCP tool call, evaluates it against a Cedar policy bundle inside a Trusted Execution Environment, and emits a signed TRACE Claim — giving you tamper-evident, hardware-attested proof of what your AI agent actually did.
+
+## What Is cMCP?
+
+cMCP (Confidential MCP Runtime) is an open-source gateway from AgenTrust that adds a hardware-attested security layer to the Model Context Protocol. Where standard MCP trusts the process it governs, cMCP moves policy enforcement into a TEE so the governed process can never reach it.
+
+Every tool call is intercepted, evaluated against a configurable Cedar policy bundle, and enforced inside the enclave. Each session produces a signed TRACE Claim that a verifier checks without trusting the operator.
+
+**Key guarantees** (from the README):
+
+- The Cedar policy bundle that ran is the one measured into the hardware attestation report — a rogue admin cannot swap it after approval.
+- The allow/deny decision runs in a separate address space from the agent process.
+- The audit log is signed, not reconstructable after the fact.
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- pip
+- (Optional, for hardware attestation) A TEE-capable cloud VM — AMD SEV-SNP (AWS C6a Nitro, Azure DCasv5) or Intel TDX (Azure DCedsv5, GCP C3)
+
+### Install
+
+```bash
+pip install cmcp-runtime
+```
+
+### Configuration
+
+Create `cmcp-config.yaml`:
+
+```yaml
+attestation:
+  provider: auto
+  enforcement_mode: advisory   # advisory eases first-run tuning; the default is `enforcing`
+listen_addr: "127.0.0.1:8443"  # pin loopback: dev mode runs without a bearer token
+policy_bundle_path: ./policies/
+catalog_path: ./catalog.json
+```
+
+**Important:** `listen_addr` is required. In version 0.3.0, omitting it binds the gateway to `0.0.0.0:8443` without authentication — expose only in dev. Set it to `127.0.0.1:8443` and use `CMCP_DEV_MODE=1` for local development.
+
+### Start the gateway
+
+```bash
+cmcp gateway
+```
+
+Point your MCP-compatible agent at `127.0.0.1:8443`. In dev mode, no bearer token is required. In production, a token is enforced by default.
+
+## How Policy Enforcement Works
+
+The gateway intercepts every tool call and routes it through the policy engine inside the TEE:
+
+1. **Intercept** — the agent's tool call hits the cMCP gateway instead of the tool directly.
+2. **Evaluate** — the Cedar policy bundle evaluates the call against the configured rules.
+3. **Enforce** — allowed calls pass through; denied calls are blocked and redacted.
+4. **Attest** — a signed TRACE Claim is emitted, carrying the hardware attestation evidence (TPM quote, cert chain) when running in a TEE, or a software signature in dev mode.
+
+### Supported Attestation Providers
+
+| Provider | Environment | Status |
+|---|---|---|
+| Azure confidential VM | Azure DCasv5/DCedsv5 | High |
+| AMD SEV-SNP | AWS C6a Nitro | High |
+| Intel TDX | GCP C3 | High |
+| NVIDIA GPU-CC (v0.2) | H100/H200/Blackwell | Planned |
+| Software (dev mode) | Any | `CMCP_DEV_MODE=1` |
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [agentrust-io.github.io/cmcp](https://agentrust-io.github.io/cmcp) ← documentation site
+- Source repository: [github.com/agentrust-io/cmcp](https://github.com/agentrust-io/cmcp) ← **README read in full**
+- License: MIT (verified via LICENSE file)
+- Latest release: [v0.3.0](https://github.com/agentrust-io/cmcp/releases/tag/v0.3.0)
+- HN launch: [Show HN: cMCP, deny an AI agent's tool call and get a signed receipt](https://news.ycombinator.com/item?id=49172545)
+- PyPI package: [pypi.org/project/cmcp-runtime](https://pypi.org/project/cmcp-runtime/)
+
+## FAQ
+
+**Q: What is the difference between cMCP and a standard MCP server?**
+
+**A:** Standard MCP servers run in the same OS process as the agent and can be altered by the operator. cMCP moves policy enforcement into an isolated TEE where the agent process cannot reach it, making the allow/deny decision tamper-evident and attestable to a third party.
+
+**Q: Do I need special hardware to use cMCP?**
+
+**A:** No. cMCP ships with a software-only mode (`CMCP_DEV_MODE=1`) that requires no hardware. The policy engine and signed claims still work — just without hardware attestation. TEE-capable VMs are needed only for hardware-attested mode.
+
+**Q: What is Cedar?**
+
+**A:** Cedar is an open-source policy engine from AWS. cMCP uses Cedar to evaluate whether a given tool call is permitted under the configured policy bundle. Policies are defined in Cedar's policy language and loaded as a signed bundle.
+
+**Q: Can I use this with any MCP-compatible agent?**
+
+**A:** cMCP acts as a drop-in gateway for any MCP client. Point your agent at the cMCP gateway endpoint instead of the MCP server directly — the agent does not need to be cMCP-aware.
+
+## Conclusion
+
+cMCP fills the gap that software-only MCP governance cannot: proving to a regulator or auditor that your AI agent's tool calls were actually blocked when policy said so. The combination of Cedar policy evaluation inside a TEE and signed TRACE claims gives you evidence that survives a challenge, without trusting the operator.
+
+If you are building AI agents that call external tools in regulated environments, cMCP is worth evaluating. The developer preview is live on PyPI — install it and read the full docs at [agentrust-io.github.io/cmcp](https://agentrust-io.github.io/cmcp).
