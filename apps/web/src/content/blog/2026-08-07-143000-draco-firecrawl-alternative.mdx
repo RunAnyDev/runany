@@ -1,0 +1,172 @@
+---
+title: "Draco - Self-Hostable Rust Web Scraper and Firecrawl Alternative"
+description: "Native Rust single-binary web scraper outputting clean Markdown and structured JSON. Firecrawl-compatible API, built-in MCP server, V8-based SPA hydration — no headless Chrome fleet."
+pubDate: "2026-08-07"
+tags: ["rust", "web-scraping", "self-hosted", "firecrawl-alternative", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/draco-firecrawl-alternative.webp"
+  alt: "Draco – Rust web scraper product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Draco is a native Rust web scraper that outputs clean Markdown, metadata, and structured JSON from any URL — including SPAs — without a headless browser. Runs as a single binary, ships with a Firecrawl-compatible REST API and an MCP server.
+
+## What Is Draco?
+
+Draco is an open-source web scraping tool written in Rust. Point it at a URL and get back clean Markdown, page metadata, or structured JSON — without spinning up a headless Chrome instance per request. It is described by its author as a "faster, cheaper, and lighter Firecrawl drop-in replacement that you own entirely."
+
+The project was [shared on Hacker News](https://news.ycombinator.com/item?id=49148163) in August 2026 and currently sits at 76 stars on GitHub.
+
+## Source and Accuracy Notes
+
+- **Project page:** [github.com/0xchasercat/draco](https://github.com/0xchasercat/draco) (no separate marketing site)
+- **Source repository:** [github.com/0xchasercat/draco](https://github.com/0xchasercat/draco)
+- **Latest release:** v0.20.5 (GitHub Releases API)
+- **License:** not explicitly declared in repository (no LICENSE file present)
+- **HN launch thread:** [news.ycombinator.com/item?id=49148163](https://news.ycombinator.com/item?id=49148163)
+- **Source last checked:** 2026-08-07
+
+## Setup
+
+### Install the binary
+
+The fastest route on Linux or macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0xchasercat/draco/main/install.sh | sh
+```
+
+This auto-detects your OS and architecture, downloads the latest release binary, and appends a shell init line to your `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish`.
+
+### Build from source
+
+```bash
+git clone https://github.com/0xchasercat/draco && cd draco
+cargo build --release
+```
+
+Build prerequisites: `cmake`, a C/C++ compiler, `clang`/`libclang`, `perl`, `pkg-config`.
+- Debian/Ubuntu: `apt install build-essential cmake clang libclang-dev perl pkg-config`
+- macOS: Xcode Command Line Tools + `brew install cmake`
+
+## Core Scraping Commands
+
+### Markdown output (default)
+
+```bash
+draco scrape https://example.com          # clean Markdown on stdout
+draco scrape https://example.com > page.md # pipe to file
+```
+
+A standard HTML page resolves in roughly 300 ms with a single TLS-fingerprinted fetch — no browser involved.
+
+### Full JSON envelope
+
+```bash
+draco scrape https://example.com --json --pretty
+# → { "markdown": "...", "metadata": { ... }, "trace": { ... } }
+```
+
+### Structured JSON extraction (SPAs and data-driven sites)
+
+Beyond Markdown, Draco can extract structured data an SPA loads from its own API, escalating through tiers:
+
+```bash
+draco scrape https://app.example.com --format json --pretty       # data[]
+draco scrape https://app.example.com --extract '$.props.pageProps'
+draco scrape https://app.example.com --format both                # markdown + data
+```
+
+Available formats: `markdown`, `html`, `raw-html`, `links`, `json`, `endpoints`, `both` (repeatable).
+
+### Client-rendered SPAs (Tier 2)
+
+When the initial static fetch yields near-empty content, Draco automatically hydrates the page in an in-process V8 isolate, serializes the live DOM, and re-runs the content extraction pipeline over it. No headless Chrome fleet required.
+
+```bash
+draco scrape https://spa.example.com            # thin shell → hydrated Markdown
+draco scrape https://spa.example.com --tier-max 1   # opt out: static shell only
+```
+
+## Daemon Mode (Firecrawl-compatible API)
+
+Run Draco as a persistent HTTP daemon — the process stays warm and existing Firecrawl clients point at it unchanged:
+
+```bash
+draco serve                        # http://127.0.0.1:3002 (Firecrawl's default port)
+draco serve --host 0.0.0.0 --port 8080 --max-concurrency 16
+```
+
+```bash
+curl -X POST http://127.0.0.1:3002/v1/scrape \
+  -H 'content-type: application/json' \
+  -d '{"url": "https://spa.example.com", "formats": ["markdown"]}'
+# → { "success": true, "data": { "markdown": …, "metadata": { … } } }
+```
+
+Draco rejects formats it does not yet produce (`html`, `rawHtml`, `links`, `screenshot`) with a clear `400`. Unknown Firecrawl fields are silently ignored. Per-request extensions include `tierMax`, `captureWindowMs`, `ignoreRobots`, `proxy`, and `timeout`.
+
+## MCP Server
+
+Draco ships a built-in MCP server for integration with AI coding agents:
+
+```bash
+draco mcp                        # stdio transport (newline-delimited JSON-RPC)
+```
+
+```json
+{ "mcpServers": { "draco": { "command": "draco", "args": ["mcp"] } } }
+```
+
+## Additional Commands
+
+```bash
+# Async crawl jobs
+draco crawl https://example.com --limit 50 --depth 2
+
+# Web search
+draco search "rust web scraper" --limit 10
+
+# With stealth and politeness
+draco scrape https://example.com --proxy socks5://127.0.0.1:9050 --delay 500
+```
+
+Key flags: `--format markdown|html|raw-html|links|json|endpoints|both`, `--json`, `--extract JSONPATH`, `--no-main-content`, `--wait-for ms`, `--tier-max 0|1|2`, `--proxy`, `--delay ms`, `--timeout ms`, `--ignore-robots`, `--allow-unsafe-replay`, `--runtime-log`, `--pretty`.
+
+## How Draco Compares to Firecrawl
+
+| Feature | Draco | Firecrawl |
+|---|---|---|
+| Single binary | Yes | No (cloud or self-host via Docker) |
+| Headless Chrome | No | Yes |
+| Markdown extraction | Yes | Yes |
+| SPA hydration (V8) | Yes | Yes |
+| Firecrawl-compatible API | Yes | — |
+| MCP server | Yes | No |
+| Built-in web search | Yes | No |
+| MIT license | Unclear | Yes |
+
+The most notable architectural difference: Draco uses a Rust-native TLS stack with a browser-faithful JA4 fingerprint to reach pages that block ordinary HTTP clients, whereas Firecrawl relies on headless Chrome.
+
+## FAQ
+
+**Q: Does Draco support screenshots?**
+**A:** Screenshots are listed as an unsupported Firecrawl format in Draco's daemon API. Draco's daemon mode currently rejects the `screenshot` format with a `400` error.
+
+**Q: What is the license?**
+**A:** No LICENSE file is present in the repository. The project page describes it as open source but does not specify a license. Treat it as All Rights Reserved unless the author clarifies.
+
+**Q: How does Draco handle robots.txt?**
+**A:** By default, Draco respects robots.txt. Use `--ignore-robots` to bypass this check.
+
+**Q: Does it run on Windows?**
+**A:** The install script targets Linux and macOS only. For Windows, build from source with `cargo build --release`.
+
+## Conclusion
+
+Draco is a pragmatic alternative to Firecrawl for teams that want full ownership of their scraping infrastructure. The single-binary deployment, Rust-native performance, and Firecrawl-compatible API mean you can migrate existing integrations without rewriting clients. The MCP server makes it natural to use alongside AI coding agents. The main caveat is the ambiguous license — confirm with the author before using it in commercial products.
