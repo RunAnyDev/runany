@@ -1,0 +1,185 @@
+---
+title: "Hiver - AI Agent Runtime with Replayable Traces"
+description: "Hiver is an open-source runtime for AI agents that runs them in fast, isolated sandboxes with a full replayable timeline of every action — browser, file, network, and tool call."
+pubDate: "2026-08-07"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hiver.webp"
+  alt: "Hiver AI agent runtime product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Hiver is an open-source local/cloud runtime that executes AI agents inside fast, isolated sandboxes and records a full replayable trace of every action — browser, file, network, and tool call — so you can debug failures without guessing.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [hiver.sh](https://hiver.sh) ← verified
+- Source repository: [github.com/hiver-sh/hiver](https://github.com/hiver-sh/hiver) ← verified
+- License: Apache 2.0 ← verified from `LICENSE` file on main branch
+- HN launch thread: [news.ycombinator.com/item?id=48893872](https://news.ycombinator.com/item?id=48893872) ← verified
+- Source last checked: 2026-08-07 (commit `16a3f4b`, v0.1.45)
+
+## What Is Hiver?
+
+Hiver is an open-source runtime for executing AI agents and the apps they generate in fast, isolated sandboxes. Rather than running agents directly on your machine — where a misbehaving agent can touch any file, network resource, or credential it finds — Hiver containers each run inside a VM that you control.
+
+The core value proposition is **agentic observability**: every run produces a structured, replayable trace covering process lifecycle, model calls, subagents, browser actions, file operations, network requests, and tool invocations. When an agent fails or produces unexpected output, you open the inspector, scrub through the timeline, and see exactly which tool call or API response caused the problem.
+
+From the README:
+
+> Hiver is an open-source runtime for executing AI agents and the apps they generate in fast, isolated sandboxes. It captures a structured, replayable trace of each run, including process lifecycle events, model calls, subagents, browser actions, file operations, network requests, and tool invocations.
+
+Hiver runs locally or in your own cloud. No hosted control plane or API key is required.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+Install via npm:
+
+```bash
+npm install --global @hiver.sh/cli && hiver
+```
+
+Or via the install script:
+
+```bash
+curl -fsSL https://hiver.sh/install | sh
+```
+
+### Step 2: Bring Up the Local Stack
+
+```bash
+hiver up
+```
+
+This starts the local gateway. No configuration file is required for the default setup.
+
+### Step 3: Start an Agent
+
+Pick a built-in image and launch an agent:
+
+```bash
+hiver start agent-1
+```
+
+Built-in images include `claude` (Claude Code), `codex` (OpenAI Codex), `copilot` (GitHub Copilot CLI), `browser` (Chromium with CDP), `node`, and `python`.
+
+### Step 4: Inspect the Run
+
+```bash
+hiver inspect agent-1
+```
+
+This opens the inspector UI where you can replay every action from the run.
+
+## Key Features
+
+### Millisecond VM Startup
+
+Hiver VMs resume instantly without pre-warming, whether running the orchestrator or a full browser. The README reports sub-20ms startup for a single pod at up to 10 requests per second.
+
+### Built-in Images
+
+| Image | Description |
+|---|---|
+| `claude` | Claude Code (`@anthropic-ai/claude-code`) |
+| `codex` | Codex (`@openai/codex`) |
+| `copilot` | GitHub Copilot CLI (`@github/copilot`) |
+| `browser` | Chromium with Chrome DevTools Protocol |
+| `node` | Minimal Node.js runtime |
+| `python` | Minimal Python 3.13 runtime |
+
+### End-to-End Replay
+
+The inspector captures a replayable timeline of every browser action, file operation, network request, and tool invocation across an agent run. This is agentic observability — not just logs, but a full visual reconstruction of what happened and in what order.
+
+### Policy-Gated Actions
+
+You can gate network access, protect credentials, and enforce policy around every file, API, tool, and action an agent uses. Egress policies are defined in `.hiver.json`:
+
+```jsonc
+{
+  "image": "my-agent",
+  "egress": [
+    {
+      "access": "allow",
+      "host": "api.anthropic.com",
+      "override": { "headers": { "x-api-key": "sk-ant-..." } }
+    },
+    { "access": "deny", "host": "*" }
+  ]
+}
+```
+
+The API key is injected by the proxy — it never lives in the sandbox's environment.
+
+### Governed Workspaces
+
+Agents access files from a configurable set of file systems with precise ACLs: read-only, write-only, scoped by user, team, org, or workflow.
+
+### Local or Cloud
+
+Hiver ships with a local-only mode. For cloud deployment, you run it in your own Kubernetes cluster — there is no hosted SaaS requiring an account.
+
+## Deeper Analysis
+
+### Why This Matters for AI Tooling
+
+The dominant pain in agent development is **debugging opacity**: an agent fails in production and you have logs, but logs do not tell you what the browser looked like when the agent called `click()`, which API responses arrived out of order, or whether the agent's file write was rejected silently by a permissions issue. Hiver's replay model directly addresses this.
+
+The policy-gated egress is also a meaningful differentiator. Most agent frameworks give the agent an API key and hope it only calls the intended services. Hiver's proxy-based key injection means the sandbox never sees credentials — they are rewritten at the proxy layer.
+
+### Comparison to Similar Tools
+
+| Feature | Hiver | Smithery | OpenAI Agents SDK |
+|---|---|---|---|
+| Local sandbox | Yes | No | No |
+| Built-in CDP browser | Yes | No | No |
+| Replay inspector | Yes | No | No |
+| Policy-gated egress | Yes | No | No |
+| License | Apache 2.0 | Proprietary | Proprietary |
+
+## Practical Evaluation Checklist
+
+- [ ] Install CLI: `npm i -g @hiver.sh/cli`
+- [ ] Start local stack: `hiver up`
+- [ ] Launch agent: `hiver start agent-1`
+- [ ] Open inspector: `hiver inspect agent-1`
+- [ ] Define egress policy in `.hiver.json`
+- [ ] Test replay of a failed run
+- [ ] Deploy to cloud (Kubernetes) if needed
+
+## Security Notes
+
+- API keys are injected at the proxy layer, never exposed to the sandbox environment
+- Egress policies allow fine-grained control over which hosts the agent can reach
+- Sandboxes are isolated — agents cannot escape to the host without explicit ACL grants
+- No hosted control plane means no third-party data exposure
+
+## FAQ
+
+**Q: Does Hiver require an API key for the models?**
+**A:** No. The agent uses its own API key, which is injected by the proxy and never stored in the sandbox environment. You control which keys the agent can access via egress policies.
+
+**Q: Can I run Hiver without Docker or Kubernetes?**
+**A:** Yes. The CLI runs entirely locally with a built-in mode that does not require any cloud infrastructure. `hiver up` starts the local gateway and sandbox on the local machine.
+
+**Q: What languages are supported?**
+**A:** Hiver ships with Node.js and Python 3.13 runtimes. The agent itself can be any framework — Claude Code, Codex, Copilot, or a custom agent — as long as it can be packaged in a container image.
+
+**Q: How does replay work?**
+**A:** Every sandbox run emits structured events covering model calls, browser actions, file I/O, and network requests. The inspector replays these events as a visual timeline. You can step forward and backward through any action in the run.
+
+## Conclusion
+
+Hiver solves the debugging problem that makes agent development painful: when something goes wrong, you should not have to guess. The replay inspector, policy-gated sandbox, and zero-configuration local mode make it a practical choice for developers who want to ship reliable agents without building the observability layer themselves.
+
+The tool is actively maintained (v0.1.45 as of August 2026) and ships with first-class integrations for Claude Code, Codex, and Copilot. If you are building agents that touch files, browsers, or network resources, Hiver is worth evaluating.
