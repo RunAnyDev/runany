@@ -1,0 +1,154 @@
+---
+title: "httpdbg – Debug HTTP Requests in Any Python Program"
+description: "httpdbg traces every HTTP request your Python code makes without touching your code. Swap python for pyhttpdbg, open localhost:4909, and inspect live request/response pairs grouped by test or script."
+pubDate: "2026-08-10"
+tags: ["python", "debugging", "developer-tools", "http"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/httpdbg-debugging-python.webp"
+  alt: "httpdbg HTTP debugging interface showing traced requests"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** httpdbg lets you trace every HTTP request your Python code makes without modifying a single line. Replace `python` with `pyhttpdbg`, open `http://localhost:4909`, and inspect live request/response pairs grouped by test, script, or interactive session.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [httpdbg.readthedocs.io](https://httpdbg.readthedocs.io/) ← **MUST visit and verify**
+- Source repository: [github.com/cle-b/httpdbg](https://github.com/cle-b/httpdbg) ← **MUST read README**
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- Stars: 905 (GitHub API, as of 2026-08-10)
+- HN launch thread: [Show HN: Httpdbg – A tool to trace the HTTP requests sent by your Python code](https://news.ycombinator.com/item?id=41650905)
+
+## What Is httpdbg?
+
+When debugging HTTP issues in Python, you typically reach for `print()` statements, a proxy like Charles or mitmproxy, or scattering `logging` calls through your code. httpdbg takes a different approach: it instruments HTTP traffic at the library level so you can trace requests without changing your code at all.
+
+The README puts it plainly:
+
+> `httpdbg` is a tool for Python developers to easily debug the HTTP(S) client and server requests in a Python program.
+
+Instead of running `python yourscript.py`, you run `pyhttpdbg yourscript.py`. The tool wraps every HTTP library call your program makes and exposes the full request/response cycle through a web UI at `http://localhost:4909`.
+
+It supports `HTTP/1.0`, `HTTP/1.1`, and `HTTP/2`. Client requests and server requests are both traced by default; use `--only-client` to filter out server-side traces.
+
+## Setup Workflow
+
+### Step 1: Install
+
+```bash
+pip install httpdbg
+```
+
+### Step 2: Run your program with pyhttpdbg instead of python
+
+```bash
+pyhttpdbg your_script.py
+```
+
+For scripts that take arguments:
+
+```bash
+pyhttpdbg --script filename.py arg1 --arg2
+```
+
+### Step 3: Open the debug UI
+
+The output tells you where to look:
+
+```
+  httpdbg - HTTP(S) requests available at http://localhost:4909/
+```
+
+Open that URL in your browser. Each HTTP transaction appears with its full request headers, body, and response.
+
+### Step 4: Trace a library module
+
+You can trace HTTP requests made by a specific module using the `-m` flag:
+
+```bash
+pyhttpdbg -m pip install hookdns --upgrade
+```
+
+This shows every HTTP request `pip` makes while resolving and downloading a package — useful for debugging registry issues or proxy problems.
+
+### Step 5: Trace HTTP server requests
+
+To trace incoming requests to an HTTP server:
+
+```bash
+pyhttpdbg -m flask --app demoflask run
+```
+
+All incoming requests to the Flask server appear in the trace UI.
+
+### Step 6: Group traces by test
+
+For pytest, unittest, or any test framework:
+
+```bash
+pyhttpdbg -m pytest arg1 --arg2
+```
+
+Requests are grouped by test name. Requests made within fixtures or setup/teardown methods are tagged accordingly.
+
+## Deeper Analysis
+
+### How the instrumentation works
+
+httpdbg wraps Python's HTTP libraries at runtime using the same mechanism you'd use to mock responses — but instead of intercepting and discarding, it records and forwards. This means you get the real HTTP behavior plus the trace, without any changes to your code or test setup.
+
+The UI is a local web application served on port 4909. It shows:
+
+- **Request method and URL** — what was called
+- **Request headers and body** — what was sent
+- **Response status and body** — what came back
+- **Timing** — when each request occurred in the execution timeline
+- **Grouping** — which test or script context a request belongs to
+
+### What it traces
+
+httpdbg traces both client-side requests (your code calling external APIs) and server-side requests (your code running an HTTP server). The `--only-client` flag restricts to client traces only.
+
+It works with any Python HTTP library that uses the standard `http.client` or `urllib` stack underneath, which covers the vast majority of Python HTTP usage.
+
+## Practical Evaluation Checklist
+
+- Zero code changes required to start tracing — just swap the runner command
+- Web UI is self-contained; no external services or accounts
+- Works with scripts, modules, and test frameworks
+- Groups requests by test or script context automatically
+- Supports both client and server HTTP tracing
+- Supports HTTP/1.0, HTTP/1.1, and HTTP/2
+
+## Security Notes
+
+- All trace data stays local — httpdbg starts a local web server on port 4909 that only serves to localhost
+- No trace data is sent anywhere unless you explicitly export or screenshot it
+- If running on a shared machine, be aware the debug port is bound to all interfaces; consider whether other users on the same host can reach port 4909
+
+## FAQ
+
+**Q: How is this different from mitmproxy or Charles Proxy?**
+**A:** mitmproxy and Charles act as HTTP proxies — your code needs to route traffic through them. httpdbg instruments the Python runtime directly, so it works without any proxy configuration. It also integrates with test frameworks to group requests by test case, which proxies cannot do.
+
+**Q: Does it work with async code (`asyncio`, `httpx` async)?**
+**A:** The README focuses on synchronous Python usage. Check the full documentation for async support — the core instrumentation approach may extend to async HTTP libraries but the UI grouping by test context is the more distinctive feature for that use case.
+
+**Q: Can I use it to trace requests in a production environment?**
+**A:** httpdbg is designed as a local development tool. Running it in production would expose the debug UI network-level and add overhead to every HTTP operation. It is best suited to local development and CI/test environments.
+
+**Q: Does it modify my code or install any hooks permanently?**
+**A:** No. It works entirely through runtime wrapping when invoked via `pyhttpdbg`. Running `python` directly does not include the instrumentation.
+
+## Conclusion
+
+httpdbg fills a specific gap in the Python debugging toolkit: getting visibility into HTTP traffic without touching your code, configuring a proxy, or scattering print statements through a library. The `pyhttpdbg` prefix on your normal run command is the only change required, and the web UI gives you a clean, organized view of every request and response.
+
+For developers debugging API clients, tracing what HTTP traffic a test is actually generating, or understanding what happens inside a library during a test, httpdbg is worth having in your tool belt. Install it with `pip install httpdbg` and try it on your next debugging session.
