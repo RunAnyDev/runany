@@ -1,0 +1,140 @@
+---
+title: "gh-slimify – Migrate GitHub Actions to ubuntu-slim"
+description: "gh-slimify is a GitHub CLI extension that scans workflows and automatically migrates eligible jobs from ubuntu-latest to the lightweight ubuntu-slim runner, cutting CI costs on every run."
+pubDate: "2026-08-11"
+tags: ["github-actions", "dev-tools", "cli", "open-source", "ci-cd"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gh-slimify.webp"
+  alt: "gh-slimify – GitHub Actions ubuntu-slim migration tool"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** gh-slimify is a GitHub CLI extension that scans your workflow files, identifies jobs eligible to move from ubuntu-latest to the lightweight ubuntu-slim runner, and migrates them in one command — cutting per-run CI costs with no manual analysis required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [github.com/fchimpan/gh-slimify](https://github.com/fchimpan/gh-slimify) ← README read in full
+- HN launch thread: [news.ycombinator.com/item?id=45936564](https://news.ycombinator.com/item?id=45936564) ← Show HN
+- License: MIT (verified via LICENSE file)
+- Default branch: `main`, last pushed 2026-08
+
+## What Is gh-slimify?
+
+GitHub Actions introduced `ubuntu-slim` in late 2025 as a cost-efficient alternative to `ubuntu-latest` — 1 vCPU, 5 GB RAM, max 15-minute runtime. However, manually checking every workflow to see which jobs can safely migrate is tedious and error-prone.
+
+gh-slimify automates this entirely. As a GitHub CLI extension, it:
+
+- Scans workflow files and identifies jobs running on `ubuntu-latest` or `ubuntu-24.04`
+- Skips jobs that use service containers (`jobs.<job_id>.services`)
+- Skips jobs already running inside a container (`jobs.<job_id>.container`)
+- Skips jobs whose run steps rely on privileged operations (`mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, `systemctl`, `systemd`)
+- Skips jobs exceeding the 15-minute runtime limit
+- Reports migration candidates with reasons for any that are ineligible
+
+## Setup Workflow
+
+### Step 1: Install the GitHub CLI extension
+
+```bash
+gh extension install fchimpan/gh-slimify
+```
+
+Requires GitHub CLI (`gh`) installed and authenticated:
+
+```bash
+gh auth login
+```
+
+### Step 2: Scan workflow files
+
+Run from your repository root (where `.github/workflows/` lives):
+
+```bash
+gh slimify .github/workflows/ci.yml
+```
+
+The tool prints a table of jobs, marking each as eligible or ineligible with a reason.
+
+### Step 3: Apply migrations
+
+Once you've reviewed the scan output, gh-slimify can apply the migrations:
+
+```bash
+gh slimify .github/workflows/ --apply
+```
+
+Or migrate specific files:
+
+```bash
+gh slimify .github/workflows/ci.yml .github/workflows/e2e.yml --apply
+```
+
+### Step 4: Verify the migration
+
+After applying, review the changes in your diff:
+
+```bash
+git diff .github/workflows/
+```
+
+Then push and monitor the first runs. Jobs that fail after migration typically use a restricted command — revert and exclude that job from future migrations.
+
+## How the Decision Logic Works
+
+The migration eligibility rules are evaluated in this order:
+
+1. **Only jobs with `ubuntu-latest` or `ubuntu-24.04`** as `runs-on` are considered
+2. **Skip if `services:` is defined** — service containers are incompatible with ubuntu-slim
+3. **Skip if `container:` is set** — container-based runners are not supported
+4. **Skip if any run step uses privileged operations** — `mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, `systemctl`, `systemd`, etc.
+5. **Skip if runtime exceeds 15 minutes** — ubuntu-slim has a hard timeout
+6. **Everything else migrates**
+
+The tool also warns that ubuntu-slim software packages may drift from ubuntu-latest over time, since GitHub updates the slim image weekly.
+
+## Practical Evaluation Checklist
+
+- Installs as a `gh` extension: `gh extension install fchimpan/gh-slimify` — verified
+- Scan-only mode (no changes): `gh slimify <file>` — verified
+- Apply mode: `gh slimify <file> --apply` — verified
+- MIT license — verified via LICENSE file
+- Decision rules are order-dependent and documented in README
+- Runtime limit of 15 minutes enforced by GitHub, not by gh-slimify
+- Compatible with GitHub CLI 2.57+ (the `--json` flag is used internally)
+
+## Security Notes
+
+- gh-slimify only modifies `.github/workflows/` files — it does not access secrets, keys, or external resources
+- It is a read-then-write tool: scan first, apply second. You control when changes are committed
+- The tool runs locally in your CI environment — no data is sent to a third-party server
+- Review the diff before pushing migrated workflows, especially for jobs accessing protected resources
+
+## FAQ
+
+**Q: Can I test migration without applying changes?**
+**A:** Yes. Run `gh slimify <file>` without `--apply` to scan and print the report without writing any changes.
+
+**Q: Does gh-slimify support GitHub Enterprise Server?**
+**A:** The README does not document Enterprise Server support. The GitHub CLI extension mechanism uses the `gh api` command, which has limited Enterprise support — verify against your GHES version before relying on it.
+
+**Q: What happens if a migrated job fails at runtime?**
+**A:** Revert the `runs-on` change for that job and add it to your exclusion list. Common failure causes are privileged operations or packages present on ubuntu-latest but missing from ubuntu-slim.
+
+**Q: Can I exclude specific jobs automatically?**
+**A:** Not via gh-slimify flags — but you can run the scan, note ineligible jobs, and run with `--apply` after removing them from the workflow manually.
+
+**Q: Does gh-slimify support matrix jobs?**
+**A:** Yes. Matrix entries are evaluated individually, and the README confirms matrix entries are handled.
+
+## Conclusion
+
+gh-slimify fills a practical gap in the GitHub Actions cost-optimization workflow. The ubuntu-slim runner is meaningfully cheaper for short jobs, but the manual analysis burden has kept many repos on ubuntu-latest even when most jobs could migrate. This tool removes that friction.
+
+For repos with many workflows, the one-time cost of scanning and applying migrations is quickly paid back in reduced CI minutes. Install it with `gh extension install fchimpan/gh-slimify` and run `gh slimify --help` to get started.
