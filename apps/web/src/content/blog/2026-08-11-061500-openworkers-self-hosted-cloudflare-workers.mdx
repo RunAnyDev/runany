@@ -1,0 +1,193 @@
+---
+title: "OpenWorkers – Self-Hosted Cloudflare Workers Runtime"
+description: "Run Cloudflare Workers on your own infrastructure with OpenWorkers – an open-source Rust-based runtime using V8 isolates, Docker Compose deployment, and full Workers API compatibility."
+pubDate: "2026-08-11"
+tags: ["cloudflare-workers", "self-hosted", "rust", "v8", "docker"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openworkers-self-hosted-cloudflare-workers.webp"
+  alt: "OpenWorkers – self-hosted Cloudflare Workers runtime"
+---
+
+## TL;DR
+
+> **TL;DR:** OpenWorkers is an open-source, self-hosted runtime that lets you run Cloudflare Workers-compatible code on your own infrastructure using Docker Compose — built in Rust with V8 isolates under the hood.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [openworkers.com](https://openworkers.com)
+- Source repository: [github.com/openworkers](https://github.com/openworkers) (multiple repos: `openworkers-infra`, `openworkers-core`, `openworkers-runner`, `openworkers-api`, etc.)
+- License: [MIT](https://github.com/openworkers/openworkers-core/blob/main/README.md) (verified via `openworkers-core` repo)
+- HN launch thread: [news.ycombinator.com/item?id=42618923](https://news.ycombinator.com/item?id=42618923) (500 points)
+
+## What Is OpenWorkers?
+
+OpenWorkers is an open-source project that replicates the Cloudflare Workers runtime for self-hosted deployment. It lets you run JavaScript Workers — the same Workers API surface, the same V8 isolate model — on your own servers, VPS, or private cloud.
+
+The project was born from a Show HN launch (500 points) and has grown into a multi-repo ecosystem covering the runtime engine, dashboard, API, scheduler, and log aggregation. The infra repo describes the full stack:
+
+| Service | Role |
+|---|---|
+| `openworkers-runner` | V8 isolate runtime |
+| `openworkers-api` | REST API |
+| `openworkers-dash` | Dashboard UI |
+| `postgate` | PostgreSQL query validation proxy |
+| `openworkers-scheduler` | Cron job scheduler |
+| `openworkers-logs` | Log aggregator |
+
+## Why Self-Hosted Workers?
+
+Cloudflare Workers is compelling — sub-millisecond cold starts, global edge network, generous free tier. But there are reasons you might want to run your own:
+
+- **Data residency** — keep Worker data in your own jurisdiction
+- **Cost control** — unlimited executions without per-request billing
+- **Custom bindings** — extend the runtime with private infrastructure
+- **Offline/air-gapped environments** — run Workers behind a firewall
+- **Custom pricing** — bundle Workers into your own product offering
+
+## Architecture
+
+The self-hosted stack uses a microservices architecture orchestrated by Docker Compose:
+
+```
+nginx (reverse proxy)
+  ├── dashboard / api (can run as Workers themselves)
+  ├── runner (V8 isolates, worker execution engine)
+  ├── postgate (PostgreSQL proxy with multi-tenant query validation)
+  ├── scheduler (cron job dispatch via NATS)
+  ├── logs (log streaming aggregation)
+  └── postgres (persistent storage)
+```
+
+Workers communicate with each other and with binding services via NATS, a lightweight message queue. The `postgate` service acts as a safe SQL bridge — Workers never connect directly to PostgreSQL; instead they call `env.DB.query(sql)` which routes through `postgate` for validation before executing against the shared database.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose
+- TLS certificates (for HTTPS)
+- A GitHub OAuth App (for dashboard authentication)
+
+### Step 1: Clone the Infrastructure Repo
+
+```bash
+git clone https://github.com/openworkers/openworkers-infra
+cd openworkers-infra
+```
+
+### Step 2: Configure Environment
+
+Copy the example environment file and fill in your credentials:
+
+```bash
+cp .env.example .env
+```
+
+Key variables to configure:
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — OAuth App credentials
+- `TLS_CERT_PATH` / `TLS_KEY_PATH` — paths to your TLS certificates
+- `POSTGRES_PASSWORD` — database password
+
+### Step 3: Launch with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+This starts all services: the nginx reverse proxy, API, dashboard, runner pool, NATS message queue, postgate SQL proxy, and PostgreSQL.
+
+### Step 4: Access the Dashboard
+
+Once running, the dashboard is available at the configured domain (or `http://localhost` for local development). Sign in with your GitHub account via the OAuth flow.
+
+### Step 5: Deploy Your First Worker
+
+Workers are deployed via the dashboard or the API. A basic Worker looks like this:
+
+```javascript
+export default {
+  async fetch(request, env) {
+    return new Response(`Hello from self-hosted Workers!`);
+  }
+};
+```
+
+## Deeper Analysis
+
+### Runtime Compatibility
+
+OpenWorkers targets the standard [Cloudflare Workers runtime APIs](https://developers.cloudflare.com/workers/). The `openworkers-core` crate defines shared abstractions for multiple runtime backends:
+
+| Feature | Status |
+|---|---|
+| `fetch` / `Response` | Supported |
+| KV Storage (`env.kv`) | Via binding |
+| Database (`env.db`) | Via `postgate` |
+| WebSockets | Supported |
+| Scheduled tasks (cron) | Via `openworkers-scheduler` |
+| Multiple runtimes | V8, Wasmtime, Deno, QuickJS, Boa |
+
+### Multi-Runtime Support
+
+Unlike the original Cloudflare Workers (V8-only), `openworkers-core` abstracts over multiple JavaScript engines. The `RuntimeLimits` struct lets you set memory limits, CPU time, wall-clock time, and concurrent fetch limits per worker:
+
+```rust
+RuntimeLimits {
+    heap_max_mb: 128,
+    max_cpu_time_ms: 50,
+    max_wall_clock_time_ms: 30_000,
+    fetch_limit: BindingLimit::new(50, 6), // 50 total, 6 concurrent
+}
+```
+
+This flexibility is useful for testing workers in different environments or running in contexts where V8 isn't available.
+
+### Security Model
+
+Workers run inside V8 isolates — the same sandboxing model as Cloudflare. The `postgate` service adds a critical extra layer: SQL queries from worker code are validated before reaching PostgreSQL, preventing injection attacks in multi-tenant scenarios.
+
+## Practical Evaluation Checklist
+
+- [ ] Docker Compose starts all services cleanly
+- [ ] Dashboard loads and OAuth login works
+- [ ] Can deploy a simple Worker via the dashboard
+- [ ] Worker `fetch` handler responds correctly
+- [ ] KV binding persists data across requests
+- [ ] Database binding (`env.db`) routes through `postgate`
+- [ ] Scheduled cron triggers fire on time
+- [ ] Logs appear in the log aggregator UI
+- [ ] Worker memory limits are enforced
+- [ ] Concurrent fetch limits are respected
+
+## Security Notes
+
+- Workers run in V8 isolates with configurable memory and CPU limits
+- `postgate` validates all SQL before execution — never let workers talk directly to PostgreSQL
+- TLS is required in production; the Docker Compose setup assumes certificates are present
+- GitHub OAuth credentials should be treated as sensitive secrets
+
+## FAQ
+
+**Q: How does this differ from Cloudflare Workers?**
+**A:** The API surface is the same, but you run and manage the infrastructure yourself. There is no global CDN, no automatic DDoS protection, no Workers KV global replication. You get full control at the cost of operational burden.
+
+**Q: Does this use Cloudflare's proprietary code?**
+**A:** No. OpenWorkers is a clean-room reimplementation of the Workers API in Rust. It does not use any Cloudflare code or trademarks. The `openworkers-runner` uses the V8 JavaScript engine (which is open-source under a BSD license).
+
+**Q: Can I use existing Cloudflare Workers libraries?**
+**A:** Most standard Workers libraries work. Libraries that call Cloudflare-specific endpoints (like `workers.cloudflare.com`) will need modification. Pure Workers runtime API usage should work without changes.
+
+**Q: What are the resource requirements?**
+**A:** The full stack needs Docker with roughly 1–2 GB RAM and 2+ CPU cores for a development setup. Production sizing depends on worker count and request volume.
+
+## Conclusion
+
+OpenWorkers fills a real gap for teams that want the Workers programming model without Cloudflare's infrastructure lock-in. The MIT-licensed Rust implementation is technically solid, the Docker Compose setup is straightforward, and the multi-runtime architecture is a bonus for portability.
+
+If you've been wanting to embed a Workers-like edge runtime inside your own product, or need data residency guarantees that Cloudflare can't provide, OpenWorkers is worth a serious look. Start with the [Docker Compose getting started guide](https://github.com/openworkers/openworkers-infra/blob/main/GETTING_STARTED.md) and have a Worker running locally in under 10 minutes.
