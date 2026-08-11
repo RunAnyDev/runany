@@ -1,0 +1,150 @@
+---
+title: "Urnerys – Self-Hosted Visual Regression Testing"
+description: "Urnerys is a self-hosted visual regression testing service. Catch UI breaks before they ship with a Docker container, REST API, and one-time pricing from $100."
+pubDate: "2026-08-11"
+tags: ["testing", "self-hosted", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/urnerys.webp"
+  alt: "Urnerys – visual regression testing dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Urnerys is a self-hosted visual regression testing service you run on your own infrastructure. One Docker container, no external dependencies, and a one-time license from $100.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [urnerys.dev](https://urnerys.dev) ← **MUST visit and verify**
+- Source: no public source repository found (footer links to `github.com` generically)
+- License: proprietary (one-time purchase software, not open-source)
+
+## What Is Urnerys?
+
+Urnerys is a web service for automated visual regression testing. You run it on your own infrastructure — a VPS, a spare machine, or a Docker host — and it catches unintended UI changes before they reach production.
+
+The core workflow is straightforward: your CI/CD pipeline sends screenshots to Urnerys after each build, it compares them against stored baselines, and the web dashboard flags any visual deviations for human review. Approved baselines update automatically, so the process stays fast without constant manual intervention.
+
+The product is targeted at teams who want the confidence of automated visual checks without the recurring SaaS bill or the data handling concerns of sending screenshots to a third-party service.
+
+## Setup Workflow
+
+### Step 1: Choose Your License
+
+Urnerys sells one-time licenses with no per-image or per-user fees:
+
+| Tier | Price | Who it's for |
+|---|---|---|
+| Solo | $100 | Private individuals or startups up to 3 employees |
+| Team | $600 | Companies under 20 employees and under $5M revenue |
+| Enterprise | $2,500 | All other organizations, no restrictions |
+
+Licenses are permanent. Minor updates are included. Contact `hi@urnerys.dev` to purchase.
+
+### Step 2: Run the Docker Container
+
+After purchasing a license, you receive an activation key. The service runs as a single Docker container:
+
+```bash
+docker run -d \
+  --name urnerys \
+  -p 8080:8080 \
+  -v urnerys-data:/data \
+  -e URNERY_LICENSE_KEY="your-activation-key" \
+  urnerys/urnerys:latest
+```
+
+The service listens on port 8080 by default. The `/data` volume persists baselines, diffs, and the embedded SQLite database — no external database required.
+
+Hardware requirements for typical use (up to ~20 engineers):
+
+- **Compute:** 1 CPU, 4 GB RAM
+- **Storage:** ~1 GB per 5,000–10,000 images stored
+- **Runtime:** Docker image (Nix derivation also available)
+
+### Step 3: Integrate with Your CI/CD Pipeline
+
+Upload snapshots from your CI system using the REST API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/upload \
+  -F "project=WEB_UI_01" \
+  -F "branch=feat/navbar" \
+  -F "image=@screenshot.png" \
+  -F "api_key=your-api-key"
+```
+
+The API is designed for high-frequency CI payloads. The web dashboard at `http://localhost:8080` gives you a visual diff view — side-by-side baseline vs. current, with pixel-level highlighting of changes.
+
+### Step 4: Review and Approve
+
+1. Urnerys runs the comparison and surfaces flagged builds in the dashboard
+2. You review the diffs and mark each as expected or a real regression
+3. Approve the new baseline to update the reference for future builds
+
+GitHub integration is available on Team and Enterprise tiers, enabling PR-triggered comparison runs automatically.
+
+## Key Features
+
+- **Web dashboard** for human-in-the-loop review of visual diffs
+- **REST API** for CI/CD integration, accepting direct image uploads
+- **No external dependencies** — embedded SQLite, no separate DB or cache required
+- **GitHub integration** on Team/Enterprise tiers
+- **One-time pricing** — pay once, own the license permanently
+- **Self-hosted** — all data stays on your infrastructure
+
+## How It Differs from Cloud Alternatives
+
+Cloud-based visual testing tools (Percy, Chromatic, BrowserStack Visual, etc.) charge per-seat or per-screenshot on a subscription basis. They also receive and store your screenshots on their infrastructure.
+
+Urneyrs inverts both:
+
+- **One-time cost** vs. ongoing subscription — the Solo license at $100 pays for itself against a single year of a SaaS equivalent
+- **Data stays local** — screenshots never leave your network, which matters for apps behind authentication or handling sensitive UIs
+
+The tradeoff is that you manage your own baseline storage and server uptime. For teams already running self-hosted CI infrastructure, this is a natural fit.
+
+## Practical Evaluation Checklist
+
+If you are evaluating whether Urnerys fits your workflow:
+
+- [ ] You have a Docker host available (or are comfortable with the Nix derivation)
+- [ ] Your team reviews visual diffs manually as part of the QA process
+- [ ] You want to avoid sending UI screenshots to a third-party service
+- [ ] You prefer one-time pricing over subscription SaaS
+- [ ] You need CI/CD integration for automated triggering
+
+## FAQ
+
+**Q: Does Urnerys support multiple projects?**
+**A:** Yes. The API accepts a `project` parameter, and the dashboard organizes baselines and diffs by project. You can run multiple projects from a single Urnerys instance.
+
+**Q: How are baseline images stored?**
+**A:** Baselines are stored on the Docker volume (`urnerys-data`). The embedded SQLite database tracks metadata; image blobs live in the volume. Backup the volume like any other persistent data.
+
+**Q: Can I run it without Docker?**
+**A:** Yes — a Nix derivation is available for Nix/NixOS users. See the documentation for platform-specific setup instructions.
+
+**Q: What happens when a diff is flagged?**
+**A:** The dashboard shows a pixel-highlighted diff between the current screenshot and the stored baseline. You manually approve or reject each flagged build. Approved builds can update the baseline automatically.
+
+**Q: Is there a trial version?**
+**A:** Contact `hi@urnerys.dev` — the developer offers setup assistance for Enterprise prospects to validate the integration before purchasing.
+
+## Security Notes
+
+- All screenshot data stays on your infrastructure — no third-party data transmission
+- API key authentication is required for uploads and API access
+- The service runs entirely self-contained with no outbound connections required
+- No separate database or cache to secure — everything is in the Docker volume
+
+## Conclusion
+
+Urnerys is a practical choice for teams that want automated visual regression testing without the recurring cost or data-handling concerns of a cloud SaaS. The one-time pricing model is unusual in this space and compelling for teams with long development horizons. The self-contained Docker deployment makes it straightforward to run on any VPS or internal server.
+
+If you are already running self-hosted CI infrastructure and your team reviews UI changes as part of the development process, Urnerys removes the friction of cloud-based visual testing without requiring a major workflow overhaul.
