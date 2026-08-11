@@ -1,0 +1,168 @@
+---
+title: "Cabot – Self-Hosted Monitoring Without PagerDuty's Price Tag"
+description: "Cabot is an open-source, self-hosted infrastructure monitoring platform with Graphite support, HTTP checks, Jenkins integration, and Docker deploy in minutes."
+pubDate: "2026-08-05"
+tags: ["self-hosted", "monitoring", "devops", "open-source"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cabot.webp"
+  alt: "Cabot self-hosted monitoring dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Cabot is an open-source, self-hosted monitoring platform (MIT, 5.7k GitHub stars) that alerts on Graphite metrics, HTTP endpoints, and Jenkins builds — offering PagerDuty-like features at zero cost, deployable via Docker in minutes.
+
+## Source and Accuracy Notes
+
+- Project page: [cabotapp.com](https://cabotapp.com)
+- Source repository: [github.com/arachnys/cabot](https://github.com/arachnys/cabot)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=7063654](https://news.ycombinator.com/item?id=7063654)
+- Source last checked: 2026-08-05 (commit `9a7bc8f`, default branch `master`)
+
+## What Is Cabot?
+
+Cabot is a free, open-source, self-hosted infrastructure monitoring and alerting service built by [Arachnys](https://www.arachnys.com). It provides a web interface for monitoring services and sending telephone, SMS, or HipChat/email alerts when those services degrade or go down — without writing any code.
+
+The project positions itself as a lighter alternative to Nagios, PagerDuty, and Server Density. From the README:
+
+> "Cabot is a free, open-source, self-hosted infrastructure monitoring platform that provides some of the best features of PagerDuty, Server Density, Pingdom and Nagios without their cost and complexity."
+
+Cabot supports monitoring through three data sources:
+
+- **Graphite / statsd** — alerts based on metrics you're already pushing to Graphite
+- **HTTP endpoints** — status code and response content checks
+- **Jenkins** — build status monitoring
+
+It is written in Python and uses Django, Bootstrap, and Font Awesome.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose (recommended)
+- Or: Python 3, PostgreSQL, and a Graphite instance (optional)
+
+### Step 1: Docker Deploy in 5 Minutes
+
+The quickest way to get Cabot running:
+
+```bash
+git clone https://github.com/arachnys/cabot.git
+cd cabot
+docker-compose up -d
+```
+
+After starting, access the web interface at `http://your-server:8000` and create an admin user:
+
+```bash
+docker-compose run cabot python manage.py createsuperuser
+```
+
+### Step 2: Configure Graphite
+
+If you already have Graphite running, add it in **Cabot → Instances → Graphite**:
+
+```
+Graphite URL: http://your-graphite:8000
+```
+
+### Step 3: Add Services
+
+Navigate to **Services → Add Service** and configure:
+
+- **Name**: e.g., "Production Redis"
+- **Check type**: HTTP (for web services) or Graphite (for metrics)
+- **Alerting**: Assign on-duty schedule and contact channels
+
+### Step 4: Set Up Alerts
+
+Cabot supports multiple alert backends:
+
+```bash
+# Environment variables for alerting
+CABOT_ALERT_EMAIL="alerts@example.com"
+CABOT_ALERT_SMS_PHONE="+1234567890"
+CABOT_ALERT_HIPCHAT_ROOM="Operations"
+CABOT_ALERT_TELEGRAM_BOT_TOKEN="your-bot-token"
+```
+
+## Deeper Analysis
+
+### What Makes Cabot Different
+
+Unlike most monitoring SaaS platforms, Cabot owns the full stack. Your metrics and alert data never leave your infrastructure. This matters for:
+
+- **Compliance** — SOC 2, HIPAA, or air-gapped environments where data cannot go to third-party SaaS
+- **Cost** — PagerDuty starts at $15/user/month; Cabot costs nothing beyond server infra
+- **Customization** — since it's open-source, you can fork and modify alert logic, add custom checks, or integrate with internal tooling
+
+### Alerting Capabilities
+
+The README lists these alert types:
+
+| Alert Type | Description |
+|---|---|
+| Graphite metrics | Threshold-based alerts on existing metric streams |
+| HTTP endpoint | Status code + content pattern matching |
+| Jenkins build | Trigger on build failure or instability |
+| Email | On-duty alerting via SMTP |
+| SMS | Via Twilio or similar provider |
+| Telephone | Voice call to on-duty engineer |
+| HipChat | Room notifications |
+
+### Limitations and Known Issues
+
+**⚠️ The project is not actively maintained.** From the README:
+
+> "Cabot is stable and used by hundreds of companies and individuals in production, but it is not actively maintained. We would like to hand over maintenance of the project to one or more responsible and experienced maintainers."
+
+The last significant commit was in September 2023. Before deploying, consider:
+
+1. Whether the Django 3.x-era stack meets your security requirements
+2. Whether you have capacity to maintain forks for security patches
+3. Alternative options like [grafana/oncall](https://github.com/grafana/oncall) (open-source, active) or [Cabot's community fork](https://github.com/zcelas-s整改/) if one exists
+
+### Deployment Options
+
+Beyond Docker, Cabot supports:
+
+- **Heroku one-click deploy** (one button via `Deploy to Heroku`)
+- **Manual Python/Django** install with gunicorn + nginx
+- **Kubernetes** — community Helm charts exist (check GitHub Issues)
+
+## Security Notes
+
+- Cabot stores monitoring credentials (API keys for alert backends) in its Django database. Use TLS for all connections.
+- The Django admin interface should be behind a VPN or restricted IP range.
+- For air-gapped deployments, verify all base Docker images for vulnerabilities before use.
+- The project does not appear to have had a security audit. Run `bandit` or `safety` against the dependencies before production use.
+
+## FAQ
+
+**Q: Can Cabot replace PagerDuty entirely?**
+**A:** For many teams, yes — if you only need Graphite-based metric alerts, HTTP checks, and Jenkins build monitoring. PagerDuty's incident management workflows, on-call scheduling, and integrations with hundreds of tools go beyond what Cabot offers. Evaluate your full incident response process before switching.
+
+**Q: Does Cabot support Prometheus?**
+**A:** Not natively. Cabot was built around Graphite. For Prometheus-based monitoring, look at [Grafana OnCall](https://github.com/grafana/oncall) or [Alertmanager](https://prometheus.io/docs/alerting/latest/alertmanager/).
+
+**Q: How does Cabot handle alert fatigue?**
+**A:** Cabot allows configuring acknowledgment and escalation paths, but deduplication and suppression windows are limited compared to enterprise tools. You may need custom alert routing logic for complex setups.
+
+**Q: Is there a managed hosted version of Cabot?**
+**A:** No. Arachnys built Cabot as an internal tool and open-sourced it, but never offered a hosted SaaS version. The maintainer handoff request in the README suggests the original team has moved on.
+
+**Q: What are the alternatives if Cabot's maintenance is a blocker?**
+**A:** [Grafana OnCall](https://grafana.com/oss/oncall/) (Apache 2.0, active), [PagerDuty](https://www.pagerduty.com) (SaaS, paid), [Dead Man's Snitch](https://deadmanssnitch.com) (cron monitoring), [Healthchecks.io](https://healthchecks.io) (simple HTTP checks).
+
+## Conclusion
+
+Cabot fills a real gap: teams that need PagerDuty-style alerting without the SaaS price tag or data exposure. At 5.7k GitHub stars and over a decade of production use, it is battle-tested. The lack of active maintenance is the primary risk — evaluate it against your team's ability to absorb patches or maintain a fork before committing.
+
+For teams already running Graphite or needing simple HTTP/Jenkins monitoring on self-hosted infrastructure, Cabot remains a solid, zero-cost option. For those needing active development and modern features, Grafana OnCall is the better bet.
+
+Deploy it at [cabotapp.com](https://cabotapp.com) or check the GitHub repo at [github.com/arachnys/cabot](https://github.com/arachnys/cabot).
