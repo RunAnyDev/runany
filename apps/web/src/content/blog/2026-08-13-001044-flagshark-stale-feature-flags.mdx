@@ -1,0 +1,160 @@
+---
+title: "FlagShark – Find Stale Feature Flags via GitHub Action"
+description: "Feature flags pile up in any growing codebase. FlagShark is a free MIT-licensed GitHub Action + CLI that scans 13 languages and detects stale flags using git age and usage — no config required."
+pubDate: "2026-08-13"
+tags: ["dev-tools", "github-actions", "feature-flags", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/flagshark-stale-feature-flags.webp"
+  alt: "FlagShark – Find stale feature flags in your codebase"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** FlagShark is a free, MIT-licensed CLI and GitHub Action that scans your codebase for stale feature flags across 13 languages and 13 flag providers — zero config, AST-based detection, two staleness signals built in.
+
+## What Is FlagShark?
+
+Feature flags are supposed to be temporary. In practice, they accumulate: the checkout flag nobody removed after the rollout, the beta-nav that shipped 18 months ago and is now just clutter. Most flag-management platforms make it easy to *add* flags — none of them make it easy to *find* the ones you forgot.
+
+FlagShark solves exactly that. It scans your codebase for feature flags, determines which ones are stale, and posts findings as a PR comment or opens a removal PR automatically. It works with LaunchDarkly, Unleash, PostHog, Flagsmith, GrowthBook, ConfigCat, Split.io, Flipt, DevCycle, Eppo, Optimizely, and more — plus generic pattern matching for custom setups.
+
+## Setup Workflow
+
+### Step 1: Run the CLI (zero install)
+
+```bash
+npx flagshark scan
+```
+
+That's it. FlagShark auto-detects your flag SDK, scans all supported files, and prints a table of detected flags with staleness signals.
+
+```
+FlagShark v2.3.1 — scanned 156 files in 2.3s
+Detected providers: LaunchDarkly (Node SDK), Unleash, PostHog
+Found 23 feature flags · 7 stale · health 70/100
+
+┌──────────────────┬────────────────────────┬───────────────┬──────────────────────────────┐
+│ Flag             │ File                   │ Added         │ Signal                       │
+├──────────────────┼────────────────────────┼───────────────┼──────────────────────────────┤
+│ CHECKOUT_V2      │ src/checkout.ts:47     │ 14 months ago │ age                          │
+│ NEW_NAV          │ src/layout.tsx:12      │ 8 months ago  │ age, low-usage               │
+└──────────────────┴────────────────────────┴───────────────┴──────────────────────────────┘
+```
+
+Exit code is `1` when stale flags are found, so you can gate CI on it.
+
+### Step 2: Add the GitHub Action
+
+Drop this into your workflow to get a PR comment on every pull request:
+
+```yaml
+name: FlagShark
+on: [pull_request]
+jobs:
+  flagshark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flagshark/flagshark-action@v2
+```
+
+The Action posts a comment with the stale flags table directly on the PR — no token setup, no external service calls for basic scanning.
+
+### Step 3: Install globally (optional)
+
+```bash
+npm install -g flagshark
+```
+
+## Supported Languages and Providers
+
+FlagShark detects flags in **13 languages** out of the box:
+
+TypeScript, JavaScript, Go, Python, Java, C#, PHP, Rust, Ruby, Swift, Kotlin, Scala, and C++.
+
+Detection is **AST-based** via [tree-sitter](https://tree-sitter.github.io/), so flag names inside strings, comments, or unrelated function calls are not flagged as false positives.
+
+**Supported flag providers:**
+
+LaunchDarkly, Unleash, PostHog, Flagsmith, GrowthBook, ConfigCat, Split.io, Flipt, DevCycle, Eppo, Optimizely, plus a generic pattern matcher.
+
+## How Staleness Is Determined
+
+FlagShark uses two signals, both computed automatically:
+
+1. **Git blame age** — how long since the flag was last touched in `git blame`
+2. **Single-file usage** — how many times the flag appears in the codebase
+
+Both run without any configuration. No YAML files, no config blocks.
+
+## Deeper Analysis
+
+### What makes this different from just deleting old flags?
+
+Most teams skip flag cleanup because it's manual and low-priority. FlagShark makes it automatic — it runs on every PR, so stale flags become visible at the moment they'd normally be ignored. The PR comment creates a paper trail that makes cleanup easy to review and approve.
+
+### For teams using LaunchDarkly specifically
+
+FlagShark has a private assessment API that performs a LaunchDarkly-to-OpenFeature migration assessment. To use it:
+
+```bash
+export FLAGSHARK_API_TOKEN='your-workspace-token'
+npx flagshark assess --output migration-assessment.md
+```
+
+This submits the repository to FlagShark's private analysis engine and writes a full migration report. Access is invite-only — email `joe@flagshark.com` to request a token. GitHub Actions users can use OIDC instead and do not need a token at all.
+
+### No telemetry, no account required
+
+The CLI is MIT-licensed open source. The basic scan (AST detection, git blame, usage counting) runs entirely locally with no outbound network calls and no account requirement.
+
+## Practical Evaluation Checklist
+
+- [ ] Run `npx flagshark scan` on a real codebase with at least one flag provider
+- [ ] Verify it auto-detects your flag SDK without config
+- [ ] Add the GitHub Action to a test repo and open a dummy PR
+- [ ] Check the PR comment appears with the stale flags table
+- [ ] Test with a monorepo containing multiple languages
+
+## Security Notes
+
+- The CLI scan runs entirely offline — no telemetry, no outbound connections
+- The GitHub Action requires `read` access to the repository
+- The assessment API (LaunchDarkly migration) requires a workspace-scoped token and sends repository identity to FlagShark's private API
+- CLI access to the assessment API is invite-only; contact `joe@flagshark.com`
+
+## FAQ
+
+**Q: Does it support custom flag provider patterns?**
+**A:** Yes. FlagShark includes a generic pattern matcher for custom flag implementations in addition to its 12 first-class provider integrations.
+
+**Q: Can it run in CI without posting PR comments?**
+**A:** Yes. Use `npx flagshark scan` directly in any CI pipeline. Exit code 1 means stale flags were found, exit code 0 means clean.
+
+**Q: Does it work in monorepos with mixed languages?**
+**A:** Yes. FlagShark scans all 13 supported languages in a single run and aggregates results into one table.
+
+**Q: Is the GitHub Action free for open source?**
+**A:** Yes. The GitHub Action is free for public repositories. Private repo pricing is not yet published — contact `joe@flagshark.com` for details.
+
+## Conclusion
+
+FlagShark fills a gap that every team using feature flags eventually hits: nobody owns cleanup, so flags accumulate indefinitely. By automating the detection and surfacing it on every PR, it makes the cleanup part of the normal review workflow.
+
+Run `npx flagshark scan` on your current project — if it finds nothing, your flag hygiene is excellent. If it finds dozens, you'll understand exactly why teams end up with legacy flags from 2022 still in production.
+
+- GitHub Action: [github.com/flagshark/flagshark-action](https://github.com/flagshark/flagshark-action)
+- CLI + docs: [flagshark.com](https://flagshark.com)
+
+## Source and Accuracy Notes
+
+- Project page: [flagshark.com](https://flagshark.com)
+- Source repository: [github.com/flagshark/flagshark](https://github.com/flagshark/flagshark) (MIT license, verified)
+- CLI source: [github.com/flagshark/flagshark/tree/main/packages/cli](https://github.com/flagshark/flagshark/tree/main/packages/cli)
+- GitHub Action: [github.com/flagshark/flagshark-action](https://github.com/flagshark/flagshark-action)
+- HN launch thread: [news.ycombinator.com/item?id=42270189](https://news.ycombinator.com/item?id=42270189) (verified — FlagShark launch thread from HN Algolia search)
+- Source last checked: 2026-08-12 (commit verified against README v2.3.1)
