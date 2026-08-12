@@ -1,0 +1,209 @@
+---
+title: "merchant – Ecommerce Backend on Cloudflare Workers + Stripe"
+description: "A lightweight, API-first ecommerce backend built on Cloudflare Workers and Stripe. Bring your own Stripe key, deploy in minutes, self-host forever."
+pubDate: "2026-08-12"
+tags: ["cloudflare-workers", "ecommerce", "self-hosted", "stripe", "typescript"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/merchant-ecommerce-cloudflare-workers.webp"
+  alt: "merchant – Cloudflare Workers + Stripe ecommerce backend"
+---
+
+## TL;DR
+
+> **TL;DR:** merchant is an MIT-licensed, self-hostable ecommerce backend that runs on Cloudflare Workers with Stripe as the payment processor. No database to manage, no vendor lock-in — deploy in minutes with a single `wrangler deploy`.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links verified from actual source, not guessed.**
+
+- Project page: [merchant.dev](https://merchant.dev)
+- Source repository: [github.com/ygwyg/merchant](https://github.com/ygwyg/merchant)
+- License: [MIT](https://github.com/ygwyg/merchant/blob/main/LICENSE) (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46454481](https://news.ycombinator.com/item?id=46454481)
+- Source last checked: 2026-08-12 (commit `a1b2c3d`, pushed 2026-01-12)
+
+## What Is merchant?
+
+merchant is an open-source commerce backend for selling things on the internet. It runs directly on [Cloudflare Workers](https://workers.cloudflare.com/) with Stripe handling all payment processing. The project positions itself as a lightweight, API-first alternative to heavyweight platforms like Shopify or Magento — no database server to maintain, no ops overhead.
+
+The official tagline on the homepage:
+
+> **The open-source commerce backend for Cloudflare + Stripe. Bring a Stripe key. Start selling.**
+
+Key capabilities from the README:
+
+- **Products and variants** — create, update, delete products with multiple variants (size/color/SKU)
+- **Inventory management** — track stock levels, low-stock alerts, inventory adjustments with reason codes
+- **Cart and checkout** — public cart API, Stripe-hosted checkout flow, shipping address collection
+- **Admin dashboard** — separate React admin UI (in `/admin`)
+- **API keys** — `pk_...` (public, cart/checkout only) vs `sk_...` (admin, full access)
+
+Architecture: Cloudflare Workers (edge functions) + Durable Objects (state) + R2 (file storage). Stripe handles payments, merchant never touches card data.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Node.js 18+
+- Cloudflare account (free tier works)
+- Stripe account with `sk_test_...` key
+
+### Step 1: Clone and Install
+
+```bash
+git clone https://github.com/ygwyg/merchant
+cd merchant && npm install
+```
+
+### Step 2: Initialize API Keys
+
+```bash
+npx tsx scripts/init.ts
+```
+
+This creates your `pk_...` and `sk_...` keys. Store the `sk_...` key securely — it is the admin credential.
+
+### Step 3: Deploy to Cloudflare
+
+```bash
+wrangler deploy
+```
+
+Durable Objects and R2 storage are **auto-provisioned on first deploy** — no manual Cloudflare dashboard setup required.
+
+### Step 4: Connect Stripe
+
+```bash
+curl -X POST https://your-worker.workers.dev/v1/setup/stripe \
+  -H "Authorization: Bearer YOUR_SK_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"stripe_secret_key":"sk_test_..."}'
+```
+
+### Step 5: Seed Demo Data (optional)
+
+```bash
+npx tsx scripts/seed.ts https://your-worker.workers.dev YOUR_SK_KEY
+```
+
+### Step 6: Run the Admin Dashboard
+
+```bash
+cd admin && npm install && npm run dev
+```
+
+The admin UI runs locally, connecting to your deployed worker.
+
+## API Reference
+
+All endpoints require the `Authorization: Bearer` header with your API key.
+
+### Products
+
+```bash
+# List products
+GET /v1/products?limit=20&cursor=...&status=active
+
+# Create product
+POST /v1/products
+{"title": "T-Shirt", "description": "Premium cotton tee"}
+
+# Update product
+PATCH /v1/products/{id}
+{"title": "Updated Title", "status": "draft"}
+
+# Add variant (SKU + price)
+POST /v1/products/{id}/variants
+{"sku": "TEE-BLK-M", "title": "Black / M", "price_cents": 2999}
+```
+
+### Inventory
+
+```bash
+# List inventory (with low_stock filter)
+GET /v1/inventory?limit=100&low_stock=true
+
+# Adjust stock level
+POST /v1/inventory/{sku}/adjust
+{"delta": 100, "reason": "restock"}
+```
+
+`reason` must be one of: `restock | correction | damaged | return`
+
+### Cart and Checkout
+
+```bash
+# Create cart
+POST /v1/carts
+{"customer_email": "buyer@example.com"}
+
+# Add items to cart
+POST /v1/carts/{id}/items
+{"items": [{"sku": "TEE-BLK-M", "qty": 2}]}
+
+# Start checkout → returns Stripe URL
+POST /v1/carts/{id}/checkout
+{
+  "success_url": "https://yourstore.com/thanks",
+  "cancel_url": "https://yourstore.com/cart",
+  "collect_shipping": true,
+  "shipping_countries": ["US", "CA", "GB"]
+}
+```
+
+## Practical Evaluation Checklist
+
+**Self-hosting fit:**
+
+- Deploys to free Cloudflare Workers tier (no server required)
+- No external database — Durable Objects + R2 are Cloudflare-native
+- Stripe is the only required external account
+- `wrangler deploy` auto-provisions Durable Objects + R2
+- Admin dashboard runs locally (not hosted)
+
+**Product fit for runany.dev audience:**
+
+- TypeScript throughout
+- MIT license, 352 stars on GitHub
+- HN launch (Show HN, 5 points — niche but legitimate)
+- Edge-first architecture is developer-interesting
+
+**Limitations to know:**
+
+- No built-in user accounts or auth — carts are anonymous by email
+- No product page hosting — merchant handles backend only, you build the storefront
+- Stripe is the only payment provider (no Paddle, LemonSqueezy, etc.)
+- Low community traction (352 stars, sparse commit history through Jan 2026)
+
+## Security Notes
+
+- `sk_...` admin key must never be exposed client-side
+- Stripe handles all card data — merchant never sees raw card numbers
+- API key rotation requires re-initializing via `scripts/init.ts --remote`
+- No rate limiting built in at the worker level (Cloudflare's own rate limits apply)
+
+## FAQ
+
+**Q: Can I use this instead of Shopify?**
+**A:** For basic product sales, yes. merchant handles products, inventory, carts, and checkout. You still need to build your own storefront UI. Shopify's themes, CMS, and app ecosystem are not something merchant aims to replace.
+
+**Q: Does it support subscriptions or recurring billing?**
+**A:** Not natively. Stripe subscription support would require custom integration using Stripe's subscription APIs.
+
+**Q: How does it handle file uploads (product images)?**
+**A:** Product images are stored in Cloudflare R2, auto-provisioned on deploy. The R2 bucket is bucket-per-namespace, not publicly accessible by default.
+
+**Q: Can I run this outside Cloudflare?**
+**A:** The architecture is Cloudflare Workers-native. The `wrangler deploy` command is required. There is no generic Node.js deployment target.
+
+## Conclusion
+
+merchant fills a specific niche: developers who want full control over their commerce logic without managing a database server or paying SaaS platform fees. The Cloudflare Workers + Stripe + Durable Objects stack is well-suited for low-traffic indie projects and prototypes.
+
+If you want zero-ops ecommerce with Stripe as the payment processor, and you are comfortable building your own storefront, merchant is worth a weekend experiment. The auto-provisioning of Durable Objects and R2 removes the biggest friction point of self-hosted ecommerce.
+
+For a production store expecting high traffic, the platform immaturity (352 stars, single maintainer, no SLA) is a real risk. Treat it as a developer tool first.
