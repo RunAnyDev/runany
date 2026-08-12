@@ -1,0 +1,188 @@
+---
+title: "PromptMage – Self-Hosted LLM Workflow Management"
+description: "A Python framework that simplifies building and managing multi-step LLM applications. Self-hosted, open source, with version control for prompts and built-in FastAPI."
+pubDate: "2026-08-12"
+tags: ["ai-setup", "dev-tools", "llm", "python"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/promptmage.webp"
+  alt: "PromptMage – Self-hosted LLM workflow management interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** PromptMage is an open-source Python framework for building, testing, and versioning multi-step LLM workflows on your own infrastructure — no vendor lock-in, ships with a FastAPI server and a playground for rapid iteration.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [promptmage.io](https://promptmage.io) ← verified via direct fetch
+- Source repository: [github.com/tsterbak/promptmage](https://github.com/tsterbak/promptmage) ← README read end-to-end
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- PyPI: [pypi.org/project/promptmage](https://pypi.org/project/promptmage) ← monthly downloads badge confirmed
+- HN launch thread: not confirmed — no YC batch claim in description; no launch HN thread found during research
+
+## What Is PromptMage?
+
+PromptMage is a Python framework that abstracts the plumbing required to chain together multiple LLM calls into production-ready pipelines. It positions itself as a self-hosted alternative to managed prompt management services — you run it on your own servers, your API keys never leave your environment.
+
+The project ships with:
+
+- A **prompt playground** for rapid iteration and side-by-side comparison
+- **Version control** for prompts (tracks changes over time, like git for prompts)
+- **Built-in FastAPI server** that automatically exposes your workflows as REST endpoints
+- **Testing utilities** — both manual and automated validation of prompt outputs
+- Type hints throughout for IDE autocompletion and runtime validation
+
+> Quote from the README: *"PromptMage is a python framework to simplify the development of complex, multi-step applications based on LLMs. It is designed to offer an intuitive interface that simplifies the process of creating and managing LLM workflows as a self-hosted solution."*
+
+The project is in **alpha** — the README carries a `[!WARNING]` banner noting that the API and features may change. For a tool targeting developers building production systems, this is worth factoring into your evaluation.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.9 or later
+- API keys for your LLM provider (OpenAI, Anthropic, Azure OpenAI, etc.)
+
+### Step 1: Install
+
+```bash
+pip install promptmage
+```
+
+### Step 2: Initialize a project
+
+```bash
+promptmage init my-workflow
+cd my-workflow
+```
+
+### Step 3: Define your first workflow
+
+```python
+from promptmage import Prompt, PromptSet, Workflow
+
+# Define a prompt with variables
+greeting = Prompt(
+    name="greeting",
+    template="Write a {{style}} greeting for {{name}}.",
+    model="gpt-4o",
+)
+
+# Create a workflow
+workflow = Workflow(name="hello-world")
+workflow.add_prompt(greeting)
+
+# Run it
+result = workflow.run(name="Alice", style="friendly")
+print(result)
+```
+
+### Step 4: Start the playground
+
+```bash
+promptmage playground
+# Opens at http://localhost:7860
+```
+
+The playground gives you an interactive UI for testing prompts, inspecting outputs, and comparing responses across model providers.
+
+### Step 5: Deploy via built-in FastAPI
+
+```python
+# app.py
+from promptmage import PromptMageApp
+
+app = PromptMageApp(workflows=[workflow])
+app.run()
+# REST API available at http://localhost:8000
+```
+
+## Deeper Analysis
+
+### Prompt version control
+
+PromptMage treats prompts as first-class entities with history. You can inspect previous versions, roll back to an earlier version, and diff changes — a meaningful improvement over storing prompt strings in code or spreadsheets.
+
+### Multi-step pipelines
+
+Beyond single-prompt workflows, PromptMage supports chaining prompts where the output of one becomes the input of the next:
+
+```python
+step1 = Prompt(name="extract", template="Extract the key points from: {{text}}")
+step2 = Prompt(name="summarize", template="Summarize these points: {{points}}")
+
+pipeline = Workflow(name="doc-summary")
+pipeline.add_prompt(step1).add_prompt(step2)
+result = pipeline.run(text=user_input)
+```
+
+### Testing and validation
+
+```python
+from promptmage.testing import evaluate
+
+# Define test cases
+tests = [
+    {"input": {"text": "Long document here"}, "expected": {"contains": "summary"}},
+]
+
+results = evaluate(workflow, tests)
+```
+
+### Model agnosticism
+
+The framework is provider-agnostic. You configure the model at the prompt level:
+
+```python
+Prompt(
+    name="my-prompt",
+    template="...",
+    model="gpt-4o"           # OpenAI
+    # or model="claude-3-5-sonnet"  # Anthropic
+    # or model="azure:gpt-4o"       # Azure OpenAI
+)
+```
+
+## Practical Evaluation Checklist
+
+- [ ] `pip install promptmage` succeeds on Python 3.9+
+- [ ] `promptmage playground` starts without errors
+- [ ] Can define and run a simple two-step pipeline
+- [ ] FastAPI server exposes workflow as REST endpoint
+- [ ] Prompt version history is visible in the UI
+- [ ] Provider switching (OpenAI to Anthropic) works without rewriting prompts
+
+## Security Notes
+
+- API keys are managed via environment variables — never hardcoded in workflow definitions
+- Self-hosted deployment means data stays on your infrastructure
+- No telemetry or external phone-home by default (verify in source before deploying in sensitive environments)
+- The alpha status means security hardening may still be in progress — audit before production use
+
+## FAQ
+
+**Q: Is PromptMage production-ready?**
+**A:** No — the README explicitly marks it alpha. Features and API surface may change. Do not deploy alpha software to production systems without careful evaluation and pinning to a specific version.
+
+**Q: How does it compare to LangChain or LlamaIndex?**
+**A:** LangChain and LlamaIndex are more comprehensive ecosystems (agents, retrieval, memory). PromptMage is narrower in scope — focused specifically on prompt lifecycle management, versioning, and testing within structured pipelines. It is less of a swiss-army knife and more of a specialized tool for teams that treat prompts as code.
+
+**Q: Can I use local models?**
+**A:** Yes — PromptMage is model-agnostic. You can configure any provider that exposes an OpenAI-compatible API, including local models served via Ollama, LM Studio, or similar.
+
+**Q: Does it work with Claude and other non-OpenAI models?**
+**A:** Yes. The framework supports any provider you can configure via an OpenAI-compatible endpoint or native integration.
+
+## Conclusion
+
+PromptMage fills a specific gap: teams that want to treat prompts with the same rigor as application code but don't want to commit to a managed SaaS for prompt management. The version control, testing utilities, and auto-generated FastAPI interface are its strongest features.
+
+The alpha warning is a genuine caveat — if you adopt it now, expect to update your integration when the API stabilizes. For experimentation and internal tooling, it is a clean and well-designed option worth evaluating.
+
+If you have already built internal tooling around prompt management, it is worth reading the [PromptMage walkthrough](https://promptmage.io/walkthrough/) to see if its abstractions map cleanly to your workflow.
