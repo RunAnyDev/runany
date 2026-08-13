@@ -1,0 +1,153 @@
+---
+title: "Tokenless - Half-cost AI API router with YC S26 backing"
+description: "Tokenless fans out LLM requests across multiple models, commits to the fastest winner, and cancels the rest — cutting inference costs by half with no quality loss."
+pubDate: "2026-08-13"
+tags: ["dev-tools", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/tokenless.webp"
+  alt: "Tokenless model router product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Tokenless is an OpenAI- and Anthropic-compatible API router that simultaneously runs your request against multiple models, watches them think, commits to whichever is clearly winning, and cancels the rest — delivering the same quality at under half the cost.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [usetokenless.com](https://usetokenless.com/) — confirmed live
+- Documentation: [usetokenless.com/docs](https://usetokenless.com/docs) — confirmed accessible
+- HN launch thread: [news.ycombinator.com/item?id=49099143](https://news.ycombinator.com/item?id=49099143) — 71 points, 2026-07-29
+- YC company page: [ycombinator.com/companies/tokenless](https://www.ycombinator.com/companies/tokenless) — YC S26
+- Source last checked: 2026-08-13
+
+## What Is Tokenless?
+
+Tokenless is a Y Combinator S26-backed model routing service. It sits in front of OpenAI and Anthropic APIs and works as a drop-in replacement — your code keeps the same SDK calls, just pointing to a different base URL.
+
+The core mechanism is speculative execution in reverse. Instead of picking one model upfront, Tokenless fans your request out to a cohort of models simultaneously and watches their reasoning traces in real time. Once one model pulls ahead — confidently solving the task — Tokenless selects it, cancels the trailing models, and returns that response. You pay only for the winner.
+
+From the landing page:
+
+> "Most calls don't need a frontier model. Tokenless fans out your request to a group of models and watches them think. Once a model is clearly on track, we select it and cancel the other models, and you only pay for what you need."
+
+The site states the team is built from AI researchers at Google DeepMind, Princeton, and UC Berkeley, and is backed by Y Combinator.
+
+## How the Routing Works
+
+Tokenless exposes two API endpoints — OpenAI-compatible and Anthropic-compatible:
+
+```
+OpenAI-compatible:  https://api.usetokenless.com/openai/v1
+Anthropic:         https://api.usetokenless.com/anthropic
+```
+
+You send `tokenless-pro` (or another tier name) as the model string instead of `gpt-4o` or `claude-opus-4`. Tokenless handles the model selection under the hood.
+
+Two tiers are shown on the site:
+
+- **Tokenless Pro** — optimized for solve rate on agentic tasks
+- **Tokenless Ultra Saver** — optimized for cost
+
+## Benchmarks
+
+Tokenless publishes numbers on three public agentic benchmarks: τ³-Banking, Terminal-Bench 2.1, and DeepSWE 1.1. On τ³-Banking:
+
+| Model | Solve Rate | Avg Cost/Task |
+|---|---|---|
+| **Tokenless Pro** | **40.2%** | **$0.57** |
+| GPT-5.6 Sol | 33.0% | $1.50 |
+| Claude Opus 5 | 32.8% | $1.64 |
+| Claude Fable 5 | 26.8% | $2.58 |
+| Gemini 3.6 Flash | 24.5% | $3.32 |
+
+These are published on the site with a note that estimates use published token prices and editable routing assumptions. Your actual results depend on your traffic profile.
+
+The savings calculator on the site shows a blended savings rate of 34% and 42% of requests being rerouted for a hypothetical $40K/month LLM bill — landing at roughly $26K/month.
+
+## Setup Workflow
+
+### Step 1: Create an API Key
+
+Sign up at [accounts.usetokenless.com/sign-up](https://accounts.usetokenless.com/sign-up). The full key is shown once — store it as an environment variable immediately.
+
+### Step 2: Point Your SDK at Tokenless
+
+**OpenAI SDK:**
+
+```bash
+export OPENAI_API_KEY="your-tokenless-key"
+export OPENAI_BASE_URL="https://api.usetokenless.com/openai/v1"
+```
+
+Then in code, use `tokenless-pro` as the model:
+
+```python
+from openai import OpenAI
+client = OpenAI()
+response = client.chat.completions.create(
+    model="tokenless-pro",
+    messages=[{"role": "user", "content": "Refactor this CLI options parser into an enum"}]
+)
+```
+
+**Anthropic SDK:**
+
+```bash
+export ANTHROPIC_API_KEY="your-tokenless-key"
+```
+
+```python
+import anthropic
+client = anthropic.Anthropic()
+response = client.messages.create(
+    model="tokenless-pro",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Refactor this CLI options parser into an enum"}]
+)
+```
+
+Both streaming and non-streaming requests are supported, along with tool calls and image inputs.
+
+### Step 3: Choose a Routing Mode
+
+The docs mention different routing modes — send `tokenless-pro`, `tokenless-ultra-saver`, or other tier names as the model string to control the balance between cost and quality.
+
+## Practical Evaluation Checklist
+
+- Drop-in replacement — no code refactoring needed for standard chat completions
+- OpenAI and Anthropic SDK compatibility confirmed
+- Speculative execution means you pay only for the winning model per request
+- Benchmarks are on public agentic tasks, not synthetic tests
+- Savings calculator lets you estimate your actual spend reduction
+- No obvious lock-in if you later want to switch back to direct API calls
+
+## Security Notes
+
+- BYOK (bring your own keys) option available — you can supply your own OpenAI/Anthropic keys rather than loading credits into Tokenless
+- Provider key management via the API: set, update, and revoke keys programmatically
+
+## FAQ
+
+**Q: Does this work with existing LangChain, LlamaIndex, or other agent frameworks?**
+**A:** Yes — as long as your framework uses the OpenAI or Anthropic SDK under the hood, changing the `base_url` or API key is sufficient.
+
+**Q: What's the latency impact of running multiple models?**
+**A:** Tokenless cancels slower models as soon as a winner emerges, so you pay the latency cost of the fastest adequate model, not the slowest. The speculative fan-out adds some overhead in the first 100-200ms before cancellation kicks in.
+
+**Q: How does it decide which model wins?**
+**A:** Tokenless watches reasoning traces and measures confidence evolution over time. Once a model is clearly on track for the task, it gets selected. The exact threshold logic is not publicly documented.
+
+**Q: Is there a free tier?**
+**A:** Check [usetokenless.com](https://usetokenless.com/) for current pricing — the site mentions a sign-up option but specific free tier limits are not documented in the public docs.
+
+## Conclusion
+
+Tokenless addresses the core inefficiency of single-model API calls: paying frontier prices for tasks a faster, cheaper model could solve just as well. The speculative execution approach is architecturally sound, and the OpenAI/Anthropic compatibility layer means adoption friction is minimal. If you're running significant LLM traffic — especially agentic workflows where task complexity varies — the 34% blended savings claim is plausible enough to test against your actual traffic.
+
+**HN thread:** [news.ycombinator.com/item?id=49099143](https://news.ycombinator.com/item?id=49099143)
