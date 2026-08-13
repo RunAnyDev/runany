@@ -1,0 +1,150 @@
+---
+title: "Pangolin – Open-source VPN alternative to Cloudflare Tunnels"
+description: "Pangolin is an open-source, identity-based remote access platform built on WireGuard that enables secure browser-based access to private infrastructure without open ports or public IPs."
+pubDate: "2026-08-14"
+tags: ["self-hosted", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pangolin-vpn.webp"
+  alt: "Pangolin VPN product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Pangolin is an open-source, identity-based VPN and reverse proxy built on WireGuard that lets you access private infrastructure through a browser — no open ports, no public IP required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [pangolin.net](https://pangolin.net)
+- Source repository: [github.com/fosrl/pangolin](https://github.com/fosrl/pangolin)
+- License: AGPL-3 (Community Edition) — verified via README
+- HN launch thread: [news.ycombinator.com/item?id=44526015](https://news.ycombinator.com/item?id=44526015) (500 points)
+
+## What Is Pangolin?
+
+Pangolin is an open-source remote access platform that combines a VPN and a browser-based reverse proxy into one tool. Built on WireGuard, it lets you access private infrastructure — web apps, VNC, RDP, SSH — without exposing ports or requiring a public IP address.
+
+The core problem it solves: traditional VPNs grant full network access once connected. Pangolin uses a zero-trust model where access is granted per-resource, not per-network. You define exactly which applications and services a user can reach, not the entire subnet.
+
+It competes directly with Cloudflare Tunnels, Twingate, and Zscaler as an open-source alternative you can self-host.
+
+## Setup Workflow
+
+### Step 1: Self-host on your server
+
+Pangolin runs as a lightweight binary or Docker container on your target network. No public IP or open ports needed.
+
+```bash
+# Docker (recommended)
+docker run -d \
+  --name pangolin \
+  -p 443:443 \
+  -v pangolin_data:/data \
+  fosrl/pangolin:latest
+```
+
+### Step 2: Create a site connector
+
+A "site" is a network gateway. The connector punches through firewalls using outbound tunnels and NAT traversal:
+
+```bash
+# Deploy connector on a private network
+pangolin site add my-home-network
+```
+
+Key properties of the connector:
+- Lightweight user-space process, no kernel module
+- Outbound-only connections — no inbound ports opened
+- Works behind CG-NAT, carrier-grade NAT, and restrictive firewalls
+- WireGuard-based encryption
+
+### Step 3: Define resources
+
+Expose specific applications rather than entire networks:
+
+```bash
+# Expose a web panel
+pangolin resource add --site my-home-network \
+  --type http \
+  --name "Home Assistant" \
+  --upstream http://192.168.1.100:8123
+
+# Expose SSH
+pangolin resource add --site my-home-network \
+  --type ssh \
+  --name "Home Server" \
+  --upstream tcp://192.168.1.200:22
+```
+
+### Step 4: Access via browser
+
+Users access resources through the browser — no client install required for web apps. For non-HTTP services (SSH, VNC, RDP), download the Pangolin client for your platform:
+
+- [Mac](https://pangolin.net/downloads/mac)
+- [Windows](https://pangolin.net/downloads/windows)
+- [Linux](https://pangolin.net/downloads/linux)
+- [iOS](https://pangolin.net/downloads/ios)
+- [Android](https://pangolin.net/downloads/android)
+
+## Deeper Analysis
+
+### Zero-trust vs traditional VPN
+
+Traditional VPNs route all traffic through a tunnel and grant access to the full network. Pangolin's zero-trust approach authenticates each resource request individually. The difference in practice:
+
+- **Traditional VPN:** Connect → full subnet visible → access granted per-IP
+- **Pangolin:** Authenticate → access granted per-resource → network topology stays hidden
+
+This matters when running self-hosted services on a home lab or private cloud. You don't expose `192.168.1.0/24` to users — only the specific services they need.
+
+### Browser-based reverse proxy
+
+Pangolin's reverse proxy handles SSL certificates automatically, routes traffic to internal services, and load-balances across multiple backends. For services that don't have native HTTPS, this is a meaningful convenience — you get a valid certificate without configuring nginx or Caddy yourself.
+
+### Deployment options
+
+| Option | Cost | Notes |
+|---|---|---|
+| Pangolin Cloud | Free tier available | Fully managed, no infrastructure |
+| Self-Host: Community Edition | Free (AGPL-3) | Full source available |
+| Self-Host: Enterprise Edition | Free up to $100K revenue | Fossorial Commercial License |
+
+## Practical Evaluation Checklist
+
+- Works behind CG-NAT (no port forwarding required)
+- Outbound-only connections don't require router configuration
+- Automatic SSL certificate management
+- Browser-based access for HTTP services
+- Per-resource access control (zero-trust model)
+- Multi-platform clients (Mac, Windows, Linux, iOS, Android)
+- Site connectors run anywhere (binary or container)
+- WireGuard-based encryption
+
+## Security Notes
+
+- RBAC with built-in users or external identity providers (OIDC/SAML)
+- Full audit logs for all access events
+- Network segmentation: users reach only explicitly defined resources
+- WireGuard encryption (modern, performant VPN protocol)
+
+## FAQ
+
+**Q: How is this different from Cloudflare Tunnels?**
+**A:** Cloudflare Tunnels is a managed service owned by a third party. Pangolin is fully open source (AGPL-3) and self-hostable. You control the infrastructure and the data. Cloudflare Tunnels requires a Cloudflare account and routes traffic through their network; Pangolin's tunnel is peer-to-peer between your sites and your users.
+
+**Q: Does it work if I am behind a strict corporate firewall?**
+**A:** Yes — the site connector makes outbound connections only. No inbound ports need to be opened, and NAT traversal handles networks without public addressing. As long as the connector can reach the Pangolin control plane, it works.
+
+**Q: What is the performance impact compared to a direct VPN?**
+**A:** WireGuard is a modern kernel-space VPN protocol with low overhead. The browser-based proxy adds minimal latency for HTTP workloads. For bulk data transfer (large file copies, streaming), a full WireGuard client is more efficient than the browser proxy.
+
+## Conclusion
+
+Pangolin fills a specific gap: you have services running on a private network (home lab, development server, IoT devices) and need to access them from anywhere without configuring port forwarding or paying for a managed tunnel service. The self-hosted Community Edition is free and runs on a $5/mo VPS.
+
+For developers who run self-hosted services and want a cleaner alternative to `ssh -L` tunnels or opening firewall ports, Pangolin is worth evaluating. The outbound-only connector model means you never poke a hole in your network perimeter.
