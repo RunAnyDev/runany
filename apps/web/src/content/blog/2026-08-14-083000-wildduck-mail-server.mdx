@@ -1,0 +1,153 @@
+---
+title: "WildDuck Mail Server – Scalable Self-Hosted Email"
+description: "WildDuck is an open-source IMAP/POP3 mail server built on Node.js and MongoDB, designed for horizontal scaling with no single point of failure."
+pubDate: "2026-08-14"
+tags: ["self-hosted", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wildduck-mail-server.webp"
+  alt: "WildDuck Mail Server – scalable IMAP/POP3 server"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** WildDuck is an open-source IMAP/POP3 mail server built on Node.js and MongoDB that scales horizontally without a single point of failure, designed as part of the Zone Mail Suite.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [wildduck.email](https://wildduck.email)
+- Source repository: [github.com/zone-eu/wildduck](https://github.com/zone-eu/wildduck)
+- License: [EUPL-1.2](https://github.com/zone-eu/wildduck/blob/master/LICENSE) (verified via LICENSE file)
+- Documentation: [docs.wildduck.email](https://docs.wildduck.email)
+
+## What Is WildDuck?
+
+WildDuck is an **opinionated IMAP/POP3 mail server** built entirely on Node.js and MongoDB. Unlike traditional mail servers (Postfix, Exim, Dovecot) that couple storage, retrieval, and delivery into monolithic components, WildDuck separates concerns: it handles IMAP/POP3 access, while companion projects [Haraka](https://docs.wildduck.email/docs/architecture/inbound-smtp) manages inbound SMTP and [ZoneMTA](https://docs.wildduck.email/docs/architecture/outbound-smtp) handles outbound delivery.
+
+The project describes its design philosophy simply: *"If there's a decision to be made, do whatever Gmail has done."*
+
+Key characteristics from the README:
+
+- **Distributed backend** — MongoDB with sharding and replica set support stores all emails and metadata
+- **Stateless application layer** — add more WildDuck instances behind a load balancer to scale throughput
+- **No root privileges, no shell access, no filesystem access** — runs entirely within its MongoDB world
+- **REST API for management** — accounts, mailboxes, messages, filters, auto-replies, DKIM, and audit logs
+- **Full IMAP4rev1 support** — IDLE, CONDSTORE, COMPRESS, SPECIAL-USE, UTF8, QUOTA, and more
+- **2FA and PGP** — TOTP, WebAuthn, application passwords, PGP encryption, and audit logging
+
+## Setup Workflow
+
+### Option 1 — Docker Compose (Recommended)
+
+The fastest path to a running instance:
+
+```bash
+git clone https://github.com/nodemailer/wildduck-dockerized.git
+cd wildduck-dockerized
+cp config.example.json config.json
+# Edit config.json with your domain and MongoDB URI
+docker-compose up -d
+```
+
+The Docker setup provisions WildDuck, Haraka (SMTP inbound), and ZoneMTA (SMTP outbound) together.
+
+### Option 2 — Manual Installation
+
+Requirements:
+- Node.js 18 or later
+- MongoDB 5 or later (standalone for dev; replica set recommended for production)
+- Redis 6 or later (for session and rate-limit state)
+
+```bash
+git clone https://github.com/zone-eu/wildduck.git
+cd wildduck
+npm install
+npm run build
+# Configure
+cp config.sample.toml config.toml
+# Edit config.toml — set MongoDB URI, Redis URL, HTTP API bind address
+npm start
+```
+
+The API listens on port 8080 by default. IMAP runs on port 993 (SSL) and 143 (STARTTLS).
+
+### Option 3 — One-Click via API
+
+Once WildDuck is running, the REST API manages everything:
+
+```bash
+# Create a new user account
+curl -X POST https://localhost:8080/users \
+  -H "Content-Type: application/json" \
+  -d '{"user": "alice", "password": "secret", "name": "Alice Smith"}'
+
+# List mailboxes
+curl https://localhost:8080/users/alice/mailboxes \
+  -u alice:secret
+
+# Create a folder
+curl -X PUT https://localhost:8080/users/alice/mailboxes/Projects \
+  -u alice:secret
+```
+
+### Connecting an Email Client
+
+WildDuck speaks standard IMAP. Any modern email client works:
+
+- **Thunderbird** — server: `your-server.com`, port `993`, SSL/TLS
+- **Apple Mail** — same settings
+- **iOS Mail** — same settings with "Use SSL" enabled
+
+The live demo at [webmail.wildduck.email](https://webmail.wildduck.email/) lets you register a free `@wildduck.email` address to test the web client without self-hosting.
+
+## Architecture Overview
+
+WildDuck is one piece of the Zone Mail Suite:
+
+```
+[Inbound SMTP] → Haraka (port 25) → WildDuck IMAP/POP3 ← [Email Client]
+                                              ↓
+                                    MongoDB (sharded)
+                                              ↓
+[Outbound SMTP] → ZoneMTA (port 587) ← WildDuck delivery queue
+```
+
+All three components scale independently. WildDuck itself is stateless — MongoDB holds the state, and any number of WildDuck processes can share the same MongoDB cluster.
+
+## Security Notes
+
+- Runs as a non-root user with no filesystem write access outside its data directory
+- 2FA via TOTP and WebAuthn for web/API access
+- Application-specific passwords for IMAP/SMTP clients
+- PGP encryption support for stored mail
+- Audit log for admin actions
+
+## FAQ
+
+**Q: How does WildDuck compare to Dovecot?**
+**A:** Dovecot is a mature, C-based IMAP server with decades of production hardening. WildDuck is newer (Node.js, 2016 onward), targets horizontal scalability from the start, and ships with a REST API for management. Dovecot handles mail storage itself; WildDuck delegates all persistence to MongoDB.
+
+**Q: What MongoDB version is required?**
+**A:** MongoDB 5.0 or later. A replica set is required for production (single-node MongoDB is for development only).
+
+**Q: Can WildDuck handle millions of mailboxes?**
+**A:** The architecture is designed for it — MongoDB sharding distributes data across nodes, and WildDuck instances are stateless, so you scale by adding app servers. The docs note it is "best suited for 1000+ accounts."
+
+**Q: Does it include spam filtering?**
+**A:** WildDuck itself does not include spam filtering. The Zone Mail Suite integrates with external tools. For a self-contained anti-spam setup, pair with rspamd or SpamAssassin on the SMTP layer.
+
+**Q: What license is it under?**
+**A:** EUPL-1.2 (European Union Public License). This is a copyleft license compatible with GPL, used by Zone Media OÜ (Estonia).
+
+## Conclusion
+
+WildDuck is a compelling option if you want a modern, API-driven mail server with horizontal scaling built into its core design. The Node.js/MongoDB stack makes it approachable for developers comfortable with JavaScript tooling, and the stateless architecture means scaling from 10 to 10,000 users is a matter of adding app servers and MongoDB nodes — not reconfiguring a monolithic mail stack.
+
+The trade-off: it is younger than Dovecot or Courier, and it requires MongoDB as a mandatory dependency. If you want a battle-tested C-based server with decades of production history, stick with Dovecot. If you want a REST-API-first, horizontally scalable IMAP server that fits a modern cloud-native stack, WildDuck is worth a look.
+
+**Source:** [github.com/zone-eu/wildduck](https://github.com/zone-eu/wildduck) — 2.1k stars, EUPL-1.2, last pushed August 2026.
