@@ -1,0 +1,132 @@
+---
+title: "RDAP API – Normalized WHOIS Data for Developers"
+description: "A developer API that replaces WHOIS with clean JSON. Covers 1,200+ TLDs, normalizes messy registry responses, and exposes MCP and REST endpoints from $9/mo."
+pubDate: "2026-08-15"
+tags: ["dev-tools", "api", "dns"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rdap-api.webp"
+  alt: "RDAP API product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** RDAP API wraps the RDAP protocol—the official WHOIS replacement—into a normalized REST and MCP interface, returning consistent JSON across 1,200+ TLDs for $9/mo.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [rdapapi.io](https://rdapapi.io) ← **MUST visit and verify**
+- Source repository: none (no public source repo)
+- License: proprietary (no open-source license)
+- HN launch thread: [news.ycombinator.com/item?id=43432938](https://news.ycombinator.com/item?id=43432938) ← 2 points, confirmed via HN Algolia search
+- Source last checked: 2026-08-15
+
+## What Is RDAP?
+
+WHOIS responses are notoriously inconsistent. Each domain registry returns its own text format, field names vary, and contact data is buried inside nested structures. RDAP (Registration Data Access Protocol) is the IETF-standardized replacement defined in RFCs 7480–7484, already required by ICANN for all gTLD registries.
+
+The problem is that raw RDAP is not developer-friendly either — each registry still formats responses differently, and "thin" registries like Verisign (for `.com` and `.net`) only hold basic data; the registrant and contact info lives with the registrar instead.
+
+RDAP API sits in front of all of this. It discovers the right RDAP server for any TLD, normalizes the response into a consistent JSON shape, and optionally follows registrar referrals automatically so you get all the data in one call.
+
+## Key Features
+
+### Normalized JSON
+
+Every response uses the same field names and structure regardless of which registry answered. Nameservers are returned as a flat array of clean strings, not nested `ldhName` objects with embedded comments.
+
+```bash
+curl https://rdapapi.io/api/v1/domain/google.com \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Accept: application/json"
+```
+
+```json
+{
+  "domain": "google.com",
+  "handle": "2138514_DOMAIN_COM-VRSN",
+  "status": ["client delete prohibited", "server transfer prohibited"],
+  "registrar": {
+    "name": "MarkMonitor Inc.",
+    "iana_id": "292",
+    "abuse_email": "abuse@markmonitor.com",
+    "abuse_phone": "+120****1750"
+  },
+  "dates": {
+    "registered": "1997-09-15T04:00:00Z",
+    "expires": "2028-09-14T04:00:00Z",
+    "updated": "2019-09-09T15:39:04Z"
+  },
+  "nameservers": ["ns1.google.com", "ns2.google.com", "ns3.google.com", "ns4.google.com"],
+  "dnssec": false
+}
+```
+
+### Coverage
+
+Over 1,200 TLDs are supported, including all major gTLDs (`.com`, `.net`, `.org`), ccTLDs (`.io`, `.de`, `.ai`, `.co`), and new gTLDs. The list is publicly documented at [rdapapi.io/tlds](https://rdapapi.io/tlds).
+
+### Registrar Follow
+
+For thin registries, adding `?follow=true` automatically fetches and merges registrar data — contacts, abuse info, and more — into a single response instead of requiring a second API call.
+
+### Bulk Lookups
+
+The `POST /api/v1/domains/bulk` endpoint accepts up to 10 domains in one request, queried concurrently. All results are returned in input order.
+
+```bash
+curl -X POST https://rdapapi.io/api/v1/domains/bulk \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"domains": ["google.com", "github.com", "cloudflare.com"]}'
+```
+
+### MCP Server
+
+The same lookups are available via the Model Context Protocol at `https://rdapapi.io/mcp/rdap`, using the same API key and quota. Available tools: `domain-lookup`, `ip-lookup`, `asn-lookup`, `nameserver-lookup`, and `entity-lookup`. This means AI agents can query domain registration data directly without a separate REST integration.
+
+### SDKs
+
+Official SDKs are available for Python, Node.js, Go, PHP, and Java. Each is documented at `rdapapi.io/sdks/[lang]`.
+
+## Practical Evaluation Checklist
+
+- API works and returns normalized JSON
+- 7-day free trial with no card charge until trial ends
+- MCP endpoint confirmed in OpenAPI spec
+- Bulk lookup endpoint confirmed
+- SDK pages for Python, Node.js, Go, PHP, Java
+- Public uptime stats at `status.rdapapi.io`
+- 26M+ queries served (stats page)
+
+## Security Notes
+
+- API key passed as Bearer token in Authorization header
+- No OAuth or key rotation complexity
+- Rate limits vary by plan (30 req/min Starter, 60 Pro, 300 Business)
+
+## FAQ
+
+**Q: Is this open source?**
+**A:** No. RDAP API is a proprietary commercial service. There is no public source repository and no open-source license.
+
+**Q: How is this different from a free WHOIS lookup?**
+**A:** WHOIS returns unstructured text that varies per registrar. RDAP API returns typed JSON with consistent field names across all TLDs. It also handles the registry/registrar split automatically — thin registries like `.com` only hold nameserver and dates; the contact data lives with the registrar and RDAP API fetches it when you add `?follow=true`.
+
+**Q: Does it support IP and ASN lookups?**
+**A:** Yes. Endpoints: `GET /api/v1/ip/:ip` for IP network data (range, CIDR, country, abuse contacts) and `GET /api/v1/asn/:asn` for autonomous system data.
+
+**Q: What happens when the quota runs out?**
+**A:** You receive emails at 75% and 100% usage. Requests then return HTTP 429 with `"error": "quota_exceeded"` until the next billing cycle. There is no overage billing.
+
+**Q: Is there a free tier?**
+**A:** Every plan starts with a 7-day free trial that has full API access. The Starter plan is $9/mo for 30,000 requests/month after the trial.
+
+## Conclusion
+
+RDAP API solves the "WHOIS is a mess" problem for developers who need reliable, programmatically parseable domain registration data. The normalized JSON alone is worth the price — no more regex spelunking through differently-formatted plain text. The MCP endpoint is a bonus for anyone building AI agents that need to check domain ownership or verify registrar info. Plans start at $9/mo with a 7-day free trial.
