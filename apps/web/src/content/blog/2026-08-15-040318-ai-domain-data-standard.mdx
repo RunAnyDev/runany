@@ -1,0 +1,142 @@
+---
+title: "AI Domain Data Standard – Self-Hosted Domain Identity for AI Agents"
+description: "Publish authoritative domain identity as open JSON. The AI Domain Data Standard gives AI systems and automated agents a canonical, self-hosted source of truth about any domain — no SaaS required."
+pubDate: "2026-08-15"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ai-domain-data-standard.webp"
+  alt: "AI Domain Data Standard product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** The AI Domain Data Standard lets any domain publish a self-hosted JSON profile at `/.well-known/domain-profile.json` that AI systems, search engines, and automated agents can consume — eliminating hallucinated domain information without a third-party dependency.
+
+## Source and Accuracy Notes
+
+- **Project page:** [ai-domain-data.org](https://ai-domain-data.org)
+- **Source repository:** [github.com/ai-domain-data/spec](https://github.com/ai-domain-data/spec)
+- **License:** MIT (verified via repository `LICENSE` file)
+- **Specification:** [ai-domain-data.org/spec](https://ai-domain-data.org/spec) — current version v0.1.1
+- **HN launch thread:** Not confirmed via YC batch — this is an open-source community standard, not a YC-funded company
+
+## What Is the AI Domain Data Standard?
+
+When an AI system crawls your site, it infers who you are from your content, meta tags, and third-party databases — a process prone to outdated information and outright hallucination. The AI Domain Data Standard (AIDD) solves this by letting any domain publish a canonical, self-hosted JSON record that machines can read directly.
+
+The record lives at `https://yourdomain.com/.well-known/domain-profile.json` and optionally mirrors via a DNS TXT record at `_ai.yourdomain.com`. Both are read in preference order, giving resilient fallback coverage.
+
+The format is deliberately simple — a minimal valid record requires just four fields:
+
+```json
+{
+  "spec": "https://ai-domain-data.org/spec/v0.1",
+  "name": "Example Site",
+  "description": "A minimal valid AI Domain Data record.",
+  "website": "https://example.com",
+  "contact": "contact@example.com"
+}
+```
+
+Optional fields include `logo`, `entity_type` (using schema.org `@type` values like `Organization`, `Person`, `Blog`), and a raw `jsonld` block for embedding complete schema.org JSON-LD.
+
+The standard is built on schema.org vocabulary, so it slots directly into existing structured-data pipelines. The specification is vendor-neutral, MIT-licensed, and has no fees or lock-in.
+
+## Setup Workflow
+
+### Step 1: Generate a domain profile
+
+Use the online generator at [ai-domain-data.org/generator](https://ai-domain-data.org/generator/) — no account required. The tool validates all required fields, lets you preview the JSON output, and provides ready-to-use DNS TXT record values.
+
+Alternatively, install the CLI:
+
+```bash
+npm install -g @ai-domain-data/cli
+aidd init --domain example.com
+```
+
+This creates a `domain-profile.json` file in the current directory, pre-filled with your domain's information.
+
+### Step 2: Publish the record
+
+**HTTPS method (recommended, authoritative):**
+
+Upload `domain-profile.json` to your web server so it is accessible at `https://yourdomain.com/.well-known/domain-profile.json`.
+
+**DNS TXT fallback method:**
+
+Publish a TXT record at `_ai.yourdomain.com` with the value:
+
+```
+ai-json=<base64-encoded JSON>
+```
+
+For example, using Cloudflare:
+
+```bash
+# Encode the JSON
+DOMAIN_JSON=$(cat domain-profile.json | base64)
+
+# Add TXT record via Cloudflare API
+curl -X POST "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
+  -H "Authorization: Bearer ${CLOUDFLARE_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"type\":\"TXT\",\"name\":\"_ai.yourdomain.com\",\"content\":\"ai-json=${DOMAIN_JSON}\"}"
+```
+
+The spec uses HTTPS as the primary source and DNS as a fallback for systems that cannot access HTTPS endpoints.
+
+### Step 3: Verify visibility
+
+Use the visibility checker at [ai-domain-data.org/checker](https://ai-domain-data.org/checker/) — enter your domain and the tool will fetch the record via both HTTPS and DNS, validate it against the JSON schema, and report any errors.
+
+From the CLI:
+
+```bash
+aidd validate --domain example.com
+```
+
+## Platform Integrations
+
+Official plugins handle generation and publishing automatically for common platforms:
+
+| Platform | Package | Link |
+|---|---|---|
+| Next.js | `@ai-domain-data/nextjs` | [npm](https://www.npmjs.com/package/@ai-domain-data/nextjs) |
+| Jekyll | `jekyll-ai-domain-data` (Ruby gem) | [RubyGems](https://rubygems.org/gems/jekyll-ai-domain-data) |
+| WordPress | AI Domain Data plugin | [WordPress.org](https://wordpress.org/plugins/ai-domain-data/) |
+
+All integrations generate the `domain-profile.json` during the site build or save process, validate against the schema automatically, and handle deployment.
+
+## Why It Matters
+
+AI hallucination about domains is a real, recurring problem. When Perplexity or Copilot cites a company, it often pulls from outdated Crunchbase data, misremembered press releases, or inferred context. AIDD gives domain owners a direct, machine-readable channel to publish ground truth — name, description, contact, entity type — that persists independently of third-party databases.
+
+The standard is complementary to `robots.txt` (which tells crawlers what to avoid) and `sitemap.xml` (which helps discovery). AIDD answers the identity question: who is this domain?
+
+## FAQ
+
+**Q: Do I need both HTTPS and DNS methods?**
+**A:** No — HTTPS is authoritative and sufficient on its own. DNS serves as a fallback for systems that cannot make HTTPS requests.
+
+**Q: Is this compatible with schema.org structured data?**
+**A:** Yes. The optional `entity_type` field uses schema.org `@type` values directly, and the optional `jsonld` field accepts full schema.org JSON-LD blocks. The spec is built on schema.org vocabulary.
+
+**Q: Does this replace ai.txt?**
+**A:** No. ai.txt tells AI systems what content they may or may not use. AIDD tells them who the domain is. They address different problems and can be used together.
+
+**Q: What happens if I stop publishing the record?**
+**A:** Nothing negative — it is completely optional. AI systems and agents will fall back to inferring your domain's identity from other sources.
+
+**Q: Is the tooling free?**
+**A:** Yes. The specification is MIT-licensed, all tooling is open source, and there are no third-party fees or SaaS dependencies.
+
+## Conclusion
+
+The AI Domain Data Standard is a lightweight, well-designed solution to a specific problem: AI hallucination about who a domain belongs to. With four required fields, a self-hosted JSON file, and official integrations for Next.js, Jekyll, and WordPress, it takes minutes to publish and requires no ongoing maintenance.
+
+If you run a domain that AI systems interact with — an open-source project, a SaaS product, a developer tool — publishing a domain profile is one of the highest-signal, lowest-effort things you can do for data accuracy in the AI era.
