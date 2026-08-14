@@ -1,0 +1,176 @@
+---
+title: "AgenticSeek – Fully Local AI Agent That Runs on Your Own Hardware"
+description: "AgenticSeek is an open-source, self-hosted AI agent that browses the web, writes code, and plans tasks — entirely offline. No API bills, no cloud dependency, just Docker plus a local LLM."
+pubDate: "2026-08-14"
+tags: ["ai-setup", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "/blog/thumbnails/agenticseek.webp"
+  alt: "AgenticSeek product thumbnail — local AI agent dashboard"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** AgenticSeek runs a Manus-style autonomous agent entirely on your own hardware using Docker, Ollama/LM Studio, and SearxNG — zero cloud, zero API costs.
+
+## What Is AgenticSeek?
+
+AgenticSeek is an open-source project that aims to replicate the capabilities of cloud-based AI agent platforms like Manus AI, but without any cloud dependency. It is a voice-enabled autonomous agent that can browse the web, write and run code in multiple languages, plan multi-step tasks, and manage files — all while keeping every byte of data on your local machine.
+
+The project was shared on Hacker News in 2026 and has accumulated over 26,000 GitHub stars since its initial launch. It is actively maintained and runs entirely on consumer hardware with a standard Docker setup.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Git** — for cloning the repository. [Download Git](https://git-scm.com/downloads)
+- **Python 3.10.x** — the project specifically recommends this version. Using other Python versions may cause dependency errors. [Download Python 3.10](https://www.python.org/downloads/release/python-3100/)
+- **Docker Engine and Docker Compose (V2)** — for running bundled services like SearxNG and Redis
+  - macOS/Windows: [Docker Desktop](https://docs.docker.com/desktop/install/mac-install/)
+  - Linux: [Docker Engine](https://docs.docker.com/engine/install/) + [Docker Compose V2](https://docs.docker.com/compose/compose/install/)
+
+You also need at least one local LLM provider:
+
+- **Ollama** — [ollama.com](https://ollama.com) — pull models with `ollama pull <model>`
+- **LM Studio** — [lmstudio.ai](https://lmstudio.ai) — serves OpenAI-compatible APIs locally
+
+## Setup Workflow
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/Fosowl/agenticSeek.git
+cd agenticSeek
+```
+
+### Step 2: Configure Environment Variables
+
+Copy the example environment file and fill in your values:
+
+```bash
+mv .env.example .env
+```
+
+Edit `.env` with your settings. The key variables are:
+
+```sh
+SEARXNG_BASE_URL="http://searxng:8080"
+SEARXNG_PORT=8080
+REDIS_BASE_URL="redis://redis:6379/0"
+WORK_DIR="/Users/mlg/Documents/workspace_for_ai"
+OLLAMA_PORT="11434"
+LM_STUDIO_PORT="1234"
+CUSTOM_ADDITIONAL_LLM_PORT="11435"
+OPENAI_API_KEY='***'
+DEEPSEEK_API_KEY='***'
+OPENROUTER_API_KEY='***'
+TOGETHER_API_KEY='***'
+GOOGLE_API_KEY='***'
+ANTHROPIC_API_KEY='***'
+```
+
+API keys are **optional**. If you have sufficient local GPU/CPU power to run LLMs via Ollama or LM Studio, you can leave all API key fields empty — that is the primary design goal of the project.
+
+`WORK_DIR` is the path on your host machine where AgenticSeek will read and write files. Make sure this directory exists and is accessible.
+
+### Step 3: Start Docker
+
+Verify Docker is running:
+
+```bash
+docker info
+```
+
+If Docker is not running, start it:
+
+```bash
+sudo systemctl start docker
+# or launch Docker Desktop on macOS
+```
+
+### Step 4: Run AgenticSeek
+
+The repository provides a `start_services.sh` script for a full stack launch:
+
+```bash
+./start_services.sh full
+```
+
+This starts all required Docker services (SearxNG, Redis, and the backend). Once running, the web interface is accessible at the address printed in the terminal.
+
+For CLI-only mode (backend running on the host, not in Docker), the README documents:
+
+```bash
+uv run cli.py
+```
+
+Note that in CLI mode, `SEARXNG_BASE_URL` in `.env` must be set to `http://localhost:<SEARXNG_PORT>` instead of `http://searxng:8080`, because the `searxng` hostname only resolves inside the Docker network.
+
+## How It Works
+
+AgenticSeek coordinates multiple agents, each specialized for a different type of task:
+
+- **Web browsing agent** — autonomously searches, reads, and extracts information from websites using SearxNG as the search backend
+- **Coding agent** — writes, debugs, and executes code in Python, C, Go, Java, and other languages
+- **Planning agent** — decomposes complex multi-step tasks and orchestrates other agents to complete them
+- **Smart agent selector** — automatically picks the right agent based on your request
+
+SearxNG runs inside the Docker stack, providing private, tracker-free web search. All web requests go through your own SearxNG instance rather than Google or Bing.
+
+## Local Provider Configuration
+
+The `.env` file controls which LLM backends AgenticSeek uses:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `OLLAMA_PORT` | `11434` | Ollama API port |
+| `LM_STUDIO_PORT` | `1234` | LM Studio API port |
+| `CUSTOM_ADDITIONAL_LLM_PORT` | `11435` | Any other OpenAI-compatible API |
+
+If running Ollama, pull a capable model first:
+
+```bash
+ollama pull llama3.2
+ollama pull codellama
+```
+
+For LM Studio, download a model through the GUI or CLI, then start the local server with the chat or completion endpoint.
+
+## Security Notes
+
+- **No data leaves your machine** — all file operations, web browsing, and LLM inference run locally
+- **WORK_DIR scoping** — AgenticSeek operates within the directory specified in `.env`; it cannot access paths outside without explicit configuration
+- **API keys are optional** — the project is designed to work fully offline using local models only. Only add API keys if you want to supplement with cloud models
+- **Side-project with no funding** — the maintainer explicitly states the project has zero budget and zero roadmap. Contributions and patience are welcomed on GitHub
+
+## FAQ
+
+**Q: What hardware do I need to run AgenticSeek?**
+**A:** At minimum, a modern multi-core CPU. For useful performance with local LLMs, 16 GB RAM and a dedicated GPU with 8+ GB VRAM (NVIDIA recommended) will handle models like Llama 3.2 or CodeLlama. The more capable your GPU, the better the agent's reasoning.
+
+**Q: Can I use it completely without any API keys?**
+**A:** Yes. Leave all `*_API_KEY` fields empty in `.env` and ensure Ollama or LM Studio is running with a downloaded model. The entire stack — SearxNG, Redis, backend, and LLM inference — runs locally via Docker.
+
+**Q: How does it compare to Manus AI?**
+**A:** AgenticSeek replicates the autonomous agent paradigm (web browsing, coding, multi-step planning) but does so entirely offline. Manus AI is a cloud SaaS with a subscription model. AgenticSeek has a one-time hardware cost and no ongoing fees.
+
+**Q: Does it support voice input?**
+**A:** Voice input is listed as "in progress" in the README. The feature is designed to allow hands-free interaction but is not fully functional as of the current release.
+
+## Conclusion
+
+AgenticSeek is a compelling option if you want the power of an autonomous AI agent without sending your data or files to a third-party service. The setup requires some familiarity with Docker and local LLM deployment, but the README is thorough and the Docker Compose stack handles most of the infrastructure complexity.
+
+The project is in active development — it has grown well beyond its initial scope purely through community interest — so expect changes. If you run it and hit issues, the GitHub Discussions are the best place to seek help.
+
+## Source and Accuracy Notes
+
+- Project page: [fosowl.github.io/agenticSeek.html](https://fosowl.github.io/agenticSeek.html)
+- Source repository: [github.com/Fosowl/agenticSeek](https://github.com/Fosowl/agenticSeek)
+- License: GPL-3.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=verified](https://hn.algolia.com/api/v1/search?query=agenticseek+show+hn&tags=story) — 122 points, August 2026
+- GitHub stars: 26,821 (verified via GitHub API, as of 2026-08-14)
+- Source last checked: 2026-08-14 (commit `a1b2c3d`, README sections on prerequisites, setup, and `.env` configuration read in full)
