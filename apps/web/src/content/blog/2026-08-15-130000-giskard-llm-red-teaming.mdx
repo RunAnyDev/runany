@@ -1,0 +1,180 @@
+---
+title: "Giskard v3 – Open-source red teaming for AI agents"
+description: "Giskard v3 is a Python library for testing AI agents via scenario evals and automated vulnerability scanning. Covers prompt injection, groundedness, and multi-turn traces."
+pubDate: "2026-08-15"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/giskard-llm-red-teaming.webp"
+  alt: "Giskard v3 – AI red teaming and evaluation interface"
+draft: false
+---
+
+## TL;DR
+> **TL;DR:** Giskard v3 is an open-source Python library for testing AI agents — it runs scenario-based evals with LLM judges and an automated vulnerability scanner that probes for prompt injection, harmful content, and OWASP LLM Top-10 categories.
+
+## What Is Giskard?
+
+Giskard v3 is a modular, open-source Python library for **testing and evaluating LLM-based agents and pipelines**. It comes in two layers:
+
+- **`giskard-checks`** — a scenario-based eval framework for writing assertions over agent traces, with built-in LLM-as-judge checks (groundedness, conformity, custom judges)
+- **`giskard-scan`** — an automated red-teaming scanner that generates adversarial test suites from a plain-language description of your agent, covering OWASP LLM Top-10 threat categories, prompt injection probes, and RAG quality evaluation
+
+The library is **language-agnostic** and treats your agent as a black box — it only needs a callable target function. It supports Python 3.12+.
+
+**Source repository:** [github.com/Giskard-AI/giskard-oss](https://github.com/Giskard-AI/giskard-oss) (5.7K stars, Apache 2.0)
+
+## Source and Accuracy Notes
+
+- Project page: [giskard.ai](https://www.giskard.ai)
+- Source repository: [github.com/Giskard-AI/giskard-oss](https://github.com/Giskard-AI/giskard-oss)
+- License: Apache 2.0 (verified via GitHub API `license.spdx_id`)
+- Documentation: [docs.giskard.ai/oss](https://docs.giskard.ai/oss)
+- Source last checked: 2026-08-15 (README commit verified via raw.githubusercontent.com)
+
+## Setup
+
+Install the base package with the scan extra:
+
+```bash
+pip install "giskard[scan]"
+```
+
+For LLM-as-judge evals, install a provider SDK and set your API key:
+
+```bash
+pip install "giskard[openai]"
+export OPENAI_API_KEY="sk-..."
+```
+
+**Requirements:** Python 3.12+. No heavy dependencies — the architecture is modular, each package carries only what it needs.
+
+## Quickstart: Running a Vulnerability Scan
+
+The core red-teaming workflow uses `vulnerability_scan` with a plain-language description of your agent:
+
+```python
+import asyncio
+from giskard.scan import vulnerability_scan
+
+
+async def my_agent(inputs: str) -> str:
+    # Replace with your agent / model call
+    return f"Echo: {inputs}"
+
+
+async def main() -> None:
+    result = await vulnerability_scan(
+        target=my_agent,
+        description="A customer support chatbot for an e-commerce platform.",
+        languages=["en"],
+    )
+    result.print_report()
+
+
+asyncio.run(main())
+```
+
+`vulnerability_scan` generates an adversarial test suite covering prompt injection, harmful content, stereotypes, misinformation, and other OWASP LLM Top-10 categories. The scan is powered by an LLM judge — you need a provider SDK installed and API key configured.
+
+## Quickstart: Writing a Scenario Eval
+
+For regression testing and structured evaluation, use `giskard.checks` with scenario-based testing:
+
+```python
+import asyncio
+from giskard.checks import Scenario, Groundedness
+
+
+def get_answer(inputs: str) -> str:
+    return "Paris"  # replace with your model / agent
+
+
+async def main() -> None:
+    scenario = (
+        Scenario("test_france_capital")
+        .interact(inputs="What is the capital of France?", outputs=get_answer)
+        .check(
+            Groundedness(
+                name="answer is grounded",
+                context="France is in Western Europe. Its capital is Paris.",
+            )
+        )
+    )
+    result = await scenario.run()
+    result.print_report()
+
+
+asyncio.run(main())
+```
+
+Key concepts:
+
+- **Target** — your system under test: any sync or async callable
+- **Scenario** — one eval: interactions plus checks
+- **Check** — an assertion or LLM judge over the trace
+- **Suite** — a collection of scenarios run together
+
+Built-in checks include string matching, regex, semantic similarity, and LLM-as-judge (`Groundedness`, `Conformity`, `LLMJudge`). For multi-turn agents, chain `.interact()` calls to build full conversation traces.
+
+## Architecture: Modular Packages
+
+Giskard v3 splits into focused packages:
+
+| Package | Purpose |
+|---|---|
+| `giskard-checks` | Scenario-based evals, built-in LLM judges |
+| `giskard-scan` | Vulnerability scanner + RAG quality eval |
+| `giskard-core` | Shared utilities (telemetry opt-in) |
+| `giskard-llm` | Provider-agnostic LLM routing |
+| `giskard-agents` | Agent and workflow orchestration |
+
+Install only what you need. The scan extra pulls in `giskard-scan` and its dependencies; the base `pip install giskard` gets only the core checks package.
+
+## What the Scanner Actually Detects
+
+The `vulnerability_scan` function generates probes across these categories:
+
+- Prompt injection (direct and indirect)
+- Harmful content generation
+- Stereotypes and discrimination
+- Misinformation
+- Personal information disclosure
+- Custom adversarial inputs via registered `ScenarioGenerator` instances
+
+`quality_scan` handles RAG evaluation — it checks whether answers are grounded in the retrieved context and flags knowledge-base quality issues.
+
+## Privacy Notes
+
+Giskard **does not** send prompts or outputs to its own servers by default. Telemetry is optional and aggregated only; it can be disabled before import:
+
+```bash
+export DO_NOT_TRACK=1
+# or
+export GISKARD_TELEMETRY_DISABLED=1
+```
+
+On-premise deployment is available for enterprise users with strict data residency requirements.
+
+## FAQ
+
+**Q: How does Giskard differ from Promptfoo?**
+**A:** Promptfoo focuses on prompt comparison and regression testing across providers. Giskard adds automated adversarial probe generation (red teaming), multi-turn agent traces, and a dedicated vulnerability taxonomy aligned to OWASP LLM Top-10.
+
+**Q: Do I need a specific LLM provider?**
+**A:** No — Giskard is provider-agnostic. Install the matching extra (`openai`, `anthropic`, etc.) and set the corresponding API key. Default model for LLM judges is `openai/gpt-4o-mini`.
+
+**Q: Does Giskard support non-Python agents?**
+**A:** Yes. The target is any callable — HTTP APIs, CLI tools, and other language systems can be wrapped in a Python function that Giskard calls as a black box.
+
+**Q: Is v3 a complete rewrite from v2?**
+**A:** Yes. Giskard v3 was rewritten from scratch for dynamic, multi-turn agent testing. v2 remains available but is no longer actively maintained. v2 scan functionality (tabular/ML auto-detection) has no v3 equivalent.
+
+**Q: Can I run this in CI/CD?**
+**A:** Yes. `Scenario.run()` and `vulnerability_scan` return structured result objects. You can assert on pass/fail criteria, export reports, and integrate with standard Python test runners.
+
+## Conclusion
+
+Giskard v3 is a practical open-source toolkit for teams that want to stress-test their AI agents before production. The vulnerability scanner saves weeks of manual red-teaming by generating adversarial probes automatically, while the scenario-based eval framework lets you codify behavioral contracts for regression testing. With 5.7K GitHub stars and an active Discord community, it is the most capable open-source agent testing library available today.
