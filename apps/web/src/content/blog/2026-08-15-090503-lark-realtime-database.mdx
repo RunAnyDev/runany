@@ -1,0 +1,149 @@
+---
+title: "Lark – Open-Source Firebase Realtime Database Alternative"
+description: "Lark is an open-source realtime database written in Rust that syncs a JSON tree across clients, with drop-in Firebase SDK compatibility and optional hosted cloud."
+pubDate: "2026-08-15"
+tags: ["dev-tools", "self-hosted", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lark-realtime-database.webp"
+  alt: "Lark realtime database product thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Lark is an AGPL-3.0 open-source realtime database engine in Rust that syncs JSON trees across clients — drop-in compatible with Firebase Realtime Database SDKs, self-hostable via Docker or Fly.io.
+
+## Source and Accuracy Notes
+
+- Project page: [lark.sh](https://lark.sh)
+- Source repository: [github.com/lark-sh/lark](https://github.com/lark-sh/lark)
+- License: AGPL-3.0 (verified via GitHub API `license.spdx_id`)
+- Documentation: [docs.larksh.com](https://docs.larksh.com)
+- HN launch thread: none confirmed at time of writing
+
+## What Is Lark?
+
+Lark is a realtime database server that synchronizes a JSON tree between multiple connected clients. When one client writes data, all other clients subscribed to that path receive the update within milliseconds. The server is built primarily in [Rust on top of Glommio](https://github.com/lark-sh/lark#architecture), a Tokio-compatible async I/O framework optimised for high-throughput storage on Linux.
+
+The defining feature is Firebase Realtime Database SDK compatibility. Lark ships a Go edge component that terminates WebSocket, WebTransport, and REST HTTP connections. With a small config change, an app already using the Firebase JS SDK can point `databaseURL` at a Lark instance instead of Firebase and continue working with the same API surface — including Firebase Auth and Storage if you use those separately.
+
+> "Lark is proudly open-source, and we believe that every developer should have the option to own their data stack without vendor lock-in." — [Lark README](https://github.com/lark-sh/lark)
+
+## Setup Workflow
+
+### Prerequisites
+
+- `git`, `make`, and Docker (recommended), or Rust toolchain for source builds
+- A Linux host for production deployments (Glommio requires Linux with io_uring)
+
+### Step 1: Run locally with Docker
+
+```bash
+git clone https://github.com/lark-sh/lark.git
+cd lark
+make up-release
+```
+
+The dashboard becomes available at `http://localhost:8080/admin/`. On first startup the admin email and one-time password are printed to the container log.
+
+A `lark-data/` directory is created in the repo root for persistence. Back this up to preserve state.
+
+### Step 2: Try the sticky-notes example
+
+Lark includes a multiplayer sticky-notes app built in ~300 lines of vanilla TypeScript:
+
+```bash
+cd examples/sticky-notes
+npm install
+npm run dev
+```
+
+Open two browser tabs to the same URL. Dragging a note in one tab immediately moves it in the other.
+
+### Step 3: Migrate an existing Firebase app
+
+If you have an app already using the Firebase JS SDK, change the `databaseURL` in your Firebase config to point at your Lark instance:
+
+```javascript
+// Before (Firebase)
+const firebaseConfig = {
+  apiKey: "...",
+  databaseURL: "https://your-app.firebaseio.com"
+};
+
+// After (Lark)
+const firebaseConfig = {
+  apiKey: "...",
+  databaseURL: "https://your-lark-instance.com"
+};
+```
+
+The same `onValue()`, `set()`, `push()`, and `update()` calls work unchanged. See the [Firebase quickstart example](https://github.com/lark-sh/lark/tree/main/examples/firebase-quickstart) for a side-by-side walkthrough.
+
+### Step 4: Deploy to Fly.io
+
+For a public internet deployment on Fly.io, the repo includes a quickstart script:
+
+```bash
+deploy/fly/quickstart.sh
+```
+
+This provisions a TLS-terminated Fly.io app with a domain. See [`deploy/fly/README.md`](https://github.com/lark-sh/lark/blob/main/deploy/fly/README.md) for prerequisites and manual steps.
+
+## Deeper Analysis
+
+### Architecture
+
+The server has two layers:
+
+1. **Core engine** — Rust + Glommio. Handles the JSON tree storage, subscriptions, and sync protocol. Runs entirely in userspace with io_uring for low-latency I/O on Linux.
+2. **Edge component** — Go. Terminates WebSocket, WebTransport, and HTTP connections and translates between the client protocol and the core engine.
+
+This split means the Rust engine stays fast and single-threaded (no connection-management overhead), while the Go edge handles the messy business of HTTP and WebSocket upgrades.
+
+### Durability and testing
+
+Lark ships with an explicit durability contract and runs Firebase's own SDK test suite against it as part of CI. The [`TESTING.md`](https://github.com/lark-sh/lark/blob/main/TESTING.md) file documents the test strategy, including crash-testing the durability contract. This is unusually rigorous for an early-stage open-source database.
+
+### Limitations
+
+The `0.x` version number signals that the wire format and configuration surface may change. The authors commit to providing a migration path when stored data formats change, but `0.x` releases can still contain breaking changes — check the [CHANGELOG](https://github.com/lark-sh/lark/blob/main/CHANGELOG.md) before upgrading.
+
+Glommio requires Linux with io_uring. macOS and Windows users can only run the server inside Docker on those platforms.
+
+## Practical Evaluation Checklist
+
+- **Drop-in Firebase compat:** Can an existing Firebase RTDB app connect by changing only the `databaseURL`? Yes, per the README and Firebase quickstart example.
+- **Self-hosted:** Works on any Linux host with Docker; Fly.io deploy script available. No managed service required.
+- **Open-source license:** AGPL-3.0 — copyleft, requires source distribution for modifications.
+- **Production readiness:** New project (3 stars on GitHub at time of writing). The hosted version at `lark.sh` is the production reference, but the codebase has not yet accumulated years of community field testing.
+- **Client SDKs:** JavaScript/TypeScript (`@lark-sh/client`), Firebase JS SDK (drop-in), with more SDKs under development per the repo.
+
+## Security Notes
+
+- Lark's security rules system mirrors Firebase's. The [docs](https://docs.larksh.com) cover writing and deploying security rules.
+- The AGPL-3.0 license means if you run Lark as a networked service and modify it, you must distribute your modified source under the same license.
+- For production deployments, use TLS (the Fly.io quickstart handles this automatically). Self-hosted deployments behind a reverse proxy should ensure WebSocket upgrades pass through correctly.
+
+## FAQ
+
+**Q: How does Lark compare to Firebase Realtime Database?**
+**A:** The API is the same; the key difference is that Lark is self-hostable and open-source. Firebase also offers Auth, Hosting, Storage, and Functions as integrated services — Lark focuses on the realtime data layer only.
+
+**Q: Can I use Lark alongside other Firebase services?**
+**A:** Yes. Because Lark implements the Firebase RTDB wire protocol, you can use Lark for the database while continuing to use Firebase Auth, Hosting, or Storage independently.
+
+**Q: What happens if I modify Lark and run it as a SaaS?**
+**A:** The AGPL-3.0 license requires you to distribute the source of your modifications under AGPL-3.0. This is a copyleft license — it applies to networked use, unlike GPL which only triggers on distribution.
+
+**Q: Does Lark work with mobile Firebase SDKs?**
+**A:** Lark targets the Firebase JS SDK compatibility layer. Mobile SDKs (iOS/Android) use a different wire protocol and are not in scope for the current version.
+
+## Conclusion
+
+Lark is a well-architected open-source realtime database that solves a real gap: Firebase Realtime Database has no self-hosted option, and alternatives like Supabase Realtime or Liveblocks are proprietary or hosted-only. If you need drop-in Firebase SDK compatibility with full data ownership, Lark is currently the only AGPL-3.0 option with explicit Firebase SDK test coverage.
+
+The setup is genuinely simple — one `make up-release` command gets you a running server with a dashboard. The Fly.io deploy script handles TLS and networking for internet-facing deployments. Watch the [GitHub repo](https://github.com/lark-sh/lark) for `1.0` progress; the `0.x` phase is earning production mileage before the authors commit to API stability guarantees.
