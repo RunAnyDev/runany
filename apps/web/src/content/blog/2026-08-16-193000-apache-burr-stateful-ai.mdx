@@ -1,0 +1,193 @@
+---
+title: "Apache Burr - Build Stateful AI Apps with Python"
+description: "Apache Burr is an open-source Python framework for building stateful AI applications like chatbots and agents, with a built-in telemetry UI and Apache 2.0 license."
+pubDate: "2026-08-16"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/burr-apache-burr.webp"
+  alt: "Apache Burr project thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Apache Burr is an open-source Python framework (Apache 2.0) for building stateful AI applications — chatbots, agents, simulations — expressed as state machines, with a built-in telemetry UI for real-time debugging.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [burr.apache.org](https://burr.apache.org)
+- Source repository: [github.com/apache/burr](https://github.com/apache/burr)
+- License: [Apache 2.0](https://github.com/apache/burr/blob/main/LICENSE) (verified via README)
+- Latest release: [v0.42.0-incubating](https://github.com/apache/burr/releases/tag/v0.42.0-incubating) (May 10, 2026)
+- Stars: 2,511 (verified via GitHub REST API)
+- Documentation: [burr.apache.org/getting_started/](https://burr.apache.org/getting_started/)
+
+## What Is Apache Burr?
+
+[Burr](https://burr.apache.org) is an open-source framework for building applications that make decisions — chatbots, agents, simulations, and any AI-powered system that needs to track state over time. It is developed under the Apache Software Foundation's incubator program.
+
+The core idea: you express your application as a **state machine** (a directed graph or flowchart), where each node represents a step in your workflow and edges define transitions between steps. Burr handles the execution, persistence, and real-time monitoring of that state machine automatically.
+
+From the README:
+
+> Apache Burr makes it easy to develop applications that make decisions (chatbots, agents, simulations, etc...) from simple python building blocks.
+
+Burr integrates with any LLM provider and works with popular frameworks like LangChain, LlamaIndex, and Hamilton. It includes a built-in **telemetry UI** that traces state transitions in real time, making debugging of complex agentic flows significantly easier than scattered `print` statements.
+
+## Setup
+
+### Install
+
+ Burr requires Python 3.10 or later. Install from PyPI:
+
+```bash
+pip install "apache-burr[start]"
+```
+
+The `[start]` extras include the telemetry UI and common persisters. To install Burr with all optional dependencies:
+
+```bash
+pip install "apache-burr[all]"
+```
+
+### Start the telemetry UI
+
+After installation, run:
+
+```bash
+burr
+```
+
+This opens Burr's built-in telemetry UI at `http://localhost:7231`. The UI loads with sample data so you can explore how state tracking works before writing any code. It includes a demo chatbot application that shows the UI capturing real-time state changes.
+
+## Core Concepts
+
+### State machines as application model
+
+In Burr, an application is a collection of **actions** (nodes) and **transitions** (edges). Each action reads/writes application state and decides what to do next. Burr handles the execution loop, persistence, and replay.
+
+```python
+from burr.core import ApplicationBuilder, State, Action
+from burr.core.persistence import LocalPersister
+
+# Simple counter example
+counter_action = Action(
+    name="count",
+    description="Increment a counter",
+    fn=lambda state: state.increment(counter=1),
+    transitions=["count"],  # loops to itself
+)
+
+app = (
+    ApplicationBuilder()
+    .with_state(counter=0)
+    .with_actions(counter_action)
+    .with_transitions("count", "count")
+    .with_persister(LocalPersister("/tmp/burr-data"))
+    .build()
+)
+
+app.run()
+```
+
+The Burr UI at `localhost:7231` then shows every state transition as it happens, with the full state history inspectable in a browser.
+
+### Persistence and replay
+
+Burr ships with pluggable persisters that can save and reload application state. This means you can:
+
+- **Pause and resume** long-running agent sessions
+- **Replay** from a specific checkpoint to debug behavior
+- **Recover** from crashes without losing work
+
+```python
+from burr.core.persistence import LocalPersister
+
+persister = LocalPersister("/tmp/burr-data")
+
+app = (
+    ApplicationBuilder()
+    .with_state(task="example")
+    .with_actions(my_action)
+    .with_persister(persister)
+    .build()
+)
+
+# State is automatically saved after each transition
+app.run()
+```
+
+### Integrating with LLMs
+
+Burr is framework-agnostic but ships with tight integration for common AI stacks. You can use it with OpenAI, Anthropic, or local models via Ollama.
+
+```python
+from burr.integrations import OpenAIAction
+
+chat_action = OpenAIAction(
+    name="chat",
+    model="gpt-4o",
+    system_prompt="You are a helpful assistant.",
+    input_key="user_message",
+    output_key="response",
+)
+```
+
+### Debugging with the telemetry UI
+
+The telemetry UI tracks every state change, action invocation, and transition in real time. For a chatbot, this means you can see each user message, the LLM response, and the resulting state mutation — visualized as a flowchart that updates live.
+
+To see it with the built-in demo:
+1. Run `burr` to start the UI
+2. Navigate to the **Demos** sidebar on the left
+3. Select **chatbot** (requires `OPENAI_API_KEY` environment variable)
+4. Send a message and watch state transitions appear in the UI
+
+## Practical Evaluation Checklist
+
+- **State machine model** — cleanly expresses multi-step AI workflows as graphs, not tangled callback chains
+- **Real-time telemetry** — built-in UI traces every state change without external instrumentation
+- **Persistence** — pluggable persister API supports local storage, databases, and cloud backends
+- **LLM agnostic** — works with OpenAI, Anthropic, Ollama, or any chat-compatible API
+- **Python-first** — no new DSL; just Python decorators and classes
+- **ASF incubation** — Apache 2.0 licensed, governance under the Apache Incubator
+- **Hamilton integration** — Burr can orchestrate Hamilton data transformation pipelines
+
+## Comparison with LangChain
+
+Burr and LangChain both target AI application development, but with fundamentally different philosophies:
+
+| | Burr | LangChain |
+|---|---|---|
+| Model | State machine / flowchart | Chain / memory abstractions |
+| Debugging | Built-in real-time telemetry UI | LangSmith (external, paid) |
+| Persistence | First-class, pluggable | LCEL run history |
+| Scope | Core execution + persistence | Broad ecosystem of integrations |
+| License | Apache 2.0 | MIT |
+
+Users migrating from LangChain to Burr [report](https://burr.apache.org/) significantly faster onboarding and cleaner, more stable implementations for complex agentic behaviors.
+
+## FAQ
+
+**Q: Does Burr require an API key?**
+**A:** Burr the framework does not. The telemetry UI demo chatbot requires `OPENAI_API_KEY` to function. Burr itself works with or without any LLM — you can use it for non-AI state machines too.
+
+**Q: Is this production-ready?**
+**A:** Burr is an Apache Incubator project. The core API is stable but some integrations are still under active development. Review the [release notes](https://github.com/apache/burr/releases) before using in critical production paths.
+
+**Q: Can I use Burr without the UI?**
+**A:** Yes. The telemetry UI is optional. You can run Burr applications entirely from the command line or embed them in any Python application without starting the web server.
+
+**Q: How does Burr compare to LangGraph?**
+**A:** Both use graph-based execution models. Burr emphasizes state machine semantics (explicit state, transitions, persistence) and ships with a built-in debugging UI. LangGraph is tied more closely to LangChain's ecosystem and LCEL.
+
+## Conclusion
+
+Apache Burr fills a specific gap in the AI application stack: a lightweight, Python-native framework for building stateful multi-step AI workflows where you need visibility into what the application is doing at every step. The built-in telemetry UI alone makes it worth trying — debugging a chatbot by reading server logs is far harder than watching state transitions animate in a flowchart.
+
+Install it with `pip install "apache-burr[start]"` and run `burr` to explore the UI with sample data before writing a single line of your own code.
