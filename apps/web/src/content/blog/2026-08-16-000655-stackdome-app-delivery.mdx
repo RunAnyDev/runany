@@ -1,0 +1,155 @@
+---
+title: "Stackdome - Deploy from AI Agents or CLI to Your Own K8s"
+description: "Stackdome is an open-source app delivery platform that deploys from Claude Code, Cursor, or the CLI directly to your own Kubernetes cluster or Stackdome Cloud."
+pubDate: "2026-08-16"
+tags: ["self-hosted", "dev-tools", "ai-setup"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/stackdome-app-delivery.webp"
+  alt: "Stackdome open-source app delivery platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Stackdome is an open-source Railway alternative that deploys to your own Kubernetes cluster via an AI agent skill, a CLI, or a web dashboard — no YAML wrestling required.
+
+## What Is Stackdome?
+
+Stackdome describes itself as an open-source application delivery platform for agents and humans. Rather than filling out a UI or writing raw Kubernetes manifests, you describe your stack in a `stackfile.yaml` and Stackdome handles the rest — build, deployment, health checks, and DNS/TLS.
+
+Three deployment interfaces are available:
+
+- **AI coding agents** — install the Stackdome skill and prompt the agent to deploy. The agent follows machine-verified instructions from `agents.stackdome.com`.
+- **Stackdome CLI** — `stackdome init`, `stackdome validate`, `stackdome deploy` from your terminal.
+- **Canvas dashboard** — web UI for manual deployments and cluster management.
+
+The platform currently targets Kubernetes as its underlying runtime. During alpha, Stackdome Cloud is available as a managed option with limited capacity, and self-hosted installations can connect one cluster.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [stackdome.com](https://stackdome.com)
+- Agent instructions (machine-readable): [agents.stackdome.com](https://agents.stackdome.com/instructions.md)
+- Documentation: [docs.stackdome.com](https://docs.stackdome.com)
+- Docs index for AI agents: [docs.stackdome.com/llms.txt](https://docs.stackdome.com/llms.txt)
+- OpenAPI spec: [docs.stackdome.com/openapi.yaml](https://docs.stackdome.com/openapi.yaml)
+- License: **not verified** — no license file found at project page or docs at time of writing
+- HN launch thread: [news.ycombinator.com/item?id=49285086](https://news.ycombinator.com/item?id=49285086) (21 points, 2026-08-13)
+
+## Core Concepts
+
+### The Stackfile
+
+Every Stackdome deployment starts with a `stackfile.yaml` in your project root. This declarative config describes the resources your application needs — web service, database, storage, secrets. Stackdome validates the file before deploying:
+
+```bash
+stackdome validate
+```
+
+### Deployment Interfaces
+
+**For AI coding agents**, the canonical entry point is installing the Stackdome skill:
+
+```bash
+# All agents
+px -y skills add stackdome/stackdome-skills --skill '*' --yes
+
+# Claude Code specifically
+px -y skills add stackdome/stackdome-skills --skill '*' --yes --agent claude-code
+
+# Cursor
+px -y skills add stackdome/stackdome-skills --skill '*' --yes --agent cursor
+```
+
+After installing the skill, invoke `use-stackdome` and the agent handles authentication, `stackfile.yaml` authoring, validation, and deployment. The skill probes existing servers over SSH if a self-hosted setup is detected.
+
+**For the CLI**, the basic workflow is:
+
+```bash
+# Authenticate
+stackdome auth login
+
+# Initialize in a project
+stackdome init
+
+# Validate the stackfile before deploying
+stackdome validate
+
+# Deploy
+stackdome deploy
+
+# Check status
+stackdome status
+```
+
+### Resources
+
+Stackdome manages these resource types (from the docs):
+
+- **Application** — a containerized web service (build from git or existing image)
+- **Postgres** — managed PostgreSQL instance with addons
+- **ObjectStore** — for backups and persistent object storage
+- **Volume** — persistent filesystem storage
+- **Secrets** — environment secrets wired into resources
+- **Preview environments** — ephemeral stacks per pull request
+
+### Environment Variables and Secrets
+
+From the docs, secrets and environment variables are set on a per-resource basis. Resources can reference each other's addresses (e.g., a web app referencing a Postgres host) through Stackdome's wiring system.
+
+## Self-Hosting
+
+For teams that want to run Stackdome on their own infrastructure, the self-hosted installation path connects an existing Kubernetes cluster. From the docs, the agent skill also covers this path — it probes the target server over SSH and installs Stackdome on it before any deployment.
+
+## How It Compares to Railway
+
+The key difference from Railway (and Render, Heroku) is the **agent-native design**:
+
+- The `/agents.stackdome.com` endpoint returns machine-readable markdown instructions that a coding agent can follow directly
+- The skill package (`stackdome/stackdome-skills`) is maintained for multiple agents (Claude Code, Cursor, Codex, Gemini CLI)
+- The platform does not expose raw Kubernetes as a user concern — the `stackfile.yaml` abstracts the cluster
+
+For developers comfortable with `docker-compose up`, this sits one step above in abstraction. For teams using AI coding agents, this is designed to be the agent's deployment interface out of the box.
+
+## Practical Evaluation Checklist
+
+- [ ] Install the Stackdome skill for your preferred agent
+- [ ] Run `stackdome init` in an existing project
+- [ ] Review the generated `stackfile.yaml`
+- [ ] Run `stackdome validate`
+- [ ] Deploy with `stackdome deploy`
+- [ ] Verify the release with `stackdome status -o json`
+- [ ] Test preview environment creation (PR workflow)
+
+## Security Notes
+
+- API token authentication — no password required (from docs)
+- Secrets are scoped per-project and org-admin can see all secrets in the org
+- JIT credentials available for Postgres database access
+
+## FAQ
+
+**Q: Does Stackdome require Kubernetes knowledge?**
+**A:** No. The `stackfile.yaml` abstraction hides Kubernetes details. The docs explicitly state "do not expose Kubernetes as a user concern unless the task is self-hosting or infrastructure architecture."
+
+**Q: How does self-hosted differ from Cloud?**
+**A:** Cloud is an ephemeral alpha playground with managed compute. Self-hosted connects one of your own Kubernetes clusters and persists your data there.
+
+**Q: Which coding agents are supported?**
+**A:** Claude Code, Cursor, Codex, and Gemini CLI — all via the `stackdome/stackdome-skills` skill package.
+
+**Q: Is there a hosted option?**
+**A:** Yes — Stackdome Cloud during alpha. It is capacity-limited and intended for trying the platform, not for production workloads.
+
+**Q: What license is Stackdome released under?**
+**A:** Not verified at time of writing. The project page and docs did not surface a license file or license statement.
+
+## Conclusion
+
+Stackdome solves the "deploy to my own infra without becoming a DevOps engineer" problem by treating the deployment interface as code that both humans and AI agents can use. The skill-based agent integration is the most forward-looking part of this — it means your AI coding assistant can ship to production following a reviewed `stackfile.yaml`, which is a meaningfully different workflow than copying a deploy command from a dashboard.
+
+If you are already on Railway or Render and want to bring the deployment logic closer to your codebase (or just want AI agents in your team to be able to deploy), Stackdome is worth watching during alpha.
