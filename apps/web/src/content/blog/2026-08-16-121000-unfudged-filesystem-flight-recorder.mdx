@@ -1,0 +1,134 @@
+---
+title: "UNF - Filesystem Flight Recorder for AI Agents"
+description: "UNF continuously records every file change on your filesystem, letting you rewind any file to any second. Open-source tool for developers working with AI coding agents."
+pubDate: "2026-08-16"
+tags: ["dev-tools", "self-hosted", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/unfudged-filesystem-flight-recorder.webp"
+  alt: "UNF filesystem flight recorder product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** UNF is a local, open-source filesystem watcher that records every file change in real time, letting you rewind any file to any second — useful when an AI agent wipes your workspace between context compaction windows.
+
+## What Is UNF?
+
+UNF (stylised UNF*) is a filesystem flight recorder. It runs continuously in the background, watching your project directory for every file change, and stores a point-in-time snapshot you can restore from at any moment.
+
+The problem it solves: when an AI coding agent rewrites files during a session, those changes live only in the agent's context. Once the context compacts or the session resets, the agent forgets what it touched. If it then makes a conflicting edit, your original code is gone.
+
+UNF sits below that workflow. It records the filesystem state at second-level granularity regardless of what tool made the change — Git, an editor, a script, or an AI agent.
+
+The product page describes it directly:
+
+> Every file change, recorded in real time. Rewind any file to any second. No commits required.
+
+UNF is open source under MIT / Apache-2.0.
+
+## How It Works
+
+UNF has three moving parts:
+
+**01 WATCH** — Uses FSEvents on macOS and inotify on Linux to monitor the filesystem. It respects `.gitignore`, skips binary files, and applies a 3-second smart debounce to avoid recording every keystroke. Resource usage is claimed at under 1% CPU and under 100MB RAM during active recording.
+
+**02 STORE** — Snapshots are stored locally using BLAKE3 content hashing inside a SQLite database with ACID guarantees. Content-addressed storage means identical files are stored only once. All data stays local.
+
+**03 REWIND** — Any file can be restored to its state at a specific point in time, by second. Manual pruning with `unf prune` reclaims disk space.
+
+## Practical Workflow
+
+Start watching a project:
+
+```bash
+unf watch
+```
+
+Review a session after an agent has been active:
+
+```bash
+unf recap --since 3h
+```
+
+Inspect what a file looked like 30 minutes ago:
+
+```bash
+unf diff --at 30m path/to/file
+```
+
+Restore a file to its state 30 minutes ago:
+
+```bash
+unf restore --at 30m path/to/file
+```
+
+The `unf diff` output shows a standard unified diff, so you can read exactly what changed before deciding whether to restore.
+
+## Installation
+
+**macOS (Homebrew):**
+
+```bash
+brew install --cask cyrusradfar/unf/unfudged
+```
+
+**macOS + Linux (Homebrew CLI):**
+
+```bash
+brew install cyrusradfar/unf/unf
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+curl -fsSLO https://downloads.unfudged.io/releases/latest/unf_amd64.deb
+sudo dpkg -i unf_amd64.deb
+```
+
+**From source (requires Rust 1.80+):**
+
+```bash
+git clone https://github.com/cyrusradfar/homebrew-unf.git
+cd homebrew-unf
+cargo build --release
+cp target/release/unf /usr/local/bin/
+```
+
+## Limitations
+
+UNF is a filesystem recorder, not a version control system. It does not track branches, manage commits, or sync across machines. If you need collaborative history, Git remains the right tool. UNF fills the gap for in-progress, uncommitted work that Git cannot capture.
+
+The current version stores snapshots locally. There is no cloud sync or multi-device support.
+
+## FAQ
+
+**Q: Does this work on Windows?**
+**A:** Currently no. UNF uses FSEvents on macOS and inotify on Linux. Windows is not supported at this time.
+
+**Q: How much disk space does it use?**
+**A:** It depends on your project size and change frequency. Use `unf prune` to manually clean up old snapshots and reclaim space.
+
+**Q: Does it interfere with editors or AI coding agents?**
+**A:** No. UNF only watches the filesystem — it does not instrument or interact with running processes. It respects `.gitignore` and skips binary files.
+
+**Q: Is the source code available?**
+**A:** The project is open source. The Homebrew tap at `github.com/cyrusradfar/homebrew-unf` hosts the installation tooling. License is MIT / Apache-2.0.
+
+## Conclusion
+
+UNF solves a specific, painful problem that surfaces whenever developers work with AI coding agents in long sessions: loss of uncommitted state when the agent's context resets. It is lightweight, local-only, and requires no infrastructure beyond installing a binary.
+
+If you regularly work with AI agents that modify code across sessions — or if you have ever lost hours of work because "the agent said it had the right version" — UNF is worth a look.
+
+Source and install instructions are at [unfudged.io](https://www.unfudged.io).
+
+## Source and Accuracy Notes
+
+- Project page: [unfudged.io](https://www.unfudged.io)
+- License: MIT / Apache-2.0 (stated on project page)
+- HN launch thread: [news.ycombinator.com/item?id=44190017](https://news.ycombinator.com/item?id=44190017) — 137 points
+- Source last checked: 2026-08-16
