@@ -1,0 +1,191 @@
+---
+title: "Servicer – systemd Service Management Without the Complexity"
+description: "Servicer is a Rust CLI that wraps systemd with a simple pm2-style API. Create, start, stop and monitor services without remembering systemctl syntax or writing .service files by hand."
+pubDate: "2026-08-18"
+tags: ["self-hosted", "dev-tools", "cli", "rust"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/servicer.webp"
+  alt: "Servicer – systemd service management CLI"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Servicer is a daemonless Rust CLI that wraps systemd with a pm2-style API — `ser create`, `ser start`, `ser stop` — so you can manage Linux services without memorizing systemctl syntax or writing `.service` files from scratch.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [servicer.dev](https://servicer.dev) — verified live, Hugo site
+- Source repository: [github.com/servicer-labs/servicer](https://github.com/servicer-labs/servicer) — verified, README accessible
+- License: MIT (verified via `LICENSE-MIT` in repo, Copyright 2023 Shardul Aeer)
+- HN launch thread: [news.ycombinator.com/item?id=37132651](https://news.ycombinator.com/item?id=37132651) — Show HN, August 2023, 147 points, 37 comments
+- Latest release: [v0.1.13](https://github.com/servicer-labs/servicer/releases/tag/v0.1.13) (2023-10-23)
+
+## What Is Servicer?
+
+If you have ever manually written a systemd unit file, you know the friction: a dozen directives to get right, `systemctl` for status, `journalctl` for logs, `systemd-run` for one-off tasks — each with its own flag conventions. For developers who just want "run my app and restart it on failure," that is a lot of boilerplate.
+
+Servicer is a thin Rust CLI that sits on top of systemd and exposes a minimal API in the style of pm2, the popular Node.js process manager. It creates `.ser.service` files (a Servicer-specific convention) in `/etc/systemd/system/` and delegates actual process supervision to systemd itself. Because systemd owns the lifecycle, Servicer never runs as a daemon — there is no background process consuming memory, and your services survive the Servicer binary being removed.
+
+The project is MIT-licensed, has 468 GitHub stars, and ships pre-built Linux binaries for `x86_64` and `aarch64`.
+
+## Setup Workflow
+
+### Install
+
+Download a pre-built binary from the GitHub releases page:
+
+```bash
+wget https://github.com/servicer-labs/servicer/releases/download/v0.1.13/servicer
+
+# Make it executable
+chmod +rwx ./servicer
+
+# Move to your PATH
+sudo mv ./servicer /usr/bin/ser
+```
+
+Or build from source with Cargo:
+
+```bash
+cargo install servicer
+sudo ln -s ~/.cargo/bin/servicer /usr/bin/ser
+```
+
+Verify the installation:
+
+```bash
+ser --help
+```
+
+### Create a Service
+
+Tell Servicer to create and start a service file for your script. The tool inspects the file extension to choose an interpreter automatically:
+
+```bash
+sudo ser create index.js --start --enable
+```
+
+The `--enable` flag makes the service start on boot. To use a specific interpreter explicitly:
+
+```bash
+sudo ser create index.js --start --enable --interpreter deno
+```
+
+Behind the scenes, Servicer writes a `.ser.service` file to `/etc/systemd/system/`. You can also edit it directly:
+
+```bash
+sudo ser edit index.js
+```
+
+This opens the service file in your default editor with a starter template, so you do not need to look up systemd syntax every time.
+
+### Manage Services
+
+Check running services with:
+
+```bash
+ser status
+```
+
+```
++-------+-------------+--------+----------------+-------+--------+
+| pid   | name        | active | enable on boot | cpu % | memory |
++-------+-------------+--------+----------------+-------+--------+
+| 24294 |    index.js | active | true           | 0     | 9.5 KB |
++-------+-------------+--------+----------------+-------+--------+
+```
+
+Stop, disable, or remove a service:
+
+```bash
+# Stop a running service
+sudo ser stop index.js
+
+# Disable load on boot
+sudo ser disable index.js
+
+# Delete the .service file
+sudo ser rm index.js
+```
+
+### View Logs and Paths
+
+View logs via journald:
+
+```bash
+ser logs index.js
+```
+
+Find the on-disk location of a service file:
+
+```bash
+ser which index.js
+```
+
+```
+Paths for index.js.ser.service:
++--------------+-----------------------------------------------------------+
+| name         | path                                                      |
++--------------+-----------------------------------------------------------+
+| Service file | /etc/systemd/system/index.js.ser.service                  |
++--------------+-----------------------------------------------------------+
+| Unit file    | /org/freedesktop/systemd1/unit/index_2ejs_2eser_2eservice |
++--------------+-----------------------------------------------------------+
+```
+
+## Deeper Analysis
+
+**Why not just use pm2?** pm2 is Node.js-specific and runs as its own background daemon. For non-JavaScript services — Rust servers, Go binaries, Python scripts — pm2's ecosystem is a poor fit. Servicer brings the same ergonomic API to any process, on any runtime that systemd supports, without a separate daemon layer.
+
+**Why not just write .service files directly?** Manual unit files require knowing the right directives, the correct `ExecStart` syntax, logging configuration, and restart policy. Servicer generates a correct baseline from a single command. You still own the systemd unit — Servicer just saves the copy-paste.
+
+**Daemonless by design.** Because Servicer only writes service files and then exits, there is no persistent process consuming RAM or CPU. If Servicer crashes or is uninstalled, your running services keep going — systemd is in charge, not Servicer.
+
+**Existing service migration.** Rename any `.service` file to `.ser.service` and Servicer will pick it up automatically:
+
+```bash
+mv myapp.service myapp.ser.service
+ser status  # shows myapp
+```
+
+## Practical Evaluation Checklist
+
+- [ ] Download binary or `cargo install` on a systemd Linux machine
+- [ ] Create a service with `sudo ser create <script> --start --enable`
+- [ ] Confirm service is active with `ser status` and `systemctl status <name>.ser.service`
+- [ ] Reboot and confirm the service starts automatically
+- [ ] Try `ser logs <name>` to read journald output
+- [ ] Migrate an existing systemd unit by renaming to `.ser.service`
+
+## Security Notes
+
+Servicer requires `sudo` for service creation and management — it writes to `/etc/systemd/system/`. This is the same permission model as `systemctl`. The tool itself is a static Rust binary with no runtime dependencies, which reduces its attack surface compared to a Node.js daemon.
+
+## FAQ
+
+**Q: Does Servicer run on macOS?**
+**A:** No. Servicer is Linux-only because it relies on systemd. For macOS service management, use launchd or a process manager like pm2.
+
+**Q: How does Servicer differ from systemd-run?**
+**A:** `systemd-run` creates transient scoped or temporary units that disappear on reboot. Servicer creates persistent `.service` files that survive reboots and can be managed with `ser`.
+
+**Q: Can I use Servicer without root?**
+**A:** Service creation and lifecycle management require root because systemd stores unit files in `/etc/`. Read-only status commands (`ser status`) can run as a normal user.
+
+**Q: Does Servicer support custom environment variables or resource limits?**
+**A:** Yes — edit the generated `.ser.service` file with `ser edit <name>` and add directives like `Environment=`, `MemoryMax=`, or `Restart=`. The file is a standard systemd unit.
+
+**Q: What happens if my service crashes?**
+**A:** Servicer delegates restart policy to systemd. Add `Restart=always` (or `on-failure`) to the unit file via `ser edit <name>` to have systemd automatically restart the process.
+
+## Conclusion
+
+Servicer fills a specific gap: developers who want pm2-style ergonomics for non-JNode.js services on Linux, without committing to a separate daemon. It is MIT licensed, written in Rust, and ships as a single static binary. If you manage Linux servers and are tired of googling systemd unit syntax every time you deploy a new service, Servicer is worth a look.
+
+**Project:** [servicer.dev](https://servicer.dev) · **GitHub:** [servicer-labs/servicer](https://github.com/servicer-labs/servicer) · **License:** MIT
