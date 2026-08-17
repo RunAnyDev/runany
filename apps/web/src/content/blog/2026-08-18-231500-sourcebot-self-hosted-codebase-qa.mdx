@@ -1,0 +1,156 @@
+---
+title: "Sourcebot – Self-hosted Perplexity for Your Codebase"
+description: "Sourcebot is an open-source, self-hosted tool that lets you ask natural-language questions about your code with inline citations, search across all repos, and navigate code like an IDE."
+pubDate: "2026-08-18"
+tags: ["self-hosted", "dev-tools", "ai-setup"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sourcebot-self-hosted-codebase-qa.webp"
+  alt: "Sourcebot product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Sourcebot is a self-hosted, open-source code intelligence tool that lets you ask natural-language questions about your codebase, search across all repos, and get answers backed by inline citations.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [sourcebot.dev](https://www.sourcebot.dev) ← verified
+- Source repository: [github.com/sourcebot-dev/sourcebot](https://github.com/sourcebot-dev/sourcebot) ← README read end-to-end
+- Live demo: [app.sourcebot.dev](https://app.sourcebot.dev) ← verified public deployment
+- Docs: [docs.sourcebot.dev](https://docs.sourcebot.dev) ← deployment docs read
+- License: NOT YET SET — repository has no LICENSE file. GitHub API returns `NOASSERTION`. Do not assume a license; check with the maintainers before using in proprietary projects.
+- HN launch thread: not listed in README; searched via HN Algolia (no confirmed launch thread found)
+
+## What Is Sourcebot?
+
+Sourcebot is a self-hosted tool that helps developers and AI agents understand a codebase. It indexes your repositories and exposes two main interfaces:
+
+1. **Ask Sourcebot** — Ask natural-language questions and get answers with inline citations that link directly to the relevant source code.
+2. **Code Search** — Search across all repos and branches using regex, filters, and boolean logic. Source-level navigation (goto definition, find references) works across all repositories.
+
+The project positions itself as a self-hosted alternative to hosted code intelligence services. It is built with Docker Compose in mind and requires PostgreSQL and Redis as backing services.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose
+- At least 4 GB RAM recommended
+- A config file (`config.json`) for code host connections (GitHub, GitLab, etc.)
+- Environment variables for secrets (AUTH_SECRET, SOURCEBOT_ENCRYPTION_KEY, DATABASE_URL, REDIS_URL)
+
+### Step 1: Download the Docker Compose file
+
+```bash
+curl -o docker-compose.yml https://raw.githubusercontent.com/sourcebot-dev/sourcebot/main/docker-compose.yml
+```
+
+### Step 2: Configure code host access
+
+Edit the `config.json` file to connect your code hosts. The full configuration reference is at [docs.sourcebot.dev/docs/configuration/code-host](https://docs.sourcebot.dev/docs/configuration/code-host).
+
+A minimal GitHub config looks like this:
+
+```json
+{
+  "codeHosts": [
+    {
+      "type": "github",
+      "id": "my-org",
+      "token": "ghp_your_github_token"
+    }
+  ]
+}
+```
+
+### Step 3: Set environment variables
+
+Generate secrets using OpenSSL, then add them to a `.env` file:
+
+```bash
+AUTH_SECRET=$(openssl rand -base64 33)
+SOURCEBOT_ENCRYPTION_KEY=$(openssl rand -base64 24)
+```
+
+Then in your `.env` file:
+
+```env
+AUTH_SECRET=your_generated_auth_secret
+SOURCEBOT_ENCRYPTION_KEY=your_generated_encryption_key
+DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
+REDIS_URL=redis://redis:6379
+```
+
+### Step 4: Start the containers
+
+```bash
+docker compose up -d
+```
+
+Sourcebot starts on port 3000 by default. The initial setup will index the configured repositories, which may take several minutes depending on codebase size.
+
+## Deeper Analysis
+
+### Architecture
+
+Sourcebot uses a web interface backed by a search indexing layer. It maintains a PostgreSQL database for query storage and Redis for caching. Repositories are cloned and indexed locally — no data leaves your infrastructure.
+
+### What sets it apart
+
+- **Self-hosted** — no external API calls, all code and data stays on your servers
+- **Multi-repo support** — indexes across all connected repos simultaneously, surfacing results from different repositories in a single answer
+- **Inline citations** — answers reference exact file locations and line numbers
+- **IDE-level navigation** — goto definition and find references work across repo boundaries
+
+### Limitations
+
+- No built-in authentication provider; you configure your own AUTH_SECRET
+- Initial indexing can be slow for large monorepos
+- No official cloud-hosted option — fully self-hosted only
+
+## Practical Evaluation Checklist
+
+- [ ] Docker Compose starts cleanly with `docker compose up -d`
+- [ ] Web UI accessible on port 3000 after startup
+- [ ] GitHub token works and repos appear in the dashboard
+- [ ] Ask Sourcebot returns answers with clickable inline citations
+- [ ] Code search returns results with regex and language filters
+- [ ] No sensitive data in logs or error messages
+- [ ] Indexing progress visible during initial setup
+
+## Security Notes
+
+- All secrets must be generated and stored securely — never commit `.env` files
+- GitHub tokens used for repo access should be scoped to read-only where possible
+- Sourcebot does not currently support SSO or fine-grained access control
+- Database and Redis should be on a private network or bound to localhost
+
+## FAQ
+
+**Q: Does Sourcebot work with GitLab or Bitbucket?**
+
+**A:** Yes. The configuration supports multiple code host types. See the [code host configuration docs](https://docs.sourcebot.dev/docs/configuration/code-host) for the full list.
+
+**Q: How long does initial indexing take?**
+
+**A:** It depends on repository size and number of repos. Small repos index in minutes; large monorepos can take an hour or more. Indexing runs in the background after startup.
+
+**Q: Can I use Sourcebot without an internet connection?**
+
+**A:** Yes. Once the Docker images are downloaded and repos are cloned locally, Sourcebot operates entirely offline.
+
+**Q: Is there a way to restrict access to certain repositories?**
+
+**A:** Access control is configured at the code host level through token scoping. There is no per-repo permission layer within Sourcebot itself at this time.
+
+## Conclusion
+
+Sourcebot fills a specific niche: teams that want Perplexity-style code intelligence but need it self-hosted. The inline citations and cross-repo search are its strongest features, and the Docker Compose setup makes it accessible to teams without a dedicated platform engineering function. If you have been evaluating Sourcegraph Cloud or GitHub Copilot for code understanding and need the data to stay in-house, Sourcebot is worth a weekend evaluation.
+
+Try the public demo at [app.sourcebot.dev](https://app.sourcebot.dev) before committing to a self-hosted deployment.
