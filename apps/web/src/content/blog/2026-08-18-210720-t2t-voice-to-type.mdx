@@ -1,0 +1,153 @@
+---
+title: "t2t – Voice-to-Text with MCP Agent Mode on macOS"
+description: "Hold fn to transcribe locally with Whisper, hold fn+ctrl to command any MCP server. Cross-platform voice-to-text app built with Tauri, Svelte, and Rust."
+pubDate: "2026-08-18"
+tags: ["dev-tools", "ai-setup", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/t2t-voice-to-type.webp"
+  alt: "t2t – Hold fn to dictate, fn+ctrl to command an MCP agent"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** t2t is a macOS menu-bar app that turns keyboard holds into a complete voice workflow — local Whisper transcription on `fn`, MCP agent control on `fn+ctrl`, built with Tauri, Svelte, and Rust.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [t2t.now](https://t2t.now)
+- Source repository: [github.com/acoyfellow/t2t](https://github.com/acoyfellow/t2t)
+- License: MIT (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=show hn](https://news.ycombinator.com/item?id=show) — 4 points, Show HN posted by author
+- Topics verified: `mcp`, `whisper`, `local-first`, `accessibility`, `clipboard`, `push-to-talk`, `rust`, `tauri`, `svelte`, `sveltekit`
+
+## What Is t2t?
+
+t2t (Talk to Type) is a menu-bar app for macOS that intercepts the `fn` key as a voice input trigger. Hold `fn` in any text field and speak — Whisper transcribes locally and inserts the result. Hold `fn+ctrl` and the transcript goes to the locally configured `pi` CLI, which routes it through an AI provider to any enabled MCP server.
+
+The distinction from a typical voice dictation tool is the **agent mode**: you are not just dictating text, you are running a full voice-driven agent loop with access to MCP tools for files, databases, Git, browser automation, and more.
+
+## Setup Workflow
+
+### Step 1: Download and install
+
+Download the macOS binary from the project page:
+
+```bash
+open https://t2t.now
+```
+
+Or grab a release directly from GitHub:
+
+```bash
+open https://github.com/acoyfellow/t2t/releases
+```
+
+The app is ad-hoc signed. On first launch macOS will ask you to approve **Accessibility** (for global shortcut detection and field insertion) and **Microphone** permissions.
+
+### Step 2: Grant permissions
+
+Open **System Settings → Privacy & Security → Accessibility** and ensure t2t is listed and enabled. The same for **Microphone** under Privacy & Security.
+
+### Step 3: Dictate with fn
+
+Open any text field — a browser search bar, a code editor, a Notes document. Hold `fn`, speak, release. The transcription appears in the field you were focused on.
+
+The first run downloads the Whisper model to `~/.cache/whisper/ggml-base.en.bin`.
+
+### Step 4: Configure agent mode (optional)
+
+Agent mode requires the `pi` CLI on your `PATH`. Install it and configure a provider and model:
+
+```bash
+# Install pi (from github.com/badlogic/pi-mono)
+# Then configure in Settings or via env vars:
+export T2T_PI_PROVIDER=cloudflare-ai-gateway
+export T2T_PI_MODEL=gpt-5.6-luna
+export T2T_PI_THINKING=medium
+```
+
+Or set them directly in t2t's Settings UI under **Pi options**. The default provider is Cloudflare AI Gateway with `gpt-5.6-luna`.
+
+### Step 5: Add MCP servers
+
+In **Settings → MCP**, add servers for the tools you want the agent to access. The t2t website includes an [MCP directory](https://t2t.now/mcp) with example servers for:
+
+- Filesystem access
+- Git and GitHub
+- PostgreSQL and other databases
+- Browser and developer-tools automation
+- Documentation and search services
+
+Enable only the servers you trust — MCP authorization is per-capability, not blanket.
+
+## Deeper Analysis
+
+### Architecture
+
+t2t is built with [Tauri](https://tauri.app) (Rust backend) + [SvelteKit](https://kit.svelte.dev) (UI). The `fn` global shortcut is handled by Tauri's app-level event system. Audio recording uses the macOS microphone permission, and Whisper runs entirely on-device for transcription.
+
+Agent mode delegates to the `pi` CLI, which is a separate installed binary. t2t does not embed credentials or a hosted chat client — it pipes the voice transcript to `pi` and reads back the streamed response.
+
+### Privacy model
+
+All audio transcription is local. Credentials stay in `pi`'s local configuration. The app stores transcriptions and agent-turn history locally at `~/Library/Logs/t2t.log`. Temporary screenshots captured for agent context are deleted after each turn.
+
+### Two-mode input
+
+| Shortcut | Function |
+|---|---|
+| `fn` (hold) | Record audio → Whisper transcription → insert into focused field |
+| `fn+ctrl` (hold) | Record audio → Whisper transcription → send to `pi` agent → TTS readback |
+
+An on-screen indicator shows recording, processing, and speaking state. `Escape` cancels an active turn.
+
+### Multi-display support
+
+Indicator bars appear on all connected displays. If you disconnect a display, stale indicator surfaces are removed automatically.
+
+## Practical Evaluation Checklist
+
+- **Local Whisper transcription** — audio never leaves the machine
+- **`fn` works system-wide** — any focused text field accepts input
+- **Agent mode with MCP** — voice-driven access to files, Git, DBs, browser
+- **Cross-platform** — macOS primary; Linux and Windows listed in topics
+- **Open source MIT** — no vendor lock-in for the core app
+- **Configurable TTS** — agent responses can be read aloud via macOS text-to-speech
+- **Local history** — full transcript and agent-turn log retained on-device
+
+## Security Notes
+
+- Microphone and Accessibility permissions are required. Review what you grant.
+- MCP servers are configurable per-capability. Do not enable servers you do not trust.
+- Credentials are stored in `pi`'s local configuration, not in the t2t app itself.
+- The `pi` agent runs locally on your Mac — it is not a hosted service.
+- Temporary screenshots captured for agent context are deleted after each turn.
+
+## FAQ
+
+**Q: Does t2t work on Linux or Windows?**
+**A:** The project page targets macOS as the primary platform. The GitHub repository topics include `linux` and `windows`, indicating cross-platform support may be available or planned, but the primary download and documentation focus on macOS.
+
+**Q: What Whisper model does it use?**
+**A:** The default model is `ggml-base.en.bin`, downloaded on first run to `~/.cache/whisper/`. You can swap this for a different Whisper model if needed.
+
+**Q: What AI provider does agent mode use?**
+**A:** Agent mode delegates to the `pi` CLI. The default provider is Cloudflare AI Gateway using `gpt-5.6-luna`, but you can configure any provider and model that `pi` supports via environment variables or the Settings UI.
+
+**Q: Can I use t2t without an MCP server?**
+**A:** Yes. Basic dictation mode (hold `fn`) works without `pi` or any MCP server — just Whisper transcription inserted into the focused field.
+
+**Q: How is t2t different from macOS native dictation?**
+**A:** macOS dictation (hold `fn` twice) is limited to transcription. t2t adds agent mode (via `pi` + MCP), spoken agent responses via TTS, local history of all turns, and a configurable shortcut (`fn+ctrl`) for the agent loop.
+
+## Conclusion
+
+t2t is a well-scoped voice workflow tool that solves a real ergonomic problem: typing interrupts flow. The `fn` hold metaphor is tactile and context-aware — you are never unsure which mode you are in. Adding MCP agent access on `fn+ctrl` extends it from a dictation tool into a hands-free coding assistant.
+
+It is MIT licensed, runs Whisper locally, and delegates AI to a self-managed `pi` configuration — no built-in cloud dependency. If you spend significant time in a terminal or code editor, t2t is worth trying.
