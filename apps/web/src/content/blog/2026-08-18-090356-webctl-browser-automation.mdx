@@ -1,0 +1,132 @@
+---
+title: "webctl – CLI-first browser automation for AI agents"
+description: "Browser automation CLI that flips the MCP model — instead of a server deciding what enters your context, you pipe CLI output through grep/jq/head. Benchmarks show 8.5/10 quality at $0.18/task vs Vercel's agent-browser at 7.0/10 for $0.26."
+pubDate: "2026-08-18"
+tags: ["ai-setup", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/webctl-browser-automation.webp"
+  alt: "webctl CLI browser automation terminal"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** webctl is a CLI-only browser automation tool that gives AI agents direct control over what page data enters their context — no MCP server intermediary, just Unix pipes.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [webctl.dev](https://webctl.dev) — verified
+- Source repository: [github.com/cosinusalpha/webctl](https://github.com/cosinusalpha/webctl) — README read in full
+- License: MIT (verified via repository metadata)
+- HN launch thread: [news.ycombinator.com/item?id=46616481](https://news.ycombinator.com/item?id=46616481)
+- Source last checked: 2026-08-18
+
+## What Is webctl?
+
+webctl is a command-line browser automation tool built for AI agents (and humans who prefer CLI). Unlike Playwright-based MCP servers that return the full accessibility tree on every call, webctl puts you in control of what data enters your context.
+
+The core insight from the README:
+
+> "MCP browser tools have a fundamental problem: the server controls what enters your context. With Playwright MCP, every response includes the full accessibility tree plus console messages. After a few page queries, your context window is full. CLI flips this around: you control what enters context."
+
+### Installation
+
+```bash
+pip install webctl
+```
+
+Core commands:
+
+```bash
+webctl navigate "https://example.com"   # Auto-starts browser, returns page data
+webctl click "Sign in"                  # Click by text description
+webctl snapshot                         # See all elements with @refs
+webctl stop                             # Closes browser and daemon
+```
+
+## How It Works: CLI Over MCP
+
+webctl ships no server. Every command is a CLI call. The README contrasts it with MCP across four dimensions:
+
+| Capability | CLI | MCP |
+|---|---|---|
+| **Filter output** | Built-in flags plus grep/jq | Server decides |
+| **Debug** | Run same command as agent | Opaque |
+| **Cache and cost** | `webctl snapshot > cache.txt` | Every call hits server |
+| **Script** | Save to .sh, version control | Ephemeral |
+
+Filtering is done before data reaches the agent:
+
+```bash
+# Filter before context
+webctl snapshot --interactive-only --limit 30      # Only buttons, links, inputs
+webctl snapshot --within "role=main"               # Skip nav, footer, ads
+
+# Pipe through Unix tools
+webctl snapshot | grep -i "submit"                  # Find specific elements
+webctl --format jsonl snapshot | jq '.data.role'   # Extract with jq
+```
+
+## Benchmarks
+
+The README publishes head-to-head benchmarks against [agent-browser](https://github.com/vercel-labs/agent-browser) (Vercel's browser CLI), driving both with Claude Opus:
+
+| Task | webctl Score | agent-browser Score |
+|---|---|---|
+| Amazon product lookup | **9/10** | 9/10 |
+| Spiegel.de headlines | **9/10** | 8/10 |
+| Google Maps restaurants | **8/10** | 7/10 |
+| DuckDuckGo search | **8/10** | 4/10 |
+| **Average** | **8.5/10** | 7.0/10 |
+
+Average cost per task: **$0.18** (webctl) vs **$0.26** (agent-browser).
+
+### Why webctl scores higher
+
+- **Structured data first**: `navigate` extracts JSON-LD and Open Graph metadata before touching the accessibility tree — often enough to answer without a full snapshot
+- **Landmark-aware filtering**: Collapses nav, footer, and sidebar landmarks so agents see content, not chrome
+- **Smart network idle**: Custom load detection that ignores media streams and websockets
+- **Act plus observe in one turn**: `--snapshot` flag on click or type returns the updated page state, saving a round-trip
+
+## Setup
+
+```bash
+pip install webctl
+webctl navigate "https://example.com"
+webctl snapshot --interactive-only --limit 30
+webctl click "Get started"
+webctl stop
+```
+
+Run benchmarks yourself:
+
+```bash
+bash benchmarks/bench_run.sh
+```
+
+## FAQ
+
+**Q: Does webctl replace Playwright?**
+**A:** No. webctl is a higher-level CLI wrapper. Under the hood it uses an existing browser automation library — the README does not specify which one.
+
+**Q: How is this different from Puppeteer or Playwright directly?**
+**A:** Both Puppeteer and Playwright are libraries you import into code. webctl is a standalone CLI with pipeline-friendly output formatting and built-in task-optimized defaults for AI agents.
+
+**Q: Can I use this without an AI agent?**
+**A:** Yes. The README shows human-readable output, grep filtering, and JSONL mode for scripting with jq.
+
+**Q: Does it support headless mode?**
+**A:** The README does not explicitly mention headless mode. Check the repository docs for the latest on this.
+
+## Conclusion
+
+webctl solves the context-window problem that doges every MCP browser tool: the server decides what you see, not you. By moving to a CLI model with Unix-pipe output, agents get filtered, version-controlled, cacheable browser interactions at lower cost per task. The benchmarks are self-reported by the project maintainer, but the design argument is sound — if you are running browser-bound AI tasks and watching context costs climb, a CLI-first approach is worth evaluating.
+
+---
+
+*Source repository: [github.com/cosinusalpha/webctl](https://github.com/cosinusalpha/webctl). License: MIT.*
