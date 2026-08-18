@@ -1,0 +1,149 @@
+---
+title: "Dedalus Labs - persistent Linux VMs for AI agents in 50ms"
+description: "Dedalus Labs runs persistent Linux VMs with VM-level isolation that boot in 50ms, scale to zero, and bill per second. Purpose-built cloud infrastructure for AI agents."
+pubDate: "2026-08-18"
+tags: ["ai-setup", "dev-tools", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dedalus-labs.webp"
+  alt: "Dedalus Labs product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Dedalus Labs runs persistent Linux VMs that boot in 50ms with VM-level isolation, per-second billing, and scale-to-zero pricing. Sleep is free — you only pay for active compute.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [dedaluslabs.ai](https://www.dedaluslabs.ai) — verified 2026-08-18
+- Docs: [docs.dedaluslabs.ai](https://docs.dedaluslabs.ai) — Mintlify-hosted, verified 2026-08-18
+- Y Combinator: [ycombinator.com/companies/dedalus-labs](https://www.ycombinator.com/companies/dedalus-labs) — YC S25 batch, verified via landing page
+- GitHub: [github.com/dedalus-labs](https://github.com/dedalus-labs) — verified 2026-08-18
+
+## What Is Dedalus Labs?
+
+Dedalus Labs is a Y Combinator S25-backed company that provides persistent Linux virtual machines purpose-built for AI agents. Their core product, **Dedalus Machines**, are VMs that boot in 50ms — not containers, not V8 isolates, but full Linux with a dedicated kernel, root access, and hardware-enforced isolation.
+
+The pitch: most agent infrastructure forces a tradeoff. Fast startup (sub-100ms) typically means restricted environments — V8 isolates, Pyodide, or container snapshots that lack full Linux. Full Linux environments have historically meant cold starts measured in seconds. Dedalus claims both: full unrestricted Linux AND 50ms boot via snapshot restore.
+
+Key claims from the landing page (verified):
+
+- **50ms boot** — snapshot restore, not image pull
+- **Full Linux** — systemd, root access, any package manager, any runtime
+- **Persistent storage** — files and memory survive restarts; sleep is free
+- **VM-level isolation** — guest kernel with hardware-enforced boundaries (EPT)
+- **Per-second billing** — only pay for active compute
+- **Scale to zero** — idle machines cost nothing
+
+Founders: Catherine Di (CEO) and Windsor Nguyen (CTO), both listed on the landing page.
+
+## Setup Workflow
+
+### Step 1: Install the CLI
+
+From the landing page:
+
+```bash
+curl -fsSL https://www.dedaluslabs.ai/install/dedalus | bash
+```
+
+### Step 2: Create your first machine
+
+```bash
+dedalus machines create --vcpu 2 --memory-mib 4096
+```
+
+Output: `Machine dm-7f3a created · status: running · 50ms`
+
+### Step 3: Connect via SSH
+
+```bash
+dedalus ssh dm-7f3a
+```
+
+Inside the machine you get a full Linux environment with root access, systemd, and any tooling you need.
+
+### Step 4: Sleep when idle
+
+```bash
+dedalus machines sleep dm-7f3a
+```
+
+Sleeping machines cost nothing. Waking is instant (50ms).
+
+## How the 50ms Boot Works
+
+The docs state that Dedalus uses **snapshot restore** rather than booting from a disk image. A pre-warmed snapshot of a Linux environment is restored from memory, giving the appearance of a running machine in 50ms. The underlying hypervisor is called the **Dedalus Hypervisor**, built on the Cloud Hypervisor project.
+
+This is notably different from:
+- **Docker containers** — fast startup but shared kernel, no root, container escape risk
+- **V8 isolates / Pyodide** — very fast but restricted runtime, no full Linux
+- **Traditional VMs** — full isolation but 2–10 second boot times
+- **AWS Firecracker** — microVM with fast boot but no persistent storage across sleeps
+
+## Isolation Model
+
+Dedalus uses VM-level isolation, which they describe as the strongest isolation model available. Each Dedalus Machine runs its own guest kernel, with the host CPU enforcing boundaries via:
+
+- **VMX root/non-root** privilege ring transitions
+- **Extended Page Tables (EPT)** for memory isolation
+
+This is hardware-level isolation enforced by the CPU, not OS-level user/kernel separation. The comparison table on the landing page shows Dedalus passing full checks for kernel isolation, memory boundary, filesystem isolation, root access, and untrusted code safety — where Docker gets partial checks and V8 isolates score lower.
+
+## Pricing
+
+From the landing page JSON-LD:
+
+- **$20 one-time sign-up credit** — no credit card required
+- **Pro plan** — $20/month, includes $20 in monthly compute credits
+- **Per-second billing** — CPU and RAM billed while machine is active
+- **Storage** — persists across sleep/wake cycles, separate billing
+
+Pro plan effectively gives $20/month in free compute (at Pro tier rates). Hobby tier lets you use the sign-up credit without a subscription.
+
+## Practical Evaluation Checklist
+
+- Boot speed: 50ms (snapshot restore, not cold boot)
+- OS: Full Linux (not a restricted sandbox)
+- Isolation: VM-level (hardware-enforced via EPT)
+- Storage: Persistent across sessions (POSIX filesystem, pjdfstest 100% pass rate)
+- Root access: Yes
+- GPU support: Mentioned on landing page for ML workloads
+- Nested virtualization: Supported (build your own sandboxes inside)
+- API: Three operations — create, exec, sleep
+- Billing: Per-second, scale-to-zero (sleep is free)
+- No imposed session limits or garbage collection pauses
+
+## Security Notes
+
+VM-level isolation is architecturally stronger than container isolation. A container escape gives you the host kernel; escaping a Dedalus VM requires exploiting the hardware virtualization layer. The tradeoff is cost and density — VMs are more expensive per-tenant than containers, and the host can run fewer VMs than containers on the same hardware.
+
+For running untrusted AI-generated code (e.g., agents that execute LLM output), the VM model is the conservative security choice. Dedalus explicitly markets this for "safe[r] for untrusted code" use cases.
+
+## FAQ
+
+**Q: How is this different from E2B or Daytona?**
+**A:** E2B and Daytona run sandboxed environments optimized for speed, but most implementations are either restricted (no full Linux) or slow (cold boot). Dedalus claims the combination of full Linux + 50ms boot + persistent storage + scale-to-zero billing, which none of those providers match on all four simultaneously.
+
+**Q: Can I install anything inside a Dedalus Machine?**
+**A:** Yes. Full Linux with root access, systemd, any package manager, any binary. No restrictions on languages, frameworks, or system-level tools.
+
+**Q: Does sleep lose my work?**
+**A:** No. Files, memory snapshots, and volumes persist across sleep and wake cycles. Compute is disaggregated from storage.
+
+**Q: How does billing work if the machine is sleeping?**
+**A:** Sleeping machines cost nothing. You only pay per-second for CPU and RAM while the machine is actively running.
+
+**Q: What happens if I need a GPU?**
+**A:** GPU support is available for ML workloads, per the landing page. GPU instances likely have different per-second pricing.
+
+## Conclusion
+
+Dedalus Labs targets a specific pain point in the AI agent ecosystem: where to run agents that need full system access (installing packages, compiling code, running long-lived servers) without paying for idle compute or dealing with cold-start latency. The 50ms boot via snapshot restore, combined with persistent storage and scale-to-zero billing, makes a concrete architectural bet.
+
+It's early-stage (waitlist-only as of August 2026), but the YC S25 backing and the specificity of the technical claims (50ms, EPT, Cloud Hypervisor) are worth watching. If the benchmarks hold, it fills a gap between fast-but-restricted sandboxes and slow-but-full VMs.
