@@ -1,0 +1,173 @@
+---
+title: "xa11y – Playwright-Style Desktop Automation via A11y Trees"
+description: "xa11y brings the Playwright developer experience to native desktop apps on macOS, Windows, and Linux — using accessibility trees instead of pixels."
+pubDate: "2026-08-20"
+tags: ["desktop-automation", "accessibility", "testing", "cross-platform", "rust"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/xa11y.webp"
+  alt: "xa11y product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** xa11y is a Rust library that brings Playwright-style auto-waiting, selectors, and locators to native desktop apps on macOS, Windows, and Linux — driven by the OS accessibility tree instead of screenshots.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [xa11y.dev](https://xa11y.dev) ← **MUST visit and verify**
+- Source repository: [github.com/xa11y/xa11y](https://github.com/xa11y/xa11y) ← **MUST read README**
+- License: MIT (verified via LICENSE file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=48446496](https://news.ycombinator.com/item?id=48446496)
+
+## What Is xa11y?
+
+xa11y is a cross-platform desktop automation library built in Rust, with Python and JavaScript bindings. It reads the OS accessibility tree — the same data screen readers use for assistive technology — to locate and interact with UI elements in native applications.
+
+The core problem it solves: screenshot-based computer-use agents and traditional desktop automation tools rely on pixel coordinates, which break when windows resize, fonts change, or DPI scaling shifts. Accessibility trees give agents semantic information about what UI elements actually are, enabling reliable automation regardless of screen geometry.
+
+The project is MIT-licensed, with permissively licensed dependencies throughout. It targets three use cases directly: end-to-end desktop testing, computer-use agents, and MCP tools for desktop interaction.
+
+## Setup Workflow
+
+### Install the library
+
+xa11y is available in three package registries:
+
+```bash
+# Rust
+cargo add xa11y
+
+# Python (requires Python 3.9+)
+pip install xa11y
+
+# JavaScript / Node.js
+npm install @crowecawcaw/xa11y
+```
+
+Python pre-built wheels are available for Linux, macOS, and Windows. For pytest suites, the optional [`pytest-xa11y`](https://xa11y.dev/reference/pytest/) plugin adds fixtures that launch the app under test and capture the accessibility tree on every failure.
+
+### Platform-specific dependencies
+
+**macOS** uses AXUIElement (the Cocoa accessibility API). No additional system packages are required — accessibility APIs are part of the OS.
+
+**Windows** uses UI Automation (UIA). The Windows SDK must be installed (available as a Visual Studio optional component or standalone).
+
+**Linux** uses AT-SPI2 via DBus. On Debian/Ubuntu:
+
+```bash
+sudo apt install libatspi2.0-dev
+```
+
+### Write your first script
+
+The API mirrors Playwright closely. Here is a Python example from the README:
+
+```python
+import xa11y
+
+safari = xa11y.App.by_name("Safari")
+
+# Find elements with CSS-like selectors via locator
+for button in safari.locator("button").elements():
+    print(button.name)
+
+# Interact with elements via locator (re-resolves every call)
+safari.locator("button[name='Submit']").press()
+
+safari.locator("text_field[name^='Search']").set_value("hello world")
+```
+
+And the equivalent Rust API:
+
+```rust
+use xa11y::*;
+use std::time::Duration;
+
+fn main() -> Result<()> {
+    let safari = App::by_name("Safari", Duration::from_secs(5))?;
+
+    let buttons = safari.locator("button[name='Submit']").elements()?;
+    println!("Found {} buttons", buttons.len());
+
+    safari.locator("button[name='Submit']").press()?;
+
+    Ok(())
+}
+```
+
+### CSS-like selectors
+
+xa11y supports a CSS-derived selector syntax for querying the accessibility tree:
+
+```text
+button[name='Submit']
+textfield[name^='Search']
+group > button
+```
+
+The selector engine evaluates filters as it walks the tree rather than after, which keeps performance reasonable on Linux where each element attribute requires a separate DBus call.
+
+## Deeper Analysis
+
+### Why accessibility trees instead of screenshots?
+
+Screenshot-based agents like OmniParser use vision models to label UI elements and pixel coordinates to interact with them. This works when it works, but has two fundamental problems: the vision model must run on every frame (expensive and slow), and pixel coordinates are inherently fragile when the UI changes.
+
+Accessibility APIs give you the semantic structure directly: `button[name='Submit']`, `text_field[name='Search']`, `group > toolbar`. The agent knows what elements are, not just where pixels appear. This makes automation reliable in CI, across different DPI settings, and in headless environments.
+
+The xa11y author wrote about this in detail in a [blog post on accessibility for computer-use](https://crowecawcaw.github.io/general/2026/05/30/accessibility-for-computer-use.html).
+
+### Auto-waiting and element stability
+
+A common source of flakiness in desktop test suites is elements that have not yet appeared or have been replaced after a re-render (which changes their accessibility IDs). xa11y borrows Playwright's auto-waiting pattern: locators poll until the element appears or the timeout expires, rather than failing immediately if the element is not ready.
+
+Pass `Duration::ZERO` for a single attempt with no waiting, or a positive duration for polling.
+
+### Cross-platform consistency
+
+The README notes that the hardest part was finding the right abstraction over the three platform APIs. Windows can read an entire accessibility tree in one call; on Linux each attribute requires a separate DBus round-trip. The library evaluates selector filters during the tree walk rather than after collecting all elements, which avoids the 10-second penalty on large Linux apps.
+
+## Practical Evaluation Checklist
+
+- [ ] Does it install cleanly on macOS, Windows, and Linux?
+- [ ] Are the Python bindings complete and match the Rust API?
+- [ ] Does `pytest-xa11y` integrate with existing pytest suites?
+- [ ] Is the selector syntax documented and predictable?
+- [ ] Does auto-waiting handle elements that appear asynchronously?
+- [ ] Are there examples for computer-use agent integration?
+
+## Security Notes
+
+xa11y requires accessibility API access, which on all three platforms means the running user must have permission to query the accessibility tree. This typically requires:
+
+- **macOS**: System Preferences → Privacy → Accessibility (or `tccutil` to grant via MDM)
+- **Windows**: UAC consent or a policy that allows UI Automation access
+- **Linux**: Membership in the `atspi` group or a running AT-SPI2 registry daemon
+
+This is the same permission model used by screen readers and other assistive technology. Automated CI environments need the accessibility daemon running (Linux) or the app under test launched with accessibility permissions.
+
+## FAQ
+
+**Q: How is this different from PyAutoGUI?**
+**A:** PyAutoGUI uses pixel coordinate clicking and image recognition. xa11y reads the semantic accessibility tree, so it works with any app without screenshots and is not fooled by DPI scaling, theme changes, or window repositioning.
+
+**Q: Does it work with Electron or other web-view-based apps?**
+**A:** Accessibility support depends on the framework. Electron apps expose accessibility trees on Windows and macOS when the `enableRemoteModule` and accessibility flags are set. On Linux, web-view accessibility varies by renderer.
+
+**Q: Can this drive apps inside containers or CI?**
+**A:** On Linux, the AT-SPI2 registry daemon must be running. This is achievable in containers with `--device` access to the session bus. On macOS and Windows, CI needs the accessibility permissions granted to the test runner user.
+
+**Q: Is there an MCP server for xa11y?**
+**A:** Not officially shipped, but the library's design maps naturally to MCP tools. The author mentions it as a target use case on the project page.
+
+## Conclusion
+
+xa11y brings the ergonomics that made Playwright the standard for web automation to the desktop. By reading the accessibility tree instead of relying on screenshots or pixel coordinates, it produces automation that is semantically meaningful and stable across renders, DPI changes, and window repositioning. MIT-licensed, with Rust at the core and bindings for Python and JavaScript, it is easy to drop into existing test suites or use as the backend for a computer-use agent.
+
+If you are building agents that need to interact with desktop applications — whether for testing, RPA, or assistive tools — xa11y is worth evaluating. The [documentation at xa11y.dev](https://xa11y.dev) and the [GitHub repository](https://github.com/xa11y/xa11y) are the best starting points.
