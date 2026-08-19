@@ -1,0 +1,148 @@
+---
+title: "machine0 - Persistent CPU and GPU VMs from the CLI"
+description: "Run persistent cloud VMs with up to 60 vCPUs and 240 GB RAM from the terminal. Designed for AI agents with MCP support, per-minute billing, and suspend-to-stop-billing."
+pubDate: "2026-08-19"
+tags: ["dev-tools", "ai-setup", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/machine0-persistent-vms.webp"
+  alt: "machine0 - Persistent CPU and GPU VMs"
+---
+
+## TL;DR
+
+> **TL;DR:** machine0 is a CLI-first cloud VM service with up to 60 vCPUs, 240 GB RAM, and H100/H200 GPU options — built for AI agents that need persistent, resumable infrastructure billed by the minute.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [machine0.io](https://machine0.io) — verified via direct fetch
+- Source repository: [github.com/fdmtl/machine0-nixos](https://github.com/fdmtl/machine0-nixos) and [github.com/fdmtl/machine0-ubuntu](https://github.com/fdmtl/machine0-ubuntu) — open-source VM images
+- HN launch thread: [news.ycombinator.com/item?id=49348136](https://news.ycombinator.com/item?id=49348136) — verified YC S26 batch
+- License: Proprietary SaaS (VM images are open source, control plane is not)
+
+## What Is machine0?
+
+machine0 is a Y Combinator S26-backed cloud infrastructure service that lets you spin up persistent virtual machines directly from the CLI. Unlike ephemeral cloud dev environments, machines stay alive until you explicitly stop them — billed per minute rather than per hour.
+
+The product is designed around the AI agent workflow: every operation is a CLI command with `--json` output, and a remote MCP server lets code agents like Claude Code and Codex drive everything programmatically. VMs survive restarts, get static IPs and HTTPS endpoints at `[name].mac0.io`, and can be suspended to freeze state and pause billing.
+
+## Setup
+
+### Install the CLI
+
+```bash
+curl -LsSf https://machine0.io/install.sh | sh
+```
+
+After installation, authenticate:
+
+```bash
+machine0 auth login
+```
+
+### Create Your First VM
+
+```bash
+# Spin up a 4 vCPU, 8 GB RAM machine in us-east
+machine0 new myvm --size xxl --region us-east
+
+# SSH in immediately
+machine0 ssh myvm
+```
+
+### Configure MCP Integration
+
+Agents like Claude Code and Codex auto-discover MCP servers injected via profiles:
+
+```bash
+# Add a profile with your MCPs and credentials
+machine0 integrations connect claude-code --profile default
+machine0 integrations add linear --url https://mcp.linear.app/mcp --profile default
+
+# Create a VM with that profile — Claude Code inherits everything
+machine0 new agentbox --profile default
+```
+
+### Suspend and Resume
+
+```bash
+# Freeze state and stop billing
+machine0 suspend myvm
+
+# Restore later
+machine0 start myvm
+```
+
+## Instance Options
+
+machine0 offers CPU and GPU instance sizes. All are billed per minute with no minimum top-up below $5.
+
+### CPU Instances
+
+| Size     | vCPU | RAM   | Disk  | $/hour |
+|----------|------|-------|-------|--------|
+| small    | 1    | 1 GB  | 25 GB | $0.013 |
+| medium   | 2    | 2 GB  | 60 GB | $0.034 |
+| large    | 2    | 4 GB  | 80 GB | $0.052 |
+| xxl      | 8    | 16 GB | 320 GB| $0.208 |
+| 4xl      | 32   | 128 GB| 480 GB| $1.980 |
+| 6xl      | 60   | 240 GB| 900 GB| $3.714 |
+
+The `-nvme` variants use newer-generation CPUs with NVMe storage for higher disk IOPS at the same vCPU/RAM. The `-premium` sizes use dedicated (non-shared) vCPUs for faster single-thread performance.
+
+### GPU Instances
+
+| Size           | GPU       | VRAM     | vCPU | RAM   | $/hour |
+|----------------|-----------|----------|------|-------|--------|
+| gpu-4000ada-1  | 1x RTX 4000 Ada | 20 GB  | 8    | 32 GB | $0.836 |
+| gpu-l40s-1      | 1x L40S   | 48 GB    | 8    | 64 GB | $1.727 |
+| gpu-h100-1      | 1x H100   | 80 GB    | 20   | 240 GB| $4.851 |
+| gpu-h200-1      | 1x H200   | 141 GB   | 24   | 240 GB| $4.917 |
+| gpu-h100-8      | 8x H100   | 640 GB   | 160  | 1.9 TB| $38.808 |
+
+GPU instances are available in `us-east`, `uk`, `eu`, and `asia` regions.
+
+## Key Features
+
+**Persistent VMs.** Unlike cloud dev environments that terminate when idle, machine0 VMs run until you suspend or delete them. State survives reboots.
+
+**Profile-based agent configuration.** Inject MCP servers, credentials, environment variables, and prompts into VMs via named profiles. Claude Code and Codex pick them up automatically on SSH.
+
+**Reproducible builds with NixOS.** NixOS images are fully deterministic — one-command rollbacks, no configuration drift. Ubuntu images come pre-installed with Docker, Node, Python, Claude Code, and Codex.
+
+**Free suspend.** Run a task, `machine0 suspend`, and billing stops entirely. You only pay for image storage ($0.078/GB/month) while suspended.
+
+**5 regions.** `us-east`, `uk`, `eu`, `asia`, plus a default region. Static IPs and HTTPS endpoints (`[vm].mac0.io`) on every machine.
+
+## FAQ
+
+**Q: Is the control plane open source?**
+**A:** No. The VM images (NixOS and Ubuntu configurations) are open source at `github.com/fdmtl/machine0-nixos` and `github.com/fdmtl/machine0-ubuntu`, but the cloud infrastructure and orchestration layer is proprietary.
+
+**Q: How does suspend billing work?**
+**A:** When you run `machine0 suspend`, the VM state is frozen and compute billing stops. You continue to pay for image storage at $0.078/GB/month. There is no charge for the suspend/resume cycle itself.
+
+**Q: What makes this agent-native?**
+**A:** Every CLI command outputs `--json` for structured parsing. The remote MCP server exposes all machine0 operations as MCP tools, so agents can create, configure, and destroy VMs programmatically without parsing terminal output.
+
+**Q: Are dedicated (non-shared) vCPUs available?**
+**A:** Yes. The `-premium` sizes (`xl-premium`, `xxl-premium`) use dedicated vCPUs with faster single-thread performance. All other sizes use shared vCPU pools.
+
+## Conclusion
+
+machine0 targets a specific gap in cloud infrastructure: AI agents and CLI-first developers who need persistent, GPU-capable VMs without the overhead of managing a cloud dashboard. Per-minute billing, suspend-to-billing-stop, and MCP integration distinguish it from both ephemeral dev environments and traditional cloud VMs. The NixOS image reproducibility is a bonus for teams that want deterministic infrastructure definition in code.
+
+For agents running long tasks — automated research, code generation at scale, model inference — machine0's model is worth evaluating against a租用 GPU cloud like RunPod or Lambda Labs, which bill similarly per second but lack the CLI-first agent UX and suspend model.
+
+## Source and Accuracy Notes
+
+- Project page: [machine0.io](https://machine0.io)
+- Source repository: [github.com/fdmtl/machine0-nixos](https://github.com/fdmtl/machine0-nixos), [github.com/fdmtl/machine0-ubuntu](https://github.com/fdmtl/machine0-ubuntu)
+- HN launch thread: [news.ycombinator.com/item?id=49348136](https://news.ycombinator.com/item?id=49348136) (YC S26)
+- License: Proprietary SaaS; VM images are MIT (per repo)
+- Source last checked: 2026-08-19 (direct from machine0.io homepage + pricing page)
