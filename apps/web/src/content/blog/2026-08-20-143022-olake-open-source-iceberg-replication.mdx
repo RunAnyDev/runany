@@ -1,0 +1,198 @@
+---
+title: "OLake – Self-Hosted Iceberg Replication That Outpaces Kafka Connect"
+description: "Open-source tool that replicates Postgres, MongoDB, MySQL and more to Apache Iceberg with 5-500x better throughput than Debezium or Kafka Connect. Docker Compose setup in one command."
+pubDate: "2026-08-20"
+tags: ["self-hosted", "dev-tools", "data-engineering"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/olake.webp"
+  alt: "OLake – Fastest Open Source Data Replication to Apache Iceberg"
+---
+
+## TL;DR
+
+> **TL;DR:** OLake is an Apache 2.0-open-source replication engine that streams Postgres, MongoDB, MySQL, Oracle, MSSql, DB2, Kafka and S3 data into Apache Iceberg — with benchmarks showing 5–500x better throughput than Debezium or Kafka Connect, and a Docker Compose one-liner to get started.
+
+## Source and Accuracy Notes
+
+- Project page: [olake.io](https://olake.io)
+- Source repository: [github.com/datazip-inc/olake](https://github.com/datazip-inc/olake) (1,422 stars, verified via GitHub REST API)
+- License: Apache 2.0 (verified via GitHub REST API `license.spdx_id`)
+- Docs: [olake.io/docs](https://olake.io/docs)
+- HN launch thread: not found — post covers current main branch functionality only
+
+## What Is OLake?
+
+OLake is a self-hosted data replication tool that moves data from operational databases and message queues into [Apache Iceberg](https://iceberg.apache.org/) tables on object storage (S3, GCS, Azure Blob). It comes in two editions:
+
+- **OLake Go** — CLI-first ingestion engine, runs as a single binary or Docker container
+- **OLake Fusion** — cloud-native version with a web UI for managing pipelines visually
+
+The pitch is raw performance. The official benchmarks claim 5–500x faster ingestion than Debezium + Kafka Connect pipelines for the same CDC (Change Data Capture) workloads. The team behind it, Datazip, also ships a [7× performance write-up](https://olake.io/blog/how-olake-becomes-7x-faster/) detailing their atomic commit refactor that eliminated read-then-write I/O on Iceberg destination writes.
+
+Supported sources at the time of writing:
+
+| Source | Type |
+|---|---|
+| PostgreSQL | Database |
+| MongoDB | Database |
+| MySQL | Database |
+| Oracle | Database |
+| Microsoft SQL Server | Database |
+| DB2 | Database |
+| Kafka | Message queue |
+| Amazon S3 | Object storage |
+
+Destinations point to Iceberg catalogs — tested against AWS Glue, Snowflake, Apache Hive Metastore, and others.
+
+## Setup Workflow
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) installed (Docker Desktop recommended)
+- At least 4 GB RAM available for Docker
+- An Iceberg-compatible destination (or use a local MinIO stack for testing)
+
+### Step 1: One-Command Deploy
+
+The quickest path to a running instance is the Docker Compose template from the official repository:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/datazip-inc/olake-ui/master/docker-compose-v1.yml \
+  | docker compose -f - up -d
+```
+
+This pulls the latest `docker-compose-v1.yml` and starts the OLake UI alongside its backing services. Once running, the web interface is available at `http://localhost`.
+
+For CLI-only deployments (no UI):
+
+```bash
+docker run --rm -v $(pwd)/olake-config:/app/data datazip/olake-go:latest
+```
+
+### Step 2: Connect a Source
+
+In the OLake UI, add a new **Source** pointing at one of the supported databases. For Postgres:
+
+```yaml
+# Example source config (from docs)
+source:
+  type: postgres
+  host: localhost
+  port: 5432
+  database: mydb
+  username: olake_user
+  password: "${POSTGRES_PASSWORD}"
+  # Enable CDC mode for real-time replication
+  replication:
+    mode: cdc
+    slot_name: olake_slot
+```
+
+The CDC slot (`olake_slot`) needs to exist on the Postgres instance before OLake can read the WAL. Create it with:
+
+```sql
+SELECT pg_create_logical_replication_slot('olake_slot', 'pgoutput');
+```
+
+### Step 3: Configure the Iceberg Destination
+
+```yaml
+# Example destination config
+destination:
+  type: iceberg
+  catalog:
+    type: glue        # or snowflake, hive, rest
+    aws_region: us-east-1
+  warehouse_path: s3://my-iceberg-warehouse/
+  table_prefix: olake_
+```
+
+OLake handles schema evolution automatically — when source column types change, it migrates the Iceberg table schema without interrupting replication.
+
+### Step 4: Create the Pipeline
+
+Map source tables to destination Iceberg tables through the UI or YAML config:
+
+```yaml
+pipeline:
+  name: users-cdc
+  source: postgres_prod
+  destination: iceberg_warehouse
+  tables:
+    - source: public.users
+      dest: users_cdc
+      sync_mode: cdc        # full | incremental | cdc
+      primary_key: user_id
+```
+
+### Monitoring
+
+OLake ships a Prometheus metrics endpoint at `/metrics` by default. Key signals to watch:
+
+- `olake_ingestion_lag_seconds` — how far behind the source the pipeline is
+- `olake_rows_written_total` — cumulative rows written to Iceberg
+- `olake_commit_duration_seconds` — Iceberg commit latency (spikes here indicate catalog contention)
+
+For Kubernetes deployments, a Helm chart is available at [olake.io/docs/install/kubernetes](https://olake.io/docs/install/kubernetes).
+
+## Deeper Analysis
+
+### Why Iceberg as a destination?
+
+Apache Iceberg is an open table format designed for analytical workloads. Unlike raw Parquet on S3, Iceberg gives you:
+
+- **Time-travel queries** — read any historical snapshot without maintaining separate snapshots manually
+- **Schema evolution** — add/drop/rename columns without rewriting existing data
+- **Partition evolution** — change partitioning strategy on existing tables without migration jobs
+- **ACID commits** — multiple concurrent writers don't produce corrupt tables
+
+For teams already running a lakehouse architecture (Snowflake, Athena, Apache Spark, Trino, DuckDB), OLake fills the ingestion gap that Debezium + Kafka + a consumer processor typically occupies — at significantly lower operational overhead.
+
+### Two-phase commit
+
+OLake uses a two-phase commit protocol when writing to Iceberg to guarantee exactly-once delivery. The write phase stages data to a temporary location; the commit phase atomically publishes the snapshot. This prevents partial commits from corrupting the Iceberg manifest.
+
+### Architecture
+
+OLake Go is written in Go (per the GitHub org name and binary distribution pattern). The Go runtime gives it a memory footprint far below a JVM-based pipeline (Debezium runs on Kafka Connect which requires a full Kafka cluster).
+
+From the architecture docs at [olake.io/docs/core/architecture](https://olake.io/docs/core/architecture), the pipeline is: Source CDC log → Go ingestion worker (parallel chunking, configurable concurrency) → Iceberg writer with two-phase commit → catalog update.
+
+## Practical Evaluation Checklist
+
+- [ ] Spun up OLake via Docker Compose
+- [ ] Connected a test Postgres database with CDC enabled
+- [ ] Verified Iceberg tables appear in the target warehouse
+- [ ] Confirmed schema evolution works when a source column type changes
+- [ ] Checked `olake_ingestion_lag_seconds` Prometheus metric under load
+- [ ] Tested recovery after a broker restart (OLake resumes from WAL position)
+
+## Security Notes
+
+- Credentials are injected via environment variables or a secrets manager integration — never hardcoded in config files
+- The Docker Compose template binds to `localhost` by default; expose it behind a VPN or reverse proxy for non-local access
+- For production, enable TLS between OLake and the Iceberg catalog (especially for AWS Glue which requiresSigV4)
+
+## FAQ
+
+**Q: Does OLake require Kafka?**
+**A:** No. Kafka is one of several supported sources, but OLake also reads directly from database WAL logs (Postgres `pgoutput`, MySQL binlog) without an intermediate message bus. If you already use Kafka as a source, OLake can consume from it too.
+
+**Q: How does it compare to Apache Kafka Connect with Iceberg sink?**
+**A:** The official benchmarks show 5–500x better throughput. The practical difference is that OLake's Go-based ingester avoids the JVM overhead of Kafka Connect workers, and its parallel chunking strategy is purpose-built for Iceberg's commit model rather than generic Parquet writes.
+
+**Q: Can I run this without a cloud data warehouse?**
+**A:** Yes. OLake works with any Iceberg-compatible catalog, including Apache Hive Metastore (for on-prem HDFS or MinIO) and the local MinIO stack for testing. The open-source version has no cloud dependency.
+
+**Q: Is there a managed / cloud offering?**
+**A:** Yes — OLake Fusion is the cloud edition. The open-source OLake Go is fully self-hostable and does not require a Fusion account.
+
+## Conclusion
+
+OLake fills a specific niche: teams that want CDC-quality data replication into a lakehouse without the Kafka operational burden. The one-command Docker Compose install, Go-based footprint, and direct Iceberg writer make it a practical alternative to the Debezium + Kafka Connect + consumer processor stack.
+
+If you're running Postgres or MongoDB and want to get data into Iceberg for analytics without maintaining a full streaming platform, OLake is worth evaluating. The docs are at [olake.io/docs](https://olake.io/docs) and the source is at [github.com/datazip-inc/olake](https://github.com/datazip-inc/olake).
