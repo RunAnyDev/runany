@@ -1,0 +1,177 @@
+---
+title: "Schedify - HTTP Task Scheduler in One Go Binary"
+description: "Self-hosted HTTP task scheduler as a single Go binary with embedded BadgerDB. No Redis, no Postgres, no infra to operate — schedule a webhook and forget it."
+pubDate: "2026-08-22"
+tags: ["self-hosted", "scheduler", "dev-tools", "go"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/schedify.webp"
+  alt: "Schedify product thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Schedify is an open-source HTTP task scheduler that runs as a single Go binary with an embedded BadgerDB. Point it at a directory, schedule a webhook, and it handles retries and delivery without any external infrastructure.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [schedify.dev](https://schedify.dev) ← verified via direct fetch
+- Source repository: [github.com/ksamirdev/schedy](https://github.com/ksamirdev/schedy) ← README read in full
+- License: MIT (verified via LICENSE file in repo root)
+- HN launch thread: [news.ycombinator.com/item?id=43599186](https://news.ycombinator.com/item?id=43599186)
+
+## What Is Schedify?
+
+Schedify (styled "Schedy") is an open-source HTTP task scheduler built in Go. The entire system is one compiled binary with an embedded BadgerDB database — no Redis, no Postgres, no cron daemon, no queue system to operate.
+
+The core contract is simple: tell Schedify a URL, a time, and a payload. At the scheduled time, it fires an HTTP request to your URL, retries on failure, and logs the outcome.
+
+```sh
+docker run -p 8080:8080 ghcr.io/ksamirdev/schedy:latest
+```
+
+```sh
+curl -X POST http://localhost:8080/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhook",
+    "execute_at": "2030-01-01T09:00:00Z",
+    "payload": {"hello": "world"}
+  }'
+```
+
+The task ID returned lets you look up delivery status, retry history, and outcomes later.
+
+## Why Schedify Exists
+
+Developers routinely need to fire HTTP webhooks at a future time. The standard answers are:
+
+- **Cron + a custom script** — requires cron to be set up, logs scattered, retries left as an exercise for the reader.
+- **A message queue (Redis/SQS/Pubsub)** — operational overhead of running and monitoring the queue itself.
+- **A hosted scheduler service (EasyPost, Cronhooks, etc.)** — adds a third-party dependency and per-request cost at scale.
+
+Schedify's pitch is that none of those things need to exist for this problem. A single Go binary with an embedded key-value store handles it, survives restarts, and costs essentially nothing to run.
+
+## Setup Workflow
+
+### Step 1: Run the Binary
+
+The fastest path is Docker:
+
+```bash
+docker run -p 8080:8080 ghcr.io/ksamirdev/schedy:latest
+```
+
+Prebuilt binaries are also available on the [GitHub Releases](https://github.com/ksamirdev/schedy/releases) page. From source (Go 1.23+):
+
+```bash
+go build -o schedy ./cmd/schedy
+./schedy --port 8080
+```
+
+### Step 2: Schedule a Task
+
+With the server running, POST a task definition:
+
+```bash
+curl -X POST http://localhost:8080/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-app.com/api/nightly-report",
+    "execute_at": "2026-09-01T06:00:00Z",
+    "payload": {"report_date": "2026-08-31"}
+  }'
+```
+
+Response:
+
+```json
+{"task_id": "01J9...","status": "scheduled"}
+```
+
+### Step 3: Secure with an API Key (Optional)
+
+Set the `SCHEDY_API_KEY` environment variable. Every request then requires the `X-API-Key` header:
+
+```bash
+docker run -p 8080:8080 \
+  -e SCHEDY_API_KEY=your-secret-key \
+  ghcr.io/ksamirdev/schedy:latest
+```
+
+## Deeper Analysis
+
+### What Schedify Does Well
+
+**Retries with configurable backoff.** Failed deliveries are retried automatically, with either fixed-interval or exponential backoff. The README explicitly calls out both options.
+
+**Interval-based recurring tasks.** Add `"schedule": "15m"` to a task definition and Schedify fires it repeatedly on that interval — no re-scheduling required.
+
+**HMAC request signing.** If your webhook consumer expects signed requests, Schedify can sign outbound payloads with HMAC. This is documented in the API reference at [schedy.mintlify.site](https://schedy.mintlify.site).
+
+**SSRF egress guard.** Outbound requests are issued from a controlled egress range, reducing the risk of accidentally hitting internal infrastructure.
+
+**Prometheus metrics.** A `/metrics` endpoint exposes delivery stats in Prometheus format, which drops directly into any standard monitoring stack.
+
+**Backup without downtime.** The `GET /admin/backup` endpoint snapshots the BadgerDB store without requiring you to copy the live data directory. The backup docs are at [schedy.mintlify.site/backup](https://schedy.mintlify.site/backup).
+
+**Backlog controls.** If Schedify restarts after being down for a while, it won't immediately fire a month of queued tasks at your API. The backlog controls throttle firing to a sane rate.
+
+**OpenAPI spec.** The repo includes an `openapi.yaml` machine-readable spec. You can point Postman, Insomnia, or any codegen tool at it.
+
+### What Schedify Deliberately Is Not
+
+The README is explicit about the scope boundary: Schedify is not cron, not a workflow engine, and has no DAG support. There is no cron syntax, no timezone/DST handling, no fan-out orchestration. If you need Temporal-grade workflow orchestration, the recommendation is to use Temporal — Schedify stays a "fire this HTTP request later" box by design.
+
+### Data Persistence
+
+Tasks persist to a `data/` directory using BadgerDB, which is a performant embedded key-value store written in Go. Restarts do not lose scheduled work. Snapshot-based backup via the admin API avoids the need to copy a live database file.
+
+## Practical Evaluation Checklist
+
+- [ ] Pull the Docker image and make a POST request to `/tasks`
+- [ ] Verify a task fires at the scheduled time
+- [ ] Test retry behavior by pointing at a non-routable URL
+- [ ] Set `SCHEDY_API_KEY` and confirm the `X-API-Key` header is enforced
+- [ ] Hit `/metrics` and confirm Prometheus metrics appear
+- [ ] Run `GET /admin/backup` and restore to a fresh container
+- [ ] Schedule a recurring task with `"schedule": "15m"` and verify it fires repeatedly
+
+## Security Notes
+
+- API key authentication via `X-API-Key` header is enforced per-endpoint when `SCHEDY_API_KEY` is set.
+- HMAC signing for outbound payloads is available; consult the [API reference](https://schedy.mintlify.site) for the signing algorithm.
+- SSRF egress guard restricts outbound requests to a controlled IP range.
+- No external database means no DB credentials to manage, but the BadgerDB data directory should be protected appropriately for your threat model.
+
+## FAQ
+
+**Q: Does Schedify support timezones or DST?**
+**A:** No. The README explicitly states there is no timezone or DST handling. Times are interpreted as UTC. If you need timezone-aware scheduling, handle timezone conversion before submitting the `execute_at` timestamp.
+
+**Q: How does Schedify survive restarts?**
+**A:** Tasks are stored in a BadgerDB instance inside the `data/` directory. When the binary restarts, it reads the existing task store on startup. Use `GET /admin/backup` to get a consistent snapshot without stopping the process.
+
+**Q: Can I run Schedify without Docker?**
+**A:** Yes. Prebuilt binaries for Linux, macOS, and Windows are on the GitHub Releases page. From source requires Go 1.23 or later.
+
+**Q: What's the difference between Schedify and a cron job?**
+**A:** Cron runs commands on a recurring schedule. Schedify fires a specific HTTP POST to a specific URL at a specific time, with retry logic and delivery status tracking. Schedify also has no cron syntax — it accepts ISO 8601 timestamps or interval strings like `"15m"`.
+
+**Q: Does Schedify require any external services?**
+**A:** No. The entire stack is the single Go binary. No Redis, no Postgres, no message queue.
+
+## Conclusion
+
+Schedify solves one problem cleanly: schedule an HTTP webhook and trust it will fire. The single-binary deployment model makes it practical for developer workstations, small VPS instances, or container environments where you want scheduling without operational overhead. The MIT license and MIT no-attribute requirement on the logo make it suitable for commercial use.
+
+The deliberate scope constraint — no DAGs, no cron syntax, no timezone magic — is what keeps it simple. If your use case fits "fire this URL later with retries," Schedify is worth a look. If you need full workflow orchestration, pair it with something like Temporal and use Schedify as the low-overhead scheduling layer.
+
+- Project page: [schedify.dev](https://schedify.dev)
+- Source: [github.com/ksamirdev/schedy](https://github.com/ksamirdev/schedy)
+- Docs: [schedy.mintlify.site](https://schedy.mintlify.site)
