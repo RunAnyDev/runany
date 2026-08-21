@@ -1,0 +1,151 @@
+---
+title: "Jitsu - Open-Source Segment Alternative"
+description: "Jitsu is an open-source data collection platform that captures events from web, app, and servers, then streams them to your data warehouse. MIT licensed."
+pubDate: "2026-08-21"
+tags: ["data-pipeline", "open-source", "self-hosted", "analytics"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/jitsu-open-source-segment-alternative.webp"
+  alt: "Jitsu open-source data collection platform"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Jitsu is an open-source, self-hostable alternative to Segment that captures events from web, mobile, and server sources and streams them to your data warehouse — MIT licensed with 5K+ GitHub stars.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [jitsu.com](https://jitsu.com) ← visited and verified
+- Source repository: [github.com/jitsucom/jitsu](https://github.com/jitsucom/jitsu) ← README read
+- License: MIT (verified via GitHub repository metadata)
+- HN launch thread: [news.ycombinator.com/item?id=24041799](https://news.ycombinator.com/item?id=24041799) (YC S20)
+- Source last checked: 2026-08-21 (commit `master` branch)
+
+## What Is Jitsu?
+
+Jitsu is an open-source data collection engine built as a self-hostable replacement for commercial platforms like Segment. It captures event data from websites, mobile apps, servers, and chatbots — then streams that data in real-time to your own data warehouse or an included ClickHouse instance.
+
+The project was founded by former data engineers who needed a fully-scriptable, transparent alternative to locked-in commercial CDP products. Unlike Segment, where your data routes through a third-party infrastructure, Jitsu runs entirely on your own servers or cloud account.
+
+> **From the README:** "Jitsu is an open source high-performance data collection service. It can: Capture events your application generates and stream to Data Warehouse; Pull data from APIs and save it to Data Warehouse."
+
+Key differentiators:
+- 100% open source under MIT license
+- Self-hostable on Docker, Kubernetes, or Heroku
+- Segment API compatibility layer — migrate existing `analytics.js` calls without rewriting instrumentation
+- Built-in ClickHouse for zero-infrastructure data storage
+- Custom domain support to reduce ad-blocker impact on data collection
+
+## Setup Workflow
+
+### Step 1: Clone and Start with Docker Compose
+
+```bash
+git clone https://github.com/jitsucom/jitsu.git
+cd jitsu
+chmod -R 777 compose-data/
+docker-compose up
+```
+
+The latest Docker image is downloaded and started automatically. Once the container is running, open the configurator.
+
+### Step 2: Configure via the Web UI
+
+After the containers are up, visit:
+
+```
+http://localhost:8000/configurator
+```
+
+The configurator is a visual UI for defining data sources (web SDK, server-side, third-party APIs) and destinations (warehouse, analytics tools). You can also write configuration as YAML for infrastructure-as-code setups.
+
+### Step 3: Instrument Your Application
+
+For web sources, add the Jitsu snippet to your HTML:
+
+```html
+<script src="https://{{your-jitsu-host}}/sEXT.js" async></script>
+<script>
+  jitsu('.jitsu', {
+    host:     '{{your-jitsu-host}}',
+    writeKey: '{{your-write-key}}',
+  })
+</script>
+```
+
+For server-side Node.js tracking:
+
+```javascript
+const { Jitsu } = require('@jitsu/sdk');
+const jitsu = Jitsu({ host: '{{your-jitsu-host}}', writeKey: '{{your-write-key}}' });
+jitsu.track({ event: 'purchase', properties: { amount: 99.00 } });
+```
+
+Jitsu also provides a **Segment compatibility layer**: if you already have Segment's `analytics.js` loaded, you can point it to a Jitsu endpoint and continue using the same `analytics.track()`, `analytics.identify()`, and `analytics.page()` calls. This makes migration straightforward without a full instrumentation rewrite.
+
+### Step 4: Connect a Destination
+
+In the configurator, add a destination warehouse. Jitsu supports:
+- **ClickHouse** (included free — no external service needed)
+- Snowflake
+- BigQuery
+- Amazon Redshift
+- PostgreSQL
+- MySQL
+
+Events are streamed in real-time and also batched for efficient warehouse writes.
+
+### Alternative: Jitsu.Cloud (Hosted)
+
+If you prefer not to self-host, [Jitsu.Cloud](https://cloud.jitsu.com) is the official hosted version. It is free for up to 250,000 events per month and includes a demo PostgreSQL database (up to 10,000 records).
+
+## Key Features
+
+### Segment API Compatibility
+
+Jitsu implements the Segment Spec, meaning most `analytics.js` and server-side Segment SDK calls work with Jitsu as the destination. You can switch your write key endpoint from Segment's servers to your own Jitsu deployment without changing any instrumentation code.
+
+### Identity Stitching
+
+Jitsu automatically builds a user identity graph by stitching together events from multiple devices and sessions. As new information arrives, user profiles are augmented incrementally — reducing the need for complex SQL joins across event tables.
+
+### ClickHouse Included
+
+A full ClickHouse instance is bundled with Jitsu at no additional cost. ClickHouse handles high-throughput event ingestion efficiently, making it practical to run the entire pipeline on modest infrastructure without paying for Snowflake or BigQuery.
+
+### Custom Domain Deployment
+
+You can deploy Jitsu behind your own subdomain (e.g., `events.yourcompany.com`). This minimizes data loss from ad blockers and tracker blockers that flag known third-party analytics domains.
+
+## Security Notes
+
+- All event data stays on your own infrastructure when self-hosted
+- Configuration supports TLS termination at the Jitsu layer
+- No data leaves your environment unless you explicitly configure an outbound destination
+- JWT or API key authentication protects the configurator UI
+- The MIT license means no commercial restrictions on self-hosting or modification
+
+## FAQ
+
+**Q: How much infrastructure is needed to self-host Jitsu?**
+**A:** At minimum, a single Docker host with 2 vCPUs and 4 GB RAM is sufficient for low-to-medium traffic. High-volume deployments can scale horizontally with the event streaming architecture.
+
+**Q: Is there a managed / cloud version?**
+**A:** Yes — Jitsu.Cloud offers a hosted version free up to 250,000 events/month. Paid tiers scale from there.
+
+**Q: How does Jitsu compare to building your own pipeline with Kafka + Flink?**
+**A:** Jitsu handles the collection SDK layer, retry logic, identity resolution, and destination routing out of the box. Building equivalent functionality from scratch with Kafka and Flink requires significant engineering time. Jitsu is purpose-built for event collection specifically, whereas Kafka is a general-purpose streaming platform.
+
+**Q: Does Jitsu support real-time analytics queries?**
+**A:** Jitsu ingests and forwards events — query performance depends on your destination warehouse. ClickHouse handles analytical queries in seconds on billions of rows. BI tools like Metabase, Grafana, or Preset connect directly to the warehouse.
+
+## Conclusion
+
+Jitsu fills the gap between rolling your own event collection pipeline and paying for a commercial CDP. With 5K+ GitHub stars, MIT licensing, and a full Segment-compatible SDK layer, it is one of the most production-ready open-source options for teams that want data ownership without rebuilding everything from scratch.
+
+The Docker Compose path gets you from zero to collecting events in under ten minutes. The Segment compatibility mode means you do not have to rewrite your existing instrumentation to try it. For teams already paying for Segment or Mixpanel and wanting to bring data collection in-house, Jitsu is the most direct migration path available today.
