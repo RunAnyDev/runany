@@ -1,0 +1,33 @@
+#!/bin/sh
+# After every commit, push the changed .mdx URLs to IndexNow for instant
+# indexing by Bing, Yandex, DuckDuckGo, and friends. Google ignores
+# IndexNow but the sitemap re-submit (gsc_audit.py) handles that side.
+#
+# Skip when:
+# - No .mdx files changed (e.g. doc-only commit)
+# - IndexNow key is missing
+# - We're in a rebase/merge mid-flight (avoid spamming during rebase)
+
+# Don't run during rebase/merge/amend
+if [ -d "$(git rev-parse --git-dir)/rebase-merge" ] || \
+   [ -d "$(git rev-parse --git-dir)/rebase-apply" ] || \
+   [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+  exit 0
+fi
+
+# Only run if python3 is available
+if ! command -v python3 >/dev/null 2>&1; then
+  exit 0
+fi
+
+# Find repo root
+repo_root="$(git rev-parse --show-toplevel)"
+if [ ! -f "$repo_root/scripts/indexnow_submit.py" ]; then
+  exit 0
+fi
+
+# Submit URLs of .mdx files added/modified in the last commit.
+# Use HEAD~1..HEAD (single-commit window) so we don't resubmit the whole
+# history every commit.
+python3 "$repo_root/scripts/indexnow_submit.py" --since HEAD~1
+exit 0

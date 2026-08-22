@@ -22,11 +22,17 @@ const xmlEscape = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 
+interface ImageEntry {
+  loc: string;
+  title: string;
+}
+
 interface Entry {
   loc: string;
   lastmod: string | null;
   changefreq: 'daily' | 'weekly' | 'monthly' | 'yearly';
   priority: number;
+  images?: ImageEntry[];
 }
 
 const renderEntry = (entry: Entry): string => {
@@ -39,6 +45,19 @@ const renderEntry = (entry: Entry): string => {
   }
   lines.push(`    <changefreq>${entry.changefreq}</changefreq>`);
   lines.push(`    <priority>${entry.priority.toFixed(1)}</priority>`);
+  // Image sitemap extensions (xmlns:image declared on root). Posts with a
+  // thumbnail in frontmatter get an <image:image> block — Google Images is
+  // a meaningful traffic source for AI/dev blogs, and the namespace was
+  // previously declared but never used. For posts without a thumbnail we
+  // skip silently; categories/tags/static pages have no images either.
+  for (const img of entry.images ?? []) {
+    lines.push('    <image:image>');
+    lines.push(`      <image:loc>${xmlEscape(img.loc)}</image:loc>`);
+    if (img.title) {
+      lines.push(`      <image:title>${xmlEscape(img.title)}</image:title>`);
+    }
+    lines.push('    </image:image>');
+  }
   lines.push('  </url>');
   return lines.join('\n');
 };
@@ -60,11 +79,16 @@ export const GET: APIRoute = async () => {
   // for Google crawl scheduling.
   const blogEntries: Entry[] = sortedPosts.map((post) => {
     const slug = stripTimestampPrefix(post.id);
+    const img = post.data.image;
+    const imageUrl = img?.url
+      ? (img.url.startsWith('http') ? img.url : `${siteUrl}${img.url}`)
+      : null;
     return {
       loc: `${siteUrl}/blog/${slug}/`,
       lastmod: toIsoDate(post.data.updatedDate ?? post.data.pubDate),
       changefreq: 'monthly',
       priority: 0.9,
+      images: imageUrl ? [{ loc: imageUrl, title: post.data.title }] : undefined,
     };
   });
 
