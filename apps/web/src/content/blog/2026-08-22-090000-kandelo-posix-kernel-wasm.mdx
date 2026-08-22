@@ -1,0 +1,133 @@
+---
+title: "Kandelo – POSIX Kernel for WebAssembly in the Browser"
+description: "Kandelo runs a full POSIX kernel compiled to WebAssembly, letting nginx, PHP, MariaDB, Redis, Python, Git and Vim execute unmodified inside any browser with SharedArrayBuffer support."
+pubDate: "2026-08-22"
+tags: ["webassembly", "posix", "browser", "wasm", "developer-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kandelo.webp"
+  alt: "Kandelo architecture diagram showing POSIX kernel, user programs, and TypeScript host runtime"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Kandelo compiles a POSIX-compatible kernel from Rust to WebAssembly, then runs real, unmodified software — nginx, PHP, MariaDB, Redis, Python, Git, Vim — inside the browser via a TypeScript host runtime backed by SharedArrayBuffer.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [kandelo.dev](https://kandelo.dev) (live demo)
+- Source repository: [github.com/Automattic/kandelo](https://github.com/Automattic/kandelo)
+- License: GPL v2+ (kernel, host runtime, SDK); MIT (libc overlay / syscall glue linked into user programs)
+- HN launch thread: [news.ycombinator.com/item?id=49378305](https://news.ycombinator.com/item?id=49378305)
+- User guide: [automattic.github.io/kandelo/guide](https://automattic.github.io/kandelo/guide/)
+- POSIX syscall status: [automattic.github.io/kandelo/docs/posix-status](https://automattic.github.io/kandelo/docs/posix-status)
+
+## What Is Kandelo?
+
+Kandelo is an experimental research project from Automattic that implements a POSIX-compatible multi-process kernel in WebAssembly. Unlike projects like JSLinux that emulate individual programs, Kandelo emulates the entire OS layer — processes, syscalls, pipes, PTY, signals, and networking — so that software compiled natively for POSIX runs without modification.
+
+From the README:
+
+> Kandelo is a POSIX-compatible multi-process kernel for WebAssembly that runs command-line tools, server stacks, and early graphical demos in the browser or Node.js with syscall-level compatibility.
+
+The architecture is three-tier:
+
+```
+┌─────────────────────────────────────────┐
+│  User Programs (C → Wasm)               │
+│  Each in its own Web Worker             │
+│  Linked against musl libc + glue        │
+├─────────────────────────────────────────┤
+│  Kernel (Rust → Wasm)                   │
+│  One instance, all processes            │
+│  Syscalls, fd table, pipes, signals,    │
+│  sockets, PTY, memory management        │
+├─────────────────────────────────────────┤
+│  Host Runtime (TypeScript)             │
+│  Node.js: fs, net, crypto               │
+│  Browser: SharedArrayBuffer FS, fetch  │
+└─────────────────────────────────────────┘
+```
+
+### What Runs on Kandelo
+
+Real, unmodified software compiled to WebAssembly. The README ships a table of tested software:
+
+| Software | Version | Notes |
+|----------|---------|-------|
+| nginx | 1.27 | Static serving, reverse proxy, FastCGI, multi-worker fork |
+| PHP | 8.4 | CLI + PHP-FPM, FastCGI protocol |
+| MariaDB | 10.5 | SQL database, Aria storage engine, 5 threads |
+| Redis | 7.2 | In-memory store, 3 background threads |
+| WordPress | 6.7 | Full CMS: nginx + PHP-FPM + SQLite or MariaDB |
+| CPython | 3.13 | REPL, script execution, stdlib |
+| Git | 2.47 | Core version control operations |
+| Vim | 9.1 | Full editor with ncurses terminal UI |
+| NetHack | 3.6.7 | Classic roguelike with curses UI |
+| SpiderMonkey | 140 ESR | JavaScript engine with Intl, SharedArrayBuffer, worker_threads, npm |
+| GNU nano | 8.3 | Terminal text editor |
+| dash | 0.5.12 | POSIX shell with pipes, redirects, job control |
+| GNU coreutils | 9.6 | 50+ utilities (ls, cat, sort, wc, etc.) |
+| curl | 8.11 | HTTP client with TLS |
+| Ruby | 3.3 | Interpreter with core stdlib |
+| Perl | 5.40 | Interpreter with core modules |
+
+All run in both Node.js and the browser with no source modifications.
+
+## How the Syscall Layer Works
+
+Every user program is compiled against musl libc and a thin "glue" layer. When a program calls a syscall (e.g., `open`, `read`, `fork`), musl routes it through this glue instead of to the host kernel. The glue serializes the syscall arguments and writes them to a channel (backed by SharedArrayBuffer in the browser, or a Rust `Port` in Node.js). The kernel reads the channel, executes the operation, and writes the return value back.
+
+This means Kandelo does not implement syscalls by patching or recompiling software. The glue layer is generic — it works with any program that uses standard POSIX file I/O, process management, and networking.
+
+## Running the Live Demo
+
+The [live demo](https://kandelo.dev) runs entirely in the browser. No installation required. Open the URL and you land in a pre-configured environment with a shell prompt.
+
+Keybindings for navigation:
+
+```bash
+# The VFS is persistent across reloads via IndexedDB
+# Take a snapshot of your environment
+# The README notes: "No writable state to encode — link is a preset."
+# Snapshot mode auto-selects: delta for small changes, inline for medium, manifest for large
+```
+
+## Practical Evaluation Checklist
+
+- Does it require SharedArrayBuffer? Yes. This means COOP/COEP headers must be set correctly in production deployments.
+- Is it open source? Yes, GPL v2+ for platform code, MIT for the runtime glue.
+- Is it production-ready? No — it is explicitly labeled a research project on GitHub. Do not use it for production workloads.
+- How does it compare to JSLinux or v86? Those emulate single programs in a single address space. Kandelo emulates the kernel itself, so software runs in independent processes with proper fork/exec semantics.
+- What browser features does it need? SharedArrayBuffer, Web Workers, `Atomics.waitAsync` for async-syscall bridging.
+
+## Security Notes
+
+Because Kandelo runs real server software (nginx, MariaDB, PHP-FPM) in the browser, it inherits the security considerations of that software. The host runtime acts as the syscall backend — a compromised or malicious WebAssembly kernel binary could theoretically exploit host capabilities. The project does not currently advertise a sandboxing model beyond what the browser's security boundaries already provide.
+
+The README notes this is research/exploration: "The idea is to default to completeness and allow developers to explicitly choose which parts of compliance are removed or compromised for the sake of performance and practicality."
+
+## FAQ
+
+**Q: Can I run a full WordPress site in the browser with Kandelo?**
+**A:** Yes — the README includes WordPress (nginx + PHP-FPM + MariaDB) as a tested software combination. The live demo at kandelo.dev can boot a WordPress instance.
+
+**Q: How does this differ from Docker or Wasmtime?**
+**A:** Docker containers share the host kernel. Wasmtime runs WebAssembly modules but does not provide a POSIX process model. Kandelo implements the kernel interface in WebAssembly itself, so the software believes it is running on a real POSIX system.
+
+**Q: What is the performance like?**
+**A:** No formal benchmarks are published. The HN thread comment from a maintainer suggests they had not yet fully characterized performance trade-offs. Expect significant overhead compared to native execution — every syscall crosses a channel boundary between the user program WebAssembly and the kernel WebAssembly, then a second boundary to the host runtime.
+
+**Q: Is there a Python interpreter?**
+**A:** Yes, CPython 3.13 is listed as a tested software package. The interpreter runs unmodified, compiled to WebAssembly via the standard Emscripten or similar toolchain path.
+
+## Conclusion
+
+Kandelo is a technically ambitious project that pushes WebAssembly beyond single-program emulation toward a full OS-in-the-browser. Whether it is practical depends on your use case — running a local development stack or a sandboxed demo in the browser is compelling; using it for production workloads is not what the project currently targets.
+
+The live demo at [kandelo.dev](https://kandelo.dev) is the best way to understand what it does. If you have ever wanted to run nginx, MariaDB, and WordPress entirely in a browser tab without a server, it is worth 5 minutes of your time.
