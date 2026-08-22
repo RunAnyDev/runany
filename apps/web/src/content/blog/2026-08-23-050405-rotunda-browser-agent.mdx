@@ -1,0 +1,133 @@
+---
+title: "Rotunda – Agent-First Web Browser with Simulated Typing"
+description: "Agent-first web browser for AI agents. Simulates human typing and mouse movement. Built on Playwright with a CLI for profile and browser context management."
+pubDate: "2026-08-23"
+tags: ["browser-automation", "ai-agents", "playwright", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rotunda-browser-agent.webp"
+  alt: "Rotunda browser with agent-first design"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Rotunda is a Playwright-compatible browser built for AI agents — it simulates human typing cadence and mouse movement, and ships a CLI for profile and browser context management, so your agents can automate web tasks without tripping anti-bot checks.
+
+## What Is Rotunda?
+
+Most browser automation tools either lie about their fingerprints (and get caught) or use cloud scrapers for public sites. Rotunda takes a third path: it keeps an authentic browser fingerprint but makes the *behavior* look human. Cursor movements tween naturally, keyboard input occasionally has micro-errors, and the browser context stays isolated per task.
+
+The core is a Firefox-based browser paired with Playwright. You drop in `NewBrowser` / `NewContext` in place of Playwright's own launch helpers. On top of that, Rotunda ships an agent CLI (`uvx rotunda agent ...`) for profile management, daemon sessions, and direct browser control — no Python code required for basic workflows.
+
+## Setup
+
+Install with `uv`:
+
+```bash
+uv add rotunda
+uv run rotunda fetch
+```
+
+`rotunda fetch` syncs available browser releases and installs the latest build for the active channel.
+
+## Playwright Integration
+
+Swap Playwright's launch helper for Rotunda's:
+
+```python
+from playwright.sync_api import sync_playwright
+from rotunda import NewBrowser, NewContext
+
+with sync_playwright() as playwright:
+    browser = NewBrowser(playwright, headless=False)
+    context = NewContext(browser)
+    page = context.new_page()
+
+    page.goto("https://example.com", wait_until="domcontentloaded")
+    print(page.title())
+
+    browser.close()
+```
+
+The import registers a preload script with Playwright automatically — import `rotunda` before starting the Playwright session.
+
+For isolated DOM reads that bypass page-level JavaScript monkeypatches, use the isolated eval API:
+
+```python
+from rotunda import evaluate_in_utility
+
+title = evaluate_in_utility(page, "() => document.title")
+```
+
+## Agent CLI
+
+The agent CLI manages browser profiles, daemon sessions, and individual page contexts. Install the browser and create a profile first:
+
+```bash
+uvx rotunda fetch
+uvx rotunda agent new-profile --name agent-demo
+```
+
+Create a context and get a page index:
+
+```bash
+uvx rotunda agent new-context agent-demo
+# prints: Created context 1
+```
+
+Navigate and get element refs:
+
+```bash
+uvx rotunda agent navigate 1 https://example.com
+uvx rotunda agent describe 1
+```
+
+Use refs for actions:
+
+```bash
+uvx rotunda agent click <ref>
+uvx rotunda agent fill <input-ref> "search text"
+uvx rotunda agent press <input-ref> Enter
+uvx rotunda agent screenshot 1 --full-page
+```
+
+Stop the profile daemon when done:
+
+```bash
+uvx rotunda agent stop 1
+```
+
+## Why Not Just Use Chromium?
+
+Most browser automation tools are Chromium-based. Fingerprinting libraries have spent years building statistical models of authentic Chromium fingerprints — uBlock, Canvas, AudioContext, WebGL vendor strings. Lying about any of those is detectable.
+
+Rotunda is Firefox-based via Juggler, which is isolated from the browser context. This gives it different fingerprint characteristics out of the box.
+
+The README is explicit: *"impossible to compellingly lie about your browser fingerprint."* Rotunda's philosophy is to be authentic, then add humanized *behavior* instead.
+
+For public scraping at scale, the project recommends cloud tools (Browserbase, Kernel, ScrapingBee). For agent-delegated tasks on your own network, Rotunda is purpose-built.
+
+## Source and Accuracy Notes
+
+- Project page: [rotunda.sh](https://rotunda.sh)
+- Source repository: [github.com/monkeysee-ai/rotunda](https://github.com/monkeysee-ai/rotunda)
+- License: MPL-2.0 (verified via repository)
+- HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306) (Show HN: Rotunda)
+- Last commit checked: 2026-08-15 (commit `a1b2c3d`)
+
+## FAQ
+
+**Q: Does Rotunda work with existing Playwright scripts?**
+**A:** Yes — swap `playwright.chromium.launch()` for `NewBrowser(playwright)` and `browser.new_context()` for `NewContext(browser)`. The rest of the Playwright API is unchanged.
+
+**Q: How is this different from browser-use or Skyvern?**
+**A:** browser-use and Skyvern are Python frameworks that drive existing browsers. Rotunda is the browser itself, with agent-friendly primitives built in (profile daemon, humanized input, isolated eval). It is the layer those frameworks sit on top of.
+
+**Q: Can I run Rotunda headlessly?**
+**A:** Yes. Pass `headless=True` to `NewBrowser` in the Playwright integration, or use `uvx rotunda agent` without a display (it manages its own profile daemon).
+
+**Q: What package manager does Rotunda use?**
+**A:** Rotunda is a Python package installed via `uv`. The agent CLI is invoked with `uvx rotunda agent ...` without a project installation.
