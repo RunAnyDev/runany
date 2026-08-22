@@ -1,0 +1,157 @@
+---
+title: "machine0 – persistent VMs for AI agents"
+description: "A CLI that gives AI agents their own persistent cloud VMs, from 1vCPU to 60 vCPU plus 8xH100 GPUs, billed by the minute."
+pubDate: "2026-08-22"
+tags: ["ai-setup", "dev-tools", "cli", "yc-s26"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/machine0.webp"
+  alt: "machine0 product thumbnail showing persistent VM infrastructure for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** machine0 is a CLI that provisions persistent cloud VMs for AI agents — from a small instance to 60 vCPU/240 GB plus 8xH100 GPUs — billed by the minute, driven entirely by the agent via CLI or MCP.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [machine0.io](https://machine0.io) — verified on 2026-08-22
+- Source repository: No public GitHub repo — this is a proprietary CLI product
+- YC S26 launch: [news.ycombinator.com/item?id=49348136](https://news.ycombinator.com/item?id=49348136) — verified batch S26
+- YC company page: [ycombinator.com/companies/machine0](https://www.ycombinator.com/companies/machine0) — verified Summer 2026 batch
+- HN object ID: `49348136`
+
+## What Is machine0?
+
+machine0 is a CLI tool that gives AI agents their own persistent cloud virtual machines. The core command:
+
+```bash
+curl -LsSf https://machine0.io/install.sh | sh
+```
+
+One command spins up a full VM with SSH access, a static IP, and an HTTPS endpoint at `<vm>.mac0.io`. The VM stays alive (99.99% uptime) until you explicitly tear it down — no laptop required.
+
+Agents drive it themselves via the CLI or through an MCP server. A human or orchestrator sets up a **profile** (bundles of MCP connections, credentials, prompts, and environment variables), then hands the CLI to the agent. The agent manages its own fleet: creates machines, snapshots them, clones them, suspends idle ones, and tears them down when done.
+
+The product description on the landing page reads:
+
+> "Up to 60 vCPUs, 240 GB RAM and GPUs. Designed for agents using CLI or MCP. Billed by the minute."
+
+## The Problem with Ephemeral Agent Compute
+
+The founder, Barnaby Malet (YC W20, previously CTO of Upflow), describes the pain in the YC launch post:
+
+- **Resources** — a few agents working on a large codebase saturate your laptop's RAM and CPU. Auto-research agents need GPUs you do not have.
+- **Security** — running `—yolo` on your personal machine is one prompt injection away from exfiltrated credentials.
+- **Availability** — close your laptop and the agent dies mid-task.
+- **Isolation** — there is no clean separation between everything on your machine and what the agent actually needs.
+
+## How It Works
+
+### Installation
+
+```bash
+curl -LsSf https://machine0.io/install.sh | sh
+```
+
+### Creating a VM
+
+```bash
+machine0 new mybox --profile default
+```
+
+This creates an SSH-ready VM with a static IP and HTTPS endpoint. The VM is always-on at 99.99% uptime until you switch it off.
+
+### MCP Integration
+
+An MCP server ships with the CLI. Hand it to Claude, Codex, or OpenCode and the agent can manage its own fleet without reading documentation:
+
+```bash
+# Agent creates a VM for a build task
+machine0 new buildbox --profile claude-coding
+
+# Agent SSHes in and runs its task
+machine0 ssh buildbox
+
+# Agent snapshots the configured machine
+machine0 snapshot buildbox
+
+# Agent clones 10 identical workers from the snapshot
+machine0 clone buildbox --count 10
+
+# Agent suspends an idle machine (stops billing)
+machine0 suspend buildbox
+
+# Agent resumes when needed
+machine0 resume buildbox
+```
+
+### Profiles
+
+Profiles bundle MCP connections, credentials, prompts, and environment variables. They are injected at VM creation. Each agent gets exactly the capabilities you choose — and nothing else.
+
+### OS Options
+
+NixOS and Ubuntu are available as first-class options. NixOS provides declarative, reproducible machines; Ubuntu provides a familiar server environment.
+
+## Practical Evaluation Checklist
+
+- [ ] Install the CLI: `curl -LsSf https://machine0.io/install.sh | sh`
+- [ ] Create a small VM: `machine0 new testbox --profile small`
+- [ ] SSH into it: `machine0 ssh testbox`
+- [ ] Suspend and resume: `machine0 suspend testbox && machine0 resume testbox`
+- [ ] Set up an MCP profile for your agent
+- [ ] Tear down when done: `machine0 delete testbox`
+
+## Pricing
+
+Billed by the minute. CPU-only plans from **$0.013/hr** (1 vCPU / 1 GB). GPU plans start at **$0.836/hr** (1x RTX 4000 Ada) and scale up to **$39.336/hr** (8x H200).
+
+Key tiers from the pricing page:
+
+| Size | vCPU | RAM | Disk | Hourly | Monthly (est.) |
+|------|------|-----|------|--------|---------------|
+| `xs` | 1 | 1 GB | 10 GB | $0.013 | $9 |
+| `small` | 2 | 4 GB | 50 GB | $0.052 | $38 |
+| `medium` | 4 | 8 GB | 100 GB | $0.104 | $76 |
+| `xl` | 8 | 16 GB | 320 GB | $0.208 | $152 |
+| `6xl` | 60 | 240 GB | 900 GB | $3.714 | $2,711 |
+
+GPU tiers include RTX 4000 Ada, L40S, RTX 6000 Ada, MI300X, H100, H200, and 8-GPU clusters. GPU sizes are available in US East, UK, EU, and Asia.
+
+## Security Notes
+
+- VMs provide isolation between agent workloads and your local machine
+- Profiles allow fine-grained credential scoping per agent
+- Static IPs and HTTPS endpoints give each agent a dedicated network identity
+- The founder's background at Upflow (handling sensitive accounting data for companies like Postman and ProductBoard) informs the security design
+
+## FAQ
+
+**Q: Is this open source?**
+**A:** No. machine0 is a proprietary CLI product. There is no public source repository.
+
+**Q: What happens to my VM if I close my laptop?**
+**A:** Nothing — the VM runs in the cloud, not on your machine. It stays up at 99.99% uptime until you suspend or delete it.
+
+**Q: Can I use this without an AI agent?**
+**A:** Yes. You can interact with machine0 entirely from your own terminal. The CLI is designed for humans and agents alike.
+
+**Q: What OS images are available?**
+**A:** NixOS and Ubuntu. NixOS is a first-class citizen for declarative, reproducible machine configurations.
+
+**Q: How does billing work for suspended VMs?**
+**A:** Suspended VMs do not bill for compute. You only pay for storage while a VM is suspended.
+
+## Conclusion
+
+machine0 targets a specific and growing pain: running AI agents that need persistent, isolated, and powerful compute — without tying that compute to your laptop. The CLI-first design means both humans and agents can use it without context-switching. With per-minute billing, profiles for capability scoping, and MCP support for agent self-service, it is purpose-built for fleet management of autonomous agents.
+
+If you are running coding agents, research agents, or agent swarms that need more than a laptop can offer, machine0 is worth evaluating. The entry price of $0.013/hr makes it accessible to individual developers, while the top-tier GPU configurations support serious workloads.
+
+**HN launch thread:** [news.ycombinator.com/item?id=49348136](https://news.ycombinator.com/item?id=49348136)
