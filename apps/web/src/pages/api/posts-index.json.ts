@@ -1,7 +1,6 @@
 import { getCollection } from 'astro:content';
 import type { APIRoute } from 'astro';
-
-const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
+import { getSlug } from '@/utils/slug';
 
 export const GET: APIRoute = async () => {
   const allPosts = await getCollection('blog', ({ data }) => !data.draft);

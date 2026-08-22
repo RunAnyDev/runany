@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { getSlug } from '@/utils/slug';
 
 const siteUrl = 'https://runany.dev';
-const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
 
 const normalizeText = (value: string) => value
   .replace(/^---[\s\S]*?---/m, ' ')

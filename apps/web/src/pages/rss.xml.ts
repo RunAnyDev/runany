@@ -1,12 +1,11 @@
 import { getCollection } from 'astro:content';
 import type { APIContext } from 'astro';
 import rss from '@astrojs/rss';
+import { getSlug } from '@/utils/slug';
 
 export async function GET(context: APIContext) {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
   const sortedPosts = posts.sort((a, b) => b.id.localeCompare(a.id));
-
-  const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
   return rss({
     title: 'runany.dev',
     description: 'Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.',

@@ -1,7 +1,7 @@
 import { getCollection } from 'astro:content';
 import type { APIRoute } from 'astro';
+import { getSlug } from '@/utils/slug';
 
-const getSlug = (id: string) => id.replace(/^\d{4}-\d{2}-\d{2}-\d{6}-/, '').replace(/\.mdx?$/, '');
 const LIMIT = 9;
 
 export async function getStaticPaths() {
