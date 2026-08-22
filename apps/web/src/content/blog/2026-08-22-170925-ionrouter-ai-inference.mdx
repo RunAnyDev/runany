@@ -1,0 +1,136 @@
+---
+title: "IonRouter - AI inference routing with zero cold starts"
+description: "One API to route across top AI models with zero cold starts, per-second billing, and an OpenAI-compatible endpoint. Built on NVIDIA GH200 hardware."
+pubDate: "2026-08-22"
+tags: ["ai-setup", "dev-tools", "inference", "api"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ionrouter-ai-inference.webp"
+  alt: "IonRouter product thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** IonRouter is a hosted inference gateway that multiplexes multiple AI models on NVIDIA GH200 GPUs, exposes them via an OpenAI-compatible API, and charges per second with zero idle costs.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [ionrouter.io](https://ionrouter.io) ← **MUST visit and verify**
+- Source repository: [github.com/cumulus-compute-labs](https://github.com/cumulus-compute-labs) ← verified via website footer
+- License: Not confirmed open source at time of writing
+- HN launch thread: [news.ycombinator.com/item?id=47355410](https://news.ycombinator.com/item?id=47355410)
+
+## What Is IonRouter?
+
+IonRouter is an inference routing platform from [Cumulus Labs](https://cumulus.blog) — see the [launch thread on HN](https://news.ycombinator.com/item?id=47355410) for context. It runs a fleet of AI models on NVIDIA GH200 Grace Hopper Superchips and exposes them through a single OpenAI-compatible API endpoint. The core pitch: drop in as a drop-in replacement for your existing OpenAI client, route between models like GLM-5, Kimi-K2.5, and Qwen3.5-122B-A10B without changing code, and pay per GPU-second with no idle fees.
+
+The differentiator against raw API access is the **IonAttention engine** — a custom inference stack that multiplexes multiple models on a single GPU, swapping contexts in milliseconds. Their benchmark claims 7,167 tok/s on Qwen2.5-7B versus ~3,000 tok/s for leading providers, though this is from IonRouter's own marketing materials and should be treated as unverified until independently benchmarked.
+
+**Key claims from the product page:**
+- Sub-millisecond cold starts on GPU streams
+- Per-second billing (no idle cost)
+- Dedicated GPU streams with no cold starts
+- Supported models: GLM-5, Kimi-K2.5, MiniMax-M2.5, Qwen3.5-122B-A10B, GPT-OSS-120B, Wan2.2 text-to-video, Flux Schnell image generation (all via [IonRouter](https://ionrouter.io))
+
+## Setup Workflow
+
+### Step 1: Get an API Key
+
+Sign up at [ionrouter.io](https://ionrouter.io) and grab your API key from the dashboard. New accounts include a free tier with limited GPU credits.
+
+### Step 2: Point Your OpenAI Client at IonRouter
+
+The simplest integration is a one-line change to your existing OpenAI client configuration:
+
+```python
+# Before (OpenAI)
+from openai import OpenAI
+client = OpenAI(api_key="sk-...")
+
+# After (IonRouter)
+from openai import OpenAI
+client = OpenAI(
+    base_url="https://api.ionrouter.io/v1",
+    api_key="your-ionrouter-key"
+)
+```
+
+No SDK changes required. Any library or agent framework that uses the OpenAI chat completions interface works out of the box.
+
+### Step 3: Route Between Models
+
+IonRouter exposes multiple models under the same endpoint. Switch by passing the model name:
+
+```python
+# Use GLM-5 for reasoning
+response = client.chat.completions.create(
+    model="glm-5",
+    messages=[{"role": "user", "content": "Explain gradient descent"}]
+)
+
+# Switch to Qwen3.5-122B for code
+response = client.chat.completions.create(
+    model="qwen3.5-122b-a10b",
+    messages=[{"role": "user", "content": "Write a Python quicksort"}]
+)
+```
+
+### Step 4: Monitor Usage
+
+IonRouter's dashboard shows per-model throughput, token counts, and billing in real time. GPU stream utilization is visible at a glance — no need to guess if a model is hot or cold.
+
+## Deeper Analysis
+
+### OpenAI Compatibility Scope
+
+IonRouter supports the `/v1/chat/completions` and `/v1/completions` endpoints. Streaming via `stream=True` is also supported. Function calling and vision capabilities depend on the underlying model, not IonRouter itself.
+
+### Billing Model
+
+IonRouter uses **per-second GPU billing**. Unlike traditional per-token pricing that charges for idle time between requests, you only pay while the GPU stream is actively processing. For workloads with bursty traffic patterns, this can materially reduce costs versus always-on model endpoints.
+
+The pricing page lists indicative per-model rates (e.g., GLM-5 at $1.20 input / $3.50 output per million tokens), but these are subject to change. Check the [pricing page](https://ionrouter.io) for current rates.
+
+### Hardware Foundation
+
+The IonAttention engine runs on **NVIDIA GH200 (Grace Hopper Superchip)** — a combined CPU+GPU architecture with 480GB LPDDR5 CPU memory and 96GB HBM3 GPU memory. The key architectural advantage for inference is the unified memory space between CPU and GPU, which IonRouter exploits for fast model swapping between requests.
+
+## Practical Evaluation Checklist
+
+- OpenAI-compatible — any existing `openai` Python client works without code changes
+- Zero cold starts — dedicated GPU streams stay warm between requests
+- Per-second billing — no idle fees for bursty workloads
+- Multi-model routing — switch models by name without provisioning new endpoints
+- NVIDIA GH200 hardware — 7,167 tok/s claimed on Qwen2.5-7B (unverified, self-reported)
+- Supported modalities — text, image generation (Flux Schnell), video generation (Wan2.2)
+
+## Security Notes
+
+- API key authentication is per-user with no shared endpoints between customers
+- The service is a hosted API, not self-hosted — your prompts route through Cumulus Labs' infrastructure
+- Review the [privacy policy](https://ionrouter.io/privacy-policy.pdf) before processing sensitive data
+
+## FAQ
+
+**Q: Is IonRouter open source?**
+**A:** The frontend and marketing site are at `github.com/cumulus-compute-labs`, but the core IonAttention inference engine is not publicly released as open source at time of writing.
+
+**Q: How does this compare to OpenRouter?**
+**A:** Both aggregate multiple AI models behind a unified API. IonRouter differentiates by offering dedicated GPU streams with zero cold starts and per-second billing, rather than shared endpoints with per-token pricing.
+
+**Q: Can I self-host IonRouter?**
+**A:** No — IonRouter is a hosted service. For self-hosted inference routing, consider projects like [text-generation-webui](https://github.com/oobabooga/text-generation-webui) or [LocalAI](https://github.com/mudler/LocalAI).
+
+**Q: What is the free tier?**
+**A:** The Discord community offers $5 in free credits for new signups. Permanent free tier details are not publicly listed — check the [pricing page](https://ionrouter.io) for current offerings.
+
+## Conclusion
+
+IonRouter solves the "I want the best model for each task without managing infrastructure" problem. The OpenAI-compatible API means zero migration effort for existing projects, while the per-second billing and dedicated GPU streams address the cold-start and idle-cost pain points of traditional inference endpoints. If you're already using multiple model providers and want a unified, high-performance gateway, it's worth a look.
+
+The main caveat: IonRouter is a commercial hosted service, not open source. If you need full control over your inference stack, [LocalAI](https://github.com/mudler/LocalAI) or [ollama](https://github.com/ollama/ollama) are better fits for a self-hosted setup.
