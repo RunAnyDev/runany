@@ -1,0 +1,145 @@
+---
+title: "Moltis – Self-Hosted AI Agent Server in Rust"
+description: "A secure persistent personal AI agent server written in Rust. One binary, sandboxed execution, multi-provider LLMs, voice, memory, and MCP tools."
+pubDate: "2026-08-22"
+tags: ["ai-setup", "dev-tools", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/moltis-ai-agent-server-rust.webp"
+  alt: "Moltis – Secure persistent personal agent server in Rust"
+---
+
+## TL;DR
+
+> **TL;DR:** Moltis is an open-source Rust binary that runs a persistent personal AI agent server on your own hardware, with sandboxed tool execution, multi-provider LLM support, and built-in integrations for Telegram, Discord, voice, and more.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [moltis.org](https://moltis.org) ← **MUST visit and verify**
+- Source repository: [github.com/moltis-org/moltis](https://github.com/moltis-org/moltis) ← **MUST read README**
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=46993587](https://news.ycombinator.com/item?id=46993587)
+
+## What Is Moltis?
+
+Moltis is a **persistent personal agent server** built entirely in Rust. One binary runs on your Mac Mini, Raspberry Pi, or any server you own — no Node.js, no npm, no plugin marketplace to get supply-chain attacked through.
+
+The core agent loop and model interface fit in approximately 7.5K lines of Rust, with LLM providers adding approximately 19K more. The full Rust workspace spans approximately 270K lines across 59 modular crates, each independently auditable.
+
+Key claims from the README:
+
+> **Secure by design** — Your keys never leave your machine. Every command runs in a sandboxed container, never on your host.
+
+> **Your hardware** — Runs on a Mac Mini, a Raspberry Pi, or any server you own. One Rust binary, no Node.js, no npm, no runtime.
+
+> **Full-featured** — Voice, memory, cross-session recall, automatic edit checkpoints, scheduling, Telegram, Signal, Discord, browser automation, MCP servers, SSH or node-backed remote exec, managed deploy keys with host pinning in the web UI, a live Settings → Tools inventory, Cursor-compatible project context, and context-file threat scanning — all built-in.
+
+Moltis hit the front page of Hacker News on February 12, 2026, reaching 131 points.
+
+## Installation
+
+```bash
+# One-liner install script (macOS / Linux)
+curl -fsSL https://www.moltis.org/install.sh | sh
+
+# macOS / Linux via Homebrew
+brew install moltis-org/tap/moltis
+
+# Docker (multi-arch: amd64/arm64)
+docker pull ghcr.io/moltis-org/moltis:latest
+
+# Or build from source
+cargo install moltis --git https://github.com/moltis-org/moltis
+```
+
+The web UI starts at `localhost:1978` by default after installation.
+
+## Architecture
+
+The Rust workspace spans approximately 270K lines across 59 crates. The core runtime crates from the README:
+
+| Crate | Approx. LoC | Role |
+|-------|-------------|------|
+| `moltis-gateway` | 37.4K | HTTP/WS server, RPC, auth, startup wiring |
+| `moltis-tools` | 37.0K | Tool execution, sandboxing, WASM tools |
+| `moltis-providers` | 18.9K | LLM provider implementations |
+| `moltis-agents` | 14.5K | Agent loop, streaming, prompt assembly |
+| `moltis-chat` | 14.2K | Chat engine, agent orchestration |
+| `moltis-config` | 10.3K | Configuration, validation |
+| `moltis-httpd` | 9.9K | HTTP server primitives and middleware |
+
+Feature crates cover channels (Telegram, WhatsApp, Discord, Teams, Slack, Matrix, Nostr, Signal), web and API integrations, extensibility (MCP, skills, plugins), memory and context (SQLite + FTS + vector search), voice and browser automation, auth and security (XChaCha20-Poly1305 vault, passkey/WebAuthn), scheduling, and more.
+
+## Security Model
+
+Moltis takes a layered approach to security, as documented in the README:
+
+- **Sandboxed execution** — Docker + Podman + Apple Container, per-session isolation
+- **Secret handling** — `secrecy::Secret`, zeroed on drop, redacted from tool output
+- **Auth** — Password + passkey (WebAuthn), rate-limited, per-IP throttle
+- **SSRF protection** — DNS-resolved, blocks loopback/private/link-local
+- **Hook gating** — `BeforeToolCall` hooks can inspect or block any tool invocation
+- **Supply chain integrity** — artifact attestations, Sigstore keyless signing, GPG signing, SHA-256/SHA-512 checksums
+
+Release verification command from the README:
+
+```bash
+gh attestation verify <artifact> -R moltis-org/moltis
+```
+
+## Deeper Analysis
+
+**Memory and recall** uses SQLite with full-text search (FTS) and vector embeddings, persisting sessions with auto-compaction and cross-session recall. The Cursor-compatible project context feature lets the agent understand your codebase.
+
+**Tool execution** is sandboxed per session, with WASM precompiled runtimes for web-fetch and web-search tools. The `BeforeToolCall` hook system gives operators visibility into every tool invocation.
+
+**MCP support** covers both stdio and HTTP/SSE transports, allowing connection to external MCP servers.
+
+**Voice I/O** is built-in with 8 TTS providers and 7 STT providers — no separate voice stack required.
+
+**The comparison table** in the README benchmarks Moltis against OpenClaw and Hermes Agent on stack, architecture, sandbox backends, auth, and memory. Moltis emphasizes Rust's memory safety guarantees and a small unsafe surface isolated to FFI and precompiled runtime boundaries.
+
+## Practical Evaluation Checklist
+
+- Installs via one-liner `curl | sh` script on macOS/Linux
+- Starts web UI at localhost:1978 with command-palette agent prompts
+- Connects to Telegram, Discord, or other channels in Settings
+- Runs Playwright-based browser automation in sandboxed containers
+- Loads multi-provider LLM keys (OpenAI, GitHub Copilot, local models)
+- Persists conversation context across sessions with SQLite + FTS
+- MCP servers connectable via stdio or HTTP/SSE
+
+## Security Notes
+
+- API keys never leave your host — they stay in the local vault, sandboxed from tool output
+- Per-session container isolation prevents a compromised tool from reaching host resources
+- `BeforeToolCall` hooks let you audit or block specific tool invocations
+- Artifact attestations and Sigstore keyless signing make release integrity verifiable
+
+## FAQ
+
+**Q: Does Moltis require an API key for the LLM?**
+**A:** Yes. You provide your own API keys (OpenAI, GitHub Copilot, or local models) which stay on your machine. Moltis does not have its own LLM API.
+
+**Q: How does Moltis compare to OpenClaw or Hermes Agent?**
+**A:** The README comparison table benchmarks stack (Rust vs TypeScript/Python), runtime (single binary vs Node.js/Python), LoC (~270K Rust vs ~1.1M/152K), sandbox backends (Docker/Podman/Apple Container vs various), and memory (SQLite+FTS+vector vs plugin-backed). See the [full comparison](https://docs.moltis.org/comparison.html) in the docs.
+
+**Q: Can it run on a Raspberry Pi?**
+**A:** Yes. Use `--no-default-features --features lightweight` for constrained ARM devices. The README confirms Raspberry Pi support.
+
+**Q: Is there a plugin marketplace?**
+**A:** No. Moltis deliberately omits a plugin marketplace to avoid supply-chain attack surface. Extensibility comes from the built-in skills system, MCP server support, and workspace crates.
+
+**Q: What does the sandboxing use?**
+**A:** Docker and Podman on Linux/x86, Apple Container on macOS, and WASM precompiled runtimes for web-fetch and web-search tools. Per-session isolation is enforced.
+
+## Conclusion
+
+Moltis fills the gap between cloud AI agents (which send your keys and data to third parties) and lightweight personal scripts (which have no memory, tool access, or cross-channel presence). The Rust foundation gives it a small attack surface and fast startup. If you want a self-hosted agent that remembers context, runs tools safely in containers, and speaks to you over Telegram, Discord, or voice — one binary is worth evaluating.
+
+Try it at [moltis.org](https://moltis.org) and read the full docs at [docs.moltis.org](https://docs.moltis.org).
