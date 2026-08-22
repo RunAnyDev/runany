@@ -124,10 +124,24 @@ export const GET: APIRoute = async () => {
     ...tagEntries,
   ];
 
+  // Dedupe by <loc>. The blog collection can contain multiple .mdx files
+  // that map to the same slug when filenames fail to follow the
+  // YYYY-MM-DD-HHMMSS-slug convention, or when the same product is
+  // re-reviewed and an earlier draft is not deleted. Astro's [slug] route
+  // already picks one and warns about the rest; the sitemap must mirror
+  // that — Google penalises sitemaps with duplicate URLs, so we keep the
+  // first occurrence only and drop the shadowed ones.
+  const seenLoc = new Set<string>();
+  const uniqueEntries = allEntries.filter((entry) => {
+    if (seenLoc.has(entry.loc)) return false;
+    seenLoc.add(entry.loc);
+    return true;
+  });
+
   const body = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">',
-    ...allEntries.map(renderEntry),
+    ...uniqueEntries.map(renderEntry),
     '</urlset>',
     '',
   ].join('\n');
