@@ -1,0 +1,168 @@
+---
+title: "DepsGuard – Hardening Package Manager Configs Against Supply Chain Attacks"
+description: "DepsGuard is a Rust-based CLI tool that scans NPM, pnpm, yarn, bun, uv, pip, poetry, and aube configs for supply chain vulnerabilities and applies fixes interactively. Single binary, no runtime deps."
+pubDate: "2026-08-22"
+tags: ["security", "dev-tools", "rust", "cli", "supply-chain"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/depsguard.webp"
+  alt: "DepsGuard – harden package manager configs against supply chain attacks"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DepsGuard scans your package manager config files (NPM, pnpm, yarn, bun, uv, pip, poetry, aube) against recommended supply chain settings and applies hardening fixes interactively — single Rust binary, zero third-party crate dependencies.
+
+## Source and Accuracy Notes
+
+- Project page: [depsguard.com](https://depsguard.com) — verified
+- Source repository: [github.com/arnica/depsguard](https://github.com/arnica/depsguard) — README verified
+- License: [MIT](https://github.com/arnica/depsguard/blob/main/LICENSE) — confirmed via GitHub API
+- HN launch thread: [news.ycombinator.com/item?id=42859890](https://news.ycombinator.com/item?id=42859890) — Show HN, 40 points, June 2026
+- Stars: 385 (GitHub API, 2026-08-22)
+- Installer sponsored by arnica.io
+
+## What Is DepsGuard?
+
+DepsGuard is an open-source CLI that scans the config files of eight package managers for supply-chain weaknesses. It reads `package.json`, `pipfile.toml`, `pyproject.toml`, and similar files — compares them against hardened baseline settings — then presents a TUI where you review and toggle each fix before applying anything.
+
+The key design constraint: **DepsGuard never runs package installs**. It only reads and edits config files you approve, and it writes backups before any change.
+
+It also detects `Renovate` and `Dependabot` config files in your repos, flagging misconfigurations there too.
+
+## Setup Workflow
+
+### Install
+
+DepsGuard ships as a single static binary. Prebuilt archives for Linux (glibc, musl, aarch64), macOS (Intel and Apple Silicon), and Windows are on the [releases page](https://github.com/arnica/depsguard/releases).
+
+Verify integrity using the `.sha256` file next to each asset.
+
+#### Via crates.io
+
+```bash
+cargo install depsguard
+```
+
+#### Via Homebrew
+
+```bash
+brew install depsguard
+```
+
+#### Via APT (Debian/Ubuntu)
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://depsguard.com/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/depsguard.gpg
+echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/depsguard.gpg] https://depsguard.com/apt stable main" | sudo tee /etc/apt/sources.list.d/depsguard.list >/dev/null
+sudo apt update && sudo apt install depsguard
+```
+
+#### Via Winget (Windows)
+
+```bash
+winget install Arnica.DepsGuard
+```
+
+#### Via Scoop (Windows)
+
+```bash
+scoop bucket add depsguard https://github.com/arnica/depsguard
+scoop install depsguard
+```
+
+Check your version any time:
+
+```bash
+depsguard --version
+```
+
+### First Scan
+
+Run without arguments for the interactive TUI:
+
+```bash
+depsguard
+```
+
+This discovers all package manager configs on your machine, compares them to supply-chain baselines, and presents a list of findings grouped by manager. You review each, toggle fixes on or off, and apply.
+
+For a read-only report without applying anything:
+
+```bash
+depsguard scan
+```
+
+### Configuration
+
+DepsGuard checks configs in their default locations. For `pip`, it looks for `Pipfile` and `pyproject.toml` with build system requirements. For `poetry`, it reads `pyproject.toml` sections. Aube config is also scanned.
+
+The tool ships a set of recommended baseline settings, not a fully custom policy engine — you accept or reject the defaults per-manager.
+
+### Restore a Backup
+
+Before any change, DepsGuard writes a backup. To roll back:
+
+```bash
+depsguard restore
+```
+
+This presents a list of available backups with timestamps, and lets you pick which to restore.
+
+## How It Works
+
+The tool is written in Rust (MSRV 1.74). The binary has zero third-party Rust crate dependencies — it uses only the Rust standard library plus a small amount of platform FFI for terminal handling.
+
+Key source files:
+
+| Component | File |
+|---|---|
+| TUI / entry point | `src/main.rs` |
+| Terminal UI | `src/ui.rs` |
+| Terminal utilities | `src/term.rs` |
+| Config detection | `src/manager.rs` |
+| Fix application | `src/fix.rs` |
+
+The scan logic reads each config file, extracts the relevant fields for that package manager, and compares against a hardcoded recommendation table. The interactive TUI lets you toggle individual fixes on/off before committing.
+
+## Practical Evaluation Checklist
+
+- Supports: npm, pnpm, yarn, bun, uv, pip, poetry, aube
+- Platform support: Linux (glibc, musl, aarch64), macOS (Intel, Apple Silicon), Windows
+- Single static binary — no runtime or language install required
+- Zero third-party Rust dependencies (stdlib only)
+- Write backups before any file change
+- Restore subcommand to roll back changes
+- Detects Renovate and Dependabot config files
+- Read-only `scan` mode for CI / reporting
+- MSRV: Rust 1.74
+
+## Security Notes
+
+The tool requires read access to your package manager config files, and write access only when you explicitly approve a fix. It does not execute package installation commands or network calls beyond the package manager channels you already have configured.
+
+Because it is a static binary with no external runtime dependencies, its attack surface is minimal — no dynamic library loading, no plugin system.
+
+## FAQ
+
+**Q: Does it edit `package-lock.json` or `yarn.lock`?**
+**A:** No. DepsGuard only reads and edits the human-authored config files (`package.json`, `Pipfile`, `pyproject.toml`, etc.). Lock files are not touched.
+
+**Q: Can I use it in CI?**
+**A:** Yes — the `scan` subcommand produces a read-only exit-code-based report suitable for CI pipelines.
+
+**Q: Does it work with monorepos?**
+**A:** It discovers configs recursively from the current directory, so running it at the repo root will find configs in all packages.
+
+**Q: Is there a config file to customize the recommendations?**
+**A:** The tool ships a fixed set of baselines. Custom policy configuration is not yet supported.
+
+## Conclusion
+
+DepsGuard addresses a specific, narrow problem: your package manager configs drift into insecure states over time, and there is no built-in tool to catch it. It fills that gap with a single binary, no dependencies, and an interactive workflow that makes reviewing supply chain settings less tedious.
+
+If you maintain projects with multiple package managers — especially in teams — running `depsguard scan` periodically is a low-friction way to catch the low-hanging fruit: overly permissive scripts, missing integrity checks, outdated lockfile policies.
