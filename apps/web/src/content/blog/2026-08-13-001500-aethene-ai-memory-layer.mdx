@@ -1,0 +1,170 @@
+---
+title: "Aethene - Open-Source AI Memory Infrastructure"
+description: "Aethene gives AI agents persistent, searchable memory. Store content, extract atomic memories, search semantically, and recall context across conversations with full MIT licensing."
+pubDate: "2026-08-13"
+tags: ["ai-setup", "dev-tools", "open-source", "memory", "agents"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/aethene.webp"
+  alt: "Aethene - Open-source AI memory layer"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Aethene is an open-source memory infrastructure layer for AI agents — store content, extract memories, search hybrid-vector, and recall context — self-hostable with MIT license.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [aethene.dev](https://aethene.dev) ← **MUST visit and verify**
+- Source repository: [github.com/Nuro-Labs/aethene](https://github.com/Nuro-Labs/aethene) ← **MUST read README**
+- License: [MIT](https://github.com/Nuro-Labs/aethene/blob/main/LICENSE) ← **MUST verify from LICENSE file**
+- HN launch thread: [news.ycombinator.com/item?id=47111048](https://news.ycombinator.com/item?id=47111048)
+
+## What Is Aethene?
+
+Aethene is an open-source memory infrastructure layer for AI agents. Built by Nuro-Labs, it solves the context-window problem by giving agents a persistent, queryable memory store — rather than cramming everything into a prompt.
+
+From the README:
+
+> Aethene is built for teams that want memory as infrastructure, not as a black box SaaS dependency.
+
+The core workflow:
+
+```text
+Raw content
+  -> ingest
+  -> chunk + extract memories
+  -> embed + index
+  -> search / recall / profile / relations
+```
+
+## Core Capabilities
+
+- **Automatic memory extraction** from raw content — notes, documents, URLs, conversations
+- **EntityContext** support for resolving pronouns like `I`, `me`, and `my` against stored context
+- **Container-tag filtering** for multi-tenant isolation — memory stays scoped per user, workspace, or tenant
+- **Hybrid search** combining vector similarity with reranking and recall logic
+- **Memory versioning and contradiction detection** — newer facts override older ones without losing history
+- **Entity graph and relationship extraction** — understand how concepts connect
+- **File and URL ingestion** — pull content directly from the web
+
+## Architecture
+
+Aethene is built on a well-established stack:
+
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js 18+ |
+| API framework | Hono |
+| Database | Convex (real-time SQL) |
+| Embeddings | Google Gemini API |
+| License | MIT |
+
+The self-hosting path uses Docker, Convex, and Node.js. A Convex deployment is required as the database backend.
+
+## Setup
+
+### Prerequisites
+
+- Node.js 18+
+- A Convex deployment
+- Gemini API key
+
+### Quick Start
+
+```bash
+git clone https://github.com/Nuro-Labs/aethene.git
+cd aethene
+npm install
+cp .env.example .env
+```
+
+Fill in `.env`:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CONVEX_URL` | Yes | Convex deployment URL |
+| `GEMINI_API_KEY` | Yes | Embeddings and memory extraction |
+| `OPENAI_API_KEY` | No | Optional OpenAI-backed extraction path |
+| `EXTRACTION_MODEL` | No | Extraction model override |
+| `API_KEYS` | No | Comma-separated dev API keys |
+| `SETTINGS_ENCRYPTION_KEY` | No | Required for persisting connector secrets |
+| `PORT` | No | API server port, default `3006` |
+
+Then start the API server:
+
+```bash
+npm run dev
+```
+
+## Memory Workflow
+
+### Ingest
+
+Send raw content to the ingest endpoint:
+
+```bash
+curl -X POST http://localhost:3006/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "content": "Meeting notes from Q3 planning...",
+    "containerTag": "workspace-123"
+  }'
+```
+
+### Search / Recall
+
+Query memory with hybrid search:
+
+```bash
+curl "http://localhost:3006/search?q=planning+priorities&containerTag=workspace-123" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Memory Profiling
+
+Extract a structured view of stored entities and relationships:
+
+```bash
+curl "http://localhost:3006/profile/containerId" \
+  -H "X-API-Key: your-api-key"
+```
+
+## Deeper Analysis
+
+Aethene's approach to memory versioning is worth highlighting. Rather than overwriting facts, contradictions are tracked explicitly — the system records both the old and new fact, with version metadata. This is important for audit trails and for agents that need to reason about how beliefs evolved over time.
+
+The EntityContext resolver is also notable. Most agent memory systems store flat key-value facts. Aethene's pronoun resolution (`I`, `me`, `my`) maps these back to the correct entity in the knowledge graph — critical when an agent is acting on behalf of a specific user or organization.
+
+## FAQ
+
+**Q: How does Aethene compare to a vector database like Pinecone or Qdrant?**
+**A:** Vector databases store embeddings and do similarity search. Aethene layers memory extraction, entity resolution, versioning, and contradiction detection on top of embedding storage. It's a full agent-memory system, not just a vector store.
+
+**Q: Does it require Convex?**
+**A:** Yes, Convex is the required database backend. For teams already using Convex, this is seamless. For teams wanting a pure Postgres or SQLite backend, this is currently a constraint.
+
+**Q: Can I self-host without Convex?**
+**A:** Not currently. The README shows only a Convex + Docker self-hosting path. A standalone database adapter would need to be built.
+
+**Q: What embedding model does it use?**
+**A:** Gemini API for embeddings by default. OpenAI is available as an optional extraction path.
+
+## Security Notes
+
+- API keys gate all endpoints — rotate them like any other secret
+- `SETTINGS_ENCRYPTION_KEY` is optional but required to persist connector credentials securely
+- `containerTag` scoping is the isolation boundary — ensure requests always include the correct scope
+- Self-hosting keeps all memory data on your own infrastructure
+
+## Conclusion
+
+Aethene fills a real gap in the agent tooling landscape: persistent, queryable, versioned memory that doesn't lock you into a SaaS. The MIT license, TypeScript stack, and Docker deployment path make it straightforward to self-host for teams with privacy requirements or existing Convex infrastructure.
+
+If you're building multi-turn AI agents and tired of context-window gymnastics, Aethene is worth evaluating. The hybrid search + entity graph approach gives agents more structured recall than raw vector similarity alone.

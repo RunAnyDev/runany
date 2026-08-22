@@ -1,0 +1,178 @@
+---
+title: "SSOReady – Open Source SAML and SCIM for Developers"
+description: "SSOReady is an open source developer tool that makes adding SAML enterprise SSO and SCIM directory sync as simple as two lines of code."
+pubDate: "2026-08-03"
+tags: ["dev-tools", "authentication", "open-source", "self-hosted"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "/blog/thumbnails/ssoready.webp"
+  alt: "SSOReady open source SAML and SCIM developer tools"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** SSOReady is an open-source MIT-licensed tool that lets you add SAML enterprise SSO and SCIM directory sync to your app in an afternoon, with SDKs in 7 languages.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [ssoready.com](https://ssoready.com)
+- Source repository: [github.com/ssoready/ssoready](https://github.com/ssoready/ssoready)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=41110850](https://news.ycombinator.com/item?id=41110850)
+
+## What Is SSOReady?
+
+SSOReady describes itself as "an open-source, straightforward way to add SAML and SCIM support to your product." It comes from [YC W24](https://www.ycombinator.com/companies/ssoready).
+
+The core product does two things:
+
+- **SAML SSO** — lets your users log in via their corporate identity provider (Okta, Azure AD, Google Workspace, etc.)
+- **SCIM** — syncs user accounts and groups from those identity providers into your app automatically
+
+What makes SSOReady stand out is the developer experience. Their README says most teams implement SAML and SCIM in an afternoon, with a claimed two lines of code. The SDKs are thin wrappers over a REST API, so you are not locked into any particular stack.
+
+The project is [fully open source](https://github.com/ssoready/ssoready) under the MIT license. You can self-host it, or use SSOReady's cloud-hosted instance. An Enterprise plan adds custom domains, a management API, and SLA support.
+
+## Setup Workflow
+
+### Step 1: Install an SDK
+
+SSOReady has official SDKs for seven languages:
+
+```bash
+# TypeScript / Node.js
+npm install ssoready
+
+# Python
+pip install ssoready
+
+# Go
+go get github.com/ssoready/ssoready-go
+
+# Ruby
+gem install ssoready
+
+# PHP
+composer require ssoready/ssoready
+
+# Java (Maven)
+# <dependency>
+#   <groupId>com.ssoready</groupId>
+#   <artifactId>ssoready-java</artifactId>
+#   <version>...</version>
+# </dependency>
+
+# C# / .NET
+# dotnet add package SSOReady.Client
+```
+
+### Step 2: Implement a Sign-In Button (SAML)
+
+When a user clicks "Sign in with SSO," call the `getSamlRedirectUrl` endpoint to get a redirect URL pointing to their corporate identity provider:
+
+```typescript
+import SSOReady from "ssoready";
+
+const ssoready = new SSOReady("your-api-key");
+
+const { redirectUrl } = await ssoready.saml.getSamlRedirectUrl({
+  organizationExternalId: "customer-org-123",
+});
+
+// Redirect the user to their corporate IdP
+window.location.href = redirectUrl;
+```
+
+After the user authenticates with their corporate IdP, SSOReady redirects them back to your app with a SAML response. Redeem it with:
+
+```typescript
+const { samlAccessToken } = await ssoready.saml.redeemSamlAccessCode({
+  samlAccessCode: req.query.samlAccessCode,
+});
+
+// Log the user in with samlAccessToken.email
+```
+
+### Step 3: Enable SCIM Directory Sync (Optional)
+
+SCIM keeps user accounts in sync automatically. When a new employee joins their company's Okta or Azure AD, SSOReady pushes the change to your app via a webhook:
+
+```typescript
+app.post("/webhooks/ssoready/scim", async (req, res) => {
+  const { ok } = await ssoready.scim.handleWebhook({
+    event: req.body,
+    secret: process.env.SSOREADY_SCIM_SECRET,
+  });
+
+  if (!ok) {
+    return res.status(400).send("bad signature");
+  }
+
+  // Sync users to your database
+  for (const user of req.body.resource_sync.users) {
+    await db.upsertUser({ email: user.emails[0].value, active: user.active });
+  }
+
+  res.send("ok");
+});
+```
+
+### Step 4: Self-Host If You Prefer
+
+SSOReady can be self-hosted. Their [self-hosting docs](https://ssoready.com/docs/self-hosting-ssoready) cover Docker deployment. The open-source core handles all the SAML and SCIM logic; the Enterprise plan adds SLA support for self-hosted deployments.
+
+## Deeper Analysis
+
+**Architecture.** SSOReady acts as an authentication middleware layer. It does not own your user database — you keep your existing users table and SSOReady just provides a canonical email-to-user mapping via the SAML flow.
+
+**SDK vs. raw API.** The TypeScript SDK maps almost 1:1 to the [HTTP API surface](https://ssoready.com/docs/api-reference/saml/redeem-saml-access-code). If your language does not have an official SDK, the API is simple enough to call directly.
+
+**Supported identity providers.** The docs mention Okta, Azure AD, Google Workspace, and Ping Identity as tested IdPs. Any SAML 2.0-compliant provider should work.
+
+**Enterprise add-ons.** The Enterprise plan adds custom domains (run SSOReady on your own domain), a full management API for automating SAML/SCIM at scale, and SLA-backed support including for self-hosted deployments.
+
+## Practical Evaluation Checklist
+
+- ✅ SAML initiation + handling in two API calls
+- ✅ SCIM webhook-based user provisioning and deactivation
+- ✅ Seven official SDKs: TypeScript, Python, Go, Java, C#, Ruby, PHP
+- ✅ Self-hostable, MIT licensed, no usage lock-in
+- ✅ Hosted self-serve IdP configuration UI for your customers
+- ✅ Management API for automating SAML/SCIM at scale (Enterprise)
+
+## Security Notes
+
+- The SCIM webhook handler above includes a signature check (`ssoready.scim.handleWebhook` validates the `SSOREADY_SCIM_SECRET`) — always verify this before processing provisioning events
+- SSOReady stores no long-lived user data; tokens are short-lived and exchanged on each login
+- SAML assertions are validated server-side and never touch your client-side code
+- Self-hosting gives you full control over where credential data flows
+
+## FAQ
+
+**Q: What is SAML?**
+**A:** SAML (Security Assertion Markup Language) is the XML-based standard behind "Enterprise SSO." It lets your users log in with their corporate Google Workspace or Okta account instead of a separate password.
+
+**Q: What is SCIM?**
+**A:** SCIM (System for Cross-domain Identity Management) automates the creation, update, and deactivation of user accounts when employees join or leave their company. It keeps your user list in sync with your customer's identity provider automatically.
+
+**Q: How long does implementation take?**
+**A:** SSOReady says "most folks implement SAML and SCIM in an afternoon." The TypeScript SDK surfaces the full SAML flow in two API calls.
+
+**Q: Is the source code open?**
+**A:** Yes. All SDKs and the core SAML/SCIM engine are MIT licensed on GitHub. The cloud-hosted service and Enterprise plan are paid products.
+
+**Q: Can I self-host SSOReady?**
+**A:** Yes. Docker-based self-hosting is documented. Enterprise plans include SLA support for self-hosted deployments.
+
+## Conclusion
+
+SSOReady solves the enterprise SSO problem without the traditional complexity of dealing with SAML XML, certificate rotation, and IdP configuration. By packaging all of that into a clean REST API with SDKs in seven languages, it makes SAML and SCIM accessible to any dev team that needs to support business customers on Okta or Azure AD.
+
+The MIT license and self-hosting option mean no vendor lock-in. If you are building B2B software and need enterprise SSO, this is worth an afternoon of evaluation.
+
+**Source:** [github.com/ssoready/ssoready](https://github.com/ssoready/ssoready) | [ssoready.com/docs](https://ssoready.com/docs)

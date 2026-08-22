@@ -1,0 +1,142 @@
+---
+title: "Netrinos - Simple Mesh VPN for Remote Teams"
+description: "Netrinos is a WireGuard-based mesh VPN that creates a LAN-like overlay network across your devices, with automatic peer discovery, NAT traversal, and fixed DNS names for every endpoint."
+pubDate: "2026-08-13"
+tags: ["vpn", "wireguard", "networking", "self-hosted", "dev-tools"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/netrinos.webp"
+  alt: "Netrinos mesh VPN product banner"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Netrinos is a WireGuard-based mesh VPN that gives every device a fixed IP and DNS name, enabling direct P2P connections across NAT without a central relay.
+
+## What Is Netrinos?
+
+Netrinos is a peer-to-peer mesh VPN built on WireGuard. Instead of routing traffic through a central server, it creates a LAN-like overlay network where every device gets a stable private IP and a DNS name (e.g., `workstation.you.netrinos.com`). Devices discover each other automatically and connect directly — P2P via WireGuard, with NAT traversal handled transparently.
+
+When direct connections fail (strict firewall/NAT), Netrinos falls back to a relay server, but traffic remains end-to-end encrypted. The service runs on Linux (nftables), macOS (PF), and Windows (WFP), using each OS's native firewall for packet handling — no proprietary network stack.
+
+Netrinos launched on Hacker News in January 2026.
+
+## Setup
+
+### Install the CLI
+
+Download from the website or install via the package manager for your OS.
+
+### Create a network
+
+```bash
+# Sign in and create a personal network
+netrinos login
+netrinos network create
+```
+
+### Connect a device
+
+```bash
+# Connect to your network
+netrinos connect
+
+# Verify connection
+netrinos status
+# Output: Connected to netrinos-network
+# Peer IP: 10.0.0.2
+# DNS: workstation.you.netrinos.com
+```
+
+### Share with teammates
+
+Invite devices by sharing a join link. Each new peer gets its own IP and DNS name within your private network.
+
+### Persist across reboots
+
+On Linux with systemd:
+
+```bash
+sudo systemctl enable netrinos
+sudo systemctl start netrinos
+```
+
+## Architecture Deep Dive
+
+### WireGuard under the hood
+
+Netrinos uses WireGuard's userspace Go implementation (`wireguard-go`), wrapped in a coordination layer that handles:
+
+- **Peer discovery** — each node announces itself to a lightweight bootstrap service
+- **Endpoint resolution** — STUN-like probes determine public IP and port mappings
+- **NAT traversal** — UDP hole punching for common symmetric/cone NAT scenarios
+- **Relay fallback** — encrypted relay via a Netrinos-hosted TURN-style server when P2P fails
+
+### No proprietary network stack
+
+Unlike tools that implement their own transport protocol, Netrinos:
+
+- Uses standard WireGuard (auditable, well-tested)
+- Leverages OS-native packet filtering: nftables on Linux, PF on macOS, WFP on Windows
+- Ships no kernel modules or custom network drivers
+
+### Fixed IP and DNS naming
+
+Every device receives:
+- A fixed private IP within your network's CIDR range
+- A stable DNS name: `hostname.you.netrinos.com`
+
+This means you can reference devices by name in configs, SSH aliases, and internal services without tracking dynamic IPs.
+
+## Practical Evaluation Checklist
+
+- [x] WireGuard P2P connections (no central traffic relay)
+- [x] NAT traversal with UDP hole punching
+- [x] Encrypted relay fallback when P2P fails
+- [x] Fixed per-device IP and `.you.netrinos.com` DNS
+- [x] Automatic peer discovery on join
+- [x] Cross-platform: Linux, macOS, Windows
+- [x] Uses OS-native firewall (nftables/PF/WFP) — no proprietary net stack
+- [x] Free tier available; Pro at $10/month
+- [x] Go-based open source core
+
+## Security Notes
+
+- **End-to-end encryption** — all WireGuard tunnels are encrypted; relay traffic is decrypted only at the endpoints, not at Netrinos servers
+- **No traffic visibility** — Netrinos relay cannot inspect P2P traffic; it forwards encrypted packets blind
+- **BYOK not available** — key management is handled by Netrinos; if you need customer-managed keys, this tool may not meet compliance requirements
+- **Auditability** — the client-side coordination layer is open source; you can audit the NAT traversal logic and peer discovery protocol
+
+## FAQ
+
+**Q: How is this different from a traditional VPN?**
+**A:** Traditional VPNs route all traffic through a central server. Netrinos routes traffic directly between peers via WireGuard when possible. The central server is only used as a fallback relay when NAT prevents direct P2P connections.
+
+**Q: Does it work through strict corporate firewalls?**
+**A:** It handles most cone NAT scenarios via UDP hole punching. For strict firewalls that block all UDP, the relay fallback provides connectivity at the cost of some latency. Some corporate proxies that inspect WireGuard traffic may still cause issues.
+
+**Q: Is the source code open source?**
+**A:** The client coordination layer and CLI are open source (BSD-style licenses per their licenses page). The relay/discovery infrastructure is proprietary.
+
+**Q: What is the free tier limit?**
+**A:** The free tier includes unlimited devices and users. Pro adds priority relay bandwidth and is $10/month. No credit card is required to start.
+
+## Conclusion
+
+Netrinos solves the "remote access" problem cleanly: install, log in, and get a stable private IP and DNS name for every device. For small teams wanting a zero-config mesh that falls back gracefully when NAT blocks direct connections, it hits a sweet spot between simplicity and correctness. The use of standard WireGuard and OS-native packet filtering means the attack surface is small and auditable.
+
+If you need a quick way to expose services between machines without exposing them to the public internet, Netrinos is worth trying. Free tier is generous enough for most homelab and small-team use cases.
+
+**Project page:** [netrinos.com](https://netrinos.com)
+**HN thread:** [news.ycombinator.com/item?id=46331364](https://news.ycombinator.com/item?id=46331364)
+
+## Source and Accuracy Notes
+
+- Project page: [netrinos.com](https://netrinos.com) — verified 2026-08-13
+- GitHub org: [github.com/netrinosnetwork](https://github.com/netrinosnetwork)
+- License: BSD 3-Clause for Netrinos code; WireGuard, Wails, Go use MIT/BSD (verified via [netrinos.com/legal/licenses](https://netrinos.com/legal/licenses))
+- HN launch thread: [news.ycombinator.com/item?id=46331364](https://news.ycombinator.com/item?id=46331364) (93 points, Jan 2026)
+- Pricing: Free tier + Pro at $10/month (verified on project page, Aug 2026)
