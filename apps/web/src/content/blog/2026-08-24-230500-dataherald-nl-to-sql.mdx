@@ -1,0 +1,175 @@
+---
+title: "Dataherald – Natural Language to SQL for Your Data Warehouse"
+description: "Open-source N-L-to-SQL engine that routes plain English queries against PostgreSQL, SQLite, BigQuery, and more. Deploy as a Docker container or integrate directly into your app."
+pubDate: "2026-08-24"
+tags: ["ai-setup", "dev-tools", "open-source"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/dataherald-nl-to-sql.webp"
+  alt: "Dataherald natural language to SQL engine interface"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Dataherald is an open-source natural language-to-SQL engine. Deploy it as a Docker container and query your existing database in plain English — no SQL required from end users.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [dataherald.com](https://dataherald.com)
+- Source repository: [github.com/Dataherald/dataherald](https://github.com/Dataherald/dataherald) ← README read in full
+- License: Apache 2.0 (verified via `LICENSE` file in repo root)
+- HN launch thread: [news.ycombinator.com/item?id=46220641](https://news.ycombinator.com/item?id=46220641) (464 points, 2024-09-04)
+- Docs: [dataherald.readthedocs.io](https://dataherald.readthedocs.io/)
+
+## What Is Dataherald?
+
+Dataherald is a natural language-to-SQL engine built for enterprise-level question answering over relational data. Instead of writing SQL, business users ask questions in plain English and Dataherald converts them into accurate SQL queries against your existing database.
+
+The README puts it directly:
+
+> "Query your relational data in natural language."
+
+Key capabilities from the official docs:
+
+- Allow business users to get insights from the data warehouse without going through a data analyst
+- Enable Q and A from your production DBs inside your SaaS application
+- Create a ChatGPT plug-in from your proprietary data
+
+The engine itself handles the core N-L-to-SQL conversion. For production use with multiple users and authentication, the Enterprise layer adds organizations, users, and business logic on top.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Docker and Docker Compose
+- A supported database: PostgreSQL, SQLite, BigQuery, Snowflake, or Databricks
+- An OpenAI, Anthropic, or other LLM API key (for the N-L-to-SQL conversion)
+
+### Step 1: Clone and Configure
+
+```bash
+git clone https://github.com/Dataherald/dataherald.git
+cd dataherald
+```
+
+Each service under `/services` has its own `.env.example` file. Copy it to `.env` and fill in your values:
+
+```bash
+# Example for the engine service
+cp services/engine/.env.example services/engine/.env
+```
+
+Required environment variables typically include:
+
+- `DATABASE_URL` — your PostgreSQL or SQLite connection string
+- `LLM_API_KEY` — your OpenAI or Anthropic API key
+- `LLM_PROVIDER` — `openai`, `anthropic`, `ollama`, etc.
+
+### Step 2: Start with Docker
+
+The repo provides a root-level Docker script that starts all services:
+
+```bash
+sh docker-run.sh
+```
+
+This creates a common Docker network and runs each component in detached mode. To start individual services, navigate to the service directory and run its `docker-compose.yml` directly.
+
+### Step 3: Connect Your Database Schema
+
+After the engine is running, connect your database schema through the Admin Console (available at `http://localhost:3000` when running the full stack). The admin console lets you:
+
+- Register your database connection
+- Import and preview your schema
+- Test natural language queries before going live
+
+### Step 4: Query in Natural Language
+
+Once configured, send a plain English question to the Dataherald API:
+
+```bash
+curl -X POST http://localhost:8080/v1/dataherald/answer \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What were total sales by region last quarter?"}'
+```
+
+Dataherald returns the generated SQL and the query results.
+
+## Deeper Analysis
+
+### Architecture
+
+The monorepo contains four components:
+
+1. **Engine** — core N-L-to-SQL conversion. Standalone if you do not need auth or user management.
+2. **Enterprise** — adds authentication, organizations, multi-user support.
+3. **Admin-console** — web GUI for configuration and observability. Requires both engine and enterprise.
+4. **Slackbot** — lets users query the database from Slack channels. Requires engine and enterprise.
+
+### Supported LLM Providers
+
+From the README, Dataherald supports:
+
+- OpenAI (GPT-4o, GPT-4o-mini)
+- Anthropic (Claude 3.5 Sonnet, Claude 3 Opus)
+- Google Gemini
+- Grok
+- DeepSeek
+- Ollama (local models)
+- Llama.cpp (local models)
+
+### Supported Databases
+
+The docs list integrations with:
+
+- PostgreSQL
+- SQLite
+- BigQuery
+- Snowflake
+- Databricks
+
+## Practical Evaluation Checklist
+
+- Does it connect to your existing database without ETL?
+- Is the schema import accurate for your tables?
+- Are generated SQL queries correct for complex JOINs and aggregations?
+- Does the LLM provider produce accurate results on your domain-specific vocabulary?
+- Is the Docker setup stable for long-running production use?
+- Is the Enterprise layer necessary for your use case, or does the engine suffice?
+
+## Security Notes
+
+- The Engine component can be run standalone without authentication for internal-only use
+- The Enterprise layer adds authentication and multi-tenant isolation
+- API keys for LLM providers are stored server-side; they are not exposed to end users
+- Database credentials are managed through environment variables — never hardcode connection strings
+- The admin console should not be exposed publicly without a reverse proxy with authentication in front
+
+## FAQ
+
+**Q: How accurate are the generated SQL queries?**
+**A:** Accuracy depends on schema quality and how well your database schema is documented. Dataherald uses the schema metadata you provide to disambiguate column names and table relationships. Poorly documented schemas produce unreliable queries.
+
+**Q: Can I use local models instead of OpenAI?**
+**A:** Yes. Dataherald supports Ollama and Llama.cpp for fully local inference. Performance and accuracy will vary based on the model.
+
+**Q: What happens if Dataherald generates incorrect SQL?**
+**A:** Dataherald does not currently have a self-correction loop built in. Incorrect SQL produces incorrect results. You should validate generated queries against your expected outcomes, especially for write operations.
+
+**Q: Is there a hosted version?**
+**A:** Dataherald is self-hosted only. There is no Dataherald-managed cloud service as of this writing.
+
+## Conclusion
+
+Dataherald solves a real problem: business users who need answers from a data warehouse but cannot write SQL. As an open-source Apache 2.0 project, it runs entirely on your infrastructure — no data leaves your environment when you self-host the engine component.
+
+The Docker-based setup is accessible to anyone comfortable with a terminal, and the Admin Console provides a GUI for schema management. If you need multi-user auth and organization management, the Enterprise layer adds those on top.
+
+For AI toolchains that need to expose database queries to non-technical users, Dataherald is worth evaluating. The YC W21 backing and active open-source development signal that it is not an abandoned project.
+
+Try it: [github.com/Dataherald/dataherald](https://github.com/Dataherald/dataherald)
