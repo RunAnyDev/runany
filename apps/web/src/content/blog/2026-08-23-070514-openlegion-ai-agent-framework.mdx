@@ -1,0 +1,161 @@
+---
+title: "OpenLegion – Self-Hosted AI Agent Fleets with Vault Security"
+description: "Docker-isolated AI agent runtime with vault-proxied credentials, per-agent budgets, and multi-agent fleet coordination. Open-source alternative to OpenClaw."
+pubDate: "2026-08-23"
+tags: ["self-hosted", "ai-agent", "dev-tools"]
+category: "self-hosted"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/openlegion-ai-agent-framework.webp"
+  alt: "OpenLegion AI agent framework product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** OpenLegion is a self-hosted AI agent runtime that runs each agent in its own Docker container, proxies all API credentials through a vault agents never access, and enforces per-agent spend limits — a security-first multi-agent framework for teams.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [openlegion.ai](https://www.openlegion.ai) — verified
+- Source repository: [github.com/openlegion-ai/openlegion](https://github.com/openlegion-ai/openlegion) — verified, read README end-to-end
+- License: PolyForm Perimeter 1.0.1 (source-available, not pure open source) — verified via LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=42870189](https://news.ycombinator.com/item?id=42870189) — 2 points at time of writing
+- Source last checked: 2026-08-23 (commit `main` branch)
+
+## What Is OpenLegion?
+
+OpenLegion is a **secure, self-hosted AI agent runtime** for running fleets of autonomous AI agents in production. Each agent runs in its own hardened Docker container, with its own memory, tools, schedule, and budget.
+
+The core security model: agents never hold API keys. Every LLM and API call routes through a central **credential vault** that also enforces per-agent spend limits. A trusted mesh host coordinates the fleet through shared state and pub/sub events, with permission ACLs checked on every cross-agent action.
+
+It is **source-available** under the PolyForm Perimeter License 1.0.1 — you can read the ~77,000-line codebase and audit it in a day. You can self-host it for free for internal commercial operations. The one restriction: you cannot resell it as a hosted or managed service that competes with OpenLegion's own managed offering.
+
+OpenLegion positions itself as an **OpenClaw alternative** for teams that need security, isolation, and cost controls around autonomous agents.
+
+## Key Features
+
+The following feature list is copied verbatim from the README and JSON-LD on openlegion.ai:
+
+- Container isolation per agent (Docker or Docker Desktop Sandbox microVMs)
+- Vault-proxied credentials — agents never see API keys
+- Per-agent daily and monthly budget enforcement
+- Fleet model coordination — blackboard + pub/sub + handoff (no CEO agent)
+- 100+ LLM providers via LiteLLM
+- Self-hosted or managed hosting on a dedicated VPS
+- ~77,000-line codebase with 5,800+ tests
+
+## Setup Workflow
+
+### Prerequisites
+
+- Python 3.10+
+- Docker (running; Docker Desktop on Windows)
+- At least one LLM provider API key (Anthropic, OpenAI, Gemini, Deepseek, xAI, Groq, etc.)
+
+### Step 1: Clone and Install
+
+**macOS / Linux:**
+
+```bash
+git clone https://github.com/openlegion-ai/openlegion.git && cd openlegion
+./install.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/openlegion-ai/openlegion.git
+cd openlegion
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The install script checks dependencies, creates a virtual environment, and installs the CLI globally.
+
+### Step 2: Start the Runtime
+
+```bash
+openlegion start
+```
+
+On first run, Docker builds the `openlegion-agent:latest` and `openlegion-browser:latest` images from the `Dockerfile.agent` and `Dockerfile.browser` in the repo root. The browser image is larger (Camoufox + KasmVNC + Openbox + Xvnc) and can take several minutes with no progress output — this is normal. Subsequent starts are fast.
+
+First run also creates `config/agents.yaml`, `config/permissions.json`, `config/mesh.yaml`, and an `operator` built-in fleet-management agent.
+
+### Step 3: Configure Agents and Credentials
+
+The interactive setup walks through adding LLM provider keys, naming agents, and assigning permissions. No config files are edited by hand.
+
+To add more agents after initial setup, use the `/add` command inside the interactive REPL.
+
+### Background Mode
+
+```bash
+openlegion start -d
+```
+
+Polls for startup for up to 90 seconds. Note: if a Docker image build is needed on first run, this timeout may be exceeded — wait for the build to finish and re-run with `-d`.
+
+## Architecture Overview
+
+OpenLegion uses a **fleet model** rather than a single "CEO agent" coordinating sub-agents:
+
+- **Mesh Host** — central coordinator that holds the vault proxy and fleet state
+- **Blackboard + pub/sub** — agents share state through a central message bus, not a hierarchy
+- **Handoff protocol** — agents pass control explicitly rather than through top-down delegation
+- **Operator** — a built-in fleet-management agent (lighter resource caps, excluded from cost/quota math) auto-created on first run
+
+Agents connect to external services (Slack, Telegram, Discord, WhatsApp) as chat interfaces. All LLM calls route through the vault proxy, which injects credentials at the network layer, tracks token usage, and enforces budget limits.
+
+## Security Model
+
+The JSON-LD on the project site describes six defense layers:
+
+1. Container isolation per agent (Docker or Sandbox microVMs)
+2. Vault-proxied credentials — agents call through the proxy, never see secrets
+3. Per-agent permission matrix (ACLs control which tools, files, and mesh operations are allowed)
+4. Per-agent budget enforcement (daily and monthly spend limits)
+5. Deterministic audit trails
+6. Bounded execution (agents cannot exceed configured time or action budgets)
+
+Even a fully compromised agent cannot access your API keys, because the vault proxy holds them and signs requests server-side.
+
+## Pricing
+
+OpenLegion is free to self-host. Managed hosting is available in tiers:
+
+- **Basic**: $19/month
+- **Growth**: $62/month
+- **Pro**: $152/month
+- **Pro Max**: $296/month
+
+(Self-hosted is free under the PolyForm Perimeter License.)
+
+## FAQ
+
+**Q: Is this fully open source?**
+**A:** OpenLegion is source-available under the PolyForm Perimeter License 1.0.1. You can read, audit, and self-host the code. You cannot redistribute it as a competing managed service. If you want pure permissively-licensed open source, look at LangGraph or CrewAI.
+
+**Q: How does it compare to OpenClaw?**
+**A:** OpenLegion was explicitly built as an OpenClaw alternative for teams. It adds container isolation, credential vaulting, per-agent budgets, and a fleet coordination model. OpenClaw is single-user by design; OpenLegion targets multi-agent production deployments.
+
+**Q: What LLM providers are supported?**
+**A:** Over 100 providers via LiteLLM, including Anthropic, OpenAI, Gemini, Deepseek, xAI, Groq, Moonshot, Ollama, and more. The setup wizard walks through configuration for each.
+
+**Q: Can I run it on Windows?**
+**A:** Yes — use Docker Desktop with WSL2 backend. Run the PowerShell install script (`install.ps1`). Docker Desktop (not Docker Engine) is required on Windows.
+
+**Q: Does it support MCP tools?**
+**A:** Yes, the README documents MCP Tool Support as a first-class feature.
+
+**Q: What happens if an agent exceeds its budget?**
+**A:** The vault proxy enforces per-agent daily and monthly spend limits at the network layer. Agents cannot make LLM calls once the budget is exhausted.
+
+## Conclusion
+
+OpenLegion fills a specific gap in the AI agent landscape: teams that want the autonomy of frameworks like OpenClaw or LangChain, but with production-grade security boundaries and cost controls baked into the architecture rather than bolted on afterward. The vault proxy model is the standout design choice — agents literally cannot leak credentials because they never see them.
+
+If you are running AI agents in production and have compliance or security requirements, or if you simply want per-agent spend visibility in a multi-agent setup, OpenLegion is worth evaluating. The self-hosted free tier makes it accessible to individual developers and small teams.
