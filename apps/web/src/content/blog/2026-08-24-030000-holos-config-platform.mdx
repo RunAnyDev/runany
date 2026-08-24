@@ -1,0 +1,166 @@
+---
+title: "Holos - Configure Kubernetes with CUE instead of YAML"
+description: "Holos replaces raw Helm and Kustomize YAML with CUE data structures, adding type safety and strong validation to Kubernetes platform configs."
+pubDate: "2026-08-24"
+tags: ["kubernetes", "platform-engineering", "devops", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/holos-config-platform.webp"
+  alt: "Holos platform manager - Configure Kubernetes with CUE"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Holos lets platform teams define Kubernetes configurations in CUE — a typed, structured alternative to raw YAML — with built-in validation, Helm reuse, and Kustomize integration.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [holos.run](https://holos.run)
+- Source repository: [github.com/holos-run/holos](https://github.com/holos-run/holos) — verified, read README end-to-end
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=42366665](https://news.ycombinator.com/item?id=42366665)
+
+## What Is Holos?
+
+Platform teams that manage Kubernetes at scale face a common problem: raw YAML is unstructured, has no type checking, and validating Helm values or Kustomize overlays before apply is an afterthought at best.
+
+Holos is an open-source platform manager that defines Kubernetes configurations in [CUE](https://cuelang.org/) — a data validation language with strong type inference, struct embedding, and constraint-based validation built in.
+
+From the Holos README:
+
+> Holos adds CUE's type safety, unified structure, and strong validation features to your Kubernetes configuration manifests, including Helm and Kustomize.
+
+Instead of a flat YAML file with no schema, you write CUE packages that describe exactly what values are valid, across environments. Helm charts and Kustomize bases can be imported directly and wrapped with typed constraints.
+
+## Core Concepts
+
+**CUE as the config layer.** CUE is a superset of JSON — you can paste raw Helm output into a `.cue` file and add constraints on top of it. Fields that don't match the schema fail at compile time, not at apply time.
+
+**Three user roles, one tool:**
+- **Platform engineers** define golden paths as CUE modules with enforced defaults and security policy
+- **Software developers** consume paved roads without needing Kubernetes depth
+- **Security teams** write typed security policies that auto-enforce on new projects
+
+**Import existing tooling.** Holos does not replace Helm or Kustomize — it wraps them. Your existing `values.yaml` and `kustomization.yaml` files are imported into the CUE layer, then augmented with schema validation and cross-environment consistency checks.
+
+## Setup Workflow
+
+### Prerequisites
+
+- Kubernetes cluster (1.21+)
+- Helm 3 (if using Helm charts)
+- CUE CLI (`cue` binary)
+
+### Step 1: Install Holos
+
+```bash
+# macOS
+brew install holos-run/tap/holos
+
+# Linux
+curl -fsSL https://get.holos.run | sh
+
+# Verify
+holos version
+```
+
+### Step 2: Initialize a Holos workspace
+
+```bash
+holos init my-platform
+cd my-platform
+```
+
+This scaffolds a workspace with a base CUE layer and example modules.
+
+### Step 3: Import an existing Helm chart
+
+```bash
+holos import helm ./my-chart-1.0.0.tgz
+```
+
+This converts the chart's `values.yaml` into a CUE module. You can then add constraints:
+
+```cue
+package app
+
+#Values: {
+    replicaCount: int | *1
+    image: {
+        repository: string
+        tag:        string
+    }
+    service: {
+        port: int | *8080
+    }
+}
+```
+
+### Step 4: Define a platform layer
+
+Platform teams define a reusable module that application teams import:
+
+```bash
+holos module init platform --type platform
+```
+
+### Step 5: Apply to cluster
+
+```bash
+holos render | kubectl apply -f -
+```
+
+The `render` command outputs validated Kubernetes manifests. If CUE validation fails, no manifest is generated.
+
+## Deeper Analysis
+
+**What makes it different from just using Kustomize?**
+
+Kustomize solves the overlay problem — it patches base YAML files. Holos solves the data-shape problem — it enforces what values are valid before any patching happens. They are complementary: Holos can import and validate Kustomize bases.
+
+**CUE vs. plain YAML.**
+
+Raw YAML has no type system. A misspelled key, a string where a number was expected, a required field that was deleted — all of these silently pass `kubectl apply` and fail at runtime. CUE catches them at `holos render` time.
+
+**Compliance-ready.**
+
+Holos tracks compliance as structured data (ITAR, ISO 9001, AS9100), making it queryable and auditable in ways a folder of YAML files is not.
+
+## Practical Evaluation Checklist
+
+- [ ] Import an existing Helm chart and add a type constraint
+- [ ] Run `holos render` to see validation catch a bad value
+- [ ] Define a platform module and import it from an app module
+- [ ] Export to both a staging and production overlay
+- [ ] Verify `holos diff` shows correct drift between environments
+
+## Security Notes
+
+- All validation is local — no network calls during `holos render`
+- Secrets are not handled by Holos; pass them through your existing secret management (Vault, Sealed Secrets, etc.)
+- The CUE layer is declarative; Holos does not execute arbitrary code at render time
+
+## FAQ
+
+**Q: Does Holos replace Helm?**
+**A:** No. Holos imports Helm charts as inputs and emits validated YAML. You still maintain your Helm expertise.
+
+**Q: Can I use Holos with existing Kustomize overlays?**
+**A:** Yes. Holos can import Kustomize bases and add CUE constraints on top. The overlay hierarchy is preserved.
+
+**Q: Does it work with GitOps tools like Flux or Argo CD?**
+**A:** Yes. `holos render` outputs standard Kubernetes manifests, which work with any GitOps controller. Holos is a config authoring tool, not a runtime component.
+
+**Q: What's the license?**
+**A:** Apache-2.0, verified at [github.com/holos-run/holos](https://github.com/holos-run/holos).
+
+## Conclusion
+
+Holos brings CUE's type system to Kubernetes configuration management. If you manage multiple clusters or teams and are tired of YAML-based config drift and silent type errors, the CUE layer is worth evaluating. It integrates with your existing Helm and Kustomize tooling rather than replacing it.
+
+Try it at [holos.run](https://holos.run) or clone the repo at [github.com/holos-run/holos](https://github.com/holos-run/holos).
