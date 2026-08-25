@@ -1,0 +1,142 @@
+---
+title: "GitDelivr – free Git CDN on Cloudflare Workers"
+description: "Cache git clones and fetches at Cloudflare edge (300+ locations). Free open proxy for GitHub, GitLab, Codeberg."
+pubDate: "2026-08-25"
+tags: ["dev-tools", "self-hosted", "cloudflare"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gitdelivr.webp"
+  alt: "GitDelivr – CDN for Git clones"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** GitDelivr is a free caching proxy that sits in front of any public Git forge and serves repeated clone/fetch requests from Cloudflare's edge network — reducing origin bandwidth while speeding up CI systems and developer clones.
+
+## Source and Accuracy Notes
+
+- Project page: [gitdelivr.net](https://gitdelivr.net)
+- Source repository: [github.com/emirb/gitdelivr.net](https://github.com/emirb/gitdelivr.net)
+- License: MIT (verified via `LICENSE` file in repo)
+- HN launch thread: [news.ycombinator.com/item?id=47216384](https://news.ycombinator.com/item?id=47216384)
+
+## What Is GitDelivr?
+
+GitDelivr is a read-only caching proxy for public Git repositories, built on Cloudflare Workers, the Cache API, and R2 object storage. Drop it in front of GitHub, GitLab, Codeberg, Forgejo, or Gitea — repeated clones and fetches get served from Cloudflare instead of hammering the origin forge.
+
+The project was inspired by [GNOME's decision to redirect GitLab traffic to GitHub mirrors](https://www.phoronix.com/news/GNOME-GitHub-GitLab-Redirect) to cut bandwidth costs. The maintainer Emir B. took that idea further: if npm has jsDelivr, Docker has registry CDNs, why does Git have no equivalent protocol-level cache?
+
+> "Git itself verifies every object by hash on the client side. If we flip a byte, `git fsck` rejects the entire pack. You don't have to trust us." — gitdelivr.net homepage
+
+The service is completely free. No account, no API key, no rate limits on the public proxy. Self-hosting is also supported — you deploy your own Workers + R2 bucket.
+
+## How the Caching Works
+
+Git's `upload-pack` protocol is deterministic: the same wants and haves produce identical packfiles. For a fresh `git clone`, many clients send effectively identical requests, so one cached pack can serve repeated clones until refs change.
+
+```
+Developer        gitdelivr.net              Origin forge
+   |                 |                           |
+   | git clone       |                           |
+   |--------------> |                           |
+   |                 | GET /info/refs           |
+   |                 | -----------------------> | short TTL, refreshed on miss
+   |                 | <-----------------------|
+   |                 |                           |
+   |                 | POST /git-upload-pack    |
+   |                 | hash request body        |
+   |                 | check edge / R2          |
+   | pack on HIT <---|                           |
+   |                 |------------------------->| MISS streams from origin
+   |                 |                           |
+```
+
+Cache strategy:
+
+| Endpoint | Cache Key | TTL |
+|---|---|---|
+| `/info/refs`, `ls-refs` | `refs/<origin>/<repo>` | short, refreshed on miss |
+| `/git-upload-pack` | hash of request body | until refs change |
+| `/archive/*` | `archive/<origin>/<repo>/<ref>` | 24h |
+
+### Large Repo Handling
+
+- **Small repos under 50 MB:** buffered in memory, cached with a single R2 `put()`
+- **Large known-length packs:** the first eligible request becomes the cache-filler immediately; concurrent followers wait briefly then hit cache or passthrough
+- **Large chunked packs:** streamed to client while multipart-uploading to R2 — avoids `ReadableStream.tee()` which crashes at ~128 MB in Workers (per [Hono issue #3612](https://github.com/honojs/hono/issues/3612))
+
+## Using GitDelivr (No Account Required)
+
+Prefix any public repo URL with `https://gitdelivr.net`:
+
+```bash
+# Clone Linux via GitDelivr edge cache
+git clone --depth=1 https://gitdelivr.net/github.com/torvalds/linux
+
+# Second clone often fills or hits cache
+git clone --depth=1 https://gitdelivr.net/github.com/torvalds/linux /tmp/linux2
+
+# Third clone served from Cloudflare edge
+git clone --depth=1 https://gitdelivr.net/github.com/torvalds/linux /tmp/linux3
+```
+
+Works with GitHub, GitLab, Codeberg, Forgejo, and Gitea:
+
+```bash
+git clone https://gitdelivr.net/gitlab.com/group/repo
+git clone https://gitdelivr.net/codeberg.org/user/repo
+```
+
+## Self-Hosting Your Own Instance
+
+One command deploys a personal git CDN backed by your own Cloudflare R2 bucket:
+
+```bash
+# Create the R2 bucket
+npx wrangler r2 bucket create gitcdn-cache
+
+# Deploy to Cloudflare Workers (gets a *.workers.dev URL immediately)
+npx wrangler deploy
+```
+
+Your instance URL: `https://gitdelivr.<your-account>.workers.dev`
+
+## Why This Matters for CI Systems
+
+CI runners that clone the same repos across thousands of builds per day are a perfect use case. Instead of every job hitting GitHub's bandwidth limits, GitDelivr caches packfiles at Cloudflare's edge. Popular repos in a team's pipeline can see dramatically faster clone times after the first build warms the cache.
+
+This is especially relevant for monorepos and projects with many contributors where the same dependencies are cloned repeatedly.
+
+## Limitations
+
+- **Public repos only** — no authentication support (by design; it's a read-only public proxy)
+- **Smart HTTP only** — SSH (`git@`) and Git protocol (`git://`) are not proxied
+- **No write-through** — it's a one-way cache, not a mirror
+- **Cache invalidation** tied to ref updates; a force-push that doesn't change the ref name may still serve a stale pack until TTL expires
+
+## FAQ
+
+**Q: Is this safe to use? Git could verify the hash, but what about the Workers code?**
+
+**A:** The architecture is designed so that Git itself is the trust anchor. The Workers code is open source, auditable, and any tampering with served objects would produce a checksum mismatch that `git fsck` catches client-side. You don't have to trust gitdelivr.net — you trust Git's hash verification.
+
+**Q: Does this help with GitHub's rate limits?**
+
+**A:** Indirectly yes. Repeated clones of the same refs are served from Cloudflare edge rather than GitHub, so origin bandwidth and API quota consumption drop. However, gitdelivr.net does not use GitHub's API — it uses the raw smart HTTP protocol, so GitHub's unauthenticated rate limits on `github.com` traffic apply differently.
+
+**Q: How is this different from a Git mirror?**
+
+**A:** A mirror requires you to change `git remote` to point to the mirror and maintain a full replica. GitDelivr works transparently: you still use the original remote (e.g. `github.com/torvalds/linux`) prefixed with `gitdelivr.net`, and the caching happens automatically without full replication.
+
+**Q: Is the public instance rate-limited?**
+
+**A:** The public instance at `gitdelivr.net` is free with no documented rate limits. It's maintained by the author as a community service.
+
+## Conclusion
+
+GitDelivr fills a gap that has existed since the early days of package CDNs: Git repositories themselves have never had a transparent, zero-config caching layer. By building on Cloudflare Workers and R2, the author delivers a globally distributed cache with no infrastructure to manage and no API keys to provision. For open-source projects with high clone volumes or teams running CI on the same repos repeatedly, this is a drop-in speed improvement with no downsides.
+
+**Source last checked:** 2026-08-25 (commit from `github.com/emirb/gitdelivr.net` main branch)
