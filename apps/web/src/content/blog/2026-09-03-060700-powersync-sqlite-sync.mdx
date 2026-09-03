@@ -1,0 +1,171 @@
+---
+title: "PowerSync - Postgres to SQLite Sync Engine"
+description: "Open-source sync engine that keeps in-app SQLite databases in real-time bi-directional sync with Postgres, MongoDB, MySQL, and SQL Server backends."
+pubDate: "2026-09-03"
+tags: ["dev-tools", "database", "open-source"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/powersync-sqlite-sync.webp"
+  alt: "PowerSync sync engine product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** PowerSync is an open-source sync engine that keeps in-app SQLite databases continuously in sync with backend databases (Postgres, MongoDB, MySQL, SQL Server) — no custom API layer required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [powersync.com](https://powersync.com) ← verified from official site
+- Source repository: [github.com/powersync-ja](https://github.com/powersync-ja) ← verified from powersync.com/open-source
+- Client SDKs license: Apache 2.0 (verified from [powersync.com/open-source](https://powersync.com/open-source))
+- Server-side service license: Functional Source License (FSL) (verified from powersync.com/open-source)
+- HN launch thread: [news.ycombinator.com/item?id=41965473](https://news.ycombinator.com/item?id=41965473) — 356 points
+- Documentation: [docs.powersync.com](https://docs.powersync.com/)
+
+## What Is PowerSync?
+
+PowerSync is a sync engine built by Journey Mobile, Inc. that solves a specific problem: keeping a local SQLite database inside a mobile or desktop app continuously synchronized with a remote database — without you having to build and maintain a custom REST or GraphQL API layer in between.
+
+The core pitch on the site reads:
+
+> "Automatically sync your backend database with in-app SQLite and avoid the complexities of using APIs to move app state over the network."
+
+Instead of your app polling HTTP endpoints, PowerSync streams data changes directly from the source database into the local SQLite replica. Writes go back through the same channel. The result is an offline-first architecture where the app works without connectivity and converges when connectivity returns.
+
+Supported source databases at launch:
+- PostgreSQL
+- MongoDB
+- MySQL
+- SQL Server
+
+## Architecture Overview
+
+PowerSync has three moving pieces:
+
+**1. Client SDK** — runs inside your app (Flutter, Swift, Kotlin, Rust, .NET). Manages the local SQLite database, tracks local writes, applies incoming changes. Ships with watch queries so your UI automatically updates when data changes.
+
+**2. PowerSync Service** — the server-side sync coordinator. Connects to your source database, reads the replication log (e.g. Postgres logical decoding), batches changes, and streams them to connected clients. Also receives and applies client-side writes back to the source.
+
+**3. PowerSync CLI** — tooling for local development, schema management, and debugging.
+
+On the open-source side: client SDKs are Apache 2.0 / MIT licensed and live across multiple repos (`powersync.dart`, `powersync-swift`, `powersync-dotnet`, `powersync-native`). The server-side service and CLI are source-available under the Functional Source License (FSL) — you can self-host them, but the license places restrictions on competing SaaS offerings.
+
+## SDK and Language Support
+
+PowerSync maintains official client SDKs for:
+
+| Language | Repo | License |
+|---|---|---|
+| Dart / Flutter | [powersync-ja/powersync.dart](https://github.com/powersync-ja/powersync.dart) | Apache 2.0 |
+| Swift | [powersync-ja/powersync-swift](https://github.com/powersync-ja/powersync-swift) | Apache 2.0 |
+| Kotlin / JVM | [powersync-ja/powersync-kotlin](https://github.com/powersync-ja/powersync-kotlin) | Apache 2.0 |
+| Rust | [powersync-ja/powersync-native](https://github.com/powersync-ja/powersync-native) | Apache 2.0 |
+| .NET | [powersync-ja/powersync-dotnet](https://github.com/powersync-ja/powersync-dotnet) | Apache 2.0 |
+
+Supporting packages include `sqlite_async.dart` (async SQLite for Flutter/Dart, MIT) and `powersync-sqlite-core` (Rust SQLite extension, Apache 2.0).
+
+## Setup Quickstart
+
+The following walks through the Flutter/Dart SDK as the canonical example — the others follow similar patterns.
+
+### 1. Add the dependency
+
+```bash
+flutter pub add powersync
+```
+
+### 2. Open a local database
+
+```dart
+import 'package:powersync/powersync.dart';
+
+final db = PowerSyncDatabase(
+  schema: schema,
+  database: 'mydb.db',
+);
+await db.connect(
+  endpoint: 'https://your-instance.powersync.com',
+  token: userToken,
+);
+```
+
+### 3. Define your schema
+
+```dart
+const schema = Schema([
+  Table('todos', [
+    Column.id(),
+    Column.text('title'),
+    Column.boolean('completed'),
+  ]),
+]);
+```
+
+### 4. Use watch queries for reactive UI
+
+```dart
+final stream = db.watch(
+  'SELECT * FROM todos WHERE completed = 0',
+);
+```
+
+The stream emits new results whenever the underlying data changes — no manual refresh needed.
+
+## Real-World Use Cases
+
+From the community section on powersync.com, developers are using PowerSync in production for:
+
+- **Habit tracking apps** — offline writes that sync when connectivity returns
+- **Field service apps** — technicians working in low-connectivity environments
+- **Mobile wallets and finance apps** — local-first data with server-side authoritative state
+- **Collaborative apps** — PowerSync's conflict resolution handles concurrent writes
+
+## Pricing
+
+PowerSync offers a cloud-hosted service and a self-hosted option:
+
+| Plan | Price | Data synced/mo | Concurrent clients |
+|---|---|---|---|
+| Free | $0 | 2 GB | 50 peak |
+| Developer | $29 | 50 GB | 500 peak |
+| Growth | $99 | 200 GB | 2,500 peak |
+| Enterprise | Custom | Unlimited | Unlimited |
+
+The self-hosted option uses the FSL-licensed server binaries — no monthly fee, but you handle your own infrastructure.
+
+## Security Notes
+
+- All data in transit is encrypted (HTTPS/TLS)
+- PowerSync Cloud supports SOC 2 Type II and HIPAA compliance (Enterprise plan)
+- JWT-based authentication for client connections
+- Data at rest encryption configurable
+
+## FAQ
+
+**Q: How does PowerSync handle conflicts when two clients write to the same record offline?**
+**A:** PowerSync uses a last-write-wins conflict resolution strategy by default, with configurable rules per table. The system tracks vector clocks and applies reconciliation when clients reconnect.
+
+**Q: Does this replace my existing REST API?**
+**A:** For the data you sync through PowerSync, yes — the sync engine replaces the need for custom API endpoints for those tables. PowerSync is not a general-purpose API replacement; it's specifically for the local-database-in-app use case.
+
+**Q: Can I self-host the server-side service?**
+**A:** Yes. The `powersync-service` and `powersync-cli` binaries are available under the Functional Source License (FSL). You can run them on your own infrastructure. The client SDKs remain fully open-source (Apache 2.0).
+
+**Q: What happens if the source database doesn't support logical replication?**
+**A:** PowerSync Service supports multiple ingestion mechanisms depending on the database. For Postgres it uses logical replication slots; for MongoDB it uses change streams. If your setup doesn't support either, you can use periodic polling mode at reduced freshness.
+
+**Q: How does this compare to Realm or WatermelonDB?**
+**A:** PowerSync differentiates by syncing directly from an existing database (Postgres, MongoDB, MySQL, SQL Server) rather than requiring you to write data to a separate sync-native store. The source of truth stays in your existing database — PowerSync just keeps a local SQLite replica in sync with it.
+
+## Conclusion
+
+PowerSync targets a specific but common pain point: building offline-first mobile or desktop apps that need to stay synchronized with a server-side database. By abstracting the sync logic into a reusable engine and offering both a cloud service and a self-hosted option, it lets you focus on the app itself rather than the reconciliation layer.
+
+The multi-SDK story (Flutter, Swift, Kotlin, Rust, .NET) makes it usable across the widest range of native app platforms, while the open-source client SDKs mean you're not locked into a proprietary client library. The FSL licensing on the server side is worth knowing about if your business model involves competing SaaS offerings, but for typical indie or in-house use it presents no obstacle.
+
+HN launch: [news.ycombinator.com/item?id=41965473](https://news.ycombinator.com/item?id=41965473) — 356 points.
