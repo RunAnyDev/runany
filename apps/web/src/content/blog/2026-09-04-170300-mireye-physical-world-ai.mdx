@@ -1,0 +1,177 @@
+---
+title: "Mireye – One API to give AI agents real-world context"
+description: "Mireye provides AI agents with a single API and MCP server for physical world data — elevation, flood zones, parcel records, land use, and more — with a citation attached to every field."
+pubDate: "2026-09-04"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mireye-yc-s26.webp"
+  alt: "Mireye product thumbnail showing physical world data for AI agents"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Mireye is a single API and MCP server that gives AI agents authoritative, cited data about the physical world — elevation, flood zones, parcel boundaries, land use, and 80+ other layers — so agents stop hallucinating and start acting on real geography.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [mireye.com](https://www.mireye.com) — verified 2026-09-04
+- Source repository: no public GitHub repo found (API service)
+- License: proprietary (SaaS)
+- HN launch thread: [news.ycombinator.com/item?id=49552616](https://news.ycombinator.com/item?id=49552616) — Launch HN, 2026-09-03, YC S26 batch
+- Source last checked: 2026-09-04 (website content verified via direct fetch)
+
+## What Is Mireye?
+
+AI agents are good at text, bad at geography. Ask one about "the elevation at 40.7128, -74.006" and it will hallucinate a plausible answer — because it has no live connection to USGS elevation data. Mireye closes that gap.
+
+From the product description on the homepage:
+
+> "One API and MCP to connect agents to the physical world with accurate data enrichment, signals and tools."
+
+Mireye is a REST + MCP server that wraps 85 authoritative federal and open datasets into a unified interface. Every response field carries its source name, source URL, `fetched_at` timestamp, and confidence level — so the agent can pass provenance straight through to the user or auditor.
+
+**Core endpoints:**
+
+| Endpoint | What it does |
+|---|---|
+| `/v1/ask` | Natural-language question about a place |
+| `/v1/geocode` | Resolve any address or place string to a canonical parcel |
+| `/v1/lookup` | One string returns the full data stack for a location |
+| `/v1/fetch` | Fetch cited fields at any US coordinate |
+| `/v1/proximity` | Drive-time and proximity analysis (US + Canada) |
+| `/v1/field-requests` | Request a field that does not yet exist in the catalog |
+
+Coverage is United States for the full data catalog, with drive-time analysis extending to Canada. The data comes from USGS, FEMA, NOAA, USDA, BLM, EPA, EIA, and other federal agencies, plus county records and open datasets such as Overture and Sentinel-2.
+
+## Setup Workflow
+
+Mireye ships as a standard REST API. You call it directly or connect via its MCP server for Cursor, Claude, and other MCP-compatible clients.
+
+### Get an API key
+
+Sign up at [mireye.com/signup](https://www.mireye.com/signup). The free tier includes 5,000 credits per month with no credit card required. Paid plans start at $19 per month.
+
+### Call the REST API
+
+```bash
+# Ask a natural-language question about a location
+curl -X POST https://api.mireye.com/v1/ask \
+  -H "Authorization: Bearer $MIREYE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What is the elevation at 40.7128, -74.006?",
+    "location": {"lat": 40.7128, "lng": -74.006}
+  }'
+```
+
+A successful response returns the elevation value, data source, timestamp, and confidence:
+
+```json
+{
+  "elevation": "13.03 meters",
+  "source": "USGS_3DEP_COG",
+  "fetched": "2026-07-28",
+  "confidence": "medium"
+}
+```
+
+### Connect via MCP
+
+For agents running in Cursor, Claude Desktop, or any MCP-compatible environment, add the Mireye MCP server:
+
+```json
+{
+  "mcpServers": {
+    "mireye": {
+      "command": "npx",
+      "args": ["-y", "@mireye/mcp-server"]
+    }
+  }
+}
+```
+
+Once connected, the agent can call any `/v1/*` endpoint with full context passing — location, citations, and confidence all flow through the MCP protocol.
+
+### Verify a field exists
+
+Before writing agent logic, check whether Mireye already covers the field you need:
+
+```bash
+curl https://api.mireye.com/v1/lookup?address=1600+Pennsylvania+Ave+NW \
+  -H "Authorization: Bearer $MIREYE_API_KEY"
+```
+
+If the field is missing, use `/v1/field-requests` to file a request. The team researches, builds, and validates the field, then notifies you when it goes live — permanently, for every future caller.
+
+## Deeper Analysis
+
+### Why citations matter for AI agents
+
+Without provenance, an agent acting on elevation data is guessing. With Mireye's citation model, every response includes:
+
+- **Source name** — e.g. `USGS_3DEP_COG`
+- **Source URL** — direct link to the authoritative dataset
+- **`fetched_at`** — so the agent knows how fresh the data is
+- **Confidence level** — `high`, `medium`, or `low`, derived from the data quality chain
+
+This turns the agent from a black-box guesser into a auditable decision-maker — critical for any compliance or regulatory context.
+
+### Field request model
+
+Mireye's `/v1/field-requests` endpoint is a notable design choice. Rather than committing to a fixed schema, Mireye lets users request arbitrary fields. If the request is feasible, the team builds and validates it. If not, they reject it honestly. Accepted fields go into the permanent catalog and are available to all callers.
+
+This creates a compounding data moat: every user request that gets fulfilled becomes available to every future user without additional work.
+
+### Pricing
+
+Credit-based. All endpoint calls consume credits; the credit cost per call type is published on the pricing page. The free tier (5,000 credits/month) has no card required. Paid plans start at $19/month, and usage stops at the plan limit rather than running up an overage charge.
+
+## Practical Evaluation Checklist
+
+- Does the agent need real-world context (elevation, zoning, flood risk, parcel data)?
+- Is the agent deployed in the United States or Canada?
+- Does the downstream user or auditor need data provenance?
+- Would a field not available in standard geocoding APIs (e.g. soil type, elevation datum, FEMA flood zone) add value?
+- Is 5,000 free credits per month sufficient for the pilot scope?
+
+If three or more of these apply, Mireye is worth evaluating seriously.
+
+## Security Notes
+
+- API key required for all endpoints — keep it in environment variables, never in client-side code
+- All data responses are read-only — no write or mutation operations
+- Source attribution is embedded in every response, supporting audit trails for compliance contexts
+
+## FAQ
+
+**Q: What data sources does Mireye use?**
+**A:** 85 authoritative sources, primarily US federal datasets (USGS, FEMA, NOAA, USDA, BLM, EPA, EIA) plus county records and open datasets like Overture and Sentinel-2.
+
+**Q: Does it cover non-US locations?**
+**A:** The full data catalog covers the United States. Drive-time and proximity analysis (/v1/proximity) covers both the US and Canada.
+
+**Q: How fresh is the data?**
+**A:** It varies by layer. Elevation from USGS 3DEP is effectively static. FEMA flood maps refresh on FEMA's cadence. USDA cropland updates yearly. Every response includes a `fetched_at` timestamp so the agent always knows the data age.
+
+**Q: What happens if I exceed my monthly credit limit?**
+**A:** Usage stops at the plan allowance rather than billing past it. No surprise overages.
+
+**Q: Can I request a field that does not exist in the catalog?**
+**A:** Yes — all plans include field requests via `/v1/field-requests`. If the field is technically feasible, Mireye builds and validates it, then notifies you when it goes live permanently.
+
+**Q: Is there a GitHub repo or self-hosted option?**
+**A:** Mireye is a hosted API and MCP server. There is no public self-hosted option documented on the site.
+
+## Conclusion
+
+Mireye solves the geographic blind spot that limits most AI agents. Rather than patching in one-off geocoding calls or watching the agent hallucinate coordinates, you route all physical-world queries through a single endpoint that returns cited, authoritative data.
+
+The MCP server integration makes it natural to drop into existing agent workflows in Cursor or Claude Desktop. The field request system means the catalog grows with your use case. And the free tier is generous enough to validate the integration without a credit card.
+
+If your agent operates in physical space — logistics, real estate, agriculture, compliance, any location-dependent automation — Mireye is worth a look.
