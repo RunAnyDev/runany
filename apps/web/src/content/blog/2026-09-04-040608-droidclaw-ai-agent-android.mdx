@@ -1,0 +1,161 @@
+---
+title: "DroidClaw – Turn Old Android Phones Into AI Agents"
+description: "DroidClaw hooks an LLM brain onto ADB so you can describe a goal in plain English and watch your retired Android phone tap, type, and swipe its way through any app."
+pubDate: "2026-09-04"
+tags: ["ai-setup", "dev-tools", "self-hosted"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/droidclaw-ai-agent.webp"
+  alt: "DroidClaw AI agent controlling an Android phone"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** DroidClaw turns any old Android phone into an autonomous AI agent by pairing ADB accessibility tree reads with an LLM that decides taps, types, and swipes — no API integrations needed.
+
+## Source and Accuracy Notes
+
+- Project page: [droidclaw.ai](https://droidclaw.ai)
+- Source repository: [github.com/unitedbyai/droidclaw](https://github.com/unitedbyai/droidclaw)
+- License: MIT (README states open-source, license file not present in repo as of last push)
+- HN launch thread: not found — tool predates current HN discovery window
+
+## What Is DroidClaw?
+
+DroidClaw is an open-source tool that puts an LLM in control of a physical Android device. The phone runs your everyday apps — WhatsApp, YouTube, Slack, GitHub — and the agent navigates them the way a human would: reading the screen, deciding on the next action, executing it via ADB, then repeating until the goal is reached.
+
+The core loop is perception → reasoning → action:
+
+1. **Perceive** — dump the accessibility tree via `adb shell uiautomator` to get the current UI structure, diff it against the previous screen to detect changes, optionally grab a screenshot
+2. **Reason** — send screen state + goal + conversation history to an LLM; receive `{ think, plan, action }`
+3. **Act** — execute the action via ADB (`tap`, `type`, `swipe`, `launch`, `press back`, etc.); feed the result back to the LLM on the next step
+
+The README calls it "an AI agent that controls your Android phone. Give it a goal in plain English — it figures out what to tap, type, and swipe."
+
+### What it can do right now
+
+From the README and live site, verified tasks include:
+
+- Opening any installed app and performing in-app actions
+- Searching YouTube and playing a specific video
+- Delegating requests to ChatGPT, Gemini, or Google Search *on the device* and pulling results back — no API keys for those services required
+- Checking GitHub pull requests
+- Installing or uninstalling apps
+
+### Failure recovery built in
+
+LLM-driven UI automation sounds fragile. DroidClaw addresses this with several layers:
+
+- **Stuck loop detection** — if the screen does not change for 3 steps, recovery hints get injected into the prompt based on what type of action is failing
+- **Repetition tracking** — a sliding window of recent actions catches retry loops even across screen changes; if the agent taps the same coordinates 3+ times it gets told to try something else
+- **Drift detection** — if the agent spams navigation actions (swipe, back, wait) without interacting with anything, it gets nudged toward direct action
+- **Vision fallback** — when the accessibility tree is empty (webviews, Flutter apps, games), a screenshot gets sent to the LLM instead, with coordinate-based tap suggestions
+- **Action feedback** — every action result (success/failure + message) feeds back to the LLM on the next step
+
+## Setup Workflow
+
+### Prerequisites
+
+- [Bun](https://bun.sh) — required, not Node/npm. DroidClaw uses Bun-specific APIs like `Bun.spawnSync` and native `.env` loading
+- [ADB](https://developer.android.com/tools/adb) (Android Debug Bridge, part of the Android SDK platform tools)
+- An Android phone with USB debugging enabled
+- An LLM provider API key, or [Ollama](https://ollama.com) for fully local inference
+
+### Install ADB
+
+```bash
+# macOS
+brew install android-platform-tools
+
+# Linux
+sudo apt install android-tools-adb
+```
+
+### Install Bun
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+### Quick install
+
+```bash
+curl -fsSL https://droidclaw.ai/install.sh | sh
+```
+
+This one-liner installs `bun` and `adb` if missing, clones the repo, and sets up `.env`.
+
+### Manual install
+
+```bash
+git clone https://github.com/unitedbyai/droidclaw.git
+cd droidclaw
+bun install
+cp .env.example .env
+```
+
+### Configure your LLM
+
+Edit `.env` and pick a provider. The fastest path is Groq (free tier):
+
+```bash
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_key_here
+```
+
+For fully local inference with no API key and no internet dependency:
+
+```bash
+LLM_PROVIDER=ollama
+```
+
+### Run
+
+```bash
+bun run src/kernel.ts
+```
+
+The agent will prompt for a goal in plain English, then show its reasoning and actions step by step.
+
+## Practical Evaluation Checklist
+
+- Open-source, MIT licensed — verify in repo before use
+- Works on any Android phone (no custom ROM required) — USB debugging only
+- Supports Groq, OpenAI, Anthropic, Gemini, and local Ollama
+- Can delegate to on-device ChatGPT, Gemini, or Google Search apps without their API keys
+- 22 distinct actions available via ADB: tap, type, swipe, launch, back, etc.
+- Step limit is configurable (default 30 steps per goal)
+- Android APK available (`v0.5.3` as of last release) for the companion app
+
+## Security Notes
+
+- All automation runs locally on your hardware — no cloud dependency for the agent logic itself
+- API keys live in your local `.env` file, never sent to the DroidClaw server
+- USB debugging must be enabled on the phone, which does expose device control to the connected computer — use a dedicated test device and disable USB debugging when not in use
+- Tailscale is recommended for remote access (agent runs over the tailnet, not over USB)
+
+## FAQ
+
+**Q: Do I need a powerful phone?**
+**A:** No. DroidClaw uses the phone as a display and input surface; all reasoning happens on your chosen LLM. An old mid-range Android works fine.
+
+**Q: Does this work over Wi-Fi or does the phone need to stay plugged in?**
+**A:** The recommended setup uses Tailscale to run ADB over the network, so the phone can stay unplugged. A cron job can trigger the agent remotely at 8am every morning.
+
+**Q: Can it handle apps with CAPTCHAs or login walls?**
+**A:** Not reliably — those are intentionally resistant to automated interaction. The README explicitly calls this out as a limitation.
+
+**Q: Is there a way to run this without an API key?**
+**A:** Yes, set `LLM_PROVIDER=ollama` to use a local Ollama instance. No internet, no API key needed.
+
+**Q: What LLM models are supported?**
+**A:** Groq, OpenAI (GPT-4o, etc.), Anthropic (Claude), Google Gemini, and Ollama (any model you have locally).
+
+## Conclusion
+
+DroidClaw occupies a genuinely uncrowded niche: repurposing old Android hardware as physical AI agents. The approach is elegant — no app integrations, no APIs, no custom ROMs — just an LLM reading the accessibility tree and driving taps via ADB. For developers who want a cheap physical agent (home automation, cross-app workflows, scheduled morning tasks), this is worth keeping in the toolkit.
+
+The project is active (last pushed February 2026, 1,558 GitHub stars), actively maintained, and the install story is clean. The one-line `curl | sh` installer plus the Tailscale remote-access pattern makes it practical to deploy on a phone that lives in a drawer.
