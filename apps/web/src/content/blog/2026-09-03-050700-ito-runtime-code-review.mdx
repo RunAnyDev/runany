@@ -1,0 +1,116 @@
+---
+title: "Ito – Runtime Code Review That Runs Your App on Every PR"
+description: "Ito connects to your repo and runs every pull request against a live copy of your app, testing impacted user flows and posting video evidence directly in the PR thread."
+pubDate: "2026-09-03"
+tags: ["dev-tools", "ai-setup"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ito-runtime-code-review.webp"
+  alt: "Ito runtime code review product thumbnail"
+---
+
+## TL;DR
+
+> **TL;DR:** Ito is an AI-powered code review tool that builds your app per pull request, runs end-to-end tests against a live containerized copy, and posts video + repro evidence in the PR before you merge.
+
+## Source and Accuracy Notes
+
+- Project page: [ito.ai](https://www.ito.ai)
+- Source repository: [github.com/getitoapp/ito](https://github.com/getitoapp/ito)
+- License: MIT (per GitHub repo)
+- HN launch thread: [news.ycombinator.com/item?id=42319520](https://news.ycombinator.com/item?id=42319520)
+- Source last checked: 2026-09-03
+
+## What Is Ito?
+
+Static code review catches syntax errors and style violations, but it cannot tell you whether a change actually breaks your user flows. Ito bridges that gap by spinning up an isolated copy of your application for every pull request, exercising the paths your code touches, and reporting what it finds as a full QA report inside the PR.
+
+The product is documented at [ito.ai/docs](https://www.ito.ai/docs) and targets engineering and QA teams who want to catch runtime bugs before they reach production.
+
+## Setup Workflow
+
+### Step 1: Connect Your Repository
+
+Ito supports GitHub and GitLab. Navigate to [app.ito.ai](https://app.ito.ai) and sign in with your GitHub or GitLab account. Authorize the Ito GitHub App on the repositories you want to cover.
+
+### Step 2: Configure the Application Stack
+
+In the Ito dashboard, define your app's build command, test command, and the environment variables needed at runtime. Ito uses containerized execution per PR, so the environment matches production closely.
+
+```yaml
+# Example ito.yaml (auto-generated on first connect)
+app:
+  build: "pnpm build"
+  run: "node dist/server.js"
+  port: 3000
+```
+
+### Step 3: Define Impacted Flows
+
+Map your routes or user journeys so Ito knows which flows to test when a given file changes. You can configure this from the dashboard or via a YAML file committed to the repo.
+
+```yaml
+flows:
+  - name: "Checkout flow"
+    path: "/api/checkout"
+    method: POST
+```
+
+### Step 4: Open a Pull Request
+
+Once connected, Ito automatically activates on every PR. A build starts within the CI pipeline, deploying a fresh container per commit. Ito then runs through the configured flows and posts a structured report.
+
+## How Ito Works Under the Hood
+
+Ito builds a complete isolated environment for each PR. It clones the app, installs dependencies, starts the server, and runs HTTP requests against it. The test execution layer handles timeouts, retries, and flakiness detection.
+
+For each flow tested, Ito records:
+- HTTP request/response pairs
+- Video of the rendered UI (if a browser is involved)
+- Screenshot captures at failure points
+- Console logs from the server
+
+This evidence is bundled into a comment posted to the pull request, tagged by severity.
+
+## Key Features
+
+### Self-Healing Codebase
+
+When Ito detects a bug, it can propose a fix as a pull request against the affected code path. This leverages the same isolated environment to validate the fix before it enters the review cycle.
+
+### Smoke Testing
+
+Rather than running a full regression suite on every commit, Ito maps each diff to at-risk user journeys and generates a targeted test plan. This reduces CI time while maintaining coverage of the paths that actually changed.
+
+### Agent Sandboxes
+
+Ito gives coding agents a live, managed copy of your application to build and test against. This is useful for AI coding assistants that need to validate their own output before a human reviews it.
+
+### SOC 2 Type II
+
+Ito supports end-to-end encryption with zero data retention for test runs. Independent audit reports are available on request.
+
+## Pricing
+
+Ito is commercial software. Free tier covers a limited number of seats and monthly test runs. Paid plans add unlimited seats, higher test run volumes, and SSO. See [ito.ai/pricing](https://www.ito.ai/pricing) for the full breakdown.
+
+## FAQ
+
+**Q: Does Ito replace my existing CI/CD pipeline?**
+**A:** No. Ito runs as a GitHub App or GitLab integration alongside your existing CI. It does not orchestrate builds or deployments — it observes PR events and executes its own test runs independently.
+
+**Q: How does it differ from tools like Mabl or TestRail?**
+**A:** Mabl and TestRail are test management platforms that require manual test case authoring. Ito is event-driven: it reacts to code changes, infers which flows are at risk, and generates the test evidence automatically.
+
+**Q: Does it support monorepos?**
+**A:** Yes. Ito can target specific packages or services within a monorepo and route tests to the correct sub-application.
+
+**Q: Is there a self-hosted option?**
+**A:** Not at this time. Ito runs as a hosted service.
+
+## Conclusion
+
+Ito adds a runtime QA layer to the pull request workflow that static analysis cannot provide. By building, deploying, and testing a live copy of the application on every diff, it surfaces bugs that only appear under real execution — complete with video evidence. Teams that ship frequently and want higher confidence without expanding manual QA coverage will find the most value here.
