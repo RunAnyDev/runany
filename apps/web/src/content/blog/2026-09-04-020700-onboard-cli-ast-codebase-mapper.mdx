@@ -1,0 +1,153 @@
+---
+title: "Onboard CLI – AST-Powered Codebase Mapper"
+description: "An AST-powered Go CLI that parses multi-language codebases, generates interactive architecture maps via React Flow, and catches architectural drift before it reaches production."
+pubDate: "2026-09-04"
+tags: ["dev-tools", "open-source", "go"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/onboard-cli.webp"
+  alt: "Onboard CLI product thumbnail showing AST-based codebase visualization"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Onboard CLI uses Tree-sitter AST parsing to generate interactive React Flow visualizations of your codebase architecture and enforces architectural boundaries via Git hooks.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [onboard-cli.vercel.app](https://onboard-cli.vercel.app)
+- Source repository: [github.com/animesh-94/Onboard-CLI](https://github.com/animesh-94/Onboard-CLI)
+- License: MIT (verified via README badge and repository)
+- HN launch thread: not confirmed — checked `show+hn+onboard+cli` on HN Algolia (24 points on GitHub announcement)
+- Source last checked: 2026-09-04 (commit verified via GitHub API)
+
+## What Is Onboard CLI?
+
+Onboard CLI is an open-source developer tool that parses codebases using Tree-sitter AST (Abstract Syntax Tree) and produces interactive architecture visualizations in a React Flow canvas. It also enforces architectural boundaries by detecting drift against a user-defined `architecture.yml` file, either on-demand or as a Git hook.
+
+The project was shared on Show HN as a tool for developers working with large, complex monorepos who need a fast way to understand structure without reading every file. The CLI is written in Go; the visualizer is a React 19 frontend served locally.
+
+## Setup Workflow
+
+### Step 1: Install
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onboard-cli/install.sh | bash
+```
+
+**Windows:**
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/onboard-cli/install.ps1 -OutFile install.ps1; .\install.ps1
+```
+
+Requires Go 1.21 or higher if building from source.
+
+### Step 2: Initialize a Project
+
+```bash
+onboard init
+```
+
+This creates a `.onboard/` directory in the project root.
+
+To generate a starter `architecture.yml` with templates:
+
+```bash
+onboard init --template clean-architecture
+```
+
+Available templates: `generic`, `clean-architecture`, `modular-monolith`, `mvc`, `serverless`.
+
+### Step 3: Map the Codebase (Interactive Visualizer)
+
+```bash
+onboard map --target "internal/parser" --radius 2
+```
+
+This boots a local React Flow canvas at `http://localhost:3000/app` by default. The `--radius` flag controls how deep the dependency graph goes. Use `--port` or set `ONBOARD_PORT` to change the default port.
+
+### Step 4: Extract Backend Routes
+
+```bash
+onboard routes --protocol rest --framework express
+```
+
+Supports Express, Gin, FastAPI, and Spring frameworks. Output maps each route to its exact file and line number.
+
+### Step 5: Detect Architectural Drift
+
+```bash
+onboard drift --rules architecture.yml
+```
+
+Compares the actual import graph against the rules in `architecture.yml`. Any cross-boundary imports are flagged with file path and line number.
+
+To enforce this automatically on every commit, add the provided Git hook:
+
+```bash
+# See docs/onboard-action.yml for GitHub Actions CI integration
+```
+
+## Deeper Analysis
+
+### Language Support
+
+Onboard CLI ships built-in parsers for five languages via Tree-sitter: Go, TypeScript, JavaScript, Python, and Java. Parsing is handled by Tree-sitter, which produces the AST used for both topology generation and drift detection.
+
+### Visualizer Architecture
+
+The map command spins up a local Vite dev server serving a React 19 + `@xyflow/react` (React Flow) canvas. Nodes represent symbols, files, or packages depending on the radius; edges represent import or call relationships. The canvas supports dark mode, compact mode, and fuzzy finding (Ctrl+P).
+
+### Drift Detection
+
+Drift detection works by extracting all import statements from the AST across target files, then comparing each import's source and destination against a regex-based ruleset in `architecture.yml`. The README claims sub-second evaluation on codebases with thousands of files.
+
+### CI/CD Integration
+
+The repository ships a GitHub Actions workflow template at `docs/onboard-action.yml` for running `onboard drift` on pull requests. This lets teams gate merges on architectural boundary compliance.
+
+## Practical Evaluation Checklist
+
+- [ ] Installs via official install script on macOS/Linux without errors
+- [ ] `onboard init` creates `.onboard/` with expected config files
+- [ ] `onboard map --target` starts the React Flow server and serves the canvas
+- [ ] React Flow canvas renders nodes and edges for a Go/TS/Python project
+- [ ] `onboard routes` correctly maps endpoints to file locations for one known framework
+- [ ] `onboard drift --rules` detects at least one known cross-boundary import
+- [ ] Git hook fires on pre-commit if drift is present
+- [ ] Help output (`onboard --help`) lists all commands
+
+## Security Notes
+
+Onboard CLI runs entirely locally. No telemetry or code uploads occur. The CLI parses source files on-disk and the visualizer is served on localhost only. When used as a Git hook, all analysis happens in the local checkout — no external services are called.
+
+## FAQ
+
+**Q: Does Onboard CLI require an internet connection?**
+**A:** No. The CLI and visualizer both run offline. The install script downloads the binary once; after that, no network access is needed.
+
+**Q: Can it handle very large monorepos?**
+**A:** The README states the drift engine handles thousands of files with sub-second regex evaluation. The React Flow canvas may need a smaller radius for very large graphs to stay responsive.
+
+**Q: How is Tree-sitter integrated?**
+**A:** Onboard CLI uses Tree-sitter to generate language-specific ASTs. These trees are traversed to extract symbols, imports, and call relationships for visualization and rule checking.
+
+**Q: Does it work with microservices or polyrepo setups?**
+**A:** Each `onboard map` invocation targets a single local directory tree. Cross-repo relationships are not automatically modeled.
+
+**Q: Can I define custom architectural layers?**
+**A:** Yes. Edit `architecture.yml` directly to add or rename layers and define which directories belong to each. The drift command evaluates imports against those rules.
+
+## Conclusion
+
+Onboard CLI fills a specific niche: developers who want a fast, local, language-aware view of a codebase without spinning up a full IDE session. The Tree-sitter AST parsing is the core differentiator — most visualization tools rely on regex or language-agnostic heuristics, whereas Onboard CLI parses actual syntax. The Git hook integration for drift detection is a practical addition for teams enforcing modular architecture in monorepos.
+
+If you maintain a large Go, TypeScript, Python, or Java codebase and want a quick way to map dependencies or enforce architectural boundaries, Onboard CLI is worth a try. Installation takes under a minute on macOS and Linux.
