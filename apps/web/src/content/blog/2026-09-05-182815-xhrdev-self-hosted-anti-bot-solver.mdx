@@ -1,0 +1,221 @@
+---
+title: "xhr.dev - Self-hosted anti-bot solver"
+description: "Run a Docker container inside your own network to solve Datadome and Akamai Bot Manager challenges. Flat fee, no per-request billing, works air-gapped."
+pubDate: "2026-09-05"
+tags: ["dev-tools", "self-hosted", "security"]
+category: "dev-tools"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/xhrdev-anti-bot-solver.webp"
+  alt: "xhr.dev product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** xhr.dev is an on-prem Docker container that solves Datadome and Akamai Bot Manager challenges without calling an external API — your traffic never leaves your network, and most vendor updates never reach you.
+
+## What Is xhr.dev?
+
+[xhr.dev](https://xhr.dev) is a self-hosted anti-bot challenge solver. You run it as a Docker container inside your own infrastructure — your proxies, traffic, and target sites never touch xhr.dev's servers. The company ships you a container image from a private GitHub org and a signed `licence.json` / `licence.sig` pair; everything else runs on your hardware.
+
+It currently solves challenges from two providers:
+
+- **Akamai Bot Manager** — sensor challenges (`_abck`, `bm-sz`) and SBSD
+- **DataDome** — captcha and interstitial challenges
+
+The key claim that differentiates it from third-party solving APIs is that it solves the challenge VM itself, not individual scripts. When Akamai or DataDome ships a new version, xhr.dev's tooling auto-discovers what changed and patches the solver — then pushes a new image to your private registry. You pull and restart; no manual reverse-engineering required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [xhr.dev](https://xhr.dev)
+- Source repository: [github.com/xhrdev](https://github.com/xhrdev) (private org — access granted on purchase)
+- License: Proprietary (no open-source licence; container is provided under a commercial licence)
+- Docs: [docs.xhr.dev](https://docs.xhr.dev)
+- HN launch: no launch HN thread verified in Algolia search
+
+## Setup Workflow
+
+### Prerequisites
+
+- A `licence.json` and `licence.sig` pair issued by xhr.dev (contact them or book a call to get both)
+- An invite accepted to xhr.dev's private GitHub org (the container image lives there)
+- Docker running on the host
+- A `GITHUB_TOKEN` with `read:packages` scope for `ghcr.io` auth
+
+### Step 1: Pull the container
+
+```bash
+mkdir -p licence
+# place licence.json and licence.sig from xhr.dev into ./licence
+
+# authenticate to GitHub Packages
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
+
+# pull the latest image
+docker pull ghcr.io/xhrdev-<your-org>/xhrdev:latest
+```
+
+### Step 2: Run the container
+
+```bash
+docker run -d \
+  --name xhrdev \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v ./licence:/run/licence:ro \
+  ghcr.io/xhrdev-<your-org>/xhrdev:latest
+```
+
+The licence mount at `/run/licence:ro` is required. If the licence is missing, expired, or tampered with, the container exits immediately with `{"event":"launcher_failed"}` and a non-zero exit code — it fails closed, not open.
+
+### Step 3: Verify the health endpoint
+
+```bash
+curl http://localhost:3000/hc
+# {"status":"ok"}
+```
+
+## Integration Patterns
+
+xhr.dev supports five integration paths. Pick based on whether you need a browser.
+
+### Via HTTP (no browser) — fastest option
+
+Your code makes the request, hands the challenge to the solver, and sends the submission itself. No browser spin-up, no CPU and RAM burned per challenge. Works with any HTTP client: Node.js `fetch`, Python `requests`, `httpx`, Go `net/http`, etc.
+
+**Solving an Akamai sensor challenge:**
+
+```bash
+curl -X POST http://localhost:3000/akamai/solve \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://target.example.com/login",
+    "profile": {
+      "id": "chrome-146-macos",
+      "chromeFullVersion": "146.0.7680.81",
+      "os": "macos",
+      "timezone": "America/New_York",
+      "timezoneOffsetMinutes": -300,
+      "tlsClientHello": "chrome_146",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+      "httpHeaderTemplates": { "form": [], "iframe": [], "image": [], "xhr": [] }
+    }
+  }'
+```
+
+The response contains a valid `_abck` cookie value to attach to your downstream request.
+
+**Solving a DataDome challenge:**
+
+```bash
+curl -X POST http://localhost:3000/datadome/solve \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://target.example.com/",
+    "userAgent": "Mozilla/5.0 ...",
+    "headers": {}
+  }'
+```
+
+### Via browser (Playwright or Lightpanda)
+
+When the target site requires a real browser — for JavaScript-rendered content, complex form interactions, or TLS fingerprint requirements — the integration routes the challenge through Playwright or the lighter [Lightpanda](https://github.com/Lightpanda/lighpanda) browser (~70MB renderer-less binary).
+
+```bash
+# Lightpanda example (from docs)
+# Your automation code routes challenge requests to xhr.dev
+# instead of handling them with a full browser instance
+```
+
+Browser-path integrations carry a real TLS fingerprint and the browser's own cookie jar.
+
+### Via Claude
+
+xhr.dev provides a prompt and a skill for having an AI agent write the integration. This is useful for rapid prototyping or when integrating with an existing Claude-powered workflow.
+
+## Deployment and Scaling
+
+### Scaling horizontally
+
+The container is stateless. Run multiple replicas behind a load balancer:
+
+```bash
+docker run -d \
+  --name xhrdev-1 \
+  --restart unless-stopped \
+  -p 3001:3000 \
+  -v ./licence:/run/licence:ro \
+  ghcr.io/xhrdev-<your-org>/xhrdev:latest
+```
+
+Point your load balancer at all replicas. The solve requests are independent; there is no shared state between instances.
+
+### Air-gapped deployment
+
+The container ships as a standard Docker image. You can import it into an air-gapped environment using `docker save` / `docker load`:
+
+```bash
+# on a machine with internet access
+docker save ghcr.io/xhrdev-<your-org>/xhrdev:latest -o xhrdev.tar
+
+# transfer xhrdev.tar and licence files to the air-gapped host
+docker load -i xhrdev.tar
+```
+
+The docs state that the system works with outbound internet turned off entirely — the solver runs entirely inside your network.
+
+### Updating when a vendor ships a new challenge version
+
+xhr.dev's tooling monitors live challenges continuously. When a vendor ships new logic:
+
+1. The tooling auto-discovers what changed against the live challenge
+2. A patched solver is generated and tested automatically
+3. A new container image is pushed to your private registry
+4. You pull the new image and restart — `docker pull && docker restart xhrdev`
+
+No manual reverse-engineering or waiting on a human to respond.
+
+## Why This Matters for Enterprise
+
+The most common friction point when evaluating third-party anti-bot solving services is the security review. Shipping your users' requests, cookies, and tokens to an external API is a conversation that stalls procurement conversations in compliance-heavy industries.
+
+xhr.dev eliminates that conversation entirely. Your stack looks exactly the same whether xhr.dev is running or not — the container just sits on `localhost:3000` and your worker calls it like any other internal service. Outbound internet access can be disabled entirely and the solving still works.
+
+In production at **supergood.ai** and **trymemorylane.com** (verified on xhr.dev's site).
+
+## Security Notes
+
+- No third-party API calls — the solving loop is entirely internal to your network
+- Works with egress disabled — suitable for air-gapped environments
+- Container fails closed on licence issues (non-zero exit, no open bypass)
+- Licence files are mounted read-only at `/run/licence`
+
+## FAQ
+
+**Q: What happens when Akamai changes their challenge?**
+**A:** xhr.dev's tooling watches live challenges continuously. When a vendor ships new logic, it auto-discovers what changed and patches the solver, then pushes a new image to your private registry. You pull and restart — no manual reverse-engineering.
+
+**Q: Can I run it air-gapped?**
+**A:** Yes. Transfer the Docker image using `docker save`/`docker load` on a USB drive or internal artifact store. The solving runs entirely without outbound internet.
+
+**Q: What does it cost?**
+**A:** Flat fee, unlimited solves at any volume. No per-request or per-gigabyte billing. Contact xhr.dev for pricing details.
+
+**Q: Does xhr.dev see my traffic?**
+**A:** No. The container runs in your infrastructure. Your requests, cookies, and target sites never reach xhr.dev's servers — only the licence handshake happens at startup.
+
+**Q: What browsers are supported in the browser-based integration paths?**
+**A:** Playwright (Chrome/Chromium) and Lightpanda (~70MB renderer-less binary). Lightpanda is significantly lighter for high-volume browser-driven solving.
+
+**Q: What is the latency compared to external solving APIs?**
+**A:** Because there is no external API call and no browser spin-up in the no-browser path, solving happens at the payload level in milliseconds rather than seconds.
+
+## Conclusion
+
+xhr.dev solves the anti-bot problem for teams that cannot route traffic through a third-party API. The Docker-based deployment model, flat-fee pricing, and auto-patching workflow make it practical for production use at scale. If your stack regularly hits Datadome or Akamai Bot Manager challenges and your security review cannot approve an external solving service, this is the alternative that does not require bending your infrastructure to fit a vendor.
+
+Visit [docs.xhr.dev](https://docs.xhr.dev) for the full integration reference, deployment guide, and API specs.
