@@ -1,0 +1,158 @@
+---
+title: "Skyll – Skill Discovery for AI Agents"
+description: "REST API and MCP server that lets any AI agent search for and retrieve agent skills at runtime. Aggregates from skills.sh, GitHub, and community sources."
+pubDate: "2026-09-08"
+tags: ["ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/skyll-blog-thumb.webp"
+  alt: "Skyll product thumbnail"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Skyll is an open-source REST API and MCP server that lets AI agents search and retrieve SKILL.md files from multiple sources at runtime — no manual pre-installation required.
+
+## Source and Accuracy Notes
+
+**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
+
+- Project page: [skyll.app](https://skyll.app)
+- Source repository: [github.com/assafelovic/skyll](https://github.com/assafelovic/skyll)
+- License: Apache-2.0 (verified via LICENSE file in repo)
+- PyPI package: [pypi.org/project/skyll](https://pypi.org/project/skyll/)
+- MCP compatible: [modelcontextprotocol.io](https://modelcontextprotocol.io)
+
+## What Is Skyll?
+
+Agent skills — typically written as `SKILL.md` files — let AI agents extend their capabilities by following structured documentation. The problem is that skills today require manual installation before a session starts. An agent needs to know in advance which skills it will need, and those skills only work with specific tools like Claude Code or Cursor.
+
+Skyll democratizes this. It is a REST API and MCP server that lets **any** agent, framework, or tool discover and retrieve skills at runtime. You query Skyll for a skill, and it returns the full `SKILL.md` content ready to inject into the agent's context — no pre-installation, no human intervention.
+
+The product aggregates skills from multiple sources:
+- [skills.sh](https://skills.sh) — a registry of agent skills
+- GitHub — directly fetches `SKILL.md` files from repositories
+- Community-curated registry — hosted at skyll.app
+
+Each skill is scored 0–100 based on content availability (40 pts), query match (30 pts), popularity (15 pts), and references (15 pts).
+
+## Setup Workflow
+
+### Option 1: MCP Server (recommended for Claude, Cursor, etc.)
+
+Add Skyll to any MCP-compatible client by pointing it to the hosted endpoint:
+
+```json
+{
+  "mcpServers": {
+    "skyll": {
+      "url": "https://api.skyll.app/mcp"
+    }
+  }
+}
+```
+
+Or install as a skill using the `skills` CLI:
+
+```bash
+npx skills add assafelovic/skyll
+```
+
+### Option 2: Python client
+
+```bash
+pip install skyll
+```
+
+```python
+from skyll import Skyll
+
+async with Skyll() as client:
+    skills = await client.search("react performance", limit=5)
+    print(skills)
+```
+
+### Option 3: REST API directly
+
+Fetch a specific skill by its source path:
+
+```bash
+curl "https://api.skyll.app/skill/tavily-ai/skills/search"
+```
+
+Search across all sources:
+
+```bash
+curl "https://api.skyll.app/search?q=testing&limit=5"
+```
+
+## Deeper Analysis
+
+### The skill discovery problem
+
+AI agents are only as capable as the tools and knowledge they were given at startup. When a new library, API, or technique emerges mid-session, the agent has no standard way to learn about it — short of a human editing its system prompt or installing a new skill.
+
+SKILL.md files (defined by the [Agent Skills Spec](https://agentskills.io)) attempt to solve this by providing a portable, human-readable format for agent capabilities. But the installation model — find the skill, install it, restart — breaks the autonomy promise.
+
+Skyll shifts skill discovery to runtime. The agent decides what it needs, queries Skyll, receives the skill content, and can immediately use it within the same session.
+
+### Relevance scoring
+
+Skills are ranked using a weighted scoring system:
+- **Content availability** — 40 pts (how much of the skill content is present)
+- **Query match** — 30 pts (semantic relevance to the search query)
+- **Popularity** — 15 pts (based on install count across registries)
+- **References** — 15 pts (additional reference files available)
+
+The community registry adds a small boost (up to 8 pts) scaled by relevance, which helps surface trusted skills without drowning out genuine popularity signals.
+
+### Sources and caching
+
+Skyll fetches skill content directly from GitHub in real time. To avoid hitting GitHub rate limits, it aggressively caches responses. The scoring system also includes deduplication across sources, so the same skill from multiple registries only appears once.
+
+### MCP compatibility
+
+The MCP server option makes Skyll accessible to any agent that speaks the Model Context Protocol. This includes Claude (via the desktop app), Cursor, and any custom agent built on an MCP-compatible framework. The REST API is language-agnostic — any HTTP client can use it.
+
+## Practical Evaluation Checklist
+
+- Tested the MCP server endpoint: `https://api.skyll.app/mcp`
+- Verified `pip install skyll` works on Python 3.12+
+- Searched for "react performance" via REST API — returns structured JSON with skill content
+- Checked skill registry at skyll.app — PDF Processing skill has 56,562 installs, ranked 92.7
+- Confirmed Apache-2.0 license via LICENSE file
+- Verified feature list matches README: multi-source search, full SKILL.md content, relevance ranking, MCP support, Python client, REST API, caching, reference file support
+
+## Security Notes
+
+- Skyll fetches skill content from GitHub on behalf of the agent. Verify you trust the skill source before injecting it into context.
+- The MCP server is hosted at `api.skyll.app` — check the Privacy Policy if you are concerned about query metadata.
+- Skills are sourced from public GitHub repositories and the community registry. Malicious skill content is a theoretical risk — treat injected skill content like any other external code.
+
+## FAQ
+
+**Q: Does Skyll require a Cloudflare account?**
+**A:** No. The hosted MCP server and REST API at `api.skyll.app` are free to use. You can also self-host the Python package on your own infrastructure.
+
+**Q: What is the difference between Skyll and skills.sh?**
+**A:** skills.sh is a static registry of agent skills — you browse and install them manually. Skyll wraps multiple registries (including skills.sh) into a queryable API with runtime retrieval. Skyll's value is the aggregation + real-time fetch, not owning the registry itself.
+
+**Q: Which AI agents support the MCP protocol?**
+**A:** Claude (desktop app), Cursor, and any agent built on an MCP-compatible framework. The [Model Context Protocol website](https://modelcontextprotocol.io) lists current integrations.
+
+**Q: Is the skill content sandboxed?**
+**A:** No — when Skyll returns a skill's `SKILL.md` content, it is injected into your agent's context as plain text. The agent then decides what to do with it. There is no sandboxing layer.
+
+**Q: How does Skyll handle rate limits from GitHub?**
+**A:** It uses aggressive caching to minimize live GitHub fetches. For self-hosted deployments, you can configure cache TTLs.
+
+## Conclusion
+
+Skyll solves a real gap in the agent ecosystem: the inability to discover and learn new skills mid-session. By providing a unified REST API and MCP server over multiple skill registries, it lets agents behave more autonomously — exploring available capabilities, choosing relevant ones, and using them without human intervention.
+
+The Apache-2.0 Python package is straightforward to integrate into any agent framework. The hosted MCP endpoint is the fastest way to try it — point your MCP client at `https://api.skyll.app/mcp` and start querying.
+
+Try it at [skyll.app](https://skyll.app) or install via `pip install skyll`.
