@@ -48,7 +48,6 @@ Always read from `~/.env` or environment variables. This includes:
   - Source repository URL
   - License (verified, not assumed)
   - HN launch thread or official announcement (if applicable)
-  - Date the source was last checked
 - ✅ **ALWAYS** prefer the project's own description over your paraphrase. Quote it in a blockquote with attribution.
 
 ### 4. When the information is missing or unclear
@@ -77,7 +76,6 @@ Always read from `~/.env` or environment variables. This includes:
 - Source repository: [github.com/fastrepl/anarlog](https://github.com/fastrepl/anarlog)
 - License: MIT (verified via GitHub API `license.spdx_id`)
 - HN launch thread: [news.ycombinator.com/item?id=44725306](https://news.ycombinator.com/item?id=44725306)
-- Source last checked: 2026-06-15 (commit `a1b2c3d`)
 ```
 
 ---
@@ -451,3 +449,64 @@ git add apps/web/src/content/blog/setup-n8n.mdx
 git commit -m "feat: add setup-n8n - How to Set Up N8N on a VPS"
 git push
 ```
+
+---
+
+## Auto-publish cron (Mavis blog-poster)
+
+**Replaces the old Hermes cron job `df16e9ef0195` (Blog Poster 60min), disabled 2026-08-13.**
+
+### Mavis cron job
+- **Schedule:** `0 * * * *` (every hour on the hour)
+- **Runtime:** Mavis scheduler (built-in cron of MiniMax Code, no Hermes dependency)
+- **Model:** `MiniMax-M2.7` lean — ~360K tokens/tick vs 3.1M for M3 verbose
+- **Workdir:** `~/personal/runany`
+- **Session mode:** new (each tick = fresh session, no cross-tick state)
+- **Skill:** `blog-publisher` (Mavis-native, at `~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md`)
+- **Delivery:** Mavis session output → bound Telegram channel (auto-routed, no separate bot needed)
+
+### Discovery → publish flow (lean, ~12-15 tool calls)
+1. `python3 scripts/hn_search.py --shortlist --top 4` — 1 call
+2. `python3 scripts/dedup-check.py --batch` against `.data/written-repos.txt` + blog slugs — 1 call
+3. Check `.data/blocklist.txt` for substring matches (case-insensitive) — inline
+4. Liveness probe: `curl -sI` each `NEW` candidate — 1 batched call
+5. `python3 scripts/og_probe.py $DOMAIN` — 1 call per candidate
+6. Optional GSC cannibalization check via `mcp__gsc__get_search_analytics` — may fail silently if token expired
+7. Write MDX with `write` tool — 1 call
+8. `python3 scripts/mdx_lint.py <file>` — 1 call (fix + re-run if any findings)
+9. `cwebp` + `node scripts/r2-upload.mjs <slug>` (or `image_synthesize` if no OG) — 1-2 calls
+10. `git add` (specific files only) + commit + push — 1 call group
+11. Final response: `Published: <title>` + `URL: https://runany.dev/blog/<slug>/`
+
+### Blocklist
+
+**`~/personal/runany/.data/blocklist.txt`** — one keyword per line, substring match against tool name + domain. Currently:
+- `quiche` — Quiche Browser, author takedown 2026-06-14. File deleted + pushed (commit 866ade4), but GSC URL removal still requires manual action: search.google.com/search-console/removals?resource_id=sc-domain:runany.dev.
+
+Add new entries to the file (not memory) — `dedup-check.py` and the cron agent read it directly.
+
+### GSC token expiry (known issue)
+
+OAuth token at `~/.minimax/agents/mavis/mcp-gsc/token.json` expired 2026-06-09. If `mcp__gsc__*` calls return 401, the cron agent logs `GSC_AUTH_FAILED` and skips cannibalization (proceeds with `SAFE_TO_WRITE` marked in `.data/cannibalization-decisions.jsonl`). Re-auth by re-running the project's GSC auth script (likely `cd apps/web && npm run gsc:auth` — confirm in project docs).
+
+### Lean-mode pitfalls (real failures, keep checklist in mind)
+
+- **MDX `{var}`** — Literal `{` outside code fences parses as JSX. Use `[var]`, `` `{var}` ``, or `&#123;var&#125;`. Real failure 2026-06-22 ClickNest post L104:40.
+- **MDX `<N` or `<[0-9]`** — JSX tag parse. Spell out: `under 250ms`. Real failure 2026-08-06 Mathesar post.
+- **MDX bare `<` operator** — `(=, !=, >, <, LIKE, IN)` trips MDX 3. Wrap in backticks: `` `(=`, `!=`, `>`, `<` ``. Real failure Mathesar L104:40.
+- **MDX `<br>`** — Use blank lines between paragraphs.
+- **Lowercase tags** — `"AI"` fails the `uppercase-tag` lint check.
+- **No `replace_all=true` on `description`** — clobbers TL;DR if both share wording.
+- **`pubDate` is a STRING** in Astro content collections. Don't call `.toISOString()` on it without normalizing first — just use the literal ISO string in frontmatter.
+
+### Per-tick thumbnail scripts
+
+**NEVER commit `scripts/blogcron_thumb_<tool>.mjs`** — use `/tmp/blogcron_thumb_*.mjs` and delete after upload. Per-tool scripts pollute `git status` and risk being picked up by future `git add .`.
+
+### Manual takedown
+
+When user says "takedown" / "remove post" / forwards an author complaint:
+1. `rm apps/web/src/content/blog/{slug}.mdx`
+2. `git add` the specific file, `git commit -m "fix: remove {slug} - {reason}"`, `git push`
+3. **GSC URL removal is MANUAL** — open https://search.google.com/search-console/removals?resource_id=sc-domain:runany.dev → Temporary Removals → New Request → submit exact URL. Mavis has no `submit_removal` tool (Google requires interactive browser login).
+4. If takedown is fact-based (hallucination, factual error) → add the tool/keyword to `.data/blocklist.txt`.
