@@ -7,49 +7,30 @@ category: "self-hosted"
 author: "Friday"
 featured: false
 image:
-  url: ""
-  alt: ""
+  url: "https://cdn.runany.dev/blog/thumbnails/open-edison-mcp-gateway.webp"
+  alt: "OpenEdison MCP gateway security thumbnail"
 draft: false
 ---
 
-## TL;DR
+> **TL;DR:** OpenEdison is an open-source MCP proxy that sits between your AI agents and their tools, enforcing tool/resource/prompt permissions and alerting when agents access private data, untrusted content, or attempt external writes.
 
-> **TL;DR:** OpenEdison is an open-source MCP proxy that sits between AI agents and your tools, enforcing tool/resource/prompt permissions and alerting when agents access private data, untrusted content, or attempt external writes.
-
-## Source and Accuracy Notes
-
-**⚠️ This section is MANDATORY. All links must be verified from actual source, not guessed.**
-
-- Project page: [edison.watch](https://edison.watch) ← **MUST visit and verify**
-- Source repository: [github.com/Edison-Watch/open-edison](https://github.com/Edison-Watch/open-edison) ← **MUST read README**
-- License: [GPL-3.0](https://github.com/Edison-Watch/open-edison/blob/main/LICENSE) ← **verified from LICENSE file**
-- HN launch thread: [news.ycombinator.com/item?id=44169961](https://news.ycombinator.com/item?id=44169961) ← MCP Gateway to block the lethal trifecta
-
-## What Is OpenEdison?
+## What it is
 
 OpenEdison is a deterministic agentic data firewall. It runs as an MCP proxy between your AI agents and their connected tools — intercepting every tool call, resource access, and prompt to enforce a configurable security policy.
 
-The core insight comes from Simon Willison's "[The Lethal Trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)" problem: when an AI agent simultaneously has access to (1) private local data, (2) untrusted external content, and (3) the ability to write externally — the risk of data exfiltration or agent hijacking spikes dramatically. OpenEdison tracks and blocks this combination.
+The motivation comes from Simon Willison's [The Lethal Trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) problem: when an AI agent simultaneously has access to (1) private local data, (2) untrusted external content, and (3) the ability to write externally, the risk of data exfiltration or agent hijacking spikes dramatically. OpenEdison is purpose-built to detect and block that combination.
 
-It is built in Python (3.12+) and deploys via `uvx` or Docker. The commercial sibling, EdisonWatch, adds multi-tenancy, SSO, and SIEM integration.
+It's written in Python (3.12+) and deploys via `uvx` or Docker. The commercial sibling, EdisonWatch, adds multi-tenancy, SSO, and SIEM integration for teams that need a managed version.
 
-## Setup Workflow
+## Getting it running
 
-### Prerequisites
-
-- Python 3.12 or later
-- `uv` package manager (Astral's fast Python tool installer)
-- Optionally: Docker for containerized deployment
-
-### Step 1: Install
-
-The fastest install path uses the official installer script:
+The fastest path uses the official installer script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Edison-Watch/open-edison/main/curl_pipe_bash.sh | bash
 ```
 
-This installs `uv` and launches OpenEdison via `uvx`. If you need `npx`-based MCP tools, also install Node.js:
+That installs `uv` and launches OpenEdison via `uvx`. If you have MCP tools that need Node.js, install it separately:
 
 ```bash
 # macOS
@@ -62,17 +43,23 @@ sudo apt-get update && sudo apt-get install -y nodejs npm
 winget install -e --id OpenJS.NodeJS
 ```
 
-Or install from PyPI directly:
+Or run directly through PyPI without the installer:
 
 ```bash
 uvx open-edison
 ```
 
-### Step 2: Configure Permissions
+A Docker image is also published for containerized deployment:
 
-OpenEdison enforces three permission files:
+```bash
+docker run -p 8080:8080 -v ./config:/app/config ghcr.io/edison-watch/open-edison
+```
 
-**`tool_permissions.json`** — classify MCP tools by access level:
+## Configuring permissions
+
+OpenEdison enforces three permission files that classify what an agent is allowed to do:
+
+**`tool_permissions.json`** decides which MCP tools are usable. A typical entry marks read/write operations, whether the tool touches private data, and an ACL level:
 
 ```json
 {
@@ -84,29 +71,13 @@ OpenEdison enforces three permission files:
 }
 ```
 
-**`resource_permissions.json`** — control resource access patterns (e.g., `file:*`, `https://*`).
+**`resource_permissions.json`** controls resource access patterns (e.g., `file:*`, `https://*`). **prompt_permissions.json** classifies prompt types by risk level. All three support wildcards: `server_name/*` for tools, `scheme:*` for resources, `type:*` for prompts.
 
-**`prompt_permissions.json`** — classify prompt types by risk level.
+Unknown tools, resources, or prompts are denied by default. That's a deliberate secure-by-default stance — you opt in to new capabilities rather than discovering later that an agent picked them up.
 
-All three support wildcard patterns: `server_name/*` for tools, `scheme:*` for resources, `type:*` for prompts.
+## Wiring it into Python agents
 
-Unknown tools/resources/prompts are **denied by default** — a secure-by-default posture.
-
-### Step 3: Run
-
-```bash
-uvx open-edison
-```
-
-Docker deployment:
-
-```bash
-docker run -p 8080:8080 -v ./config:/app/config ghcr.io/edison-watch/open-edison
-```
-
-### Step 4: Integrate with Python Agents
-
-Add the `@edison.track()` decorator to your tools or agent functions for immediate observability and policy enforcement:
+For LangGraph and LangChain codebases, the `@edison.track()` decorator adds immediate observability and policy enforcement to any tool or agent function:
 
 ```python
 import open_edison as edison
@@ -117,66 +88,35 @@ def read_customer_database(query):
     return db.execute(query)
 ```
 
-OpenEdison integrates with LangGraph and LangChain out of the box.
+That one-line change is the most useful integration path if you already have a Python agent stack — no need to rewrite tool registration.
 
-## Deeper Analysis
+## How the lethal trifecta actually gets detected
 
-### The Lethal Trifecta Problem
-
-OpenEdison tracks three concurrent risk flags per agent session:
+Every agent session carries three concurrent risk flags tracked independently:
 
 1. **Private data access** — reading local files, databases, or private configs
-2. **Untrusted content exposure** — processing external/web content that could be adversarial
+2. **Untrusted content exposure** — processing external or web content that could be adversarial
 3. **External communication** — ability to write or send data outside the system
 
-When all three are active simultaneously, OpenEdison blocks further potentially dangerous operations and surfaces an alert via the `get_security_status` tool.
+The interesting part is what happens when all three are active simultaneously. Each individual tool call might be authorized in isolation, but the combination triggers a higher-risk state. OpenEdison blocks further potentially dangerous operations and surfaces an alert via the `get_security_status` tool. That combination logic is what distinguishes it from a normal permission system — most ACL models evaluate calls in isolation, not as a session-level risk posture.
 
-### Security Model
+Each tool call is also evaluated against five criteria: enabled/disabled status, write operation flag, private data read flag, untrusted public data read flag, and an ACL level (`PUBLIC`, `PRIVATE`, or `SECRET`). If a write operation targets a lower ACL level than the session's current maximum, it can be blocked per your configuration.
 
-Each tool call is evaluated against:
-- Whether it is enabled/disabled
-- Whether it is a write operation
-- Whether it reads private data
-- Whether it reads untrusted public data
-- Its ACL level: `PUBLIC`, `PRIVATE`, or `SECRET`
+## How it compares to other MCP gateways
 
-If a write operation targets a lower ACL level than the session's current maximum, it can be blocked per configuration.
+The project maintainers publish a [comparison blog](https://edisonwatch.substack.com/p/mcp-gateway-comparison-for-security) positioning OpenEdison against Wombat, MCPJungle, and other MCP security tools. The core differentiation is the lethal-trifecta tracking layer — most MCP gateways treat each tool call as an isolated decision, which misses the combination risk.
 
-### Comparison with Other MCP Gateways
+## When it makes sense
 
-The project maintainers publish a [comparison blog](https://edisonwatch.substack.com/p/mcp-gateway-comparison-for-security) positioning OpenEdison against alternatives like Wombat, MCPJungle, and other MCP security tools.
+OpenEdison is single-user in the open-source version. If you need multi-tenancy, SSO, or SIEM integration, that's the EdisonWatch commercial tier.
 
-## Practical Evaluation Checklist
+For self-hosted deployments, the Docker image lets you run the proxy behind a corporate firewall with no external calls. The GPL-3.0 source is auditable — useful if you're in a regulated environment that needs to verify the security implementation yourself.
 
-- Does it run behind a corporate firewall without external calls? (Docker image available)
-- Is the permission model flexible enough for real-world tool sets? (wildcard support, three permission layers)
-- Does it integrate with LangGraph/LangChain without invasive code changes? (`@edison.track()` decorator)
-- Are unknown tools denied by default? (Yes — secure baseline)
-- Is the commercial tier needed for team use? (Yes — OpenEdison is single-user, EdisonWatch adds multi-tenancy)
+If your agents touch production data, OpenEdison is worth evaluating as a security boundary at the tool-call layer. It's not a full SIEM or zero-trust network tool — it sits at the MCP layer specifically, which is where the lethal-trifecta risk actually manifests.
 
-## Security Notes
+## Source and Accuracy Notes
 
-- **Default-deny on unknown tools** — any MCP tool not in `tool_permissions.json` is rejected
-- **ACL per tool** — granular `PUBLIC`/`PRIVATE`/`SECRET` classification
-- **Lethal trifecta detection** — cross-checks all three risk vectors simultaneously
-- **Session-level tracking** — `get_security_status` exposes current risk posture at any point
-- **Docker isolation** — run in a container to limit host filesystem access
-- **GPL-3.0 source** — auditable security implementation
-
-## FAQ
-
-**Q: What is the difference between OpenEdison and EdisonWatch?**
-**A:** OpenEdison is the open-source single-user MCP security proxy. EdisonWatch adds multi-tenancy, SSO, SIEM integration, and client-side auto-enforcement for team deployments.
-
-**Q: Does OpenEdison work with non-Python agents?**
-**A:** The core proxy runs as an MCP server that any MCP-compatible agent (Claude Desktop, Cursor, etc.) can connect to. The Python `@edison.track()` decorator is optional for deeper LangGraph/LangChain integration.
-
-**Q: Can it block all external network calls?**
-**A:** It classifies `https://` resources in `resource_permissions.json` and can deny access based on configuration. External write operations (e.g., sending data to a third-party API) are controlled via the write-operation flag on tools.
-
-**Q: How is the lethal trifecta different from normal tool permissions?**
-**A:** Normal tool permissions evaluate each call in isolation. The lethal trifecta tracks the *combination* of three concurrent risk conditions across a session — even if each individual tool call is authorized, the combination triggers a higher-risk state.
-
-## Conclusion
-
-OpenEdison addresses a real gap in the MCP ecosystem: with hundreds of tools now accessible to AI agents, there is no standard way to enforce least-privilege access or detect when an agent's combined capabilities create a data exfiltration risk. It is not a full SIEM or zero-trust network tool — it is purpose-built for the MCP layer, and the `@edison.track()` integration means even existing LangGraph agents can adopt it with a single decorator. If you are deploying AI agents that touch production data, OpenEdison is worth evaluating as a security boundary at the tool-call level.
+- Project page: [edison.watch](https://edison.watch)
+- Source repository: [github.com/Edison-Watch/open-edison](https://github.com/Edison-Watch/open-edison)
+- License: [GPL-3.0](https://github.com/Edison-Watch/open-edison/blob/main/LICENSE) — verified from LICENSE file
+- HN launch thread: [news.ycombinator.com/item?id=44169961](https://news.ycombinator.com/item?id=44169961) — MCP Gateway to block the lethal trifecta
