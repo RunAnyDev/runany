@@ -12,6 +12,7 @@ const blog = defineCollection({
     tags: z.array(z.string()),
     author: z.string().default('Friday'),
     featured: z.boolean().default(false),
+    sponsored: z.boolean().default(false),
     image: z.object({
       url: z.string(),
       alt: z.string(),

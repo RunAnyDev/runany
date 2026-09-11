@@ -295,6 +295,18 @@ The `wrangler r2 object put --remote` command silently fails — returns "Upload
 - **TL;DR**: Add block quote `>` for summary (AI summary box will extract)
 - **FAQ**: Add Q&A format at the end if there are common questions
 
+### 7. Sync priority-posts list (when promoting a post)
+
+The "Popular starting points" section appears on **both** the homepage hero (`pages/index.astro`) **and** the 404 fallback (`pages/404.astro`). Both pages read from a single source of truth — `apps/web/src/utils/priority-posts.ts` — so a new slug only needs to be appended once.
+
+When promoting a post (sponsor placement, GSC top performer, hand-pick):
+
+1. Add the post slug to the `prioritySlugs` array in `apps/web/src/utils/priority-posts.ts`. Order rule: sponsor first, then descending GSC 28-day impressions.
+2. If sponsored, also set `sponsored: true` in the post frontmatter so the amber highlight + "Sponsored" badge renders on both surfaces.
+3. **Never** edit the 404 or homepage inline lists directly — they should stay empty and pull from the shared module. Hardcoded duplicates drift and silently desync.
+
+If a slug in `prioritySlugs` no longer matches a published post, `resolvePriorityPosts()` logs a `console.warn` at build time — fix by removing the stale entry, do not silence the warning.
+
 ---
 
 ## Commit Workflow
