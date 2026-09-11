@@ -151,15 +151,28 @@ const structuredData = [
 
     {priorityPosts.length > 0 && (
       <div class="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
-        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-cyan-300">Popular starting points</p>
-        <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {priorityPosts.map((post) => (
-            <a href={`/blog/${getSlug(post.id)}/`} class="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-slate-300 transition hover:border-cyan-300/40 hover:text-white">
-              <span class="block font-semibold text-white">{post.data.title}</span>
-              <span class="mt-1 block text-slate-400">{post.data.description}</span>
-            </a>
-          ))}
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm font-semibold uppercase tracking-[0.22em] text-cyan-300">Popular starting points</p>
+          <div class="flex gap-2" data-priority-nav>
+            <button type="button" data-priority-prev aria-label="Previous" class="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40">
+              <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true"><path fill="currentColor" d="M12.7 4.3a1 1 0 0 1 0 1.4L8.4 10l4.3 4.3a1 1 0 1 1-1.4 1.4l-5-5a1 1 0 0 1 0-1.4l5-5a1 1 0 0 1 1.4 0Z"/></svg>
+            </button>
+            <button type="button" data-priority-next aria-label="Next" class="grid h-8 w-8 place-items-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40">
+              <svg viewBox="0 0 20 20" class="h-4 w-4" aria-hidden="true"><path fill="currentColor" d="M7.3 4.3a1 1 0 0 0 0 1.4L11.6 10l-4.3 4.3a1 1 0 1 0 1.4 1.4l5-5a1 1 0 0 0 0-1.4l-5-5a1 1 0 0 0-1.4 0Z"/></svg>
+            </button>
+          </div>
         </div>
+        <div class="mt-4 overflow-hidden" data-priority-viewport>
+          <div class="flex gap-3 overflow-x-auto scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" data-priority-track>
+            {priorityPosts.map((post) => (
+              <a href={`/blog/${getSlug(post.id)}/`} class="snap-start shrink-0 basis-full sm:basis-[calc((100%-0.75rem)/2)] xl:basis-[calc((100%-2.25rem)/4)] rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-slate-300 transition hover:border-cyan-300/40 hover:text-white">
+                <span class="block font-semibold text-white">{post.data.title}</span>
+                <span class="mt-1 block text-slate-400">{post.data.description}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+        <div class="mt-3 flex justify-center gap-1.5" data-priority-dots></div>
       </div>
     )}
   </section>
@@ -492,6 +505,97 @@ const structuredData = [
         }
 
         updateStatus();
+      })();
+    </script>
+  )}
+
+  {priorityPosts.length > 0 && (
+    <script>
+      (function () {
+        const track = document.querySelector('[data-priority-track]');
+        const viewport = document.querySelector('[data-priority-viewport]');
+        const prevBtn = document.querySelector('[data-priority-prev]');
+        const nextBtn = document.querySelector('[data-priority-next]');
+        const dotsEl = document.querySelector('[data-priority-dots]');
+        if (!track || !viewport || !prevBtn || !nextBtn || !dotsEl) return;
+
+        const totalCards = track.children.length;
+
+        function cardsPerView() {
+          const w = window.innerWidth;
+          if (w >= 1280) return 4;
+          if (w >= 640) return 2;
+          return 1;
+        }
+
+        function totalPages() {
+          return Math.max(1, Math.ceil(totalCards / cardsPerView()));
+        }
+
+        function buildDots() {
+          const pages = totalPages();
+          dotsEl.innerHTML = '';
+          for (let i = 0; i < pages; i++) {
+            const dot = document.createElement('button');
+            dot.type = 'button';
+            dot.className = 'h-1.5 rounded-full transition bg-white/15 hover:bg-white/30';
+            dot.style.width = '1.5rem';
+            dot.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+            dot.addEventListener('click', function () {
+              track.scrollTo({ left: i * viewport.clientWidth, behavior: 'smooth' });
+            });
+            dotsEl.appendChild(dot);
+          }
+          updateActiveDot();
+        }
+
+        function activePage() {
+          if (!viewport.clientWidth) return 0;
+          return Math.round(track.scrollLeft / viewport.clientWidth);
+        }
+
+        function updateActiveDot() {
+          const page = activePage();
+          const dots = dotsEl.children;
+          for (let i = 0; i < dots.length; i++) {
+            if (i === page) {
+              dots[i].classList.remove('bg-white/15', 'hover:bg-white/30');
+              dots[i].classList.add('bg-cyan-300');
+            } else {
+              dots[i].classList.add('bg-white/15', 'hover:bg-white/30');
+              dots[i].classList.remove('bg-cyan-300');
+            }
+          }
+          prevBtn.disabled = page === 0;
+          nextBtn.disabled = page >= totalPages() - 1;
+        }
+
+        prevBtn.addEventListener('click', function () {
+          track.scrollBy({ left: -viewport.clientWidth, behavior: 'smooth' });
+        });
+        nextBtn.addEventListener('click', function () {
+          track.scrollBy({ left: viewport.clientWidth, behavior: 'smooth' });
+        });
+
+        let scrollTimer = null;
+        track.addEventListener('scroll', function () {
+          if (scrollTimer) return;
+          scrollTimer = window.setTimeout(function () {
+            updateActiveDot();
+            scrollTimer = null;
+          }, 80);
+        });
+
+        let resizeTimer = null;
+        window.addEventListener('resize', function () {
+          if (resizeTimer) window.clearTimeout(resizeTimer);
+          resizeTimer = window.setTimeout(function () {
+            buildDots();
+          }, 150);
+        });
+
+        buildDots();
+        updateActiveDot();
       })();
     </script>
   )}
