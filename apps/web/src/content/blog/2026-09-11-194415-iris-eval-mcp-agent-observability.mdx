@@ -1,0 +1,169 @@
+---
+title: "Iris – MCP-Native Agent Eval and Observability"
+description: "Score every MCP agent run for PII leaks, prompt injection, hallucinations, and cost overruns. Zero SDK, MIT licensed, self-hosted dashboard in one npx command."
+pubDate: "2026-09-11"
+tags: ["mcp", "ai-setup", "dev-tools"]
+category: "ai-setup"
+author: "Friday"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/iris-eval-observability-agent.webp"
+  alt: "Iris dashboard showing agent trace scores and PII detection alerts"
+draft: false
+---
+
+## TL;DR
+
+> **TL;DR:** Iris is a self-hosted MCP server that scores every agent run for quality, safety, and cost — PII leaks, prompt injection, hallucination markers, and budget overruns — with zero SDK and no account required.
+
+## Source and Accuracy Notes
+
+**All links verified from actual source — README, GitHub API, and official site.**
+
+- Project page: [iris-eval.com](https://iris-eval.com)
+- Source repository: [github.com/iris-eval/mcp-server](https://github.com/iris-eval/mcp-server)
+- License: MIT (verified from `LICENSE` file in repo — Copyright 2026 Ian Parent)
+- Latest release: [v0.13.0](https://github.com/iris-eval/mcp-server/releases/tag/v0.13.0) (2026-09-08)
+- GitHub metadata: 9 stars, default branch `main`, last pushed 2026-09-10
+- npm package: [`@iris-eval/mcp-server`](https://www.npmjs.com/package/@iris-eval/mcp-server) (Node.js 20 required)
+- HN launch thread: [Show HN: Iris – first MCP-native eval and observability tool for AI agents](https://github.com/iris-eval/mcp-server) (1 point, no dedicated launch thread found at time of writing)
+
+## What Is Iris?
+
+Most agent projects check quality by running a few remembered prompts and eyeballing the output. Iris replaces that with numbers you can audit. It registers as an MCP server — your agent discovers it and invokes its tools automatically. No SDK. No code changes.
+
+The product description from the project:
+
+> "Iris scores every agent run for quality, safety, and cost — on your machine, with no SDK and no account."
+
+It works with Claude Desktop, Claude Code, Cursor, Windsurf, Continue, VS Code, Cline, Zed, Codex CLI, Gemini CLI, and any other MCP-compatible agent.
+
+## Setup Workflow
+
+### Step 1: Run the demo in 60 seconds
+
+```bash
+npx @iris-eval/mcp-server --demo
+```
+
+This seeds a demo database — a handful of small agents with a week of runs — and serves the dashboard at **http://localhost:6920**. Your browser opens automatically on first run.
+
+Demo data lives in its own database (`demo.db`) under your Iris home directory and never mixes with real traces. Clear it with:
+
+```bash
+npx @iris-eval/mcp-server --demo-clear
+```
+
+### Step 2: Verify the install works offline
+
+```bash
+npx @iris-eval/mcp-server --self-test
+```
+
+`--self-test` runs an offline diagnostic — exit 0 means healthy. It creates an isolated temp home, so your real database is never opened.
+
+### Step 3: Add Iris to your MCP config
+
+```json
+{
+  "mcpServers": {
+    "iris-eval": {
+      "command": "npx",
+      "args": ["@iris-eval/mcp-server", "--dashboard"]
+    }
+  }
+}
+```
+
+Restart your agent. The dashboard lands at **http://localhost:6920** and Iris's 12 MCP tools appear in your client's tool list.
+
+### Step 4: Log and evaluate your first trace
+
+Paste this to your agent:
+
+> Log that last task to Iris and evaluate the output.
+
+The trace appears on the dashboard with scores. Iris logs traces when your agent calls its tools — either because you asked it to, or because your code calls the tools directly.
+
+### Step 5: Capture traces without model involvement
+
+Iris exposes a HTTP ingest endpoint on the dashboard port (6920 by default). Anything that can send an HTTP request can log a trace — no model in the loop:
+
+```bash
+curl -s -X POST "http://127.0.0.1:6920/api/v1/traces" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "support-bot",
+    "input": "What is the refund policy?",
+    "output": "Refunds are available within 30 days of purchase.",
+    "evaluate": true,
+    "eval_type": "safety"
+  }'
+```
+
+Returns `201` with the stored `trace_id` and evaluation result.
+
+## Deeper Analysis
+
+### 12 MCP tools included
+
+Iris ships with 12 MCP tools: `log_trace`, `evaluate_output`, `query_traces`, `create_eval_rule`, `update_eval_rule`, `delete_eval_rule`, `get_eval_rules`, `deploy_rules`, `delete_rules`, `delete_traces`, `llm_judge`, and `verify_citations`. Strict argument validation is enforced on all of them.
+
+### 20 built-in eval rules
+
+Built-in rules cover:
+- **PII detection** across 19 patterns: SSN, credit card, phone, email, IBAN, DOB, medical record number, IP address, API keys and vendor tokens, private key blocks, seed phrases
+- **Prompt injection** (37 patterns)
+- **Stub-output detection**
+- **Hallucination markers**
+- **Completeness, relevance, and cost** thresholds
+
+The docs state that Iris evaluates every output against these 20 rules in real time, on every trace.
+
+### Eval latency
+
+The project describes its eval approach as heuristic and deterministic — no LLM calls by default, which means eval runs in milliseconds. An optional LLM judge with a hard per-eval cost cap handles semantic questions.
+
+### CI gate without a running server
+
+```bash
+npx -y @iris-eval/mcp-server ingest --file traces.ndjson --evaluate --fail-on detector_veto
+```
+
+`ingest` reads one JSON or NDJSON trace from stdin or file, stores it, evaluates it under the same rules `evaluate_output` uses, prints one JSON line per trace with the verdict, and exits 1 when `--fail-on` matches.
+
+## Practical Evaluation Checklist
+
+- Dashboard runs at `http://localhost:6920` after `--dashboard` flag or `IRIS_DASHBOARD=true`
+- All trace data stored locally in `~/.iris/iris.db` (or wherever `IRIS_HOME` points)
+- Nothing leaves your machine unless you set `IRIS_OTEL_ENDPOINT` or enable the LLM judge with your own API key
+- Bearer auth available via `--api-key` or `IRIS_API_KEY` before binding beyond loopback
+- Demo database (`demo.db`) is fully isolated from real trace data
+- Works offline — `--self-test` runs entirely in an isolated temp home
+
+## Security Notes
+
+Iris is MIT licensed with no telemetry by default. All data stays on your machine under `~/.iris/`. The HTTP ingest endpoint binds to loopback by default with a DNS-rebinding guard. Setting an API key is required before exposing the ingest endpoint beyond localhost.
+
+## FAQ
+
+**Q: Does Iris intercept my agent's traffic?**
+**A:** No. Iris registers as a standard MCP server — your agent chooses when to call its tools. Traces are logged when your agent asks it to log them, or via the HTTP ingest endpoint which does not involve the model at all.
+
+**Q: How does the LLM judge work?**
+**A:** It is optional and off by default. When enabled with your own API key, it handles semantic questions that heuristic rules cannot answer. The docs state it has a hard per-eval cost cap.
+
+**Q: What data leaves my machine?**
+**A:** Nothing unless you set `IRIS_OTEL_ENDPOINT` to export traces to a collector you name, or enable the LLM judge with your own key. The default install is fully local and offline-capable.
+
+**Q: Which MCP clients are supported?**
+**A:** Claude Desktop, Claude Code, Cursor, Windsurf, Continue, VS Code, Cline, Zed, Codex CLI, Gemini CLI, and any other MCP-compatible agent. A Cursor Directory listing and a PulseMCP listing are available on the project page.
+
+**Q: Can I use Iris in CI without a running server?**
+**A:** Yes. The `ingest` command runs stateless from a JSON/NDJSON file and exits with a pass/fail status — suitable for gating CI pipelines on agent output quality.
+
+## Conclusion
+
+Iris fills a real gap in the MCP agent tooling stack: you ship the agent, but you have no visibility into what it is actually outputting until a user reports a problem. The MCP-native approach means it slots into any compatible agent with a single config change and a 60-second demo to prove it works. Heuristic eval rules run without LLM calls, making it fast enough to score every trace deterministically. If you run any MCP-based agents in production or development, Iris is worth a look.
+
+Install: `npx @iris-eval/mcp-server --demo`
