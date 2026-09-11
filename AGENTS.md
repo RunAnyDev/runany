@@ -464,18 +464,35 @@ git push
 
 ---
 
-## Auto-publish cron (Mavis blog-poster)
+## Auto-publish crons (Mavis blog-poster + blog-poster-github-trending)
 
-**Replaces the old Hermes cron job `df16e9ef0195` (Blog Poster 60min), disabled 2026-08-13.**
+**Replaces the old Hermes cron job `df16e9ef0195` (Blog Poster 60min), disabled 2026-08-13.** Two distinct skills now run side-by-side:
 
-### Mavis cron job
+| Cron | Source | Cadence | Scope | Skill |
+|---|---|---|---|---|
+| `blog-poster` | HN Algolia | Every hour | 1 post/tick (top HN launch) | `~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md` |
+| `blog-poster-github-trending` | github.com/trending (HTML scrape) | Daily 9 AM ICT | All NEW trending (capped at 30) | `~/.minimax/agents/mavis/skills/blog-publisher-github-trending/SKILL.md` |
+
+### `blog-poster` (HN, hourly)
 - **Schedule:** `0 * * * *` (every hour on the hour)
-- **Runtime:** Mavis scheduler (built-in cron of MiniMax Code, no Hermes dependency)
 - **Model:** `MiniMax-M2.7` lean — ~360K tokens/tick vs 3.1M for M3 verbose
 - **Workdir:** `~/personal/runany`
 - **Session mode:** new (each tick = fresh session, no cross-tick state)
-- **Skill:** `blog-publisher` (Mavis-native, at `~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md`)
+- **Skill:** `blog-publisher`
 - **Delivery:** Mavis session output → bound Telegram channel (auto-routed, no separate bot needed)
+
+### `blog-poster-github-trending` (GitHub, daily)
+- **Schedule:** `0 9 * * *` (9:00 AM ICT daily)
+- **Model:** `MiniMax-M2.7` lean (per-repo loop budget)
+- **Workdir:** `~/personal/runany`
+- **Session mode:** new
+- **Skill:** `blog-publisher-github-trending`
+- **Discovery script:** `scripts/gh_trending.py` (parses `github.com/trending` HTML → JSON list of `{full_name, owner, name, url, description, language, stars_total, stars_period, period, lang_filter}`). Default = daily trending, all languages. Flags: `--since weekly|monthly`, `--language <name>`, `--top N`.
+- **Thumbnail pipeline:** `scripts/gh_trending_thumbnail.mjs OWNER/REPO /tmp/thumb.webp STARS LANG DESC` → `node scripts/r2-upload.mjs SLUG /tmp/thumb.webp` (wrangler-based, NOT S3 SDK). Verify CDN URL returns HTTP/2 200 before commit (R2 negative-cache pitfall — see Memory).
+- **Dedup:** owner/repo (lowercased) match in `.data/written-repos.txt` OR any existing post slug contains BOTH owner + repo as slug words. Plus blocklist substring match + unsafe keyword filter (`kms`, `crack`, `activator`, `keygen`, `piracy`, `malware`, `cheat`, `exploit`).
+- **Per-repo loop:** GitHub API metadata → thumbnail → R2 upload → CDN verify → MDX write → lint → commit. ~6 calls/repo × ~16 repos/day = ~100 calls/tick.
+- **Output:** One commit per post + one final tracking commit for `.data/written-repos.txt` updates. Expect ~10-16 commits/day on busy trending days.
+- **Token note:** Cron currently runs WITHOUT `GITHUB_TOKEN` (not in `.env`). Uses unauthenticated API (60 req/hr). With ~16 repos/day = ~16 API calls/tick, sustainable for ~3 weeks before hitting limits. Add token to `.env` to lift to 5000 req/hr.
 
 ### Discovery → publish flow (lean, ~12-15 tool calls)
 1. `python3 scripts/hn_search.py --shortlist --top 4` — 1 call
