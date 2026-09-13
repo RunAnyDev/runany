@@ -7,7 +7,11 @@ Catches patterns MDX/Astro refuses to parse:
   - <N or <[0-9] in body text → parsed as JSX tag
   - <br> outside code fences → parsed as JSX element
   - Uppercase tags in frontmatter
-  - Markdown image syntax ![]() in body (image is frontmatter-only)
+  - Bare `<` operator in body text → MDX 3 still opens JSX tag parse
+
+Note: inline `![]()` markdown images are now ALLOWED in body (per visual
+density rules in cron skills, 2026-09-13). They must use https://cdn.runany.dev/
+URLs and have alt text. Lint enforces neither — visual density is the skill's job.
 
 Usage:
   python3 scripts/mdx_lint.py [file ...]
@@ -55,11 +59,6 @@ CHECKS = [
         re.compile(r"<br\s*/?>"),
         "<br> tag — MDX parses as JSX element. Use blank lines between paragraphs.",
     ),
-    (
-        "markdown-image-in-body",
-        re.compile(r"!\[[^\]]*\]\([^)]+\)"),
-        "![]() markdown image in body — image goes in frontmatter only.",
-    ),
 ]
 
 
@@ -90,8 +89,7 @@ def lint_file(path: Path) -> list[tuple[int, str, str]]:
     body_no_fences = strip_code_fences(body)
 
     for check_name, pattern, message in CHECKS:
-        # markdown-image check is on the original body (not frontmatter)
-        for m in pattern.finditer(body if check_name == "markdown-image-in-body" else body_no_fences):
+        for m in pattern.finditer(body_no_fences):
             line_no = body[: m.start()].count("\n") + 1
             findings.append((line_no, check_name, message))
 
