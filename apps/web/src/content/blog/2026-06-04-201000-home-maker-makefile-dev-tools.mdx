@@ -31,7 +31,7 @@ The mental model is simple: every tool you care about becomes a `make` target. T
 APT += ripgrep jq bat fzf htop tmux
 
 $(foreach p,$(APT),$(eval $(call gen-apt,$(p))))
-```
+```bash
 
 Each `gen-<manager>` macro emits the same shape: a `.PHONY` target whose recipe is the package manager's install command. `make ripgrep` runs `sudo apt-get install -y ripgrep`. `make ruff` runs `uv tool install ruff`. Targets appear because the lists grew — nothing more.
 
@@ -47,7 +47,7 @@ The repository is a working starter. Clone it into `~/hm` and start editing:
 git clone https://github.com/santhoshtr/hm.git ~/hm
 cd ~/hm
 ls -la
-```
+```bash
 
 The shipped layout:
 
@@ -64,7 +64,7 @@ hm/
 │   └── lsp.mk
 └── desktop/
     └── apps.mk
-```
+```bash
 
 Each `*.mk` file is a thin wrapper around a `+=` append. `dev/python.mk` is just `UV += ruff black isort pyright`. The Makefile `include`s them all and expands the five lists into targets.
 
@@ -76,7 +76,7 @@ Pick a tool name from the comments in the relevant `*.mk` file and run it direct
 make ripgrep
 make bat
 make fzf
-```
+```bash
 
 Each command calls the appropriate package manager without checking whether the tool is already installed. That is intentional — `apt-get` skips if present, `cargo install` upgrades if a newer version exists, `uv tool install` re-installs. The Makefile is a declaration; the package manager decides what to do.
 
@@ -85,7 +85,7 @@ You will see output like:
 ```bash
 installing/upgrading ripgrep ...
 sudo apt-get install -y ripgrep
-```
+```bash
 
 If the command does not need `sudo` on your system, edit `APT_INSTALL` in the root `Makefile` to drop it. The README and `Makefile` are written for Debian/Ubuntu first; for other distros, change `APT_INSTALL` to your package manager (for example, `pacman -S --noconfirm` for Arch, `dnf install -y` for Fedora).
 
@@ -98,7 +98,7 @@ Three patterns, in order of frequency:
 ```bash
 # dev/cli.mk
 APT += htop
-```
+```bash
 
 **Pattern 2 — pin a version.** Use `name@version`:
 
@@ -108,7 +108,7 @@ UV += [email protected]
 
 # dev/go.mk
 GO += golangci-lint@v1.55.0
-```
+```bash
 
 **Pattern 3 — target name differs from package name.** Use a `PKG_` override:
 
@@ -116,7 +116,7 @@ GO += golangci-lint@v1.55.0
 # dev/cli.mk
 CARGO += fd
 PKG_fd := fd-find
-```
+```bash
 
 `make fd` now runs `cargo install fd-find`. The target name is what you type; the `PKG_` value is what the manager sees.
 
@@ -128,7 +128,7 @@ alacritty:
 	@echo "installing/upgrading $@..."
 	@curl -fsSL https://example.com/alacritty -o /usr/local/bin/alacritty
 	@chmod +x /usr/local/bin/alacritty
-```
+```bash
 
 The target appears in `make` tab-completion and in the interactive `fzf` browser — there is no second place to update.
 
@@ -139,7 +139,7 @@ The target appears in `make` tab-completion and in the interactive `fzf` browser
 ```bash
 ln -s "$(pwd)/hm.sh" ~/bin/hm
 hm
-```
+```bash
 
 The critical line is `make -pn -C "$SCRIPT_DIR"` — Make's dry-run database dump. The script parses it, filters out group and meta targets, and hands the rest to `fzf`:
 
@@ -149,7 +149,7 @@ selected=$( packages | fzf \
   --prompt "install > " \
   --preview "make -n -C '$SCRIPT_DIR' {} 2>/dev/null" \
   --preview-window "right:50%:wrap" )
-```
+```bash
 
 The preview pane runs `make -n <target>` (dry run) so you see the exact install command before you commit. Tab selects multiple targets. Enter runs them. The list is derived live — add a package to any `.mk` file and it appears in `fzf` the next time you run `hm`. Nothing to keep in sync.
 
@@ -161,7 +161,7 @@ The migration story is the whole point. On a new laptop:
 git clone https://github.com/santhoshtr/hm.git ~/hm
 cd ~/hm
 make all
-```
+```bash
 
 `make all` runs every meta-target (`dev`, `desktop`), which run every group target (`cli`, `python`, `node`, `go`, `rust`, `lsp`), which run every leaf target. Three levels of granularity, one system. The author has used this approach with `clause code` to bootstrap a fresh laptop in a single afternoon.
 
@@ -178,7 +178,7 @@ $(call pkg-name,$(1)) :
 	@echo "installing/upgrading $$@..."
 	@$(APT_INSTALL) $(call pkg-pkgname,$(1))
 endef
-```
+```bash
 
 `pkg-name` splits `name@version` on `@` and takes the first word. `pkg-pkgname` returns the `PKG_<name>` override if defined, else the bare name. The `$$@` is escaped for `eval`-time expansion. The same pattern repeats for `gen-cargo`, `gen-uv`, `gen-go`, `gen-npm` — only the install command differs.
 
@@ -202,7 +202,7 @@ cli : ripgrep jq bat fzf htop tmux eza zoxide fd
 
 .PHONY: python
 python : uv ruff black isort pyright
-```
+```bash
 
 Group targets roll up into meta targets:
 
@@ -212,7 +212,7 @@ dev : cli python node go rust lsp
 
 .PHONY: all
 all : dev desktop
-```
+```bash
 
 `make all` installs everything. `make dev` installs all developer tools. `make cli` installs just CLI utilities. `make ripgrep` installs one tool. The same Makefile syntax works at every level of granularity.
 
