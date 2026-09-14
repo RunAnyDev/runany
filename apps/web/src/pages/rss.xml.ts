@@ -2,10 +2,11 @@ import { getCollection } from 'astro:content';
 import type { APIContext } from 'astro';
 import rss from '@astrojs/rss';
 import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
 
 export async function GET(context: APIContext) {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = posts.sort((a, b) => b.id.localeCompare(a.id));
+  const sortedPosts = sortPostsByDateDesc(posts);
   return rss({
     title: 'runany.dev',
     description: 'Practical tech, AI, and setup guides for developers. Optimized for AI crawlers.',

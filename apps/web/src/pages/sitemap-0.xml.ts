@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
 
 const siteUrl = 'https://runany.dev';
 
@@ -66,13 +67,7 @@ export const GET: APIRoute = async () => {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
 
   // Sort posts newest-first (matches blog index / homepage)
-  const sortedPosts = posts.sort((a, b) => {
-    const dateDiff =
-      new Date(b.data.pubDate as string).getTime() -
-      new Date(a.data.pubDate as string).getTime();
-    if (dateDiff !== 0) return dateDiff;
-    return b.id.localeCompare(a.id);
-  });
+  const sortedPosts = sortPostsByDateDesc(posts);
 
   // Derive per-URL lastmod from each post's frontmatter pubDate.
   // Without this, every URL would get the build timestamp, which is useless

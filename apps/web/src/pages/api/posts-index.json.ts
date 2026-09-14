@@ -1,10 +1,11 @@
 import { getCollection } from 'astro:content';
 import type { APIRoute } from 'astro';
 import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
 
 export const GET: APIRoute = async () => {
   const allPosts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = allPosts.sort((a, b) => b.id.localeCompare(a.id));
+  const sortedPosts = sortPostsByDateDesc(allPosts);
 
   const posts = sortedPosts.map((post) => ({
     title: post.data.title,

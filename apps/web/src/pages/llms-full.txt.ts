@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
 
 const siteUrl = 'https://runany.dev';
 
@@ -28,7 +29,7 @@ const excerptWords = (value: string, limit: number) => {
 
 export const GET: APIRoute = async () => {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = posts.sort((a, b) => b.id.localeCompare(a.id));
+  const sortedPosts = sortPostsByDateDesc(posts);
 
   const body = [
     '# runany.dev — Full AI-readable content index',

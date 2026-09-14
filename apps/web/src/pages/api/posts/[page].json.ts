@@ -1,12 +1,13 @@
 import { getCollection } from 'astro:content';
 import type { APIRoute } from 'astro';
 import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
 
 const LIMIT = 9;
 
 export async function getStaticPaths() {
   const allPosts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = allPosts.sort((a, b) => b.id.localeCompare(a.id));
+  const sortedPosts = sortPostsByDateDesc(allPosts);
   const totalPages = Math.ceil(sortedPosts.length / LIMIT);
 
   return Array.from({ length: totalPages }, (_, i) => ({
@@ -17,7 +18,7 @@ export async function getStaticPaths() {
 export const GET: APIRoute = async ({ params }) => {
   const page = parseInt(params.page || '1', 10);
   const allPosts = await getCollection('blog', ({ data }) => !data.draft);
-  const sortedPosts = allPosts.sort((a, b) => b.id.localeCompare(a.id));
+  const sortedPosts = sortPostsByDateDesc(allPosts);
   const total = sortedPosts.length;
   const start = (page - 1) * LIMIT;
   const pagePosts = sortedPosts.slice(start, start + LIMIT);
