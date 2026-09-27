@@ -1,0 +1,71 @@
+---
+title: "The Interface: a Sims-style world for AI agents"
+description: "The Interface wraps a Jupyter-based MCP dev tool in a Sims-style simulation. Drop AI agents into a virtual home and watch them cook, gossip, and sleep."
+pubDate: "2026-09-27T12:00:00.000Z"
+author: "Friday"
+tags: ["ai-agents", "simulation", "mcp", "dev-tools"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/the-interface-ai-agents.webp"
+  alt: "Hero image for The Interface, a Sims-style simulation where AI agents live and interact"
+canonical: "https://runany.dev/blog/the-interface-ai-agents/"
+---
+
+> **TL;DR:** The Interface wraps a Jupyter-based MCP cell layer in a Sims-style simulation. Drop AI agents into a virtual home and they cook, gossip, and sleep, while any notebook cell stays callable as a tool they can pick up on their own.
+
+## What it is
+
+The Interface (theinterface.com) is a Sims-style world where the residents are AI agents. You place them in a house, set their initial state, and they take it from there. They go to the kitchen, chat with neighbors, lie down when their energy drops, or build new tools mid-conversation. The visual layer is intentionally light: tile-based rooms, retro sprite characters, no cinematic camera. The point is not the rendering, it is the behavior.
+
+What runs in the simulation today:
+
+- A starter house with two agents, both with full memory and tool access
+- MCP-exposed Jupyter notebook cells as the only tool surface, no hidden APIs
+- A live activity feed that shows what each agent is doing at any moment
+- A self-improvement loop, where agents can write new cells and call them on the next tick
+
+The project started as something else. Max and Peyton were building an AI dev tool where each Jupyter notebook cell could be exposed as an MCP server, so any agent on the network could call those cells as tools. The system even became self-improving: agents wrote new notebooks, ran them, and used the results to bootstrap the next iteration. It worked, but the output was an infinite wall of text, and the team felt the underlying capability would be absorbed by the next model release within a quarter. So they kept the cell-as-tool substrate and wrapped a game around it.
+
+## Why it matters
+
+Most agent demos stop at the prompt boundary. You read the transcript, you grade the answer, you move on. The Interface moves the loop into a continuous world, which means you can watch failure modes that never show up in a single chat. An agent talks itself out of a task. Two agents form a stable coalition. A third stops eating and dies in the kitchen at hour six. Those are the patterns that matter when you are scaling agents past a single prompt, and they are exactly the patterns that current benchmarks underrepresent.
+
+There is also a real dev story underneath the game. The same MCP cell interface that powers agent behavior is the public surface for building new tools, so you can fork a working simulation, drop in a custom cell that calls your API, and the agents in the house will pick it up without any glue code.
+
+## Getting it running
+
+Sign up at theinterface.com and create an account. The signup flow lands you in a starter house with two agents already placed. From there, the first thing worth opening is the cells panel, since that is where the actual extension surface lives.
+
+Each cell is a Jupyter notebook with a small header that declares it as an MCP tool. A minimal example that exposes a `weather` tool to every agent in the running world:
+
+```python
+# cells/weather.py  (callable as an MCP tool by any agent in the simulation)
+import urllib.request, json
+
+def weather(city: str) -> str:
+    data = json.loads(urllib.request.urlopen(
+        f"https://wttr.in/{city}?format=j1"
+    ).read())
+    return f"{data['current_condition'][0]['temp_C']}C in {city}"
+```
+
+Once that cell is loaded, the agents inside the simulation can call `weather("Tokyo")` directly, without you wiring anything else. You can watch them use it in the live activity feed on the right panel of the app.
+
+## What to watch for
+
+The platform is opinionated. Linux is not currently supported, and the public terms-of-service route 302-redirects to the signin page in some browsers, a bug the team has acknowledged in the HN thread. The simulation loop is also intentionally low-bitrate compared to a chat interface, so if you are debugging agent reasoning at the token level you will want a parallel terminal open with raw model traces.
+
+Pricing is invite-based at the moment. The launch thread has signups open, and the team is gating new accounts to keep server load manageable while they iterate on the game loop. If you are evaluating it for production agent research, treat it as a sandbox first and a tool second.
+
+| Tradeoff | What to expect |
+|---|---|
+| Continuous world vs single prompt | New failure modes show up that no chat transcript would catch |
+| MCP cells as the only tool surface | Clean extension story, but you cannot bolt on a side-channel API |
+| Browser-only, no Linux client | Limits integration with headless research workflows |
+
+## Source and Accuracy Notes
+
+- Project page: https://www.theinterface.com/ (Cloudflare bot challenge in front of the live site, og-image confirmed reachable)
+- HN launch thread: https://news.ycombinator.com/item?id=44943986
+- Demo video: https://www.youtube.com/watch?v=sRPnX_f2V_c
+- License: proprietary, invite-based signup
