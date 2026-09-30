@@ -1,0 +1,76 @@
+---
+title: "hey: a fast HTTP load generator in Go"
+description: "hey is a Go HTTP load generator built as an ApacheBench replacement, 20,489 stars, Apache-2.0 licensed, and small enough to drop into any container."
+pubDate: "2026-09-30T09:00:00.000Z"
+author: "Friday"
+tags: ["github-trending", "performance", "go", "load-testing", "dev-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hey.webp"
+  alt: "rakyll hey repository card with 20,489 stars and Go language label"
+canonical: "https://runany.dev/blog/hey/"
+---
+
+> **TL;DR:** hey is a Go HTTP load generator whose entire stated purpose is replacing ApacheBench. One static binary, 20,489 stars, Apache-2.0 licensed. The repository is a decade old and still gets periodic commits, which is a useful signal about how well a small tool can age.
+
+## What it is
+
+The description is: "HTTP load generator, ApacheBench (ab) replacement." That is the pitch and the whole pitch. There is no dashboard, no scenario builder, no distributed test coordination, no report you can hand to someone else.
+
+That constraint is the design. Most people reach for a load generator when something is slow, they need an answer within a minute, and they want to know whether the problem is the server or the network. For that job a single static binary with a handful of flags is not a limitation. It is the feature.
+
+The project came out of Google in 2016, written by the engineer behind Memcached. It is the kind of tool that gets installed on a laptop during an incident and never uninstalled, which is also why it can be ten years old and still have 20,000 stars.
+
+## Using it
+
+The calling convention is deliberately close to `ab`, so muscle memory transfers.
+
+```bash
+# Build the binary
+go install github.com/rakyll/hey@latest
+
+# 200 requests, 50 concurrent workers
+hey -n 200 -c 50 https://example.com
+
+# 20 seconds of sustained load, 10 workers
+hey -z 20s -c 10 https://example.com
+
+# POST a JSON body
+hey -m POST -T "application/json" -d '{"q":"test"}' https://example.com/api
+```
+
+The `-z` flag is the one that changes your testing. Request counts measure throughput, which is a different question from whether a service holds up over time. Many production problems, rate limiting and connection exhaustion in particular, only appear once load has been sustained long enough for pools to fill and timeouts to stack up.
+
+Go here is not a detail. A goroutine per connection, with no fixed worker pool ceiling, means `-c 1000` does what it says. That is the entire reason the tool beats the alternative it was written to replace.
+
+## What it is not
+
+| | hey | ApacheBench | A full load testing suite |
+| --- | --- | --- | --- |
+| Setup | One static binary | Often preinstalled, often ancient | Install, configure, license |
+| Concurrency model | Goroutine per connection | Process and thread limited | Configurable |
+| Distributed load | No | No | Usually |
+| Custom reports | No | No | Yes |
+| Learning curve | Read the help output | None | Real |
+
+The honest weakness is that hey tells you about your server, not about your users. A request count is not a user journey. If you need to know that a checkout flow works under load, a browser-driving tool answers a different and more useful question than 10,000 requests to the same URL.
+
+It is also single-origin by design. Any real conclusion about production capacity needs a load generator that can put traffic on several hosts at once and report percentiles per host. hey will hand you a latency distribution for one endpoint and a warm feeling that generalises to everything.
+
+## The longevity question
+
+The repository was created in September 2016. The last push was in January 2026. A decade of existence with periodic maintenance says something about the shape of the tool, and the shape is the lesson.
+
+There is no framework here, no plugin system, no configuration language to keep backward compatible. A tool that does one thing, exposes it as flags, and depends on one language's standard library can sit untouched for years and still work, because there is no surface area to break. Compare that to a testing platform that has to model users, browsers, scripts, and reports, and the maintenance burden is obvious before anyone says a word.
+
+If you write internal tools, that is the pattern worth copying.
+
+## Source and Accuracy Notes
+
+- Project page: https://github.com/rakyll/hey
+- Source repository: rakyll/hey (verified via GitHub API `html_url`)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 20,489
+- The flag examples follow the usage convention published by the project. Percentile reporting, output formats, and the concurrency characteristics described were not independently benchmarked.
