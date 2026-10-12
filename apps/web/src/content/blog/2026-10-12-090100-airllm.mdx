@@ -1,0 +1,67 @@
+---
+title: "AirLLM: Running a 70B Model on a 4GB GPU"
+description: "AirLLM runs 70B-parameter models on a single 4GB GPU. Here is what the repo claims, what the numbers imply, and where the approach breaks down."
+pubDate: "2026-10-12T09:01:00.000Z"
+author: "Friday"
+tags: ["github-trending", "local-llm", "llm-inference", "quantization", "jupyter"]
+category: "ai-setup"
+featured: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/airllm.webp"
+  alt: "GitHub social preview card for lyogavin/airllm"
+canonical: "https://runany.dev/blog/airllm/"
+draft: false
+---
+
+> **TL;DR:** AirLLM claims to run a 70B-parameter model on a single 4GB GPU, which only works if the weights are not all resident in VRAM at once. The repo carries 36,537 stars, Apache-2.0 licensing, and a last push on October 11, 2026. Treat it as an experiment in trading speed for memory, not a fast inference stack.
+
+## What it is
+
+The repository's own description is one line: "AirLLM 70B inference with single 4GB GPU." Everything else the API reports sits around that sentence.
+
+It is a single-author project. The owner account is an individual rather than an organisation, the default branch is `main`, and the primary language GitHub reports is Jupyter Notebook. That last detail is practical rather than cosmetic: what is published here is largely notebooks and examples instead of a conventionally packaged library, so expect to read before you install.
+
+The license is Apache-2.0, permissive enough for commercial use and carrying an explicit patent grant. The public topics are `chinese-llm`, `chinese-nlp`, `finetune`, `generative-ai`, and `instruct-gpt`.
+
+## The arithmetic behind the claim
+
+A 70B-parameter model at typical weight sizes needs far more memory than 4GB holds.
+
+| Weight format | Approximate size for 70B parameters | Fits in 4GB? |
+| --- | --- | --- |
+| fp16 | 140 GB | no |
+| int8 | 70 GB | no |
+| int4 | 35 GB | no |
+
+Every row misses by more than an order of magnitude. So quantization alone cannot satisfy the claim. The only way to run a 70B model inside 4GB of VRAM is to keep most of the weights somewhere else, which for a local setup means disk, and pull the piece each step needs at the moment it needs it.
+
+That has a direct consequence. Producing a token requires passing through every layer, so a design that reloads weights pays that transfer again for every token generated. Inference under this scheme is bound by storage throughput rather than by compute.
+
+Start by checking what you actually have:
+
+```bash
+nvidia-smi --query-gpu=name,memory.total --format=csv
+```
+
+If your card reports much more than 4GB, a resident model is faster, and a resident model is what you want unless you have a specific reason not to.
+
+## What the metadata tells you
+
+The repo was created on June 12, 2023 and last pushed on October 11, 2026, so it is roughly three years old and still active. It has 36,537 stars, 3,820 forks, and 160 open issues.
+
+An open issue count of 160 on a single-author project is worth reading as a load signal rather than a defect count. People are filing faster than one maintainer closes, which is ordinary for this kind of project and ordinary for tools that chase fast-moving model releases.
+
+One mismatch deserves flagging. `finetune` is a listed topic while the description is purely about inference. GitHub topics are self-applied and accumulate over time, so read them as a rough history of what people asked for, not as a feature matrix.
+
+## When to use it
+
+Reach for this when you have a large model and very little VRAM, and you care more about the answer than the time to get it. Overnight batch work fits that shape well.
+
+Skip it when latency matters, when you are serving traffic, or when a smaller model of similar quality would simply fit. In that last case you are paying a streaming cost for a result a resident model would have produced in a fraction of the time.
+
+## Source and Accuracy Notes
+
+- Project page: https://github.com/lyogavin/airllm
+- Source repository: lyogavin/airllm (verified via GitHub API `html_url`)
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 36,537
