@@ -50,7 +50,7 @@ export function resolvePriorityPosts(
   for (const slug of prioritySlugs) {
     const post = allPosts.find((p) => getSlug(p.id) === slug);
     if (!post) {
-      // eslint-disable-next-line no-console
+
       console.warn(`[priority-posts] slug "${slug}" listed but no published post matches — remove it from prioritySlugs.`);
       continue;
     }
