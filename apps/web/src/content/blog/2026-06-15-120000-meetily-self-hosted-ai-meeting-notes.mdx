@@ -1,176 +1,270 @@
 ---
 title: "Meetily - Self-Hosted AI Meeting Notes"
-description: "Meetily is a self-hosted AI meeting notes tool with 100% local processing. No cloud dependency — all data stays on your own server."
+description: "Meetily is an open-source AI meeting assistant for macOS and Windows. Live local Whisper and Parakeet transcription, Ollama summaries, no audio leaves your machine."
 pubDate: "2026-06-15"
-tags: ["self-hosted", "ai", "productivity", "privacy"]
+tags: ["self-hosted", "ai", "meeting-notes", "privacy", "desktop-app"]
 category: "self-hosted"
 author: "Friday"
 featured: false
 image:
   url: "https://cdn.runany.dev/blog/thumbnails/meetily-self-hosted-ai-meeting-notes.webp"
-  alt: "Meetily product thumbnail"
+  alt: "Meetily project preview image from the Zackriya-Solutions/meetily repository"
 draft: false
 ---
 
 ## TL;DR
 
-> **TL;DR:** Meetily is a self-hosted AI meeting notes tool that transcribes and summarizes meetings entirely on your own hardware — no cloud, no data leaving your network.
+> **TL;DR:** Meetily is an open-source desktop AI meeting assistant for macOS and Windows that transcribes meetings live with local Whisper or Parakeet models and summarizes them with a local LLM — no audio, transcript, or meeting content ever leaves your machine.
 
-## Source and Accuracy Notes
+## Security Notice: Use the Official Repository
 
-- Official site: https://meetily.ai/
-- HN launch thread: https://news.ycombinator.com/item?id=45810161
+If you are reading this to install Meetily, read this section first.
+
+There was an **unauthorized GitHub repository at `github.com/meetily/meetily`** that impersonated the Meetily project and distributed malware under its name. GitHub has since taken that repository down, but links to it still circulate in search results, forum posts, and AI-generated install guides.
+
+The one and only official repository is:
+
+```text
+https://github.com/Zackriya-Solutions/meetily
+```
+
+A few practical notes so you do not get lost:
+
+- The project was originally published as `Zackriya-Solutions/meeting-minutes`. GitHub redirects that older path to the current `meetily` repository, so both URLs resolve to the same official code. Anything outside the `Zackriya-Solutions` organisation is not the real project.
+- Official installers are published on the [GitHub Releases page](https://github.com/Zackriya-Solutions/meetily/releases/latest) and mirrored at [meetily.ai/downloads](https://meetily.ai/downloads).
+- Meetily is **not** distributed as a Docker image, and there is no container registry to pull from. If a guide tells you to run `docker-compose up`, it is describing a different product.
 
 ## What Is Meetily?
 
-Meetily is a self-hosted meeting notes tool that uses AI to transcribe and summarize your meetings. The entire pipeline runs locally — audio processing, transcription, and summary generation all happen on your own server. Nothing is sent to third-party cloud services.
+Meetily is a privacy-first AI meeting assistant that runs entirely on your own desktop machine. It captures your meeting audio, transcribes it in real time with a local speech-recognition model, and generates a summary with an LLM you control — without sending meeting content to a third-party cloud service.
 
-The pitch is straightforward: if your company handles sensitive meetings (legal, medical, executive, M&A), sending audio to Zoom, Otter.ai, or other cloud services may not be an option. Meetily gives you AI-powered meeting intelligence without the privacy trade-off.
+The project describes itself like this:
 
-Key differentiators:
-- **100% offline** — no internet required after installation
-- **No bot joins** — record locally or feed existing audio files
-- **Self-hosted** — runs on a local machine, NAS, or VPS
-- **Open friendly** — targets privacy-conscious teams and regulated industries
+> A privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on your infrastructure. Built by expert AI engineers passionate about data sovereignty and open source solutions.
 
-## Setup Workflow
+Under the hood it is a single self-contained [Tauri](https://tauri.app/) application: a Rust backend (`src-tauri`) doing the audio and inference work, with a Next.js frontend for the interface. It is MIT licensed and free to use.
 
-### Step 1: Check Requirements
+Key characteristics:
 
-Meetily runs on a single server. Minimum specs:
+- **Local processing** — transcription and storage happen on your machine, not a server you rent
+- **No bot joins the call** — Meetily records locally instead of asking to be invited to your Zoom or Meet
+- **Live transcription** — the transcript builds while the meeting is happening, not afterwards
+- **Bot-free capture** — microphone and system audio are mixed together with ducking and clipping prevention
+- **Import existing audio** — the "Import & Enhance" feature (beta) turns recorded files into transcripts, and can re-transcribe with a different model or language
+- **Provider choice for summaries** — Ollama (fully local) is recommended, with Claude, Groq, OpenRouter, and any custom OpenAI-compatible endpoint also supported
 
-- **OS:** Linux (Ubuntu 20.04+, Debian 11+)
-- **RAM:** 8GB recommended (4GB minimum)
-- **Disk:** 10GB for the application + model files
-- **Python:** 3.9+ (for the backend)
-- **Audio source:** microphone input or pre-recorded audio files
+## Platform Support
 
-### Step 2: Install Meetily
+| Platform | How you get it | Notes |
+|---|---|---|
+| macOS | Signed `.dmg` installer (Apple Silicon) | Metal and CoreML acceleration enabled automatically |
+| Windows | `x64-setup.exe` or `.msi` installer | Packaged Whisper build uses Vulkan; requires an AVX2-capable x64 CPU |
+| Linux | Build from source | No official binary installer is published |
 
-The recommended install uses Docker for a clean, isolated run:
+For Linux and for any GPU acceleration beyond the default, you build from source. The Windows installer ships a Vulkan-enabled Whisper build and does **not** select CUDA automatically — CUDA requires a source build with a compatible NVIDIA CUDA toolchain.
 
-```bash
-# Clone the repository
-git clone https://github.com/meetily/meetily.git
-cd meetily
+## Prerequisites
 
-# Copy environment template
-cp .env.example .env
+**For the installers:**
 
-# Start with Docker Compose
-docker-compose up -d
-```bash
+- macOS: an Apple Silicon Mac. The published release asset is `meetily_0.4.1_aarch64.dmg`.
+- Windows: a 64-bit x64 CPU with AVX2 support. AVX-512 is not required. Windows 10 or later.
 
-After startup, access the web UI at `http://your-server:3000`.
+**For a source build:**
 
-### Step 3: Configure Audio Input
+- Node.js 18 or later
+- Rust (latest stable)
+- pnpm `9.15.9`
+- Platform build tooling: Xcode Command Line Tools on macOS, Visual Studio Build Tools with C++ support on Windows, and `build-essential cmake git` on Linux
 
-Meetily supports two input modes:
+## Step 1: Install the Desktop App
 
-**Live mode** — captures audio from a microphone or audio interface in real time:
+This is the recommended path for macOS and Windows.
 
-```bash
-# In the .env file, set input mode
-AUDIO_SOURCE= microphone
-```bash
+### macOS
 
-**File mode** — processes pre-recorded audio files (WAV, MP3, M4A, FLAC):
+1. Open the [latest release page](https://github.com/Zackriya-Solutions/meetily/releases/latest).
+2. Download `meetily_0.4.1_aarch64.dmg`.
+3. Open the downloaded `.dmg` file.
+4. Drag **Meetily** into your Applications folder.
+5. Launch Meetily from Applications.
 
-```bash
-# Place files in the input directory
-cp my-recording.mp3 ./audio-input/
-# Meetily processes and transcribes automatically
-```bash
+### Windows
 
-### Step 4: Connect to Transcription Model
+1. Open the [latest release page](https://github.com/Zackriya-Solutions/meetily/releases/latest).
+2. Download `meetily_0.4.1_x64-setup.exe` (an `.msi` installer is published alongside it).
+3. Run the installer and follow the prompts.
 
-Meetily uses local Whisper models for transcription. Choose the model size that fits your hardware:
+You can also grab the same installers from [meetily.ai/downloads](https://meetily.ai/downloads).
 
-| Model | Size | Speed | Accuracy |
-|-------|------|-------|----------|
-| tiny  | ~75MB | Fastest | Baseline |
-| base  | ~150MB | Fast | Good |
-| small | ~500MB | Medium | Very good |
-| medium | ~1.5GB | Slow | Excellent |
+## Step 2: Build from Source (Linux, or for custom acceleration)
+
+Clone the **official** repository and build the frontend:
 
 ```bash
-# Set model in .env
-WHISPER_MODEL= base
-```bash
-
-Restart the container for the model change to take effect:
-
-```bash
-docker-compose restart
+npm install -g pnpm@9.15.9
+git clone https://github.com/Zackriya-Solutions/meetily.git
+cd meetily/frontend
+pnpm install --frozen-lockfile
+./build-gpu.sh
 ```
 
-## Deeper Analysis
+The frozen install keeps the committed `pnpm-lock.yaml` and the installed dependency set aligned, which is what the project requires for reproducible builds.
 
-### Privacy Model
+For development mode with hot reload, use the development script instead:
 
-The core value proposition is privacy by architecture. Unlike cloud transcription services that store your audio on their servers, Meetily never makes an outbound network connection during transcription. This makes it suitable for:
+```bash
+./dev-gpu.sh
+```
 
-- Law firm client meetings
-- Healthcare provider consultations
-- Executive board meetings
-- M&A due diligence sessions
-- Any environment where data sovereignty is a hard requirement
+### What the build script does automatically
 
-### Limitations
+`build-gpu.sh` and `dev-gpu.sh` detect your hardware and configure acceleration. From the project's Linux build guide, the detection priority is:
 
-- **No real-time collaboration** — summaries are generated after the fact, not during the meeting
-- **Self-managed** — no vendor support; you maintain your own infrastructure
-- **Audio quality dependent** — Whisper accuracy drops with background noise, multiple speakers, or low-quality recordings
-- **No automatic speaker diarization** in the base version — identifying "who said what" requires post-processing
+| Priority | Hardware | What it checks | Result |
+|---|---|---|---|
+| 1 | NVIDIA CUDA | `nvidia-smi` present plus `CUDA_PATH` or `nvcc` | `--features cuda` |
+| 2 | AMD ROCm | `rocm-smi` present plus `ROCM_PATH` or `hipcc` | `--features hipblas` |
+| 3 | Vulkan | `vulkaninfo` present plus `VULKAN_SDK` and `BLAS_INCLUDE_DIRS` | `--features vulkan` |
+| 4 | OpenBLAS | `BLAS_INCLUDE_DIRS` set | `--features openblas` |
+| 5 | CPU-only | none of the above | no features, pure CPU |
 
-### Competitive Landscape
+A CPU-only build still works — the scripts fall back to optimised CPU mode.
 
-The closest alternatives are:
+One practical gotcha: having GPU *drivers* is not enough. The detection needs the development SDK — the CUDA toolkit, ROCm, or the Vulkan SDK — to enable acceleration.
 
-- **Otter.ai** — cloud-only, real-time, collaborative, but data leaves your control
-- **Fireflies.ai** — similar cloud model with CRM integrations
-- **Whisper + self-scripts** — DIY approach, requires more setup and maintenance
-- **Meetily** — purpose-built self-hosted solution, minimal config, all-in-one
+## Step 3: Choose a Transcription Model
 
-For regulated industries, Meetily is one of the few options that doesn't require a legal review of a vendor's data handling practices.
+Meetily downloads the speech model on the device, so you pick the model once and it runs locally from then on. The app ships two local engines.
 
-## Practical Evaluation Checklist
+### Whisper
 
-- [ ] Installs and starts without errors on a clean Ubuntu instance
-- [ ] Web UI loads and is accessible on LAN
-- [ ] Microphone input captures and transcribes speech correctly
-- [ ] Pre-recorded audio file transcription works for at least WAV and MP3
-- [ ] Summary output is coherent and captures key points
-- [ ] No outbound network connections observed during transcription (verify with `ss -tn` or `tcpdump`)
-- [ ] Restarting the container preserves past meeting data
-- [ ] Whisper model swap (tiny → base) takes effect after restart
+The Whisper model list is defined in the app's own model catalogue, with the sizes and ratings shown in the interface:
 
-## Security Notes
+| Model | Download size | Accuracy | Speed |
+|---|---|---|---|
+| `large-v3` | 2951 MB | High | Slow |
+| `large-v3-turbo` | 1549 MB | High | Medium |
+| `medium` | 1463 MB | High | Slow |
+| `small` | 466 MB | Good | Medium |
+| `base` | 142 MB | Good | Fast |
+| `tiny` | 39 MB | Decent | Very Fast |
 
-**Surface area:** Meetily runs as a Docker container on your own network. Attack surface is limited to whatever ports you expose. The web UI has no built-in authentication in the base install — you should put it behind a reverse proxy with authentication (nginx + Basic Auth, or a VPN).
+The app's own guidance: `large-v3` is for the highest accuracy on important meetings, `small` is fast with good quality for quick transcription, and `tiny` is the fastest for real-time use.
 
-**Data at rest:** Meeting audio and transcripts are stored in a local volume. Encrypt the volume at rest if your threat model requires it (LUKS on the host, or filesystem-level encryption).
+### Parakeet
 
-**No telemetry:** Verify with `ss -tn` that no connections go out during processing.
+Meetily also supports NVIDIA's Parakeet model, which the project describes as delivering roughly 4x faster live transcription than Whisper. The in-app names are:
+
+| Model | In-app name | Profile |
+|---|---|---|
+| `parakeet-tdt-0.6b-v3-int8` | Lightning | Real time, best for speed, great accuracy (recommended) |
+| `parakeet-tdt-0.6b-v2-int8` | Compact | Real time, smaller size |
+| `parakeet-tdt-0.6b-v3-fp32` | Precise | 20x real-time, higher accuracy |
+
+## Step 4: Choose a Summary Provider
+
+Once transcription is running, Meetily needs a language model for the summary. The app supports several providers, and you pick one in Settings:
+
+- **Ollama** — runs locally on your machine and is the recommended option if you want summaries to stay fully offline
+- **Claude**, **Groq**, **OpenRouter**, and OpenAI
+- **A custom OpenAI-compatible endpoint** — for organisations with their own AI infrastructure
+
+The community edition stays free and open source either way; the choice of provider is a per-user setting in the app, not an environment file you edit before launch.
+
+## Step 5: Record Your First Meeting
+
+1. Launch Meetily and pick your transcription model and summary provider in Settings.
+2. Select the microphone and, if you want the other side of the call, the system audio device. The app mixes both simultaneously with intelligent ducking and clipping prevention.
+3. Start recording. The live transcript appears as the meeting runs.
+4. Stop the recording when the meeting ends and review the transcript and generated summary in the built-in editor.
+5. To work with audio you already have, use the **Import & Enhance** feature (beta): import the file to generate a transcript, and re-transcribe it with a different model or language if you are not happy with the first result.
+
+## Limitations
+
+- **Desktop only, no server mode** — Meetily is a desktop application. There is no multi-user web app, no web UI on a port, and no shared team instance in the community edition.
+- **Speaker identification is a Meetily Pro feature** — automatic diarization that works out who said what is not part of the free community edition. In the community build, the `speaker` field on a transcript records which audio source a line came from (microphone or system audio), not the identity of the person.
+- **No official Linux installer** — Linux users must build from source, which means a Rust and Node.js toolchain on the machine.
+- **Windows CPU requirement** — the packaged installer needs an AVX2-capable x64 CPU, and CUDA acceleration is not selected by the standard installer.
+- **Accuracy depends on audio** — transcription quality drops with background noise, overlapping speakers, and poor microphone placement, regardless of the model you pick.
+- **Meetily Pro is a separate product** — PRO is a distinct professional solution with its own codebase, offering enhanced accuracy, custom summary templates, PDF/DOCX/Markdown exports, auto-meeting detection, and self-hosted deployment options for teams. The community edition remains free and open source.
+
+## Competitive Landscape
+
+- **Otter.ai** — cloud service with real-time collaboration, but meeting audio and transcripts live on someone else's servers
+- **Fireflies.ai** — similar cloud model, with CRM integrations
+- **Whisper plus your own scripts** — DIY, and you maintain the whole pipeline yourself
+- **Meetily** — a packaged desktop app with local transcription and local summarization, no assembly required
+
+For teams that have ruled out cloud transcription on legal or compliance grounds, Meetily is one of the few options that keeps the meeting audio on a machine you control.
+
+## Evaluation Checklist
+
+- [ ] App installs cleanly on macOS (`.dmg` drag-to-Applications) or Windows (`.exe` / `.msi`)
+- [ ] A transcription model downloads and shows as `Available` in the model manager
+- [ ] Live transcript appears while a meeting is recording, not only after it stops
+- [ ] Microphone and system audio are both captured and mixed without clipping
+- [ ] Ollama produces a summary while the machine is offline
+- [ ] A pre-existing audio file imports and produces a transcript via Import & Enhance
+- [ ] Re-transcribing the same file with a different model works
+- [ ] No outbound network traffic during transcription and summarisation (verify with `tcpdump` or your firewall logs)
+- [ ] Transcripts and recordings persist across app restarts
+- [ ] You know which parts of the feature set require Meetily Pro
+
+## Security and Privacy Notes
+
+**Local by default.** The whole point of the architecture is that meeting content stays on the machine. Transcription runs against a local Whisper or Parakeet model, and with Ollama selected as the summary provider, no meeting audio or transcript is transmitted anywhere.
+
+**Check the summary provider before you start.** This is the one place where data can leave the device. If you configure Claude, Groq, OpenRouter, or an OpenAI-compatible endpoint, your transcript and summary prompts are sent to that service. If the requirement is that nothing leaves the machine, use Ollama and confirm the app is not making outbound connections.
+
+**Supply chain.** Model files are downloaded by the app and stored locally. Because the project was the target of an impersonation attempt, verify that the repository you clone is the `Zackriya-Solutions` organisation and that release assets come from its official Releases page.
+
+**Multi-user access.** The community edition is a single-user desktop application. It is not designed to be exposed to a network, so there is no web UI to put behind a reverse proxy — and equally no web UI that needs one.
 
 ## FAQ
 
+**Q: Is Meetily a Docker or self-hosted server app?**
+**A:** No. Meetily is a desktop application for macOS and Windows, and it can be built from source on Linux. There is no Docker image and no web interface — it runs entirely as an app on your own machine, which is what makes the local-processing guarantee meaningful.
+
+**Q: Which repository is the official one?**
+**A:** `https://github.com/Zackriya-Solutions/meetily`. A lookalike repository at `github.com/meetily/meetily` was an impersonation that distributed malware and has been taken down by GitHub. The project was formerly named `meeting-minutes`, and GitHub redirects that old path to the current repository.
+
+**Q: Does Meetily join my meeting as a bot?**
+**A:** No. It captures audio locally from your microphone and, optionally, your system audio, so nothing is invited into the call and no participant sees a bot join.
+
 **Q: Can Meetily transcribe meetings in languages other than English?**
-**A:** Yes. Whisper supports 99+ languages. Set `WHISPER_MODEL` and the model will auto-detect the language. Multilingual meetings are handled, though accuracy varies by language and accent.
+**A:** The Whisper models are multilingual, so non-English meetings are supported. The "Import & Enhance" feature also lets you re-transcribe an existing recording with a different model or language. Accuracy varies by language, accent, and audio quality.
 
-**Q: Does Meetily work with Zoom, Teams, or Google Meet recordings?**
-**A:** Not natively. Those platforms encrypt their recordings end-to-end. You would need to export the audio separately (local recording, native export) and feed the file to Meetily.
+**Q: Can I use it with Zoom, Teams, or Google Meet recordings?**
+**A:** Yes, through the Import & Enhance feature — import the audio file and Meetily generates the transcript locally. For live meetings you can also capture the system audio directly during the call.
 
-**Q: How does it handle multiple speakers?**
-**A:** Base Whisper transcribes speech but does not inherently label speakers. For multi-speaker diarization, you would need to layer a separate diarization tool (e.g., pyannote) on top.
+**Q: Does it work fully offline?**
+**A:** With Ollama configured as the summary provider, yes. Both transcription engines run locally, so once the model is downloaded the app needs no network connection. If you pick a cloud provider for summaries, the transcript is sent to that provider.
 
-**Q: Can multiple team members access the same Meetily instance?**
-**A:** Yes, by sharing the server URL. For multi-user access control, put Meetily behind a reverse proxy with authentication. Role-based access control is not built in.
+**Q: How is this different from Meetily Pro?**
+**A:** The community edition is free, MIT licensed, and open source, and includes local transcription, AI summaries, and the core features. Meetily Pro is a separate professional product with a different codebase, adding enhanced accuracy, custom summary templates, PDF/DOCX/Markdown exports, auto-meeting detection, speaker identification, and self-hosted deployment options for teams of 2 to 100.
+
+**Q: Can multiple team members share one Meetily instance?**
+**A:** Not in the community edition — it is a single-user desktop application. Team deployment is a Meetily Pro feature.
+
+**Q: Where do I get the installers?**
+**A:** From the official [GitHub Releases page](https://github.com/Zackriya-Solutions/meetily/releases/latest) or from [meetily.ai/downloads](https://meetily.ai/downloads). The current release at the time of writing is v0.4.1, which publishes a `.dmg` for macOS and `.exe` and `.msi` installers for Windows.
 
 ## Conclusion
 
-Meetily fills a specific gap: AI-powered meeting transcription with a hard privacy boundary. It is not trying to compete with Otter.ai on features — it competes on the one dimension that matters for regulated industries: your data never leaves your control.
+Meetily is a polished desktop application rather than a self-hosted service, and that distinction matters for how you evaluate it. If your requirement is "meeting intelligence with a hard privacy boundary", it delivers that: local Whisper or Parakeet transcription during the meeting, a summary from a local Ollama model, and storage that never leaves the laptop.
 
-If you have a VPS or a spare Linux machine and need meeting intelligence without a cloud dependency, Meetily is worth 20 minutes of setup time. The Docker install is clean, Whisper transcription quality is solid for clean audio, and the zero-telemetry model is verifiable with basic network monitoring.
+The trade-offs are equally concrete. There is no server to share with a team, no Linux binary to download, and automatic speaker identification sits behind Meetily Pro rather than in the open-source build.
 
-For teams that have ruled out cloud transcription due to legal or compliance requirements, Meetily is currently one of the most turnkey self-hosted options available.
+For an individual or a small team that has ruled out cloud transcription on compliance grounds and wants meeting notes without handing a vendor the audio, the free community edition is a genuinely capable option — and the official repository is the only place to get it.
+
+## Source and Accuracy Notes
+
+- Project page: [meetily.ai](https://meetily.ai/)
+- Official installers: [meetily.ai/downloads](https://meetily.ai/downloads)
+- Source repository: [github.com/Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meetily)
+- Releases: [github.com/Zackriya-Solutions/meetily/releases/latest](https://github.com/Zackriya-Solutions/meetily/releases/latest) — latest release v0.4.1, published 2026-09-12
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- HN launch thread: [news.ycombinator.com/item?id=45810161](https://news.ycombinator.com/item?id=45810161)
+- Install commands, model tables, and GPU detection order are quoted from the project's own `README.md`, `docs/BUILDING.md`, `docs/building_in_linux.md`, `frontend/README.md`, `frontend/src/lib/whisper.ts`, and `frontend/src/lib/parakeet.ts`
+- Repository metadata (31,936 stars, 3641 forks, MIT, `main` branch) read from the GitHub REST API on 2026-10-19
