@@ -8,10 +8,11 @@ const blogDir = path.join(root, 'apps/web/src/content/blog');
 const validCategories = new Set(['ai-setup', 'tutorial', 'dev-tools', 'self-hosted', 'review', 'news']);
 
 // The blog post template (see .blog-post-template.md) tightened its editorial
-// rules over time. Posts published before this date predate the current rules
-// and are grandfathered, otherwise every one of them has to be rewritten
-// before the validator can run at all. Raise this date to tighten enforcement.
-const CONVENTIONS_START = '2026-10-18';
+// rules over time, so posts were grandfathered under an earlier date while the
+// archive was backfilled. That backfill is done: this date now predates the
+// oldest post, so both tiers cover every file. Keep the constant so a future
+// split can move the boundary without touching the checks below.
+const CONVENTIONS_START = '2026-02-28';
 const blockedPhrases = [
   /Important rule/i,
   /duplicate coverage/i,
