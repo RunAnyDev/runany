@@ -11,7 +11,7 @@ const validCategories = new Set(['ai-setup', 'tutorial', 'dev-tools', 'self-host
 // rules over time. Posts published before this date predate the current rules
 // and are grandfathered, otherwise every one of them has to be rewritten
 // before the validator can run at all. Raise this date to tighten enforcement.
-const CONVENTIONS_START = '2026-10-19';
+const CONVENTIONS_START = '2026-10-18';
 const blockedPhrases = [
   /Important rule/i,
   /duplicate coverage/i,
