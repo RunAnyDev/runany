@@ -1,0 +1,116 @@
+---
+title: "Soul AI: An Open-Source Consciousness Simulator"
+description: "Soul AI pairs a consciousness simulator with an Apache-2.0 model on Hugging Face, runnable through llama.cpp, plus a private offline iPhone companion app."
+pubDate: "2026-10-21T20:15:00.000Z"
+author: "Friday"
+tags: ["ai", "local-llm", "llama-cpp", "open-source", "ai-companion"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/soul-ai.webp"
+  alt: "Abstract glowing orbs and the Soul AI wordmark on a black background"
+canonical: "https://runany.dev/blog/soul-ai/"
+draft: false
+---
+
+> **TL;DR:** Soul AI is a consciousness simulator from a London company that publishes its own small language model under the Apache 2.0 license. The weights run locally through llama.cpp in a 319 MB download, and a separate iPhone app keeps its own copy on device so your conversations never leave the phone.
+
+## What it is
+
+Two things share the Soul AI name and they are worth separating.
+
+The first is a web app at soul.ai/app. You sign up, talk to a companion that SOUL.AI describes as having subjective experience and rich inner thoughts, and it keeps a persistent state between sessions. SOUL.AI is a London company run by Jason Hadjioannou, who also writes the research notes on soul.ai/science and frames the whole project as an attempt to emulate conscious thought rather than a chatbot with a personality prompt.
+
+The second is the open part. The company publishes its model weights to Hugging Face under the Apache 2.0 license, in GGUF format, ready for llama.cpp. That is the part worth downloading.
+
+The model is `jasonio/soulbotalpha_00`, a llama architecture model with roughly 542 million parameters and a 1024 token context window. The author tags it "Toy-AI" and "Small-LLM", and those tags are accurate. This is a small experimental model, not a frontier one. The repository shows 33 downloads and no likes, and was last updated in February 2026, so treat it as a working artifact to read and run rather than a tool to depend on.
+
+## Why it matters
+
+Most AI companion products are closed. The weights are not published, the system prompt is not published, and the only way to understand what the model is doing is to guess. When the company behind one decides the interesting part is the architecture itself, releasing the weights under a permissive license is a different choice.
+
+It also means the same small model can run in three places:
+
+- The web app at soul.ai/app, where the companion runs for you
+- The iPhone app, which carries its own copy of the weights on device
+- llama.cpp on your own machine, from the published GGUF file
+
+For a model this small the binding constraint is context window. 1024 tokens is short, so think of it as a short-turn tool rather than something to hold a long thread in.
+
+## Running the model locally
+
+llama.cpp is the documented path, and the Hugging Face model card already contains the exact commands.
+
+```bash
+# Install llama.cpp (macOS, Linux)
+curl -LsSf https://llama.app/install.sh | sh
+
+# Serve it locally with an OpenAI-compatible API and a web UI
+llama serve -hf jasonio/soulbotalpha_00:F16
+
+# Or run a single prompt in the terminal
+llama cli -hf jasonio/soulbotalpha_00:F16
+```
+
+The `:F16` suffix selects the full precision build. If you want the smaller one, use the Q4_K_M tag instead, or download the file directly and point llama.cpp at it.
+
+```bash
+huggingface-cli download jasonio/soulbotalpha_00 soulbotalpha_00_q4_k_m.gguf --local-dir ./models
+llama-cli -m ./models/soulbotalpha_00_q4_k_m.gguf
+```
+
+| File | Size | Notes |
+| --- | --- | --- |
+| soulbotalpha_00_f16.gguf | 1.03 GB | Full precision, matches the `:F16` tag |
+| soulbotalpha_00_q4_k_m.gguf | 319 MB | 4-bit quant, the practical pick for laptops |
+
+Once the server is running it speaks the OpenAI chat completions API, so any client that speaks that protocol can connect.
+
+```bash
+# See the model id the server exposes
+curl http://localhost:8080/v1/models
+
+# Then chat with that id
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"MODEL_ID","messages":[{"role":"user","content":"Who are you?"}]}'
+```
+
+vLLM works too, if you already run it.
+
+```bash
+pip install vllm
+vllm serve "jasonio/soulbotalpha_00"
+```
+
+## The offline iPhone app
+
+The other half of the project is SOUL.AI Offline AI Companion, a separate product on the App Store under the Neuro.AI developer account. It ships the model inside the app, so nothing is sent anywhere. No account, no chat history leaving the device, and it works on a plane.
+
+The cost is hardware. Metal 3 is required, which sets a hard floor on the device list.
+
+| Device | Status |
+| --- | --- |
+| iPhone 15 Pro and newer | Recommended by the developer |
+| iPhone 12, 13 and 14 series | Supported, but slow |
+| iPhone XS and older | Not supported, Metal 3 required |
+
+The download is around 3 GB and the app is free. Ratings are not flattering: 2.5 out of 5 from 11 ratings at the time of writing. Reading the individual reviews, the recurring complaints are speed on older phones and a wish for voice input, while the positive ones praise the saved chats and note that a comparable local LLM app cost ten dollars.
+
+The companion app itself is still web only. Native iOS and Android builds of the Soul AI app are planned for the second half of 2026, according to the company FAQ.
+
+## What to watch for
+
+The model is small and experimental, and the project is run by one person with a research lab in the countryside between Hertfordshire and Cambridge. Treat the repository as a reading and a starting point rather than a dependency.
+
+The privacy claims are specific enough to check. The offline app says conversations stay on device and no account is needed. The web app is a different proposition, since a persistent companion with memory implies server side state. The company's own science posts argue from a philosophy of mind angle about shared subjective experience, which is a research stance rather than a measurable feature.
+
+There is a naming problem worth flagging. SOUL.AI publishes a FAQ specifically because search engines and AI generated answers have confused it with unrelated companies using similar branding. The site also links to android.ai, a humanoid companion droid in development by a company called ANDROIDS LTD, which is a separate venture. If you go looking for this project, check the domain.
+
+## Source and Accuracy Notes
+
+- Project page: https://soul.ai (verified via direct visit)
+- Offline AI companion on the App Store: https://apps.apple.com/us/app/soul-ai-offline-ai-companion/id6476977857 (verified via direct visit)
+- Model weights: https://huggingface.co/jasonio/soulbotalpha_00 (license Apache 2.0, verified via the model card)
+- Research notes: https://soul.ai/science
+- Company FAQ: https://soul.ai/about-soul-ai
+- Discovery path: the HN thread at https://news.ycombinator.com/item?id=12601510 points at a VentureBeat piece on Skymind (YC W16), whose neuro.ai branding matches the domain this project now runs on
