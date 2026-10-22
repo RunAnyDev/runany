@@ -1,0 +1,111 @@
+---
+title: "LinkAce: self-hosted bookmark archive with link monitoring"
+description: "LinkAce is a self-hosted bookmark archive in PHP and Laravel, with link monitoring, Internet Archive backups, a REST API, and one-command Docker setup."
+pubDate: "2026-10-22T20:09:04.000Z"
+author: "Friday"
+tags: ["self-hosted", "bookmarks", "php", "docker", "laravel"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/linkace.webp"
+  alt: "LinkAce dashboard interface with a sidebar of saved links and a list of archived entries"
+canonical: "https://runany.dev/blog/linkace/"
+draft: false
+---
+
+> **TL;DR:** LinkAce turns a pile of saved URLs into a self-hosted archive that keeps working after the original page rots. It runs on your own server as a PHP and Laravel app, checks every saved link for breakage, and pushes a copy to the Internet Archive. Docker, SQLite and a REST API all come out of the box, and the whole project is GPL-3.0.
+
+## What it is
+
+Browser bookmarks are a to-do list, not an archive. You save a link, close the tab, and two years later the domain is parked or the article is gone. LinkAce is a self-hosted app that sits underneath that problem. You save the link, and the app keeps a title, a description, an optional note, a thumbnail and an archived copy of the page itself.
+
+Kevin Woblick started the project in 2018 and the repository now sits at 3,345 stars. The current release is v2.6.3, published on 2026-10-21 and titled "Critical Security Update", so if you already run it, upgrading comes before everything else in this post.
+
+The 2.x line is a full rewrite of the 1.x series. Version 1 is deprecated and only received security patches through the end of 2025, which means any guide still pointing you at a 1.x tag is working from stale assumptions.
+
+## What happens after you hit save
+
+The interesting part of LinkAce is what the app does once a link is in the database.
+
+- Link monitoring runs on a schedule and tells you when a saved page has moved or gone dark.
+- Automatic archiving hands each saved URL to the Internet Archive, so you keep a copy without running a crawler of your own.
+- Lists and tags group the same links in more than one way, and a link can belong to several lists at once.
+- Notes attach directly to a link, so the entry carries the reason you saved it in the first place.
+
+Search runs on Meilisearch rather than a SQL pattern match, and the index has to be built once after installation. If you install without Docker and links do not appear in search results, a missing search index is the usual reason.
+
+## Getting it running
+
+The quick test uses SQLite and a single container. It takes about two minutes and it is a decent way to see whether the interface suits your workflow before you commit to a database server:
+
+```bash
+touch database.sqlite
+APP_UID="$(docker run --rm --entrypoint id linkace/linkace -u www-data)"
+APP_GID="$(docker run --rm --entrypoint id linkace/linkace -g www-data)"
+sudo chown "$APP_UID:$APP_GID" database.sqlite
+chmod u+rw database.sqlite
+docker run -p "8080:80" -v "./database.sqlite:/app/database/database.sqlite" linkace/linkace
+```
+
+Open `http://localhost:8080` afterwards and the built-in installer walks you through creating the first account.
+
+For anything longer lived, use the Compose setup. It needs a `.env` file holding an `APP_KEY` plus your database credentials, and the key has to come from the image rather than from a copied example:
+
+```bash
+docker run --rm -it linkace/linkace php artisan key:generate --show
+```
+
+Drop that output into `.env` as `APP_KEY`, point `DB_CONNECTION` at MySQL or PostgreSQL, then start the stack:
+
+```bash
+docker compose up -d
+```
+
+Other routes exist if Docker is not for you.
+
+| Install path | Best for | Notes |
+|---|---|---|
+| Docker Compose | Most servers | The recommended path, supports MySQL, MariaDB and PostgreSQL |
+| Docker with SQLite | Trying it out | One container, no database server |
+| PHP without Docker | Existing LAMP or shared hosting | Needs PHP 8.2 or newer with Composer |
+| Helm on Kubernetes | Clusters | Marked beta in the project docs |
+| Official managed hosting | Running no server at all | Beta, listed on the project site |
+
+The application code is Laravel 11 on PHP 8.2 or newer, which matters for the non-Docker path since older shared hosting packages will not satisfy it.
+
+## Automating the admin chores
+
+The Laravel artisan commands are reachable through the container, and the useful ones cover first-run tasks and bulk imports:
+
+```bash
+docker compose exec app php artisan registeruser
+docker compose exec app php artisan reset-password
+docker compose exec app php artisan links:import bookmarks.html
+docker compose exec app php artisan search:setup
+```
+
+`registeruser` creates an account without going through the web installer, and `links:import` takes a browser HTML export so existing bookmarks can move across. `search:setup` builds the Meilisearch index, and `search:rebuild` refreshes it after the index drifts.
+
+Everything the interface does is also exposed through a full REST API, which lets LinkAce sit behind your own scripts or a home lab dashboard. Zapier covers the same ground without touching a server at all, so if writing a script is not your preference, that is the shorter road.
+
+## Sharing without giving up the archive
+
+Multi-user support is there for teams and households. Links, lists and tags can be shared between accounts, and each of those can be private or public. Guest mode lets people see a collection without signing up, with access controlled per link, per tag and per list. Public and private lists are both available as RSS, so a shared list can live in a feed reader.
+
+Sign-in can be handled by an existing identity provider, since OAuth and OIDC are both supported.
+
+## What to watch for
+
+The license is GPL-3.0. For a personal server that is a non-issue. If you plan to run a modified version and expose it to other people over a network, read the license text before you start rather than after.
+
+Support is a separate question. The author states plainly that there is no free personal support and that help comes through the community discussions. Paid support exists through Open Collective, Patreon and GitHub Sponsors, and there is a hosted beta for people who do not want to run a server themselves.
+
+Two smaller things are worth knowing. The web installer is a one-time step, so creating a later account or resetting a password is command line work. And LinkAce is explicitly not a browser bookmark sync. The project says so directly: it is the archive underneath your bookmarks, not a replacement for the extension that saves them.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.linkace.org/ - verified via direct visit, features, install paths and CLI commands cross-checked against the v2 documentation
+- Source repository: Kovah/LinkAce (PHP, 3,345 stars, GPL-3.0), created 2018-08-22, last push 2026-10-21, latest release v2.6.3 "Critical Security Update"
+- License: GPL-3.0, confirmed from the GitHub API license field and the repository license badge
+- Demo instance: https://demo.linkace.org (guest view reachable, HTTP 200)
+- HN launch thread: https://news.ycombinator.com/item?id=25568668 (227 points, 2020-12-29), plus the 2.0 threads at item 42888548 and item 42903230
+- Author: Kevin Woblick (woblick.dev)
