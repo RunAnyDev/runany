@@ -1,0 +1,132 @@
+---
+title: "SimplePDF Copilot: Fill PDF forms by chat in the browser"
+description: "SimplePDF Copilot fills PDF forms by chat using client-side tool calling, so the document stays in the browser. BYOK or a local model."
+pubDate: "2026-10-22T05:15:00.000Z"
+author: "Friday"
+tags: ["pdf", "ai-tools", "webmcp", "privacy", "javascript"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/simplepdf-copilot.webp"
+  alt: "SimplePDF Copilot illustration showing an AI assistant filling a PDF form beside a browser editor"
+canonical: "https://runany.dev/blog/simplepdf-copilot/"
+draft: false
+---
+
+> **TL;DR:** SimplePDF Copilot puts a chat sidebar next to a browser based PDF editor, so you can ask it to fill fields, find clauses or delete pages while the PDF itself never leaves the browser. The Copilot app is MIT licensed and open source, and the model behind it can be Anthropic, OpenAI, DeepSeek, a local Ollama or LM Studio endpoint, or a provider you host yourself.
+
+## What it is
+
+SimplePDF Copilot is a reference implementation rather than a separate product. It pairs the SimplePDF editor (a hosted iframe) with a chat sidebar and wires the two together over an iframe `postMessage` bridge. You load a PDF, the sidebar opens, and you ask for things like "fill this form" or "what is this form about". The assistant writes values into the fields as it works, you click any field to correct it, and nothing is submitted until you approve it.
+
+The editor underneath is the commercial SimplePDF product, started seven years ago and used monthly by what the author says is more than 200k people, with most paying customers in healthcare. The Copilot half is the open source side. It sits in the `copilot/` folder of the `SimplePDF/simplepdf-embed` repository (408 stars, TypeScript) under an MIT license. The stack is TanStack Start with React 19 and Vite, the Vercel AI SDK for streaming and tool calling, Tailwind, Biome and Vitest.
+
+## Why the browser is the point
+
+Most "chat with your PDF" tools work by uploading the file, extracting text and OCR, then answering questions about the text. That answers the wrong question for anyone whose documents contain PII: the file itself never has to move, but the content does.
+
+SimplePDF Copilot takes a different route. Parsing, rendering and field detection all run client-side, so the PDF bytes stay in the browser. Only the text the model actually needs, plus your chat messages, go to the provider. Field detection uses CommonForms by Joe Barrow, with some post-processing heuristics layered on top by the SimplePDF author.
+
+That split is the whole product thesis. The author built it because healthcare customers handle documents where the privacy stakes are highest, and shipping a patient's form to a third party was not acceptable.
+
+## How the client-side tool calling works
+
+Tool calling is how an LLM takes actions. The interesting part here is where those actions run. The intent to call a tool comes from the model, but the execution happens in the browser against the iframe. Events pass back and forth over `postMessage`, and your server proxies nothing but the chat stream.
+
+```text
+Browser
+  +-- Chat sidebar (SimplePDF Copilot)
+  |     +-- postMessage --> SimplePDF editor iframe
+  |
+  +-- /api/chat --> your server
+                        +-- Vercel AI SDK --> Anthropic / OpenAI / DeepSeek
+```
+
+The model gets a fixed allowlist of tools, and the browser side executor is gated on that same list, so a model cannot reach an operation the app did not expose:
+
+```typescript
+const SHARED_TOOL_NAMES = [
+  'batchSetFieldValues',
+  'deleteFields',
+  'deletePages',
+  'detectFields',
+  'focusField',
+  'getDocumentContent',
+  'getFields',
+  'goTo',
+  'movePage',
+  'rotatePage',
+  'selectTool',
+  'setFieldValue',
+]
+```
+
+A finalisation tool is layered on top, and it does one of two things depending on mode: submit the document, or download it.
+
+Because tool execution is local, the data you expose to the model is a design choice rather than an accident. The hosted demo feeds the document content to the model, but the author notes that this connection could be cut by removing the tool that exposes it.
+
+## Running the demo locally
+
+No SimplePDF account is needed for the local demo. It runs against a shared workspace that whitelists exactly one origin, `http://localhost:3001`, so keep the dev port where it is:
+
+```sh
+git clone https://github.com/SimplePDF/simplepdf-embed.git
+cd simplepdf-embed/copilot
+npm install
+cp .env.example .env
+printf "\nVITE_SIMPLEPDF_COMPANY_IDENTIFIER=spdf-copilot\n" >> .env
+npm run dev
+```
+
+Open the chat sidebar, click "Bring your own provider", and paste a key from Anthropic, OpenAI or DeepSeek. You can also point it at any OpenAI-compatible endpoint such as Ollama or LM Studio, which is how the author has been testing fully local setups.
+
+The same editor also exposes its actions as WebMCP tools, a W3C Community Group draft standard for letting browser agents operate a site. The author confirmed in the launch thread that it already works with Chrome's built-in AI, and the docs describe the ChatGPT desktop app browser as another caller. You open the editor in an agent capable browser and ask, and the agent fills the form the way a script would.
+
+## Self-hosting it
+
+Self-hosting means you own the chat app, the system prompt and tool registry, the AI routing and the storage flow around the editor. The editor iframe itself stays hosted by SimplePDF. You need a Pro plan or higher, because running on your own domain requires white-labelling, programmatic editor control and an allowed origin in the SimplePDF dashboard.
+
+The template expects a Node 24 runtime and works unmodified on DigitalOcean App Platform, Cloudflare Containers, Vercel, Render, fly.io, Railway or your own Docker host. The environment surface is small:
+
+```env
+VITE_SIMPLEPDF_COMPANY_IDENTIFIER=your-company-subdomain
+DEMO_CHAT_API_KEY=sk-...
+DEMO_CHAT_MODEL=deepseek_v4_flash
+DEMO_RATE_LIMIT_TURNS=20
+DEMO_STT_OPENAI_API_KEY=sk-...
+REDIS_URL=redis://...
+IP_HASH_SALT=<openssl rand -hex 32>
+```
+
+Leave the demo variables unset and the deployment runs in BYOK-only mode, where each visitor brings their own key. Set all four and every visitor chats on your key, capped per IP by the turn count. That cap is the only cost control, so size it accordingly, and remember that with no invite gating, anyone who can reach the page can spend it.
+
+`REDIS_URL` is optional. Set it when you run more than one container so rate limit counters are shared, and set `IP_HASH_SALT` with it, otherwise the server refuses to boot.
+
+## Pricing
+
+| Plan | Price | What it includes |
+|---|---|---|
+| Free | $0 | Editing PDFs as an individual, no sign up, no watermarks |
+| Basic | $99/mo | Collect and manage submissions, share by link, email and webhook notifications, embed the editor, dashboard for 5 users, up to 2,500 documents and submissions per month |
+| Pro | $349/mo | Everything in Basic, custom branding, your own S3-compatible or Azure Blob storage, AI agent tools, dashboard for 25 users |
+| Premium | $899/mo | Everything in Pro, API access, SharePoint storage, audit logs, priority support |
+
+The site markets this as up to 80% cheaper than DocuSign or Adobe, which depends entirely on how much of the workflow you actually replace.
+
+## What to watch for
+
+AcroForms work, XFA does not. The author confirmed this on the launch thread, and it matters because plenty of government forms are XFA.
+
+Your chat messages do leave the device. The PDF stays in the browser, but the text the model needs and everything you type go to the provider you selected. The hosted demo routes through a rate capped proxy the author describes as DeepSeek V4 Flash, and the UI shows a warning when you start chatting. In your own deployment the same warning applies to whatever endpoint you configured.
+
+Voice input is a deliberate exception. Dictating into the composer records a clip in the browser and sends it when you confirm, either through the operator's server to OpenAI for transcription, or browser directly to a provider you configured yourself, never through SimplePDF's server.
+
+Then there are the rough edges. A commenter on the launch thread called the demo model quite small, and a bug where form labels reached the model mangled, which sent values into the wrong field, was reported and fixed by the author afterwards. The demo also has a turn limit that stops a third round of conversation. And the `?url=` parameter only accepts absolute URLs on your configured base-domain family, because the iframe is granted clipboard access and wired to the bridge, so framing an arbitrary site would hand it both.
+
+## Source and Accuracy Notes
+
+- Project page: https://copilot.simplepdf.com and https://simplepdf.com, verified via direct visit on 2026-10-22
+- Source repository: https://github.com/SimplePDF/simplepdf-embed, `copilot/` directory, MIT license, 408 stars and 38 forks at time of writing
+- License: MIT, confirmed from the repository LICENSE file and the package metadata
+- HN launch thread: https://news.ycombinator.com/item?id=47984675, 60 points and 29 comments on 2026-05-02
+- Field detection dependency: https://github.com/jbarrow/commonforms by Joe Barrow
+- Pricing and self-hosting details taken from the SimplePDF help pages on Copilot, self-hosting and WebMCP
