@@ -1,0 +1,107 @@
+---
+title: "Davit: A Native macOS GUI for Apple Containers"
+description: "Davit is a SwiftUI desktop app that manages Apple's Linux containers, with live stats, a file browser, compose import, and a docker-compatible CLI."
+pubDate: "2026-10-22T11:05:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "containers", "macos", "swift", "self-hosted"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/davit-macos-container-ui.webp"
+  alt: "Davit desktop app showing a dashboard of running containers with live CPU usage"
+canonical: "https://runany.dev/blog/davit-macos-container-ui/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** Davit wraps Apple's `container` platform in a native SwiftUI app, so Linux containers on Apple silicon stop being a terminal-only workflow. You get live CPU and memory per container, a file browser for the guest filesystem, compose import, and a `Davit` binary that accepts docker-style flags.
+
+## What it is
+
+Apple ships a Linux container runtime for Apple silicon called [`container`](https://github.com/apple/container). It is a genuinely different stack from Docker: every container is a lightweight virtual machine with its own kernel rather than a shared-host process, which buys isolation but costs you a VM boot and some of the muscle memory that Docker users have built up over a decade.
+
+Davit is a desktop front end for that stack. It is a SwiftUI application, not an Electron shell, and it talks to `container-apiserver` directly over XPC using Apple's own `ContainerAPIClient` library. The `container` command line binary is never invoked, even for things like logs and shells. The project's own description of it is a native Mac app for Apple's container platform, in the OrbStack and Docker Desktop space, free and MIT licensed.
+
+The project has moved quickly since it started in July 2026. It now sits at roughly 1,600 GitHub stars with an active release cadence, and the feature list covers most of what you would reach for a GUI for.
+
+| Capability | What Davit does |
+| --- | --- |
+| Dashboard | Service status, one-click start and stop, disk usage with reclaimable cleanup, aggregate CPU chart |
+| Container list | Live CPU, memory and IP per row, start/stop/kill/restart/delete, prune, search |
+| Detail view | Overview, streaming logs, live stats charts, raw inspect JSON, terminal, file browser |
+| Images | Pull with progress, pull latest digest, tag, delete, prune, per-layer size breakdown |
+| Volumes and networks | Create, delete, prune, browse volume files, subnet and internal network options |
+| Compose | Parses a compose file, previews exactly what it will create, then starts the stack |
+| Local DNS | Creates host DNS domains so containers resolve at `name.yourdomain` |
+| Registry auth | Signs in to Docker Hub, ghcr.io or any registry, honors docker credential helpers |
+| CLI | `Davit run`, `Davit compose`, `Davit exec` and more, with docker-style flags |
+
+## Why it matters
+
+Apple's container runtime is powerful and awkward at the same time. The awkward part is not the isolation model, it is that everything is a terminal command, and the platform ships no GUI at all. Docker Desktop and OrbStack both fill that gap for their own stacks, but neither covers Apple's `container` platform.
+
+That gap is what Davit walks into, and it does it in a way that respects the platform rather than wrapping it. Because it links Apple's API client directly, there is no shell-parsing layer and no docker shim. The app reads the same daemon state the CLI reads, so what you see in the dashboard is what `container system status` reports.
+
+Two design decisions stand out. The first is `Edit & Recreate`. Containers on this platform are immutable, so changing a port or an environment variable means creating a replacement. Davit handles that by opening its run sheet prefilled from the existing container, with the image's own entrypoint and environment subtracted, so you only see your customizations. It then swaps the old one for the new on confirmation.
+
+The second is the compose importer, which handles more than it has any right to. It parses `docker-compose.yml`, previews every service, named volume, network and the equivalent `container run` command per service, warns about anything it cannot support, and then creates the stack honoring healthchecks, profiles, `depends_on` conditions, `env_file`, and `${VAR}` interpolation with docker-style quoting rules. The platform's DNS cannot resolve compose service names, so Davit writes managed `/etc/hosts` entries into every running container of the project, mapping each service name to its current IP and refreshing them on every run.
+
+That last detail is the kind of thing that separates a real compatibility layer from a demo.
+
+## Getting it running
+
+Davit needs an Apple silicon Mac running macOS 15 or newer, and macOS 26 is recommended because that is what Apple's `container` 1.1 targets. The platform itself is a prerequisite the app cannot fully avoid, since `container-apiserver` and its runtime plugins are host launchd services that the API client talks to but does not run.
+
+On first launch, if the platform is missing, Davit downloads and installs it for you without asking for an admin password. You can also install the app itself with Homebrew:
+
+```sh
+brew install wouterdebie/tap/davit
+```
+
+Homebrew 6 asks you to trust the third-party tap on first use, so run `brew trust wouterdebie/tap` when prompted. Or grab the signed DMG from the releases page and drag it into Applications.
+
+From there the fastest path to something running is a small image with a visible port:
+
+```sh
+# Pull a tiny demo image and run it in the background
+Davit run -d -p 8088:80 nginxdemos/hello
+
+# Check which platform install Davit is driving
+Davit platform status
+```
+
+Visit `localhost:8088` and the page you get back shows its own hostname and IP from inside the container. The container's Ports row in the app also has an `Open in Browser` button.
+
+The binary doubles as a real CLI, not a thin wrapper. This is a compose workflow with the flags you would expect:
+
+```sh
+# Preview what a compose file will create, without creating it
+Davit compose plan -f docker-compose.yml
+
+# Bring the stack up in the background, tearing it down if the run fails partway
+Davit compose up -d --down-on-failure
+
+# Stream logs from one service
+Davit compose logs -f --tail 100 api
+```
+
+Flags follow docker's vocabulary, including clustered short forms such as `-it` and `-dit`. What does not map to the platform gets rejected loudly rather than silently ignored, so `--restart`, `--privileged`, `--gpus` and similar will tell you they are unsupported instead of pretending to work. Container signals cannot be forwarded to the guest process on this platform, which means Ctrl-C during an attached run detaches only, and the container keeps running.
+
+## What to watch for
+
+The compose importer has to compensate for a platform limitation, and compensation has edges. Containers recreated outside of compose keep stale `/etc/hosts` entries until the next `up` or `start`, and images without `/bin/sh` cannot be patched at all, so you get a warning instead of working service discovery. Resource limits behave differently than in Docker too: since each service is its own lightweight VM, the default container memory and CPU allowance is reserved per container rather than shared across the stack.
+
+AMD64 images need a decision up front. Davit detects amd64-only images automatically and, with Rosetta installed, adds the architecture flag for you along with a performance note. Without Rosetta the run is blocked, and the app shows the exact install command to copy.
+
+The app itself is signed and notarized, and in-app updates use Sparkle with EdDSA signatures over the update archive. That signing key is a trust root separate from the Developer ID certificate, so controlling the update feed alone is not sufficient to ship a malicious update. That is the correct design and worth noting on its own.
+
+On licensing, the project is MIT, which is unusual for this category and simpler than the alternatives.
+
+One caveat on scale: this is a single-maintainer project, created in July 2026 and iterating quickly. The feature surface is wide, and the compose importer in particular is doing a lot of work to paper over a platform gap. Expect sharp edges, and expect the compatibility details to shift as Apple changes the platform underneath.
+
+## Source and Accuracy Notes
+
+- Project page: https://davit.app — verified via direct visit
+- Source repository: wouterdebie/davit (Swift, MIT, roughly 1,600 stars as of October 2026)
+- Apple container platform: https://github.com/apple/container — the underlying runtime Davit drives
+- License: MIT, confirmed from the repository LICENSE file
+- HN launch thread: https://news.ycombinator.com/item?id=48821848 — "Show HN: Davit, a Apple Containers UI", 389 points, July 7, 2026
