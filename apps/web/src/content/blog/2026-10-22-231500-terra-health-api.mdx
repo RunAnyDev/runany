@@ -1,0 +1,124 @@
+---
+title: "Terra: one API for 500+ wearables and health data sources"
+description: "Terra turns Fitbit, Garmin, Oura and Strava data into one normalized API with SDKs for Python, TypeScript, iOS, Android and Flutter."
+pubDate: "2026-10-22T16:08:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "api", "wearables", "python", "typescript"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/terra-health-api.webp"
+  alt: "Terra API dashboard for connected fitness and health data sources"
+canonical: "https://runany.dev/blog/terra-health-api/"
+draft: false
+---
+
+> **TL;DR:** Terra exposes Fitbit, Garmin, Oura, Strava and dozens of other wearable services through one normalized REST API, so your app reads sleep, workouts and body metrics the same way no matter which device a user owns. Generated Python and TypeScript clients ship alongside mobile SDKs for iOS, Android, React Native and Flutter. Paid plans start at $499 a month and are metered in credits.
+
+## What it is
+
+Terra is a YC W21 company that started out as an API for putting wearables in apps. The product now sits in front of a long list of providers: Oura, Fitbit, Garmin, Polar, COROS, WHOOP, Strava, Zwift, Withings, Google Fit and others. You authenticate a user once against Terra, then read their data through the same endpoints regardless of which device they wear.
+
+Every payload comes back normalized. A Garmin sleep record and an Oura sleep record are both results from `client.sleep.fetch(...)` with the same fields, so a chart in your app does not care where the data came from. That normalization is the product itself. The provider integrations are just the plumbing behind it.
+
+The company also sells past wearables now: lab reports, DNA tests, health scores, rewards, and an AI interface for building models on the same feed. The site claims 500+ wearables, sensors and blood testing providers. The public integrations endpoint I called returns 80 provider identifiers, so read 500+ as the wider catalog covering lab partners and destinations, not a count of wearable vendors.
+
+## Why it matters
+
+Building health features directly against vendors is a treadmill. Fitbit alone wants its own OAuth app, its own rate limits and its own response format, and Garmin, Oura and Strava each want another. Every provider needs client-secret handling, token refresh and a mapping from its field names to yours. Then you test against all of them.
+
+Terra turns that into one partner relationship with the vendors and an OAuth flow you implement once. The `authenticateUser` call returns a URL your user visits to link their own account, and after that the data arrives normalized, on demand or as a webhook. A health app can ship with Garmin and Oura support without writing two provider clients.
+
+## Getting it running
+
+The Python client is generated with Fern and published as `terra-python`.
+
+```bash
+pip install terra-python
+```
+
+```python
+from terra import Terra
+
+client = Terra(
+    dev_id="YOUR_DEV_ID",
+    api_key="YOUR_API_KEY",
+)
+
+integrations = client.integrations.fetch()
+```
+
+Linking a user's own account is one call. The `resource` argument names the provider, and `reference_id` ties the result back to your own user record.
+
+```python
+client.authentication.authenticateuser(
+    resource="FITBIT",
+    reference_id="user_1234",
+)
+```
+
+The TypeScript client is published as `terra-api` on npm and follows the same shape.
+
+```typescript
+import { TerraClient } from "terra-api";
+
+const client = new TerraClient({ apiKey: "YOUR_API_KEY", devId: "YOUR_DEV_ID" });
+await client.integrations.fetch();
+```
+
+Under the hood both clients hit `https://api.tryterra.co/v2` with two headers, `dev-id` and `x-api-key`, so a plain curl works as well.
+
+```bash
+curl -H "dev-id: $TERRA_DEV_ID" \
+     -H "x-api-key: $TERRA_API_KEY" \
+     https://api.tryterra.co/v2/integrations
+```
+
+Health data lives in resources separate from the auth calls, and every one of them has a `fetch` method:
+
+- `activity` and `plannedworkout` for workouts and sessions
+- `sleep` for sleep records
+- `body` for weight and body composition
+- `daily` for daily summaries
+- `nutrition` for calories and intake
+- `menstruation` for cycle data
+- `athlete` for athlete-level metrics
+- `user` for account state and identifiers
+
+`activity`, `body`, `nutrition` and `plannedworkout` also accept `write` and `delete`, so Terra can push data back to a provider rather than only reading from it.
+
+Most of this traffic lands on a phone, and the mobile SDKs live in their own repositories with their own release cadence.
+
+| SDK | Repository | License | Last push |
+| --- | --- | --- | --- |
+| iOS | `tryterra/TerraiOS` | MIT | 2026-10-13 |
+| React Native | `tryterra/terra-react` | MIT | 2026-10-22 |
+| Flutter | `tryterra/terra-flutter` | BSD-3-Clause | 2026-10-21 |
+| Android | `tryterra/TerraAndroid` | none listed | 2023-04-18 |
+
+## Pricing
+
+Two public tiers, and the unit is credits rather than requests.
+
+| Plan | Price | Included |
+| --- | --- | --- |
+| Quick Start | from $499/month | 100,000 credits, unlimited integrations and destinations, mobile SDK, connection widget |
+| Enterprise | custom | 24/7 engineering support, custom integrations and destinations, MSAs and SLAs, signed BAA, dedicated server |
+
+Both tiers carry a 30-day money-back guarantee. Real-time streaming is an add-on on Quick Start rather than part of the base plan.
+
+## What to watch for
+
+Credits are the number to model carefully before you commit to a polling interval. A "request" is not the same thing across providers, so your bill depends on how many users sync and how often, not on how many screens you build.
+
+The license picture is uneven. The three actively maintained mobile SDKs carry MIT or BSD-3-Clause, while the generated `terra-client-python` and `terra-client-js` repositories have no LICENSE file at all. The Python package is at version 1.1.0 on PyPI and requires Python 3.8 or newer.
+
+Two smaller things. `TerraAndroid` has had no commit since April 2023, so the maintained Android route is the React Native SDK rather than the native one. And because the whole catalog is health data, consent, retention and BAA terms become part of your contract rather than a checkbox you tick.
+
+## Source and Accuracy Notes
+
+- Project page: https://tryterra.co, verified by direct visit on 2026-10-22
+- API reference: https://docs.tryterra.co/reference, with endpoint paths, auth headers and the base URL read from the generated clients
+- Source repositories: `tryterra/terra-client-python`, `tryterra/terra-client-js`, `tryterra/TerraiOS`, `tryterra/terra-react`, `tryterra/terra-flutter`, `tryterra/TerraAndroid`
+- Licenses: MIT for the iOS and React Native SDKs, BSD-3-Clause for Flutter; the Python and TypeScript client repositories have no LICENSE file
+- Provider count: 80 identifiers returned by a live GET against `https://api.tryterra.co/v2/integrations`
+- HN launch thread: https://news.ycombinator.com/item?id=29118517, Launch HN on 2021-11-05
