@@ -1,0 +1,165 @@
+---
+title: "NullClaw: a 678 KB Zig runtime for AI agents"
+description: "NullClaw is a MIT-licensed Zig runtime for autonomous AI agents: a 678 KB static binary that boots in under 2 ms with 50+ providers."
+pubDate: "2026-10-22T15:09:00.000Z"
+author: "Friday"
+tags: ["ai-tools", "zig", "self-hosted", "ai-agents", "cli"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nullclaw.webp"
+  alt: "NullClaw social card showing the nullclaw/nullclaw repository name, the tagline about autonomous AI assistant infrastructure written in Zig, and the project statistics"
+canonical: "https://runany.dev/blog/nullclaw/"
+draft: false
+---
+
+> **TL;DR:** NullClaw is a single-binary AI agent runtime written in Zig, shipping at 678 KB with roughly 1 MB of peak RAM and a cold start under 2 ms on Apple Silicon. One executable covers 50+ model providers, 35+ tools, 19 channels, MCP, and sandboxed shell and file access, with a config format that stays compatible with OpenClaw. The project is MIT licensed with 8,131 stars, and young enough that its docs badge still resolves to a 404.
+
+## What it is
+
+NullClaw is an autonomous AI agent runtime, not a chatbot front end. The whole system compiles to one static binary with no runtime dependency beyond libc, and the project describes it as the smallest fully autonomous AI assistant infrastructure, booting in under 2 ms on a modern laptop and under 8 ms on a 0.8 GHz edge core.
+
+That framing matters because most agent frameworks assume a Python or Node process with a cloud API on the other end. NullClaw assumes a cheap box: a single-board computer, a $7 VPS, an ARM board with a megabyte of free RAM. The GitHub repository was created on 2026-02-16 and had 8,131 stars and 945 forks when this was written, with the most recent push on 2026-10-08.
+
+Everything else in the project is arranged around that binary:
+
+- **Providers** multiplex OpenRouter, OpenAI-compatible endpoints, and custom local or remote URLs, with automatic model discovery, key rotation, and rate limit handling.
+- **Tools** cover shell commands, file operations, and custom scripts behind approval policies, allowlists, timeouts, and resource limits.
+- **Channels** give you terminal, WebSocket, and a headless gateway mode.
+- **Memory** stores conversation history in SQLite by default, auto-compacts the context window, and can save and restore sessions.
+- **Security** layers pairing, workspace scoping, encrypted secrets, and sandboxes that pick between landlock, firejail, bubblewrap, or Docker.
+
+Around the runtime sits a small ecosystem. NullHub is a UI layer for setup and orchestration and is currently in beta, NullBoiler handles orchestration, NullWatch does observability, and NullTickets tracks tasks.
+
+## Why the footprint matters
+
+The project publishes a benchmark comparing itself to OpenClaw, NanoBot, PicoClaw, and ZeroClaw, normalized to 0.8 GHz edge hardware.
+
+| Project | Language | RAM | Startup on 0.8 GHz | Binary | Tests |
+| --- | --- | --- | --- | --- | --- |
+| OpenClaw | TypeScript | over 1 GB | over 500 s | about 28 MB | not reported |
+| NanoBot | Python | over 100 MB | over 30 s | scripts | not reported |
+| PicoClaw | Go | under 10 MB | under 1 s | about 8 MB | not reported |
+| ZeroClaw | Rust | under 5 MB | under 10 ms | about 8.8 MB | 1,017 |
+| NullClaw | Zig | about 1 MB | under 8 ms | 678 KB | 5,300+ |
+
+Treat these as vendor-reported numbers rather than neutral benchmark results. The stated method is `/usr/bin/time -l` on ReleaseSmall builds, run by the project itself, and it does not say how the peer projects were built or measured. The startup figures for the TypeScript and Python entries look extreme, so cold start on a weak core is probably the weakest part of the comparison rather than the strongest part of NullClaw's case.
+
+The honest read is that the Zig choice buys three things that are hard to fake: a binary you can copy onto a box with no runtime, a resident set small enough to share with whatever else runs there, and a build with no garbage collector in the path. If your agent needs to live on hardware you already own, that footprint is the feature.
+
+## Getting it running
+
+Homebrew is the shortest path on macOS and Linux.
+
+```bash
+brew install nullclaw
+nullclaw --help
+```
+
+There is also an official OCI image at `ghcr.io/nullclaw/nullclaw`, and it keeps state under `/nullclaw-data` so sessions survive a container restart.
+
+```bash
+docker run --rm -it \
+  -v nullclaw-data:/nullclaw-data \
+  ghcr.io/nullclaw/nullclaw:latest status
+```
+
+Building from source needs Zig 0.16.0 exactly. The docs are explicit that other Zig versions are unsupported and may fail to build, and `zig version` has to print `0.16.0` before you start.
+
+```bash
+git clone https://github.com/nullclaw/nullclaw.git
+cd nullclaw
+zig build -Doptimize=ReleaseSmall
+zig build test --summary all
+```
+
+## Configuration and channels
+
+The interactive setup wizard writes `~/.nullclaw/config.json`, and you can hand it credentials instead of typing them.
+
+```bash
+nullclaw onboard --interactive
+nullclaw onboard --api-key sk-... --provider openrouter
+```
+
+The file uses snake_case keys and follows the OpenClaw config structure, so a migrated setup is mostly a rename rather than a rewrite. This is the whole shape of it:
+
+```json
+{
+  "models": {
+    "providers": {
+      "openrouter": {
+        "api_key": "YOUR_OPENROUTER_API_KEY"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/anthropic/claude-sonnet-4"
+      }
+    }
+  },
+  "channels": {
+    "cli": true
+  },
+  "memory": {
+    "backend": "sqlite",
+    "auto_save": true
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 3000,
+    "require_pairing": true
+  },
+  "autonomy": {
+    "level": "supervised",
+    "workspace_only": true,
+    "max_actions_per_hour": 20
+  }
+}
+```
+
+Once that is in place, the commands you actually reach for are short.
+
+| Command | What it does |
+| --- | --- |
+| `nullclaw help` | Top level command summary |
+| `nullclaw version` | Print the running version |
+| `nullclaw agent -m "..."` | Run a single prompt |
+| `nullclaw gateway` | Start the long-running gateway |
+| `nullclaw status` | Check runtime state |
+
+`autonomy.level` and `max_actions_per_hour` are the two knobs to think about before pointing an agent at anything real. The supervised level and the hourly cap exist so a runaway tool loop has a ceiling, and `workspace_only` keeps file access inside the workspace directory.
+
+## Putting it on a public box
+
+The most convincing use of NullClaw so far came from a Show HN thread in March 2026, where George Larson put an agent on a $7/month VPS and used IRC as the transport layer. The split he describes is worth copying:
+
+```text
+visitor -> georgelarson.me/chat -> gamja web IRC client
+        -> wss://nullclaw.georgelarson.me:443
+        -> Cloudflare proxy -> ergo IRC server (LarsonNet)
+        -> #lobby -> nully (nullclaw agent)
+        -> #backoffice -> ironclaw (private agent, separate box over Tailscale)
+```
+
+Two agents, two machines, two trust boundaries. The public one handles greetings and can clone public repos to back up its claims about his work. The private one holds email and calendar access and only answers what gets routed to it over the private channel. The reason to pick IRC over a WebSocket or Discord is that he owns the whole stack, the client fits a terminal UI aesthetic, and there is no vendor in the middle.
+
+## What to watch for
+
+The project is young and moving quickly. The repository was created in February 2026, so most of the surface area, the provider list, and the channel count are likely to shift. The docs badge in the README points at `nullclaw.github.io`, and that host currently returns a 404; the real documentation lives in the repository under `docs/en/`.
+
+The NullHub UI is still in beta, and the surrounding ecosystem (orchestration, observability, task tracking) is separate software that will not necessarily move in step with the runtime.
+
+The benchmark numbers above come from the project itself, and the peer comparison covers projects it competes with. If you are choosing between agents, run the same measurement on the one you would actually deploy.
+
+And the security posture deserves reading before you widen any permission. The defaults are conservative (localhost gateway, pairing required, supervised autonomy, workspace scoping, sandboxing), and the interesting failure mode is not the binary but the channel you expose it through. Larson put a Cloudflare proxy and a bot protection layer in front of the public agent, and that was his choice, not a default from the project.
+
+## Source and Accuracy Notes
+
+- Project page: https://nullclaw.io, verified via direct visit on 2026-10-22
+- Source repository: nullclaw/nullclaw, MIT licensed, 8,131 stars and 945 forks at the time of writing
+- Configuration documentation: `docs/en/configuration.md` in the repository
+- Benchmark table: the project's own README, measured with `/usr/bin/time -l` on ReleaseSmall builds and normalized to 0.8 GHz edge hardware
+- HN launch thread: https://news.ycombinator.com/item?id=47536761, "Show HN: I put an AI agent on a $7/month VPS with IRC as its transport layer", 340 points on 2026-03-26
+- Deployment write-up: https://georgelarson.me/writing/2026-03-23-nullclaw-doorman/
