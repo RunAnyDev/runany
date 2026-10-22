@@ -1,0 +1,172 @@
+---
+title: "Mirascope: one decorator-based API for every frontier LLM"
+description: "Mirascope is an MIT-licensed Python and TypeScript toolkit for calling OpenAI, Anthropic, and Google models with decorators, tools, MCP, and tracing."
+pubDate: "2026-10-22T13:07:52.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai-tools", "python", "typescript", "mcp"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/mirascope.webp"
+  alt: "Mirascope social card showing the LLM anti-framework wordmark on a dark background"
+canonical: "https://runany.dev/blog/mirascope/"
+draft: false
+---
+
+> **TL;DR:** Mirascope is an MIT-licensed Python and TypeScript toolkit that puts frontier LLM calls behind decorators, with typed tools, Model Context Protocol clients, and OpenTelemetry tracing built in. The Python package sits at 2.8.1 on PyPI while the TypeScript SDK is still an alpha release, and the company has discontinued its hosted Mirascope Cloud in favor of pointing tracing at whatever OTEL backend you already run.
+
+## What it is
+
+Mirascope is an LLM toolkit maintained by Mirascope, Inc. and published under the MIT license. The GitHub repository is a monorepo with separate Python and TypeScript implementations alongside the website and unified docs, and it had 1,536 stars when this was written. The project was pushed the day before this post, so it is not a stalled repository.
+
+The homepage calls it "The LLM Anti-Framework" and lists four words under it: Build. Observe. Iterate. Ship. The bet is that most agent frameworks ask you to learn their vocabulary before you can write a prompt, and Mirascope declines that trade. You keep writing ordinary functions and you decorate them.
+
+The public surface is short. `llm.call` handles a single model call, `llm.prompt` defines a reusable prompt, `llm.tool` turns a typed Python function into a tool, `llm.mcp` talks to Model Context Protocol servers, and a separate `ops` module handles tracing and function versioning. Model identifiers are provider-prefixed strings such as `anthropic/claude-sonnet-4-5` or `openai/gpt-5-mini`, so switching vendors is a string change rather than a rewrite.
+
+| Surface | What it does |
+| --- | --- |
+| `llm.call` | Decorates a function so calling it runs a model and returns a response |
+| `llm.prompt` | Defines a prompt once and calls it against any model |
+| `llm.tool` | Builds a tool from a typed function signature and docstring |
+| `llm.mcp` | Connects to MCP servers and exposes their tools to a call |
+| `ops` | OpenTelemetry tracing, spans, sessions, and function versioning |
+
+## Why it matters
+
+The recurring cost of LLM frameworks is the abstraction tax. You learn a message hierarchy, a chain or graph type, and a streaming protocol, and then your business logic ends up written in that framework's terms. When a provider quirk shows up and you need the raw request body, the framework does not surface it.
+
+Mirascope's answer is the decorator, and the payoff is testability. The decorated function keeps a normal Python signature and a normal return value, so you can assert on it in a unit test without mocking an SDK. Structured output is a Pydantic model rather than a string you parse by hand, and the agent loop is a `while` loop you can read top to bottom.
+
+There is a second reason the decorator shape matters: it composes with the rest of your stack. A tool is just a function, a trace is just a decorator, and both come from the same library, so there is no separate framework object graph to thread through your application.
+
+## Getting it running
+
+Mirascope needs Python 3.10 or newer. Install it with the `all` extra to get every provider, or pull extras one at a time.
+
+```bash
+pip install "mirascope[all]"
+```
+
+A first call is a decorated function, and the response object exposes `.text()` for the raw output.
+
+```python
+from mirascope import llm
+
+
+@llm.call("anthropic/claude-sonnet-4-5")
+def recommend_book(genre: str) -> str:
+    return f"Recommend a {genre} book."
+
+
+response = recommend_book("fantasy")
+print(response.text())
+```
+
+Adding structured output means passing a Pydantic model as `format` and calling `.parse()` on the result.
+
+```python
+from pydantic import BaseModel
+from mirascope import llm
+
+
+class Book(BaseModel):
+    title: str
+    author: str
+
+
+@llm.call("anthropic/claude-sonnet-4-5", format=Book)
+def recommend_book(genre: str) -> str:
+    return f"Recommend a {genre} book."
+
+
+book = recommend_book("fantasy").parse()
+print(f"{book.title} by {book.author}")
+```
+
+Tools follow the same pattern, and the agent loop is explicit. `execute_tools()` runs the tools the model asked for, and `resume()` feeds the results back in.
+
+```python
+from pydantic import BaseModel
+from mirascope import llm
+
+
+class Book(BaseModel):
+    title: str
+    author: str
+
+
+@llm.tool
+def get_available_books(genre: str) -> list[Book]:
+    """Get available books in the library by genre."""
+    return [Book(title="The Name of the Wind", author="Patrick Rothfuss")]
+
+
+@llm.call("anthropic/claude-sonnet-4-5", tools=[get_available_books], format=Book)
+def librarian(request: str) -> str:
+    return f"You are a librarian. Help the user: {request}"
+
+
+response = librarian("I want a fantasy book")
+while response.tool_calls:
+    response = response.resume(response.execute_tools())
+```
+
+For Model Context Protocol servers the tools come from the server instead of your own code, and the flow is asynchronous. Both the call definition and its invocation have to sit inside the `async with` block, because the client holds a live connection to the server for the lifetime of that block.
+
+```python
+import asyncio
+from mirascope import llm
+
+
+async def main():
+    async with llm.mcp.streamable_http_client("https://gofastmcp.com/mcp") as client:
+        tools = await client.list_tools()
+
+        @llm.call("openai/gpt-5-mini", tools=tools)
+        async def assistant(query: str) -> str:
+            return query
+
+        response = await assistant("Give me a getting started primer on FastMCP.")
+        while response.tool_calls:
+            tool_outputs = await response.execute_tools()
+            response = await response.resume(tool_outputs)
+        print(response.pretty())
+
+
+asyncio.run(main())
+```
+
+Observability is a separate install, and it exports OpenTelemetry data rather than locking you into a vendor.
+
+```bash
+pip install "mirascope[otel]"
+```
+
+With that extra, the `ops` module covers a short list of things:
+
+- `@ops.trace` for function-level spans
+- `ops.session()` to group related traces under one session
+- `ops.span()` when you want an explicit span of your own
+- `@ops.version` to hash a function's closure and expose a version number
+
+The versioning decorator computes a hash over the function's source and its dependencies, plus a separate signature hash, so you can tell two prompt versions apart in production months later.
+
+## What to watch for
+
+Mirascope Cloud is gone. The company's own page states that the hosted product has been discontinued and that the Python and TypeScript SDKs are where the effort is going, with observability delegated to OpenTelemetry-compatible backends such as Langfuse, Jaeger, or Datadog. If you were on Cloud, tracing setup is the work item, and it is a migration to a backend you choose rather than a toggle in someone else's dashboard.
+
+The two SDKs are at very different levels of maturity. Python is the mature one, with `mirascope` at 2.8.1 on PyPI. The TypeScript package on npm is still prerelease: its `latest` dist-tag points at `2.0.0-alpha.0` and the alpha channel sits at `2.8.1-alpha.0`. The version numbers line up, but a matching number does not mean matching stability. The docs treat v2 as current and keep v1 published as a legacy branch.
+
+MCP tools are always async, and the docs say so early enough to catch you. Read the Tools and Async guides first, and remember that the MCP client maintains a live connection, so hoisting the decorated function out of the `async with` block will not work.
+
+Old links rot quickly here. The 2025 launch thread pointed at `mirascope.com/learn/mcp/server/`, which now returns a 404. The current MCP guide lives at `mirascope.com/docs/learn/llm/mcp`, and the docs navigation splits into an `llm` section and an `ops` section with the v1 legacy tree still published alongside it.
+
+## Source and Accuracy Notes
+
+- Project page: https://mirascope.com, verified via direct visit
+- Documentation: https://mirascope.com/docs
+- Source repository: Mirascope/mirascope, MIT licensed, 1,536 stars at the time of writing
+- Package versions checked: PyPI `mirascope` 2.8.1 requiring Python 3.10 or newer, npm `mirascope` latest `2.0.0-alpha.0`
+- HN launch thread: https://news.ycombinator.com/item?id=42894425, "Show HN: Simple to build MCP servers that easily connect with custom LLM calls", 57 points on 2025-02-01
+- Earlier HN thread: https://news.ycombinator.com/item?id=41284506, "Show HN: We're tired of LangChain and you are too, so we built Mirascope", 2024-08-18
+- Later HN thread: https://news.ycombinator.com/item?id=46772977, "Show HN: Mirascope - The LLM Anti-Framework", 2026-01-26
+- Cloud discontinuation notice: https://mirascope.com/cloud
