@@ -1,0 +1,130 @@
+---
+title: "Lattice: OKRs, reviews and 1:1s with an API behind them"
+description: "Lattice puts OKRs, performance reviews, 1:1s and engagement surveys in one HR platform, with a documented Talent API and an MCP server on top."
+pubDate: "2026-10-22T09:13:00.000Z"
+author: "Friday"
+tags: ["hr-tech", "okr", "api", "mcp"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lattice.webp"
+  alt: "Lattice logo and wordmark from the company's own product hero image"
+canonical: "https://runany.dev/blog/lattice/"
+draft: false
+---
+
+> **TL;DR:** Lattice pulls goals, reviews, 1:1s, feedback and engagement surveys into one place for managers, then hangs a real developer surface off it: a documented Talent API with bearer auth and a 240 requests per minute budget, plus an MCP server that lets an AI client draft and submit performance reviews. It is a sales-led SaaS rather than something you can try on a free tier, and the $4,000 annual floor tells you exactly who it was built for.
+
+## What it is
+
+Lattice launched in May 2016 with the pitch "help startups be productive through goal setting" (the original [TechCrunch launch story](https://techcrunch.com/2016/05/12/lattice-be-productive/), 27 points on [Hacker News](https://news.ycombinator.com/item?id=11687090), YC W16). Ten years later the homepage calls itself "the HR platform that people love" and claims 5,000+ teams. The platform page states the goal plainly: improve manager productivity, simplify people operations, and act on employee insights with an AI-powered platform.
+
+What makes it worth a look for a tools blog is the second half of that sentence. Underneath the app sits a documented HTTP API and an MCP server, which means the performance data is not trapped in a dashboard.
+
+## What sits on the platform
+
+The product page lists eight modules, and they cover the full arc of the performance management cycle:
+
+| Module | What it does |
+| --- | --- |
+| Performance | Drive performance when you need it most, identify your best and grow the rest |
+| Goals and OKRs | Set goals, track progress, align the team around what matters |
+| Engagement | Survey with AI-powered insights on the results |
+| Grow | Make career progression clear and develop people |
+| Compensation | Strategic pay with consistent, fair comp reviews |
+| Analytics | Turn people data into real-time insights and trend spotting |
+| AI Agent | Surface insights and answers for HR teams |
+| MCP | Draft, edit and submit performance reviews without leaving the conversation |
+
+There is also a bundle called Manager Tools, which the pricing FAQ defines as 1:1s, Feedback and Updates. Those come included with a purchase of Performance, OKRs and Goals, or Engagement, which is the part that surprises people who assume 1:1s are a separate line item.
+
+## The AI layer and where it stops
+
+The AI page breaks Lattice AI into Coaching, Review drafting, Note-taking, Analysis and Composition, with the AI Agent sitting on top. The review drafting feature synthesizes 1:1s, feedback, goals and updates into an evidence-backed draft. Lattice states that its applications are powered by OpenAI's machine-learning models, and that it is GDPR and SOC 2 compliant.
+
+The interesting part is the boundary. Lattice says plainly that its AI does not make performance decisions: not who gets promoted, not whether an employee is on track, and it is not the final communicator of nuanced feedback. That is a specific promise, and it is the one to hold the company to.
+
+Its own customer numbers make the same point from the other direction. GoCardless reportedly raised review participation from 62% to 100%, and Huge says it saved 2,000 hours by eliminating inefficient annual and peer review cycles.
+
+## Talking to Lattice from code
+
+The developer hub documents a "Talent API" with a live OpenAPI spec. The base URL depends on your company's data residency, so US customers and EMEA customers hit different hosts:
+
+| Residency | Base URL |
+| --- | --- |
+| US | `https://api.latticehq.com` |
+| EMEA | `https://api.emea.latticehq.com` |
+
+Authentication is a bearer token, and API keys carry the same privileges as the user who created them. Requests must be over HTTPS, and unauthenticated calls return a 401:
+
+```bash
+curl https://api.latticehq.com/v1/goals \
+  -H "Authorization: Bearer $LATTICE_API_KEY"
+```
+
+The API refuses browser calls on purpose. There is no CORS support, because exposing a bearer token to client-side JavaScript would hand it to anyone who opens the console. Anything you build for the browser needs a backend of your own.
+
+Rate limits are 240 requests per minute, and the response headers tell you where you stand:
+
+```http
+HTTP/1.1 200 OK
+X-RateLimit-Limit: 240
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1573501292
+```
+
+Going past the limit gives you a 429 with a Retry-After header. The limit is comfortable for scheduled syncs and tight for backfilling every review in the company in one pass.
+
+Writing is limited to goals. Creating a goal needs a name, a type, dates and at least one owner:
+
+```bash
+curl -X POST https://api.latticehq.com/v1/goals/ \
+  -H "Authorization: Bearer $LATTICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Ship the new onboarding flow",
+    "okrType": "objective",
+    "startDate": "2026-10-01T00:00:00Z",
+    "dueDate": "2026-12-31T00:00:00Z",
+    "ownerIds": ["f5bbeafa-9875-11e5-8627-9397a5211a96"]
+  }'
+```
+
+The spec itself is at `https://api.latticehq.com/v1/swagger` and imports straight into Postman. If you want to hand the docs to an agent, the hub publishes an index at `https://developers.lattice.com/llms.txt` with every page available as raw markdown.
+
+## The MCP piece
+
+MCP is one of the eight modules on the platform page, described as drafting, editing and submitting performance reviews without leaving the conversation. The developer hub hosts an MCP page and an OAuth callback route, and `mcp.latticehq.com` exists, redirecting to a Lattice login. The integrations directory lists Claude and OpenAI next to the HRIS crowd (ADP, BambooHR, Workday, Rippling, UKG, Zenefits, Personio, HiBob) and the everyday ones (Slack, Jira, Google Suite, Teams, Okta, Entra ID, Glean, Salesforce).
+
+This is the part worth watching. If the MCP server genuinely can submit a review, then an AI client becomes a participant in your performance process, and the "AI does not make performance decisions" line starts doing real work as a design constraint rather than a marketing note.
+
+## What it costs
+
+| Item | Price |
+| --- | --- |
+| Performance or Goals and OKRs, unbundled | $8 per month each |
+| Minimum annual agreement | $4,000 |
+| Billing | Annual only, USD only |
+| Manager Tools (1:1s, Feedback, Updates) | Included with Performance, OKRs and Goals, or Engagement |
+| Implementation and change management | No extra fees on performance management |
+| Support | Dedicated customer success contact on every contract |
+
+The buying process runs through a demo call, and there is no self-serve tier listed on the pricing page. Lattice University and the Lattice Rollout Toolkit exist as optional change management services.
+
+## What to watch for
+
+The floor of $4,000 a year rules out small teams, and annual-only billing in USD makes it awkward to budget across regions. EMEA customers also need to remember that their API host differs from the US one.
+
+For anyone planning to move data into their own models, the API is the path and the write side is narrow. You can create and update goals and read users, goals, feedback, review cycles and reviews, but you are not writing review decisions through the API. The MCP server may be the route for that, and it is the piece to test before committing.
+
+Data residency and AI governance are the two questions to ask in the demo. The AI features run on OpenAI models, and Lattice says it is GDPR and SOC 2 compliant, but your own legal team still has to sign off on employee review data flowing through a third party.
+
+## Source and Accuracy Notes
+
+- Project page: https://lattice.com - verified via direct visit on 2026-10-22
+- Platform modules: https://lattice.com/platform - verified via direct visit on 2026-10-22
+- Pricing and FAQ: https://lattice.com/pricing - verified via direct visit on 2026-10-22
+- AI features: https://lattice.com/ai - verified via direct visit on 2026-10-22
+- Developer hub and API docs: https://developers.lattice.com - verified via direct visit on 2026-10-22
+- Integrations list: https://lattice.com/integrations - verified via direct visit on 2026-10-22
+- Launch thread: https://news.ycombinator.com/item?id=11687090 - 27 points, 12 May 2016
+- Licensing: proprietary commercial SaaS, all rights reserved per the site footer
