@@ -1,0 +1,123 @@
+---
+title: "Krea 3: fast regional image editing for production"
+description: "Krea 3 edits only the region you change, returns native 2K in under 8 seconds, and costs $0.06 per image through a simple REST API."
+pubDate: "2026-10-22T06:08:06.000Z"
+author: "Friday"
+tags: ["image-editing", "ai-tools", "api", "design", "generative-ai"]
+category: "news"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/krea-3.webp"
+  alt: "Krea 3 wordmark with three edit boxes showing glass, blackletter and liquid chrome letter treatments"
+canonical: "https://runany.dev/blog/krea-3/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** Krea 3 is a Krea-built image editing model that redraws only the region you point at and leaves the rest of the frame untouched. Krea publishes it as roughly four times faster than Nano Banana Pro at $0.06 per 2K image, reachable through a plain REST API and shipped to fal, Baseten, Comfy and other distributors. Enterprise plans can run it on your own GPUs.
+
+## What it is
+
+Krea builds a creative suite that sits on top of dozens of third-party models, but Krea 3 is theirs. It is a new model trained for editing rather than generation, and the difference matters more than the label suggests. Most edits change a small part of an image, so Krea 3 locates the region first and spends its compute only on what actually changes.
+
+That design shows up in three concrete features. You can draw a region and say what should change there, and Krea reports the changed-pixel percentage against the original so you can see whether it drifted. You can name a hex color and it matches that value on the product and nowhere else in the frame. And you can supply up to eight reference images, then point at people, products, places and styles by number to compose them into one picture.
+
+Output is native 2K (2736 by 1536 pixels at 16:9), not an upscale of a smaller render. There is also a voice path: send a photo, then a voice note, and the edit comes back before you finish the next thought.
+
+## Why regional editing changes the economics
+
+Krea's own numbers put Krea 3 against the two models it expects to displace in product work:
+
+| Model | Price per 2K image | Seconds per edit |
+|---|---|---|
+| Krea 3 | $0.06 | under 8 |
+| Nano Banana Pro | $0.135 | 26.8 |
+| GPT Image 2.5 | $0.21 | 39.9 |
+
+At list price, a Krea 3 edit costs less than half of a Nano Banana Pro edit and roughly a third of a GPT Image 2.5 edit. For a studio producing hundreds of product variants a week, the latency is the larger lever. A 26.8-second round trip caps a single designer at about 134 edits an hour; under 8 seconds pushes that past 450.
+
+The regional constraint is what makes the price defensible. A model that regenerates the whole image has to redraw everything and hope the untouched parts survive. A model that only renders the changed region keeps the original pixels around it, which is the difference between a usable product mockup and another take.
+
+## Getting it running
+
+The API is a normal async job flow. Create a token at krea.ai/settings/api-tokens, post a request, poll the job or register a webhook.
+
+```bash
+curl -X POST https://api.krea.ai/generate/image/krea/krea-3 \
+  -H "Authorization: Bearer $KREA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Change the ceramic mug to cobalt blue, keep everything else",
+    "image_urls": ["https://example.com/photo.jpg"],
+    "resolution": "2K",
+    "aspect_ratio": "4:3",
+    "regional_edit": true
+  }'
+```
+
+The response comes back immediately with a job identifier and a status of `queued`:
+
+```json
+{
+  "job_id": "5f1c9d2e-7a44-4b03-9c11-2e5f8a6b1d90",
+  "status": "queued",
+  "created_at": "2026-10-22T06:00:00.000Z",
+  "completed_at": null,
+  "result": null,
+  "progress": null
+}
+```
+
+Statuses run `backlogged`, `queued`, `scheduled`, `processing`, `sampling`, `intermediate-complete`, `completed`, `failed` or `cancelled`. Fetch the result with `GET /jobs/{id}`, or set the `X-Webhook-URL` header on the original request to get a callback. Webhook deliveries are signed with ECDSA P-256, so verify the signature against the keys at api.krea.ai/.well-known/jwks.json and treat unsigned requests as unauthenticated.
+
+The request body accepts a handful of optional fields beyond the required prompt:
+
+- `image_urls` takes up to eight references, each as an external URL, a base64 data URI or an uploaded asset URL
+- `resolution` is `1K` or `2K`
+- `aspect_ratio` accepts `1:1`, `4:5`, `3:4`, `2:3`, `9:16`, `5:4`, `4:3`, `3:2`, `16:9` or `21:9`
+- `regional_edit` is a boolean that scopes the edit to the marked region
+- `seed` pins the result for reproducible runs
+- `thinking_mode` switches between `fast` and `high`
+
+Two headers are worth knowing about. `X-Api-Zero-Data-Retention` with a value of `1` opts a request out of data retention, and `X-Webhook-URL` is how the async callback gets wired in.
+
+## What the benchmarks actually show
+
+On Arena's Multi-Image Edit leaderboard, Krea 3 Ultra sits in fourth place:
+
+| Rank | Model | Arena score |
+|---|---|---|
+| 1 | GPT Image 2.5 Sunburst | 1,518 |
+| 2 | GPT Image 2.5 Flare | 1,479 |
+| 3 | GPT Image 2 (Medium) | 1,453 |
+| 4 | Krea 3 Ultra | 1,435 |
+| 5 | Gemini Nano Banana 2.1 | 1,432 |
+
+Krea also publishes a precision metric, defined as the share of pixels outside the edit area left unchanged, alongside a side-by-side edit comparison with Nano Banana Pro and GPT Image 2.5.
+
+## What to watch for
+
+The speed and price comparison on the launch page carries footnotes that are easy to skim past. Krea 3's sub-8-second figure is an illustrative playback time, not a live measurement, while the 26.8 and 39.9 second figures for the competing models are median request-to-result times taken from 12-image batches that include queue time. The comparison also states plainly that it uses pre-generated outputs rather than a live benchmark, and that the GPT Image 2.5 pricing is a draft estimate pending validation. The precision numbers come from a single attempt per model on one image at 2K. Treat all of it as directional.
+
+Self-hosting is real but enterprise-only. Krea confirms Krea 3 can run on your own GPUs in your own cloud, with license terms and hardware sizing handled through sales.
+
+Subscription pricing is built on compute units rather than image counts, and the tiers scale separately on both:
+
+| Tier | Monthly | Yearly per month | Compute units | Image concurrency |
+|---|---|---|---|---|
+| Free | $0 | $0 | 100 daily | 1 |
+| Basic | $9 | $5.25 | 5,000 | 4 |
+| Pro | $35 | $21 | 20,000 | 8 |
+| Max | $70 and up | $42 and up | 40,000 and up | Unlimited |
+| Business | $50 and up | $40 and up | 20,000 and up | Unlimited |
+
+The free tier includes Krea 3 but not a commercial license, and Max is where unlimited relaxed generations and 2,000-image LoRA training appear. Business adds custom roles, per-model access controls and no-training clauses, with SAML SSO, audit logs and indemnification reserved for Enterprise.
+
+Krea says the launch price is list price and expects it to fall rather than rise. The model also ships through more than a dozen distributors, including fal, Baseten, Comfy, Together AI, Envato, Civitai and Eachlabs, so the same weights are reachable without going through Krea's own billing.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.krea.ai/krea-3, verified via direct visit on 2026-10-22
+- API reference: https://www.krea.ai/docs/api-reference/krea/krea-3, endpoint schema read from the published OpenAPI document
+- Pricing and leaderboard figures are quoted from Krea's launch page, including their own caveats about illustrative timings and draft estimates
+- HN launch thread: https://news.ycombinator.com/item?id=50105648, 352 points and 108 comments on 2026-10-15
+- Krea 3 is a closed, hosted model. No source repository or license file is published for the weights themselves
