@@ -1,0 +1,114 @@
+---
+title: "Petal: open-source screen sharing for pair programming"
+description: "Petal is an open-source screen sharing app for pair programming. Shared windows arrive as real native windows, and it runs on macOS and Windows."
+pubDate: "2026-10-22T07:11:52.000Z"
+author: "Friday"
+tags: ["screensharing", "pair-programming", "open-source", "rust", "remote-collaboration"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/petal-open-source-screenshare.webp"
+  alt: "Petal homepage with the Open Source Pair Programming headline above a macOS app screenshot showing a shared code editor window"
+canonical: "https://runany.dev/blog/petal-open-source-screenshare/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** Petal gives every shared window its own movable native window on your desktop instead of a video tile, which makes it a better fit for pair programming than a grid-based screen share. It adds remote control, telepointers, browser joining, and an optional Gemini chat about the shared screen, and it can be self-hosted on your own LiveKit. The macOS build is signed and notarized, the Windows build is early and unsigned.
+
+## What Petal is
+
+The team behind CoScreen published Petal under Apache-2.0 in August 2026, and the Show HN thread pulled 228 points and 41 comments in mid-October. The scope is deliberately narrow: a screen sharing app for small engineering syncs, the three-to-eight person kind of session where pairing, code review, and joint debugging happen.
+
+What separates it from a video call is how a shared window lands on the other side. Most tools capture a window and re-render it as a video feed inside their own interface, so you get a tile you cannot move independently of the call window, floating on top of your actual work. Petal's compositor creates a real, borderless, independently movable native window on the receiving desktop. You can drag it next to your editor, resize it, push it behind your other windows, because it behaves like a window your operating system owns rather than a video embedded in someone else's app.
+
+## How the compositor works
+
+Each shared window becomes its own hardware-encoded H.264 stream, and the receiving side composites it into the window server instead of into a canvas inside the app. On macOS the capture path is ScreenCaptureKit and the encode path is VideoToolbox. On Windows it is Windows.Graphics.Capture with a D3D11 receiver compositor. Transport is WebRTC over a LiveKit SFU, which is also what makes the self-hosting path possible later on.
+
+Around that core sit the parts you would expect from a pair programming tool:
+
+- Share several windows at once, from a hover pill, a picker, or the global shortcut `⌘⌃⇧S`, each as a separate stream
+- Telepointers show every participant's cursor live over the window they are pointing at, and anyone can draw, with strokes fading after ten seconds
+- Persistent named rooms with one-click join and a `petal://join/` invite scheme carrying a short code
+- A browser client at meet.petal.live so people without the app can still join
+- Audio with echo cancellation, noise suppression, real mute from the gallery, and device hot-swap
+
+## Getting it running
+
+The macOS build is a signed and notarized universal DMG for macOS 13 or later, covering Apple Silicon and Intel Macs. The Windows build is an x86-64 NSIS installer.
+
+```bash
+# macOS: signed and notarized universal build
+curl -L -o Petal.dmg "https://app.petal.live/api/download?platform=macos"
+
+# Windows: x86-64 NSIS installer, unsigned, may trigger SmartScreen
+curl -L -o Petal-setup.exe "https://app.petal.live/api/download?platform=windows"
+```
+
+On macOS you drag Petal into Applications and launch it, and Gatekeeper recognizes it without a workaround. On first run the app walks you through the privacy permissions one at a time, and it will not let you past setup until the required ones are granted.
+
+| macOS permission | Required | What it unlocks |
+|---|---|---|
+| Screen Recording | Yes | Capturing any window content at all |
+| Microphone | Yes | Being heard in a meeting |
+| Accessibility | Yes | Replaying approved remote-control clicks and keystrokes |
+| Camera | No | Joining with your webcam on |
+
+Windows has no equivalent privacy-permission model, so the checklist is skipped entirely there.
+
+## Remote control and its consent model
+
+A viewer switches a shared window's mode segment to Control, and the sharer's setting decides what happens next: Ask me each time, which is the default, Allow automatically, or Off.
+
+Under the default, every request raises a consent prompt on the sharer's screen, so a remote teammate can never take the keyboard without an explicit yes. Several people can hold control of the same window at once, and a new request adds a controller rather than bumping the current one. Control ends when the controller switches back to View, the share stops, someone leaves the meeting, or the sharer turns the setting off, which drops every controller at once.
+
+Two boundaries are built in rather than bolted on. A browser participant's share can never be controlled, because a browser cannot inject input into an operating system, and the Control option is hidden for those shares instead of being shown and then failing. A sharer whose policy is Off does not advertise the capability either, so the button only appears when it will work.
+
+## AI chat on a shared window
+
+This is the feature with the most caveats, and the documentation is upfront about them. Any participant in a meeting can open a live conversation with Google's Gemini Live model about a window being shared. The model sees the shared window and hears the room, answers by voice and text, and can act on the window only with the sharer's explicit approval. It is off by default, and switching it on shows you both consequences before you confirm.
+
+The data path deserves a careful read. While a session is live, that window's content and the room's audio go to Google. By default Petal's hosted service supplies the credentials, with tight limits: a session token is single use, has to connect within 30 seconds, and sessions are capped per person per room per hour. You can paste your own Gemini key instead, which the docs price at roughly two to four cents per minute of AI chat, though a free-tier key may let Google use the content to improve its models.
+
+## Self-hosting
+
+Petal can run against infrastructure you operate. The supported path is a self-hosted LiveKit server plus a deployment of the repository's stateless backend, which mints short-lived, room-scoped LiveKit tokens. The LiveKit API secret stays on the backend and never reaches the desktop app or a browser, and the core token and room discovery APIs need no database, Redis, or separate Petal service.
+
+```bash
+cd backend
+npm install
+vercel --prod
+```
+
+```bash
+LIVEKIT_URL=wss://livekit.example.com
+LIVEKIT_API_KEY=petal_key
+LIVEKIT_API_SECRET=replace-with-a-long-random-secret
+PETAL_ALLOWED_ORIGINS=https://meet.example.com
+```
+
+The desktop client is then built with the backend URL embedded at build time.
+
+```bash
+cd apps/desktop
+PETAL_BACKEND_URL=https://petal-backend.example.com npm run tauri build
+```
+
+There is also a plugin registry, configured with a `PETAL_PLUGIN_REGISTRY_URL` and a minisign public key for signature checks, and an optional Gemini key for the AI chat feature.
+
+## What to watch for
+
+The project is pre-1.0 and says so plainly. Interfaces change, some features are further along than others, and the README flags remote control specifically as early. Windows support is early too: basic sharing, rooms, audio, and camera work, but the platform is described as incomplete and buggy under active development, with macOS the more mature client. The Windows installer is also not Authenticode-signed, so SmartScreen will likely warn on first download, while the Tauri updater signature still verifies automatic updates after install.
+
+The permissions page and the README disagree about Accessibility. The README lists it as optional, and the permissions page lists it as one of three required grants, because setup refuses to continue without it. If you follow the README, expect to be sent back through setup.
+
+Building from source is stricter than running the app. Petal runs on macOS 13 and later, but compiling it needs Xcode 26.x, because the `apple-metal` crate uses Metal APIs that do not resolve against the earlier SDK, along with Node 20 or later, stable Rust, and a `livekit-server` binary for local meetings. A build that never sets `PETAL_BACKEND_URL` has no token backend at all, which the README calls deliberate: a build from source should never quietly use someone else's service. Such a build is also unsigned and is not the same artifact as the notarized download.
+
+## Source and Accuracy Notes
+
+- Project page: https://petal.live, verified via direct visit on 2026-10-22
+- Documentation: https://petal.live/docs, with the permissions, remote control, AI chat, and self-hosting pages read directly
+- Source repository: kiruna-labs/petal, Rust with Tauri 2 and Svelte 5, Apache-2.0, 391 stars and 16 forks on 2026-10-22, last push 2026-10-20
+- HN launch thread: https://news.ycombinator.com/item?id=50092470, 228 points and 41 comments on 2026-10-14
+- The Petal name and logo are excluded from the Apache-2.0 grant, per the repository's TRADEMARKS.md file
+- Linux is listed as coming next on the homepage, and no Linux build is published
