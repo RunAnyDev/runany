@@ -1,0 +1,108 @@
+---
+title: "Sphinx: a Git hook that quizzes you on your code"
+description: "Sphinx is a Git hook that quizzes you on the code your AI agent just wrote. Free, MIT licensed, and it runs on your own Claude Code or OpenRouter plan."
+pubDate: "2026-10-23T16:06:17.000Z"
+author: "Friday"
+tags: ["dev-tools", "git", "ai", "cli", "open-source"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sphinx-understand.webp"
+  alt: "Abstract checkpoint gate where a stream of code lines pauses before a glowing question mark"
+canonical: "https://runany.dev/blog/sphinx-understand/"
+draft: false
+---
+
+> **TL;DR:** Sphinx hooks into Git and pauses a push to protected branches, then puts a question to you about what the code actually does. Answer wrong and it explains the gap, then asks a harder scenario. The reviewer model reads your committed diff without ever seeing the chat that produced it, and it runs on your existing Claude Code, Codex, or OpenRouter plan. Free and MIT licensed.
+
+## What it is
+
+Sphinx is a Git hook for agent-assisted development, published on npm as `sphinx-understand`. You install it once per machine, run `sphinx init` inside a repository, and from then on a push to `main` or `master` stops and waits while a reviewer model reads the change and questions you about it.
+
+The question is not about syntax or file names. It asks about behavior, failure modes, and invariants. The demo on the project page shows a webhook handler that saves a Stripe event ID before calling `charge()`, then asks what happens when Stripe times out and redelivers the same event. Get it wrong and Sphinx explains the gap and asks a harder variant on the same concept.
+
+What separates this from a generic code reviewer is where it runs. The reviewer model reads the committed change through read-only Git tools, so it sees the diff but not the conversation that produced it. It is checking the code on its own terms, not grading your prompt.
+
+## Why it matters
+
+The failure mode with coding agents is familiar. You describe a goal, the agent returns a plausible diff, and the loop repeats until something works. You ship it. Three weeks later someone asks how that code handles a timeout and you discover you cannot answer.
+
+Sphinx puts the checkpoint where the cost is cheapest, right before the push. It is practice rather than enforcement, but it makes one trade explicit: the minutes you spend answering are minutes you spend building a mental model of the system, which is the part that does not get outsourced.
+
+The Hacker News thread is worth reading for the pushback. Several commenters pointed out that the quiz tests the person rather than the diff, so a leftover debug print or an assertion weakened to match the bug it was meant to catch still ships. Others noted the questions are open book, meaning you can ask your own agent for the answer while you reply, and that a local hook is not something you can enforce on an agent that decides to remove it.
+
+## Getting it running
+
+Sphinx needs Node.js 22.19 or newer, Git, and macOS, Linux, or WSL. Native Windows is not supported yet.
+
+```sh
+npm install -g sphinx-understand
+sphinx install
+```
+
+The first command puts the `sphinx` binary on your PATH. The second does the real work: it sets your global Git `core.hooksPath`, chains any hooks you already had so they still run first, and asks which coding agents you use and which model should review. It suggests Haiku through Claude Code or GPT-6 Luna through Codex. To skip the prompts entirely:
+
+```sh
+sphinx install --yes --preset claude-economy --agents claude
+```
+
+Then set up the repository. This writes three files worth committing so collaborators share the same policy:
+
+```sh
+cd your-repo
+sphinx init
+sphinx doctor
+```
+
+`.sphinxconfig` holds the policy (branches, events, question depth). `.sphinxignore` lists paths that are never read, so edit it before your first check if the repo has generated or private files. `.sphinxcontext.md` is a short project description that every reviewer request receives, so keep secrets out of it. `sphinx doctor` verifies the hook and agent integrations are actually in place.
+
+After that, push normally:
+
+```sh
+git push origin main
+```
+
+Git prints a local questionnaire address and waits. On macOS the page opens in a background browser tab and your terminal stays where it was. Over SSH, or on Linux and WSL, Git prints the URL for you to open yourself. Terminal-first is available with `sphinx config --interface terminal`, and the questions then accept `/hint`, `/learn`, `/dispute`, `/skip`, and `/quit`.
+
+| Command | What it does |
+| --- | --- |
+| `install` | Set up machine-wide Git hooks and agent integrations |
+| `init` | Create the repository policy, ignore, and context files |
+| `doctor` | Check hook and integration coverage |
+| `status` | Show the current policy, pending checks, and recent skips |
+| `check` | Run a check in the terminal instead of the browser |
+| `yolo` | Toggle skipping checks for this repository |
+| `config` | Change reviewer models, distance, and limits |
+
+## How a check behaves
+
+A pass lasts 24 hours unless the code, the destination, or the policy changes, so pushing the same commit twice in a row does not ask twice. A matching push waits up to 25 minutes for you to pass, pause, or skip, and an agent shell may well time out before that.
+
+There are five outcomes, and they are not interchangeable:
+
+- **Correct answer.** The push continues.
+- **Wrong answer.** You get an explanation and a new scenario on the same concept. Disputes and errors never count as passing.
+- **Dispute question.** For a premise that is wrong or ambiguous. A bad question has to be fixed before that concept passes.
+- **Pause check.** Progress is saved and the push stops. Run the same `git push` later to pick up where you left off.
+- **Skip this time.** The push goes through immediately, even while the review is still running. Skips never count as passing.
+
+Question count scales with the size of the change. Small changes get up to one question, and documentation or trivial edits get none. Large changes get up to three at the default depth. A separate distance setting decides how close questions get to the code: `high` asks about design and how the change fits the system, `low` asks about implementation details and edge cases, and `mixed` is the default.
+
+```sh
+sphinx config --max-model-calls 30
+sphinx config --distance low
+```
+
+## What to watch for
+
+Code leaves your machine. The reviewer provider receives the changed code and related files from the commit, your answers, and `.sphinxcontext.md`. Ignored files are never read, and `.env` files, private keys, and common credential files are excluded by default, but ignore rules match paths, so a secret pasted into an ordinary source file still ships to the provider.
+
+There is no default cap on model calls. A typical check makes about 5 to 8 requests plus roughly one per answer, so set a cap and a spending limit if you point it at a paid endpoint. The Claude Code and Codex presets spend your existing plan allowance rather than separate API credits, and there is no Sphinx account or hosted service of its own.
+
+Version 0.1 is narrow in ways worth knowing. It covers local commits and pushes only, not web merges, CI-required checks, or deployments, and it cannot read binary file contents. If `gh` is signed in, a pass stamps the pushed commit, and `sphinx init --github-check` adds a Sphinx check to pull requests, but nothing here ever blocks a push.
+
+## Source and Accuracy Notes
+
+- Project page: https://sphinx-six-theta.vercel.app, verified via direct visit
+- Source repository: parthh01/sphinx, README read on 2026-10-23
+- npm package: `sphinx-understand` at version 0.1.13, MIT licensed
+- HN launch thread: https://news.ycombinator.com/item?id=50137950, Show HN posted 2026-10-18 with 253 points and 89 comments
