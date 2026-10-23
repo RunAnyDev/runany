@@ -1,0 +1,118 @@
+---
+title: "BIGWORDS.PAGE: turn any screen into a sign with a URL"
+description: "BIGWORDS.PAGE turns a phone, tablet or TV into a fullscreen sign, timer or QR board. The display lives in the URL fragment, so there is no backend, no account."
+pubDate: "2026-10-23T10:16:00.000Z"
+author: "Friday"
+tags: ["kiosk", "web-tool", "utilities", "typescript"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bigwords-page.webp"
+  alt: "BIGWORDS.PAGE rendering a fullscreen welcome sign from a single URL"
+canonical: "https://runany.dev/blog/bigwords-page/"
+---
+
+> **TL;DR:** BIGWORDS.PAGE turns any browser into a fullscreen sign, countdown or QR board, and the whole display lives in the URL fragment after the hash, so the server never sees the message and there is no account to create. The project is MIT licensed, written in TypeScript with Vite, and you can use the hosted site or build the static output and host it on your own.
+
+## What it is
+
+BIGWORDS.PAGE is a static site with one idea behind it: a display is a URL.
+
+The message comes first, then parameters, both after the hash:
+
+```text
+https://bigwords.page/#Hello World&bg=000000&fg=ffd60a&font=4
+└─ message ──┘ └──── parameters ────┘
+```
+
+Because the fragment never leaves the browser, one static file serves every display you could want. The server logs the same request for a birthday sign and a cafe Wi-Fi password. Three paths carry the whole product:
+
+- `/editor` is the builder, with a live preview and controls for color, font, slides, countdowns, animations and QR codes. It copies the finished link for you and can show that link as a QR code.
+- `/#...` is the viewer. Fullscreen, no controls, no bars. This is the link you paste into a chat or open on the screen itself.
+- `/docs` is the parameter reference, built from the repository's `docs/REFERENCE.md`.
+
+The viewer does layout for you. Text grows to the largest size that still fits the screen minus its padding, and the size is recalculated whenever the window resizes or rotates. Each slide is fitted on its own. On top of that sit a small Markdown subset, slides split on `||`, a `{countdown}` token that expands into a live timer, QR codes drawn in the browser, and seven bundled fonts.
+
+## Why it matters
+
+The problem is small and real. You have a second monitor, a tablet in reception, or a TV in the studio, and you want it to say one specific thing for the next hour. The usual answers are a dedicated app, which means install friction on every device, or a hosted dashboard, which means an account and a login screen left open on a public display.
+
+This inverts the arrangement. You write the display once, in a link, and that link can be pasted into a chat, scanned from a table, or left as a bookmark. The cafe showing the guest Wi-Fi password and the studio with an on-air sign run the same page.
+
+Privacy falls out of the design instead of being bolted on. The message sits in the fragment, so there is nothing for the operator to store and no history to request. A countdown that reveals a gate number never reaches the host as a log line.
+
+## Getting it running
+
+On the hosted site there is nothing to install. Type the message after the hash, add parameters, open the link:
+
+```text
+https://bigwords.page/#%23%20Gate%2012%0ABoarding%20now&bg=0b3d91&fg=ffffff&font=2
+```
+
+Percent-encoding is the part that catches people. A space is `%20`, a line break is `%0A`, and since `&` starts a parameter a literal ampersand has to be `%26`. A hash inside the message needs to be `%23`, otherwise the browser reads it as the start of the fragment.
+
+Self-hosting is the better choice for a display that has to keep working when the internet does not. The build is a folder of static files, and the supported way to run it is the Docker image, which serves the build with Caddy:
+
+```sh
+git clone https://github.com/SpeakingOfBrad/BIGWORDS.PAGE.git
+cd BIGWORDS.PAGE
+docker compose up -d --build
+```
+
+`compose.yaml` publishes no ports, because you are meant to attach the service to your reverse proxy's network and let the proxy handle TLS. The container runs Caddy as a non-root user with a read-only filesystem, all capabilities dropped except binding port 80, and memory and CPU capped.
+
+Building it yourself is a plain Vite app. It wants Node 22.22.2+, 24.15+ or 26+:
+
+```sh
+npm install
+npm run build      # static output in dist/
+npm run preview    # serve dist/ on port 4173
+```
+
+Three environment variables shape a build. `SITE_URL` adds canonical URLs, Open Graph tags, JSON-LD and a sitemap, all of which need an absolute origin. `NOINDEX=1` marks a staging instance private. `OPERATOR_DOCS` points at a Markdown file that gets appended to your `/docs`, which is the natural place to say who runs the instance and how to report abuse.
+
+### The parameters worth knowing
+
+| Param | What it does | Example |
+| --- | --- | --- |
+| `bg` | Background color, 6-digit hex without the hash | `bg=111111` |
+| `fg` | Text color, 6-digit hex without the hash | `fg=ffd60a` |
+| `font` | Bundled font, 0 to 6 | `font=4` |
+| `size` | Fixed size in px, vh or vw, or `auto` to fit | `size=8vw` |
+| `anim` | Animation: pulse, flash, shake, bounce, scroll, crawl, typewriter, fadein, rainbow | `anim=scroll` |
+| `timer` | Countdown length counted from page open | `timer=30s` |
+| `until` | Countdown target as an ISO 8601 datetime | `until=2027-01-01T00:00:00` |
+| `qr` | A URL, or a WIFI, phone, text, email or location code | `qr=https://example.com/menu` |
+| `interval` | Seconds per slide, from 0.2 to 86400 | `interval=3` |
+| `wake` | Keep the screen awake while the display is open | `wake=on` |
+
+Fonts carry their own licenses, and a font is only downloaded from the site when a display actually uses it, so nothing is pulled in from a third-party font service.
+
+| `font` | Family | License |
+| --- | --- | --- |
+| 0 | Your system font | not needed |
+| 1 | Inter | SIL OFL 1.1 |
+| 2 | Montserrat | SIL OFL 1.1 |
+| 3 | Roboto Slab | Apache 2.0 |
+| 4 | Bebas Neue | SIL OFL 1.1 |
+| 5 | JetBrains Mono | SIL OFL 1.1 |
+| 6 | Caveat | SIL OFL 1.1 |
+
+## What to watch for
+
+Bad values fail quietly. A malformed hex color, an unknown font or an impossible date falls back to that parameter's default instead of raising an error, so one typo in a link produces a display that looks nearly right. You find out when a screen is already showing the wrong thing.
+
+Messaging apps and shorteners also mangle the tail of a URL. A link ending in `#Hello!` usually arrives as `#Hello`, so encode the last character, `%21` for an exclamation mark and `%2E` for a period, and let the editor do it for you.
+
+Two display behaviors are worth checking before you rely on them. `size-min` sets a floor, and text that would need to be smaller than that runs off the edges of the screen rather than shrinking. And `{countdown}` is shown literally when neither `timer` nor `until` is set, which is easy to miss on a slide copied from somewhere else.
+
+A self-hosted instance keeps no operational history. There is no record of what was displayed, no way to see who opened a link, and no remote way to change a screen that is already up. For a public display the URL is the only lever you have, which is exactly the property that makes it private and exactly the property that makes it hard to manage.
+
+## Source and Accuracy Notes
+
+- Project page: [bigwords.page](https://bigwords.page/) — verified via direct visit
+- Parameter reference: [bigwords.page/docs](https://bigwords.page/docs) — verified live, built from `docs/REFERENCE.md`
+- Source repository: [SpeakingOfBrad/BIGWORDS.PAGE](https://github.com/SpeakingOfBrad/BIGWORDS.PAGE), MIT licensed, TypeScript, 185 stars and 15 forks at the time of writing, last pushed October 15, 2026
+- License: MIT, confirmed in the repository `package.json` and by the license file
+- HN launch thread: [news.ycombinator.com/item?id=49994443](https://news.ycombinator.com/item?id=49994443) — Show HN, 728 points and 166 comments, October 7, 2026
