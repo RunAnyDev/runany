@@ -1,0 +1,118 @@
+---
+title: "Trails: Claude Code finds the hidden links between 100 books"
+description: "Trails indexes 100 books with Claude Code, SQLite and Leiden clustering to surface thematic links across passages, one trail at a time."
+pubDate: "2026-10-23T05:16:00.000Z"
+author: "Friday"
+tags: ["claude-code", "ai-agents", "knowledge-graph", "embeddings", "tutorial"]
+category: "tutorial"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/trails-syntopic-reading.webp"
+  alt: "Trails, a browsable index of thematic links across 100 books"
+canonical: "https://runany.dev/blog/trails-syntopic-reading/"
+---
+
+> **TL;DR:** Trails is a browsable index over 100 non-fiction books, where each trail chains excerpts from different books through a shared idea. Pieter Maes built it by pointing Claude Code at a folder of EPUBs and giving it a set of CLI tools over the corpus. The interesting part is the pipeline underneath: chunked text, extracted topics, an embedding index in SQLite, and a Leiden-clustered topic tree the agent navigates to find connections worth writing about.
+
+## What it is
+
+Trails lives at trails.pieterma.es and does one thing: it connects passages you would not normally read next to each other. A trail titled "Useful Lies" links self-deception as a leadership tactic to evolutionary psychology, then to base rates in nuclear early warning systems. "Pacemaker Principle" runs from the Strait of Hormuz to the weakest link in distributed systems.
+
+The corpus is 100 non-fiction books, picked from Hacker News favourites. Maes had already scraped and visualised those earlier as hnbooks.pieterma.es. The site currently exposes 44 trails, and the books index shows which titles carry the most: Thinking in Systems has 15, Seeing Like a State 11, Superforecasting 9.
+
+What separates this from a reading list is how the trails get made. They are not hand-curated, and they are not summaries. They are sequences of passages selected by an agent working from a structured index of the entire corpus.
+
+## How the corpus gets built
+
+The pipeline is the part worth copying if you want to do something similar with your own library. Maes wrote it up in detail.
+
+EPUBs are parsed with selectolax, which he preferred over BeautifulSoup for speed and a simpler API. Text is split into sentences with wtpsplit using the sat-6l-sm model, then sentences are grouped into chunks of up to roughly 500 words without splitting a paragraph. Topic extraction runs through DSPy, calling Gemini 2.5 Flash Lite to pull three to five topic labels out of each chunk, plus a usefulness flag that filters out index entries, acknowledgements and orphan headers.
+
+That yields more than 100,000 topics, far too many to browse. Near-duplicate labels such as "Startup founder", "Startup founders" and "Founder of startups" get merged when their embedding distance falls under a threshold, and everything else lands in SQLite alongside the plain text, with embeddings stored in sqlite-vec.
+
+| Stage | Library | Output |
+|---|---|---|
+| EPUB parsing | selectolax | Plain text per book |
+| Sentence split | wtpsplit (sat-6l-sm) | Sentences |
+| Chunking | custom | Up to 500 words, paragraph-aligned |
+| Topic extraction | DSPy + Gemini 2.5 Flash Lite | 3 to 5 topics per chunk |
+| Embeddings | google/embeddinggemma-300m | Topic vectors in sqlite-vec |
+| Reranking | BAAI/bge-reranker-v2-m3 | Search ordering |
+
+## From 100,000 topics to a browsable tree
+
+Searching for "deception" gives you matches, but search alone cannot tell you what the corpus contains. So the topic collection becomes a graph via igraph, where edges come from embedding similarity and from the point-wise mutual information of topic co-occurrences. The graph is then cut into a tree by applying Leiden partitioning recursively until each group is small enough, using the Surprise quality function because it has no parameters to tune.
+
+That tree is the browsable shape of the corpus, roughly a thousand top-level topics. Gemini labels each group from the topics it contains, which is how you end up with entries as specific as "Incidents that frustrated Ev Williams" or "Names beginning with Da". Those are not all useful, and Maes says so plainly: the taxonomy is good enough for the agent to work with, not clean enough to read as a reference.
+
+Topics are embedded for search with google/embeddinggemma-300m and reranked with BAAI/bge-reranker-v2-m3. The CLI returns results in a semi-XML format where output is nested to encourage the agent to keep exploring, with each chunk carrying the other topics it contains:
+
+```xml
+<topics query="deception" count="1">
+  <topic id="47193" books="7" score="0.0173" label="Deception">
+    <chunk id="186" book="1">
+      <topic id="47192" label="Business deal"/>
+      <topic id="47108" label="Internal conflict"/>
+      <topic id="46623" label="Startup founders"/>
+    </chunk>
+    <chunk id="1484" book="4">
+      <topic id="51835" label="Gawker Media"/>
+      <topic id="53006" label="Legal Action"/>
+      <topic id="52934" label="Maskirovka"/>
+    </chunk>
+  </topic>
+</topics>
+```
+
+That sample is trimmed from the writeup, but the nesting is the point. A flat list of topic IDs tells the agent nothing about what else sits next to them.
+
+## How a trail gets written
+
+Trail generation runs in stages, and the agent drives all of them through the CLI. First it scans the library and the existing trails and proposes new trail ideas, mostly by browsing the topic tree into areas nobody has explored yet. Then it takes one specific idea, pulls seed topics from that first stage, browses many chunks, extracts the excerpt sequences, and decides on the order that best supports the insight. Last it adds highlights and edges between consecutive excerpts.
+
+Two details are worth stealing. The first is novelty as a ranking signal. A topic's novelty is the mean distance from its embedding's k nearest neighbours, and a book's novelty is the average novelty of the unique topics it holds. Results are ranked so that passages which are both relevant and novel come up first. The second is that excerpt cleanup happens late: Gemini strips EPUB artifacts, parsing errors, headers and footnotes only for excerpts that actually get shown, not during preprocessing, which saved a lot of tokens.
+
+The other lesson is about the agent itself. Maes started with a conventional pipeline of discrete LLM modules and hand-assembled contexts. Then he tried the opposite: Claude Code, the same debugging tools, and the prompt "find something interesting". It beat the hand-tuned pipeline immediately. He ended up using Claude Code as the main interface to the project, asking it what functionality it wished it had, and letting it propose and implement those improvements. His conclusion is that agents widened his ambitions, because revision became cheap enough to stop optimising for it.
+
+The CLI itself hides its expensive state behind a server process. The first call transparently starts a separate process that loads the embedding model and everything else costly, and later calls talk to it over Python's multiprocessing.connection.
+
+## Running the same stack yourself
+
+The libraries involved are ordinary Python packages:
+
+```bash
+pip install selectolax wtpsplit dspy sqlite-vec igraph
+```
+
+The index in SQLite ends up roughly like this:
+
+```sql
+chunks(id, book_id, text, word_count)
+topics(id, label)
+chunk_topics(chunk_id, topic_id)
+topic_embeddings(topic_id, vector)  -- sqlite-vec
+```
+
+What you still have to build is the agent-facing CLI, and that is the real work. Maes describes its primitives as finding all chunks associated with a topic similar to a query, finding topics that occur in a window of chunks around a given topic, finding topics that co-occur across multiple books, and browsing topics and chunks that are siblings in the topic tree. Those four are what turn a search index into something an agent can use to hunt for connections.
+
+## What to watch for
+
+The cost is real but bounded. Indexing 100 books took about 60M input tokens, roughly £10 in total, with Gemini 2.5 Flash Lite doing the bulk of the topic extraction. Excerpt cleanup and group labelling add to that, but the extraction pass dominates.
+
+There is no published code. The site links to no repository, and the CLI that makes it work is described in prose rather than released. You can rebuild the pipeline from the writeup, but you cannot clone it, and the prompt tuning that made the agent work is the part that would take longest to recreate.
+
+The corpus is books Maes owns. The 100 titles came from Hacker News favourites, so the selection is reproducible in spirit, but you would need the same EPUBs to get the same corpus, and they are not freely distributable.
+
+Finally, the novelty metric is a heuristic with a personality. Maes notes the agent gets pulled toward secrecy, systems theory and tacit knowledge, as if finding connections in a corpus summons Umberto Eco. The trails are better when the connection is genuinely surprising and worse when the agent is just filing three familiar themes under fresh labels.
+
+The site is worth an hour. Pick a topic you actually care about, search it, and follow a trail until it lands somewhere you did not expect.
+
+## Source and Accuracy Notes
+
+- Project page: https://trails.pieterma.es/ (verified via direct visit; the 44 trail count comes from the distinct trail links on the live homepage, and the per-book trail counts come from the live books index)
+- Writeup with the full method: https://pieterma.es/syntopic-reading-claude/ (primary source for the pipeline, the libraries, the cost and the quoted output format)
+- HN launch thread: https://news.ycombinator.com/item?id=46567400 (524 points, 146 comments, 10 January 2026)
+- Earlier iteration of the same corpus: https://hnbooks.pieterma.es (HN item id 41473518, 285 points)
+- Figures (100 books, 60M input tokens, about £10, 100,000 topics, roughly 1,000 top-level topics, 500-word chunks, 44 published trails) come from the author's writeup and site. The pipeline was not rebuilt and the numbers were not independently reproduced
+- The site publishes no source repository, so the CLI primitives and index schema described here come from the writeup rather than from reading code
