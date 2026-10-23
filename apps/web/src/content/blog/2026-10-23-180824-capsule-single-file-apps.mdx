@@ -1,0 +1,114 @@
+---
+title: "Capsule: pack an HTML app and its data into one file"
+description: "Capsule packs a small HTML app together with its SQLite data inside one .capsule file, so you can open it offline, move it between machines and send it like a document."
+pubDate: "2026-10-23T11:08:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai-apps", "local-first", "sqlite", "rust"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/capsule-single-file-apps.webp"
+  alt: "Capsule logo beside the words App and data in a single file"
+canonical: "https://runany.dev/blog/capsule-single-file-apps/"
+---
+
+> **TL;DR:** Capsule is a Rust and Tauri 2.0 desktop app that keeps a small HTML app and its SQLite data inside a single .capsule file, so the thing you share is a document that still works offline. Desktop builds cover macOS, Windows and Linux, with a browser version for quick previews. A built-in agent and the vendor's app-wizard prompt let you describe an app in plain language and get a working capsule back.
+
+## What it is
+
+Capsule is two things at once: a desktop app, and a file format for it. The author describes it as written in Rust with Tauri 2.0, and the .capsule extension is the container itself.
+
+Inside a .capsule file sits a SQLite database. The HTML that makes up the app, any images or PDFs it needs, and the data the user has entered all live in that one database. Two storage models are available inside the document: a plain localStorage key/value store, or a MongoDB-inspired collections API where each record is a document kept in a table. Data can be exported to CSV or JSON whenever you want it out.
+
+Because the app and the data travel together, a capsule behaves like a Word document that happens to be a program. The author's framing is that an Excel spreadsheet is also just a UI plus data in a single file, and so is this.
+
+There are two runtimes, and they are not equivalent:
+
+| Capability | Capsule Desktop | Capsule Web |
+|---|---|---|
+| Built-in AI coding agent with live previews and schema migration | Yes | No |
+| Open a .capsule by double-clicking it | Yes, on macOS and Windows | No |
+| Three-way merge for divergent copies | Yes | No |
+| Scoped network proxy with explicit host permissions | Yes | No |
+| Offline SQLite engine | Yes | Yes |
+| Save straight to your local disk | Yes | No |
+| Open and save inside Google Drive | No | Yes |
+| Install required | Yes | No |
+
+## Why it matters
+
+The problem is specific. Writing an HTML page is trivial now, and an AI assistant will write one for you in seconds. The moment you want to save anything inside it, you hit browser walls. A file opened from disk cannot write back to disk, IndexedDB is bound to an origin, and a sibling script file trips CORS before it ever runs. That is why so many personal tools end up as a hosted app with an account, a database and a monthly bill.
+
+Capsule sidesteps all of it by not being a browser tab. The desktop app runs the document inside a sandboxed webview with a strict Content Security Policy. No filesystem access unless it is granted, no network calls except to hosts you approve.
+
+The sweet spot is small and personal: a recipe box, a time and billing tracker, a checklist for a trip. The author put it plainly in the launch thread, describing it as an alternative to managing data in Excel, or downloading an app just to keep some recipes, without a SaaS subscription for either.
+
+## Getting it running
+
+Desktop builds are direct downloads, currently on the 0.5.2 line:
+
+```bash
+# macOS, Apple Silicon
+curl -LO https://downloads.withcapsule.app/v0.5.2/Capsule_0.5.2_aarch64.dmg
+# Windows 64-bit
+curl -LO https://downloads.withcapsule.app/v0.5.2/Capsule_0.5.2_x64-setup.exe
+# Linux, portable
+curl -LO https://downloads.withcapsule.app/v0.5.2/Capsule_0.5.2_amd64.AppImage
+```
+
+Linux packages also ship as .deb and .rpm. The browser version at https://withcapsule.app/web is the fastest way to look around, and it comes with ready-made templates.
+
+To make a capsule of your own, the project publishes an app-wizard prompt you can hand to any assistant:
+
+```text
+Please read the app wizard instructions at https://withcapsule.app/prompt.txt
+and help me design an app.
+```
+
+That prompt turns ChatGPT, Claude or Gemini into a guided interviewer that asks one question at a time across eight stages, then emits a complete HTML file you import into Capsule. It also defines quick commands so you can steer it mid-flow:
+
+```text
+/build                       generate the app now with the recommended defaults
+/skip                        accept the recommended default and move on
+/tweak add a due date field  adjust the last decision
+```
+
+The generated document follows a small set of Capsule conventions. Storage is either the key/value store or the collections API, and the accent color is set with a meta tag rather than by overriding CSS variables:
+
+```js
+// key/value option, plain localStorage
+localStorage.setItem('notes', JSON.stringify([{ id: 1, text: 'Buy oat milk' }]))
+```
+
+```html
+<meta name="capsule-theme-color" content="#38bdf8">
+```
+
+The desktop app also carries its own coding agent, which iterates on the document with live previews and migrates the schema when your fields change.
+
+## What to watch for
+
+Version 0.5.2 is pre-1.0, and the author says the file format specification is planned for the 1.0 release so other apps can read and write .capsule files. Until that lands there is no third-party tooling, and no public source repository was linked from the project page when this was written, even though the site describes Capsule as free and open source.
+
+Distribution has a catch that came up repeatedly in the launch thread. Recipients need the Capsule app installed for double-click to work, which draws the same objection people raise about needing a Java runtime. The web version covers part of that gap, but it cannot write files to your disk directly, so it sits closer to a viewer and editor than a full replacement.
+
+Sharing one file between two people also produces two copies. Capsule answers with a three-way merge tool, and every data entry carries a UUID and timestamp so two histories can be reconciled. The author describes the permission model as something he is still improving, and notes that each release ships migrations so data survives version jumps.
+
+Mobile is marked as coming soon, with iOS 16 and Android 9 as the stated floor. That matters more than it looks, because a capsule dropped into a chat is much harder to open on a phone than a PDF.
+
+## Where it fits
+
+The single-file app idea is not new. TiddlyWiki has packed a whole wiki into one HTML file for twenty years, Bento does it for slide decks, and Nash is a standalone editable HTML note. The File System Access API is the browser-native route, and it is the honest comparison point: it needs no installer at all, but it is Chromium-only, its ergonomics are rough, and it does not get around the origin rules that make local files awkward in the first place.
+
+Capsule takes the other branch. The app stays in HTML, but the data moves into standard SQLite tables inside the same file, so it can be queried with any SQLite tool, exported, merged and migrated, and it survives an update to the app. The price is the installer. The gain is a document you can hand to someone without asking them to sign up for anything.
+
+## Source and Accuracy Notes
+
+- Project page: https://withcapsule.app/ , verified by direct visit on 2026-10-23
+- Desktop downloads: https://downloads.withcapsule.app/v0.5.2/ , current release line 0.5.2
+- Browser version and templates: https://withcapsule.app/web
+- App builder prompt: https://withcapsule.app/prompt.txt
+- Launch thread: https://news.ycombinator.com/item?id=49712278 , 380 points on 2026-09-15, where the author describes the app as written in Rust with Tauri 2.0
+- License: the project page states Capsule is free and open source. No public source repository was linked from the site at the time of writing, and the author says the file format specification is planned for the 1.0 release so other apps can read or write .capsule files.
+- Platform floors as listed on the project page: macOS 12 Monterey or later, Windows 10 or later 64-bit, Linux through deb, rpm and AppImage, with iOS 16 and Android 9 marked as coming soon.
