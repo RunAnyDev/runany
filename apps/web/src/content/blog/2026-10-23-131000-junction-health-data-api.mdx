@@ -1,0 +1,143 @@
+---
+title: "Junction: one API for wearables and lab testing"
+description: "Junction (formerly Vital) puts 300+ wearables, normalized health data, and nationwide lab testing behind one API, with at-home collection across all 50 US states."
+pubDate: "2026-10-23T06:10:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "api", "health-tech", "typescript"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/junction-health-data-api.webp"
+  alt: "Junction health data API linking wearables and lab testing"
+canonical: "https://runany.dev/blog/junction-health-data-api/"
+---
+
+> **TL;DR:** Junction puts 300+ wearables and a nationwide US lab network behind one API, so a health app can pull normalized sleep, HRV and glucose data and order at-home lab tests without building either integration. It launched on Hacker News in 2022 as Vital, renamed itself Junction in March 2025, and now sells a flat $300 per month wearables plan, with lab testing reserved for a custom enterprise tier.
+
+## What it is
+
+Junction is infrastructure for teams that ship health features. One API covers two things that are usually two separate projects: reading normalized health data out of consumer devices, and ordering real lab tests on a user's behalf.
+
+The device side connects more than 300 providers and models, including Apple HealthKit, Android Health Connect, Oura, Garmin, Fitbit, Withings, Dexcom and Freestyle Libre. Incoming data lands in Junction's own schema instead of each vendor's, so sleep, heart rate, HRV, blood pressure, glucose, SpO2, ECG, activity, workouts and menstrual cycle all come back in a consistent shape.
+
+The lab side is what separates it from a fitness API. Junction routes orders across a network of partner laboratories covering all 50 US states, and runs patient service centers in New York and New Jersey. You can order a walk-in test, an at-home kit or mobile phlebotomy, and Junction handles the requisition through its physician network before returning structured biomarker results. Coverage is not uniform everywhere, so the Area Info endpoint is how you check whether a given ZIP code is actually served before you promise it to a user.
+
+For the device connection you embed Link, a Plaid-style widget where users authorize a provider without leaving your app.
+
+## Why it matters
+
+Junction's own site puts numbers on the friction it removes. Lab integration takes more than six months, which delays both care and the services built around it. One in four lab orders go unfulfilled because the testing option is inconvenient. Ten percent of orders need a manual follow-up.
+
+Those are downstream of one fact: health data lives in silos, each with different documentation, and some needing a partnership before you get a single record back.
+
+Device sprawl is the quieter version of the same problem. Every vendor ships its own OAuth flow, its own rate limits and its own data shape, and the moment you support more than a couple of them the integration code starts competing with the product for engineering time.
+
+## Getting it running
+
+The quickest path is the official quickstart, a Next.js frontend on a Poetry-managed FastAPI backend with the device connection already wired up:
+
+```bash
+git clone https://github.com/tryVital/quickstart.git
+cd quickstart
+poetry install
+cd backend/python
+source ./start.sh
+```
+
+The backend reads its credentials from a `.env` file, and the variable names still carry the old brand:
+
+```bash
+# backend/python/.env
+VITAL_API_KEY=sk_us_your_sandbox_key
+VITAL_REGION=us
+VITAL_ENV=sandbox
+```
+
+That naming is not a typo. The docs still accept `tryvital.io` base URLs alongside `junction.com`, and the API key header is still `X-Vital-API-Key`.
+
+If you would rather write the calls yourself, creating a user takes one request. There are four regional base URLs, and sandbox environments are functionally identical to production:
+
+```bash
+curl --request POST \
+  --url 'https://api.sandbox.us.junction.com/v2/user/' \
+  --header 'Accept: application/json' \
+  --header 'Content-Type: application/json' \
+  --header 'X-Vital-API-Key: sk_us_your_sandbox_key' \
+  --data '{"client_user_id":"user_123"}'
+```
+
+| Environment | Base URL | Key prefix |
+| --- | --- | --- |
+| Production US | `https://api.us.junction.com/` | `pk_us_*` |
+| Production EU | `https://api.eu.junction.com/` | `pk_eu_*` |
+| Sandbox US | `https://api.sandbox.us.junction.com/` | `sk_us_*` |
+| Sandbox EU | `https://api.sandbox.eu.junction.com/` | `sk_eu_*` |
+
+The TypeScript client ships on npm as `@junction-api/sdk` and handles the region and environment split for you:
+
+```typescript
+import { JunctionClient, JunctionEnvironment } from "@junction-api/sdk";
+
+const client = new JunctionClient({
+  apiKey: "sk_us_your_sandbox_key",
+  environment: JunctionEnvironment.Sandbox,
+});
+
+const user = await client.user.create({ clientUserId: "user_123" });
+```
+
+Sandbox is more than a stub. A team can create synthetic device connections, simulate an order through its full lifecycle, and work with up to 50 users, which is enough to build and test the whole flow before a real patient is involved.
+
+## What else is in the box
+
+| Surface | What it does |
+| --- | --- |
+| Core API | Users and demographic records in your team |
+| Devices API | Connections, normalized data, backfill status |
+| Lab Testing API | Orders, appointments, results, redraws |
+| Junction Sense | Continuous queries over ingested device data |
+| Management API | Team config, org resources, key rotation |
+| Link widget | Embedded provider authorization flow |
+| Webhooks | Svix delivery, exponential backoff across eight attempts |
+| ETL pipelines | Streaming to Google Cloud Pub/Sub over TLS |
+
+Typed clients exist for Java, Go, TypeScript and Python, plus mobile SDKs for iOS (HealthKit), Android (Health Connect), Flutter and React Native. The mobile side carries more weight than it first appears. Apple Health and Google Health Connect are where a lot of the data actually lives, and both platforms gate access behind permissions that are far easier to obtain through a vendor SDK than through a web flow.
+
+One more piece worth knowing before you design the flow: Junction can send the patient email and SMS updates about an order on your behalf, which removes a whole category of reminder logic from your side.
+
+## Pricing
+
+Two plans, both listed on junction.com/pricing.
+
+| | Launch, $300 per month | Enterprise, custom |
+| --- | --- | --- |
+| Wearables | Included | Included |
+| Connected users | 1 to 500 | Unlimited |
+| Lab testing | Not available | Nationwide network, at-home kits, mobile phlebotomy |
+| OAuth | Junction-branded app | Custom OAuth credentials, iOS app |
+| Support | Community Slack | Dedicated Slack, implementation help, 6 days a week |
+
+The entry plan is wearables only and flat, which replaces the old Vital pricing built around per-user tiers. If you need to order lab tests, a sales conversation is the only door.
+
+## What to watch for
+
+The lab network is the asset, not the SDK. Client libraries are copyable in an afternoon, but lab contracts, physician relationships and requisition handling are not, and that is also why lab testing sits behind a sales conversation instead of a self-serve button. Read the $300 floor as an entry point for the half of the product that is not included.
+
+Data residency is a hard constraint rather than a preference. Your flow has to sit in the US region for HIPAA or the EU region for GDPR, and the key prefix tells you which one you are holding. Teams serving both regions maintain two sets of credentials, two sets of endpoints and two sets of test runs.
+
+Compliance does not transfer. Junction is SOC 2 Type 2 certified, ISO 27001 certified, HIPAA compliant and GDPR ready, but that covers Junction. Your app still needs its own posture, and if you store the normalized data yourself you have taken on consent and retention obligations that the badge does not cover.
+
+Most of the SDK repositories on GitHub carry no license file, so treat them as reference material rather than something to vendor into a product. The commercial API is the licensed thing, and the bindings are thin wrappers over the OpenAPI schema. The docs also publish an `llms.txt` index, which is a faster way to enumerate every endpoint than clicking through a sidebar.
+
+The pitch keeps converging. Terra now sells lab testing too, and Junction now publishes a flat entry plan, so the differentiator moves every few quarters. If you are comparing the two, look at the actual device list and the lab coverage for the ZIP codes you care about.
+
+## Source and Accuracy Notes
+
+- Project page: [junction.com](https://www.junction.com/) — verified via direct visit
+- API documentation: [docs.junction.com](https://docs.junction.com/) — verified live, publishes an `llms.txt` index
+- Pricing: [junction.com/pricing](https://www.junction.com/pricing) — verified live
+- SDKs: [github.com/tryVital](https://github.com/tryVital) for the mobile clients, [github.com/junction-api](https://github.com/junction-api) for typed server-side bindings, and `@junction-api/sdk` on npm (verified, latest 2.0.0)
+- License: no SPDX license detected on most SDK repositories. The API itself is a commercial service, so treat the clients as reference code
+- History: launched as Vital (YC W20), renamed Junction on March 11, 2025 alongside an $18M Series A led by Creandum
+- HN launch thread: [news.ycombinator.com/item?id=32179530](https://news.ycombinator.com/item?id=32179530) — Launch HN, 114 points, July 2022
