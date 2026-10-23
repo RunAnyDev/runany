@@ -1,0 +1,177 @@
+---
+title: "Hallucinating Splines: give an AI agent a city to build"
+description: "Hallucinating Splines puts the Micropolis city simulator behind a REST API and MCP server, so an AI agent can plan, zone and grow a city that anyone can watch."
+pubDate: "2026-10-23T13:05:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai-agents", "api", "mcp", "open-source"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hallucinating-splines.webp"
+  alt: "A dark grid map of a simulated city with glowing roads and zones"
+canonical: "https://runany.dev/blog/hallucinating-splines/"
+---
+
+> **TL;DR:** Hallucinating Splines runs the old Micropolis city simulator headlessly and exposes it as a REST API plus an MCP server, so an AI agent can zone roads and power, advance the clock and grow a city. Every city is public and gets its own page with a map, a replay and a history. Keys are free but capped, and the whole thing runs on Cloudflare Workers.
+
+## What it is
+
+Hallucinating Splines is a city simulator where the mayor is an AI agent. Underneath it sits Micropolis, the open-source city builder Don Hopkins wrote at Electronic Arts in the 1990s and released under the GPL. Andrew Dunn and Graeme McC took the JavaScript port, micropolisJS, and stripped away everything that needed a browser.
+
+The engine runs with no DOM, no jQuery and no browser APIs. Maps generate deterministically from a seed, so the same number always returns the same coastline, and a city can be saved and reloaded partway through a simulation.
+
+That headless engine sits behind four pieces:
+
+| Piece | Stack | What it does |
+|---|---|---|
+| Engine | Node.js, TypeScript | Runs the Micropolis simulation behind a typed API |
+| REST API | Cloudflare Workers, Hono, D1, Durable Objects, R2 | One Durable Object per city, each holding a live game instance |
+| MCP server | Cloudflare Workers, Agents SDK | Streamable HTTP endpoint with 19 tools for agents |
+| Website | Astro SSR, React, Cloudflare Pages | City pages, replay, rankings and leaderboards |
+
+Every city gets its own Durable Object holding the live game. Metadata, API keys, snapshots and action history live in D1 (SQLite), and map snapshots go to R2. The platform currently reports 411 mayors, 1,922 cities and roughly 28.8 million total population.
+
+## Why it matters
+
+This is a more honest testbed for planning agents than a grid of coloured squares. Zoning, power coverage, road access and RCI demand interact the way they did in the original game, so an agent that ignores demand and threads power plants through residential blocks fails in a way that looks like a real failure rather than a scripted one.
+
+It is also a surprisingly clean benchmark of tool use. The API refuses to place a tile on invalid ground, so an agent has to ask where it can build before it builds. The project publishes a ready-made brief that asks an agent to keep a $5,000 reserve, cap itself at 30 calls per session and report unresolved problems at the end, which is exactly the kind of constraint that reveals how an agent behaves when it runs out of room.
+
+Worth knowing before you point a model at it: the simulation is deterministic. Same seed plus same action order means the same city, every time.
+
+## Getting it running
+
+There is nothing to install. You create a key, then talk to the API or hand the MCP server to your agent.
+
+```bash
+# 1. Create a key. The hs_ prefix value is shown only once.
+curl -X POST https://api.hallucinatingsplines.com/v1/keys
+
+# 2. Create a city from a curated seed
+curl -X POST https://api.hallucinatingsplines.com/v1/cities \
+  -H "Authorization: Bearer hs_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"seed": 42}'
+
+# 3. Find somewhere you can actually put a power plant
+curl "https://api.hallucinatingsplines.com/v1/cities/CITY_ID/map/buildable?action=build_coal_power"
+```
+
+Most read endpoints are public, so you can explore a city without a key. Creating cities, placing tiles, advancing time and retiring cities all need the Bearer token.
+
+```bash
+# 4. Place the power plant at coordinates the buildable scan returned
+curl -X POST https://api.hallucinatingsplines.com/v1/cities/CITY_ID/actions \
+  -H "Authorization: Bearer hs_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "build_coal_power", "x": 10, "y": 10}'
+
+# 5. Advance the calendar. 1 to 24 months per call.
+curl -X POST https://api.hallucinatingsplines.com/v1/cities/CITY_ID/advance \
+  -H "Authorization: Bearer hs_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"months": 12}'
+```
+
+A new city starts with $20,000 in funds. The published agent brief tells you to keep $5,000 of that in reserve, which is a good number to hold onto since roads and power lines are not free.
+
+The action vocabulary covers the whole game:
+
+| Category | Actions |
+|---|---|
+| Zoning | `zone_residential`, `zone_commercial`, `zone_industrial` |
+| Transport | `build_road`, `build_rail` |
+| Utility | `build_power_line` |
+| Services | `build_park`, `build_fire_station`, `build_police_station` |
+| Power | `build_coal_power`, `build_nuclear_power` |
+| Special | `build_seaport`, `build_airport`, `build_stadium` |
+| Demolition | `bulldoze` |
+| Lines and rectangles | `build_road_line`, `build_rail_line`, `build_wire_line`, `build_road_rect`, `build_rail_rect`, `build_wire_rect` |
+
+Line and rectangle actions take two points instead of one, so you can run a road along a whole street rather than tile by tile.
+
+## The API surface
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/v1/seeds` | Public | Curated seeds with terrain, water and buildable percentages |
+| GET | `/v1/cities` | Optional | `?mine=true` scopes the list to your key |
+| POST | `/v1/cities` | Required | Create a city, returns the ID and starting funds |
+| POST | `/v1/cities/CITY_ID/actions` | Required | Place a single tool |
+| POST | `/v1/cities/CITY_ID/batch` | Required | Up to 50 actions, counted as one call for rate limiting |
+| POST | `/v1/cities/CITY_ID/advance` | Required | Move the clock forward 1 to 24 months |
+| GET | `/v1/cities/CITY_ID/map/buildable` | Public | Valid positions for one action type |
+| GET | `/v1/cities/CITY_ID/map/summary` | Public | Building counts, infrastructure totals, terrain breakdown |
+| GET | `/v1/cities/CITY_ID/demand` | Public | Residential, commercial and industrial demand |
+| GET | `/v1/cities/CITY_ID/stats` | Public | Live population, funds, year and score |
+| GET | `/v1/cities/CITY_ID/history` | Public | Census history for charts |
+| GET | `/v1/cities/CITY_ID/map/image` | Public | Rendered PNG of the map |
+
+A full machine-readable schema lives at `https://api.hallucinatingsplines.com/openapi.json`, and the API reference has an interactive explorer if you would rather click through the endpoints than read a table.
+
+## Connecting an agent over MCP
+
+The MCP server speaks Streamable HTTP and exposes 19 tools, including `create_city`, `list_seeds`, `get_city_stats`, `get_map_summary`, `get_buildable`, `perform_action` and `batch_actions`.
+
+```bash
+# Claude Code
+claude mcp add hallucinating-splines --transport http "https://mcp.hallucinatingsplines.com/mcp?key=YOUR_KEY"
+```
+
+For Cursor, the same URL goes into your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "hallucinating-splines": {
+      "url": "https://mcp.hallucinatingsplines.com/mcp?key=YOUR_KEY"
+    }
+  }
+}
+```
+
+The project also publishes a portable mayor skill at `https://hallucinatingsplines.com/skill.md` and a full agent guide at `https://hallucinatingsplines.com/agent-guide.md`. The guide ships copy-paste briefs for a first session and for later maintenance, each with its own call budget and month cap.
+
+## Running the engine yourself
+
+The repository is public and the engine is usable on its own. This is the internal engine API, where tool names are shorter than the REST action names:
+
+```typescript
+import { HeadlessGame } from './src/headlessGame';
+import { withSeed } from './src/seededRandom';
+
+const game = HeadlessGame.fromSeed(42);
+game.placeTool('coal', 10, 10);        // Power plant
+game.placeTool('residential', 19, 10); // Zone
+game.tick(768);                        // Advance 1 year
+```
+
+Local development splits into the engine, the API worker and the site:
+
+```bash
+npm test                  # engine tests
+cd worker && npm run dev # local API worker
+cd site && npm run dev   # local Astro site
+```
+
+## What to watch for
+
+Keys are the sharpest edge. The value is shown once, there is no account, and a new key cannot recover cities created under a lost one. Each key supports five active cities, issuance is limited to two per IP per hour, and the platform caps out at 2,000 active keys, so the status endpoint at `GET /v1/keys/status` is worth checking before you request a new one.
+
+The MCP server takes the key in the connection URL, which means it lands in MCP config files that people commit by accident and in logs that people paste into issues. The project's own guide says to keep that configuration private.
+
+Client support is uneven, and the project is upfront about it. Claude Code and Cursor are documented. The compatibility notes say a full Grok Bot session has not been verified, and that custom MCP installation for Instinct and Muse is unconfirmed, with REST as the fallback for those clients. Legacy SSE transport is not served at all.
+
+Batch calls stop on the first failure rather than skipping bad actions and continuing, so a partially valid batch leaves the earlier actions applied.
+
+On licensing, the engine directory is GPL-3.0 inherited from micropolisJS, which makes it a good fit for an agent sandbox and a poor fit if you were planning to ship it inside a closed-source product. The GitHub repository reports its license as NOASSERTION because the engine and the surrounding worker code do not share one.
+
+## Source and Accuracy Notes
+
+- Project page: https://hallucinatingsplines.com (verified via direct visit, HTTP 200)
+- REST base: https://api.hallucinatingsplines.com, MCP endpoint at `https://mcp.hallucinatingsplines.com/mcp`
+- Source repository: andrewedunn/hallucinating-splines (TypeScript, 28 stars, 7 forks, created 2026-02-03, last push 2026-10-09, not archived)
+- License: engine code under `src/engine/` is GPL-3.0 inherited from micropolisJS, based on Micropolis by Don Hopkins and Electronic Arts; GitHub reports NOASSERTION for the repository as a whole
+- HN launch thread: https://news.ycombinator.com/item?id=46946593 (216 points, 2026-02-09)
+- Platform counts read from `GET /v1/stats` on 2026-10-23: 411 mayors, 1,922 cities, 28,852,920 total population
