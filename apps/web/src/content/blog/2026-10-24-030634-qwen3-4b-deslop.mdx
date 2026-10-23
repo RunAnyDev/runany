@@ -1,0 +1,120 @@
+---
+title: "Qwen3-4B Deslop: a local model without AI writing tics"
+description: "A fine-tuned Qwen3-4B that drops em dashes, not-X-but-Y habits and lists of three, runs locally with Ollama, and ships under Apache 2.0."
+pubDate: "2026-10-23T20:06:34.000Z"
+author: "Friday"
+tags: ["ai", "local-llm", "ollama", "fine-tuning"]
+category: "ai-setup"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/qwen3-4b-deslop.webp"
+  alt: "Abstract illustration of a small language model with its writing habits stripped away"
+canonical: "https://runany.dev/blog/qwen3-4b-deslop/"
+draft: false
+---
+
+> **TL;DR:** qwen3-4b-deslop is a **fine-tuned Qwen3-4B-Instruct** that writes without the em dashes, the "it's not X, it's Y" constructions and the endless lists of three. It runs locally from a 2.5 GB download, and the author published the whole recipe: three distillation rounds, a 126 MB LoRA adapter, and a neuron edit that flips the sign of four weights.
+
+## What it is
+
+Erik Markus Kannike published qwen3-4b-deslop on 17 October 2026, and it targets a narrow, annoying failure mode: the model reproduces the verbal habits of AI writing even when nobody asks for them. The fix was built on a MacBook Air in his home lab, and the artifact ships as Apache 2.0 on Hugging Face in two forms, merged full-precision weights and a LoRA adapter that needs a small companion file.
+
+What makes the release worth reading is that the detector came first. On 40 prompts the model never saw in training, his "slop score" fell from 121 to 12.5 per 1000 words, and em dashes went from 20.5 per 1000 words to zero. The GGUF build carries a Q4_K_M file at about 2.5 GB and a Q8_0 for more headroom.
+
+The repository holds more than weights:
+
+- Merged full-precision checkpoint, split across three safetensors shards
+- `adapter/`, the 126 MB LoRA adapter plus its config
+- `notxy-flip4.json`, the neuron edit, a 175-byte list of four weight columns and their scales
+- `deslop-build.json`, the build record naming the base model, the adapter and the four edits
+- `params`, a small sampling defaults file for the GGUF build
+
+## How the habit gets measured
+
+The slop score comes from a detector written from a style guide of AI writing habits, counted as a weighted total per 1000 words: the em dash, "it's not X, it's Y", lists of three, rhetorical questions answered on the spot, signposts such as "here's the thing", short fragments used for emphasis, and words like "delve" and "seamless". Human writing usually scores under 15, and a careful human paragraph scores close to zero.
+
+A regex cannot tell good writing from bad, so every candidate model also goes through damage checks: drift, measured as how far its predictions on 22 human-written passages move from the original model, a 30-question quiz for factual knowledge, and a rule-based check for broken output such as lowercase sentence starts or a lost topic.
+
+| Measure on 40 held-out prompts | Qwen3-4B-Instruct | qwen3-4b-deslop |
+| --- | --- | --- |
+| Slop score per 1000 words | 121 | 12.5 |
+| Em dashes per 1000 words | 20.5 | 0 |
+| Answers inside the human range | not published | 68% |
+| Task-fit checks passed | 78% | 80% |
+| Factual quiz | 30 of 30 | 30 of 30 |
+
+## Getting it running
+
+The write-up shows the two ways to run the GGUF build locally:
+
+```bash
+ollama run hf.co/erikkannike/qwen3-4b-deslop-v4-GGUF:Q4_K_M
+
+llama-cli -hf erikkannike/qwen3-4b-deslop-v4-GGUF:Q4_K_M
+```
+
+The `hf.co/` prefix points Ollama at the Hugging Face repository. The plain library form `ollama run qwen3-4b-deslop` returns a 404 today, so use the namespace path. The GGUF build also ships sampling defaults, which is worth knowing before you start tuning them:
+
+```json
+{
+  "repeat_penalty": 1.1,
+  "repeat_last_n": 256,
+  "temperature": 0.7,
+  "top_p": 0.9
+}
+```
+
+For the full-precision checkpoint, transformers loads it like any other Qwen3 checkpoint:
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+name = "erikkannike/qwen3-4b-deslop-v4"
+tok = AutoTokenizer.from_pretrained(name)
+model = AutoModelForCausalLM.from_pretrained(name, torch_dtype="auto")
+msgs = [{"role": "user", "content": "Write a LinkedIn post about switching to a four-day week."}]
+ids = tok.apply_chat_template(msgs, add_generation_prompt=True, return_tensors="pt")
+out = model.generate(ids, max_new_tokens=300, do_sample=True, temperature=0.7)
+print(tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True))
+```
+
+The adapter and the neuron edit belong together. The adapter was trained with the edit active, so the merged weights already contain both, while loading the adapter alone gives you a model missing the edit's effect. To see exactly what the release contains, the file list is one request away:
+
+```bash
+curl -s https://huggingface.co/api/models/erikkannike/qwen3-4b-deslop-v4-GGUF \
+  | python3 -c "import sys,json; print('\n'.join(s['rfilename'] for s in json.load(sys.stdin)['siblings']))"
+```
+
+## How the training worked
+
+Three rounds of distillation. A teacher model answers 288 training prompts, the answers that pass the checks are kept, and a small LoRA adapter learns to reproduce them from the bare prompt.
+
+Round one reached a score of about 20 with no system prompt and no runtime hooks. Round two used a stronger teacher, the round-one model plus the four-neuron patch and a plain-style prompt, and measured 9.5, but the output had no capital letters and wandered off topic, so the steering came back out. The teacher then averaged 7.4, and the student trained on its 171 best answers scored 9.9 with 80% of answers in the human range. The damage showed up in the content rather than the score. An opinion piece about a company's new CRM took no position and read like an incident report. A reflection about moving city became third-person fiction about a leaking apartment. A piece on houseplants cited a study from the University of Technology Sydney, which the model invented. Almost every sentence ran into the next with ", which", 28 times as often as in the original, because his own teacher prompt had told the model to join sentences with words like "so" and "which", and two rounds of imitation amplified it.
+
+Round three put the task first in the teacher prompt, wrote three answers per prompt, and kept only answers that scored under 12 and passed the damage and task checks. About 30% survived, covering 161 of the 288 prompts.
+
+| Round | Slop score | Task fit | What broke |
+| --- | --- | --- | --- |
+| 1 | about 20 | not published | first pass, no prompt or runtime hooks |
+| 2 | 9.9 | 60% | invented studies, 28 times more ", which" joins |
+| 3, released | 12.5 | 80% | 161 of 288 prompts kept, task fit recovered |
+
+Two earlier attempts explain why the final recipe looks the way it does. Subtracting the assistant register direction during generation, plus a plain-style system prompt, reached about 15, but it needs code running during every generation and it moves the model's predictions on ordinary text. Reading neurons one at a time found four whose sign flip cuts the "not X, but Y" habit by 70% at almost no cost, measured at KL 0.001, but that trick removes one habit and nothing else. The `notxy-flip4.json` file names the four: the em dash writer, the dash and ellipsis neuron, the "not" writer, and the anti-"rather" neuron.
+
+## What to watch for
+
+The voice is flat. The model writes runs of short declarative sentences, and personal pieces read like diary entries. It also still invents things. Studies and percentages are rare now, but invented names and places are common, like a coffee shop on Maple Street run by a woman named Maria, because concrete detail was exactly what each round rewarded. It runs long too, so a request for about 150 words often lands near 200.
+
+Scope is narrow. Only short English prose in a handful of genres was tested, and code, long conversations, other languages and tool use may be no better than the original model or worse. The score is his own style guide written as regular expressions, with no blind test against readers behind it, and the numbers move between runs. The same model measured 10.2 through the adapter and 12.5 as merged weights, from sampling differences alone.
+
+Keep the scale in mind. The published build is a 4B model trained on 161 answers on a laptop, and the author is explicit that the recipe does not depend on the model size, with larger models as the next step. Apache 2.0 applies to both Hugging Face repositories. The GGUF repository showed 1,674 downloads and the full-precision one 140 when checked on 24 October 2026, five days after the launch thread.
+
+## Source and Accuracy Notes
+
+- Project page: https://100toolkit.com/blog/deslop-model/ (verified by direct visit)
+- Model page, full precision: https://huggingface.co/erikkannike/qwen3-4b-deslop-v4
+- GGUF build: https://huggingface.co/erikkannike/qwen3-4b-deslop-v4-GGUF
+- Base model: Qwen/Qwen3-4B-Instruct-2507, confirmed in `deslop-build.json`
+- License: Apache 2.0 on both Hugging Face repositories
+- Author: Erik Markus Kannike, erik@100toolkit.com
+- Related write-ups: https://100toolkit.com/blog/slop-neurons/ and https://100toolkit.com/blog/where-ai-slop-comes-from/
+- HN launch thread: https://news.ycombinator.com/item?id=50151928 (158 points, 113 comments, 19 October 2026)
