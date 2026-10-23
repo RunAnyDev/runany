@@ -497,7 +497,7 @@ git push
 - **Token note:** Cron currently runs WITHOUT `GITHUB_TOKEN` (not in `.env`). Uses unauthenticated API (60 req/hr). With ~16 repos/day = ~16 API calls/tick, sustainable for ~3 weeks before hitting limits. Add token to `.env` to lift to 5000 req/hr.
 
 ### Discovery → publish flow (lean, ~12-15 tool calls)
-1. `python3 scripts/hn_search.py --shortlist --top 4` — 1 call
+1. `python3 scripts/hn_search.py --shortlist --top 4` — 1 call. **Recency matters:** the script defaults to `--max-age-days 45` and hits Algolia's `search_by_date`, so it surfaces fresh launches. The old points-only search returned a fixed set of all-time classics (Quiche, Cardboard, Moltis, Intuned, Kampala, Twill, IonRouter) that the blog has covered, so every tick came back empty. Use `--max-age-days 0` only to reproduce the old behavior. Widen with `--max-age-days 90 --min-points 40` when the shortlist is thin.
 2. `python3 scripts/dedup-check.py --batch` against `.data/written-repos.txt` + blog slugs — 1 call
 3. Check `.data/blocklist.txt` for substring matches (case-insensitive) — inline
 4. Liveness probe: `curl -sI` each `NEW` candidate — 1 batched call
