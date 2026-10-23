@@ -1,0 +1,152 @@
+---
+title: "Sieve: petabyte-scale multimodal data for frontier AI"
+description: "Sieve is the multimodal data lab behind frontier AI training sets. Inside its pipeline for embedding a billion videos, and the pivot that led there."
+pubDate: "2026-10-23T17:09:44.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai", "video", "data"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/sieve-multimodal-data-lab.webp"
+  alt: "Sieve logo as a dotted orb on black above the words The multimodal data lab"
+canonical: "https://runany.dev/blog/sieve-multimodal-data-lab/"
+draft: false
+---
+
+> **TL;DR:** Sieve sold a **video search API** in 2022 and now runs a multimodal data lab supplying petabyte-scale training sets to frontier AI labs. The most useful thing it published in July 2026 is the engineering behind that shift: embedding a billion videos, discarding two thirds of the frames, and skipping a vector index entirely.
+
+## What it is
+
+Sieve showed up on Hacker News in February 2022 with a clear pitch: an API-first way to search video. Upload footage, get back the frames where something happened. The founder answered questions in that thread about per-frame processing, action detection, and how pricing worked for a customer already sitting on terabytes of video in a bucket.
+
+That API is not the product anymore. The site now leads with "the multimodal data lab" and promises curated video, audio, image, and interaction data for frontier AI, with customers described as AI labs, Fortune 100 companies, and AI startups. The work runs through five stages:
+
+| Stage | What happens |
+| --- | --- |
+| Source | Aggregating raw media from real-world, digital, and simulated environments |
+| Filter | Scoring for semantics, rights, artifacts, and task quality |
+| Index | Detectors and embeddings over billions of videos, images, and audio clips |
+| Annotate | Dense labels, pairings, temporal alignment, transcripts, and human QA |
+| Deliver | Training-ready datasets, evaluation sets, and environments |
+
+## Why it matters
+
+The interesting part is not the product, it is the reasoning behind the pivot. By early 2025 Sieve had real customers, including creative tools, social platforms, and media companies, running its APIs in production. Then the team noticed a smaller set of customers doing something unexpected: using the APIs to annotate very large video datasets.
+
+Two conclusions came out of that. The APIs were already functioning as annotation systems for research teams, and model progress would likely make many of those API products obsolete within a year or two, since the model would absorb the job the API was doing. Rather than productize annotation as a separate offering, Sieve decided to supply finished datasets end to end, arguing that collection, QA, and labeling have to be built together at that scale.
+
+## Embedding a billion videos
+
+Sieve's engineering blog published "A Tutorial on Embedding Billions of Videos" in July 2026, written by Sarina Li. It is unusually concrete for a company post, and most of it applies to anyone who has to make a large video corpus searchable.
+
+They run SigLIP2, which produces 768-dimensional fp32 vectors, on L4 GPUs with beefy CPUs for preprocessing, spread over preemptable nodes that come with a 60 to 70 percent discount. The obvious alternative was to call a hosted embedding API, which the post prices out. Sampling at 1 fps means about 912 frames for an average 15.2-minute video, and at the published rate for one hosted image embedding model that lands near $109 million for a billion videos, before any volume discount.
+
+The pipeline starts by throwing frames away. Sieve samples densely, then prunes with two filters in sequence. A perceptual difference hash acts as the first gate, keeping a frame only when its Hamming distance from everything already kept exceeds 15. Frames that pass that gate get checked with a 96-dimension RGB histogram, 32 bins across 3 channels, against a sliding window of the last 10 frames, and survive only if the minimum chi-square distance to that window is at least 0.05.
+
+```python
+import numpy as np
+
+def difference_hash(gray, size=8):
+    """64-bit dHash computed from a grayscale frame."""
+    small = np.array(gray.resize((size + 1, size)).pixels)
+    return (small[:, 1:] > small[:, :-1]).flatten()
+
+
+def hamming(a, b):
+    return int(np.count_nonzero(a != b))
+
+
+def chi_square(a, b, eps=1e-8):
+    denom = a + b + eps
+    return 0.5 * float(np.sum((a - b) ** 2 / denom))
+
+
+def select_pivotal_frames(frames, dhash_threshold=15, hist_threshold=0.05, window=10):
+    """Two-stage filter: dHash gate first, then histogram check against recent frames."""
+    kept, hashes, histograms = [], [], []
+    for frame in frames:
+        digest = difference_hash(frame.to_gray())
+        if kept and min(hamming(digest, h) for h in hashes) <= dhash_threshold:
+            continue
+        hist = frame.rgb_histogram(bins=32)          # 96 dims: 32 bins x 3 channels
+        recent = histograms[-window:]
+        if recent and min(chi_square(hist, r) for r in recent) < hist_threshold:
+            continue
+        kept.append(frame)
+        hashes.append(digest)
+        histograms.append(hist)
+    return kept
+```
+
+The payoff is that about 29.3 percent of frames survive on average, and the median video keeps roughly 20 percent of its frames. Sieve reports that this removes about two thirds of the frames while leaving recall and precision essentially where uniform sampling had them.
+
+## Why they threw out the vector index
+
+The part that should change how you think about ANN search is what comes after. With an average of 41.2 embeddings per video, a billion videos means 41.2 billion vectors. An HNSW index over 768-dim fp32 vectors at that scale is roughly 126.6 TB of raw vectors plus about 10.5 TB of graph overhead, so around 137 TB, which does not fit on one machine and cannot stay resident in memory.
+
+So Sieve does not use one. Their use case is threshold filtering rather than top-k retrieval, and a cosine distance cut does not care about its neighbors. That lets them store embeddings as an ordinary column and brute-force the distance in ClickHouse, sharded into mutually exclusive chunks.
+
+```python
+import numpy as np
+
+def cosine_distance(a, b):
+    return 1.0 - float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def select_candidates(embeddings, query, threshold=0.88):
+    """Threshold filtering, not top-k: keep everything below the distance cut."""
+    distances = [cosine_distance(e, query) for e in embeddings]
+    return [i for i, d in enumerate(distances) if d < threshold]
+
+
+def recall_precision(embeddings, query, oracle, threshold=0.88):
+    picked = set(select_candidates(embeddings, query, threshold))
+    truth = set(oracle)
+    hits = len(picked & truth)
+    recall = hits / len(truth) if truth else 0.0
+    precision = hits / len(picked) if picked else 0.0
+    return recall, precision
+```
+
+The arithmetic behind their threshold choice is worth stealing. If fine-grained processing costs $2 per video, a million-video corpus costs $2 million to run end to end. At a cosine distance threshold of 0.88 the cheap filter keeps 60 percent of the true positives and passes 29 percent of the corpus downstream, so the expensive stage drops to $580,000. Recall tells you how much usable yield survives the cut, pass rate tells you how much work is left.
+
+## Running the same ideas on your own footage
+
+Sieve sells datasets by request rather than API key, so there is nothing to sign up for and no public pricing to look up. The pipeline in the blog post is reproducible though.
+
+```bash
+pip install torch transformers numpy opencv-python
+```
+
+```python
+import torch
+from transformers import AutoModel, AutoProcessor
+
+model = AutoModel.from_pretrained("google/siglip2-base-patch16-224")
+processor = AutoProcessor.from_pretrained("google/siglip2-base-patch16-224")
+
+inputs = processor(images=frame, return_tensors="pt").to(model.device)
+with torch.no_grad():
+    features = model.get_image_features(**inputs)
+
+vector = features[0].cpu().numpy().astype("float32")   # 768 dims, fp32
+```
+
+Two habits from their write-up are worth copying whatever you are building. Input pruning pays for itself before anything downstream gets optimized. And chasing several modalities at once works less well than getting one slice of semantic understanding solid, which then becomes a complementary layer.
+
+## What to watch for
+
+Start with the obvious: there is no public API for the current product and no published pricing. The 2022 video search endpoints are gone, so any pricing quoted in the launch thread is historical. The company is also closed source, with no public repositories under the github.com/sieve-data account.
+
+The structural risk is the one Sieve itself identified. Their reasoning was that model progress would make many API products obsolete within a year or two, and they responded by moving up the stack to supply datasets. The buyers for that product are the same frontier labs they cite as references, so demand and their own pipeline stay tightly coupled.
+
+Data rights deserve a question before anything lands in a training run. The partner program has two ways in, licensing content a studio already owns and recording the physical work a team already performs. Both turn existing material into training material, and the rights position on a specific dataset is worth confirming rather than assuming. Their published example runs fine-grained processing at $2 per video, which is the scale to keep in mind when a supplier quotes you a dataset.
+
+## Source and Accuracy Notes
+
+- Project page: https://sieve.ai/ (verified by direct visit)
+- Launch page: https://sievedata.com/ (redirects to sieve.ai)
+- Engineering write-up: https://sieve.ai/blog/a-tutorial-on-embedding-billions-of-videos
+- Pivot write-up: https://sieve.ai/blog/reintro
+- HN launch thread: https://news.ycombinator.com/item?id=30181676
+- License: closed source, no public repositories under the github.com/sieve-data account
+- Pricing: not published, contact sales
