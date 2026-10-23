@@ -1,0 +1,118 @@
+---
+title: "Ledge: Markdown notes that run your code where you wrote it"
+description: "Ledge is an open-source Markdown notebook for developers where code blocks run in a persistent per-note shell, with a CLI, agent prompts and self-hosted sync."
+pubDate: "2026-10-23T23:07:00.000Z"
+author: "Friday"
+tags: ["markdown", "notes", "self-hosted", "developer-tools", "cli", "open-source"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ledge-runnable-markdown-notes.webp"
+  alt: "Ledge app window showing a Markdown note with runnable code blocks and streamed output"
+canonical: "https://runany.dev/blog/ledge-runnable-markdown-notes/"
+draft: false
+---
+
+> **TL;DR:** Ledge is a **Markdown notebook** where any fenced code block with a runnable language gets a Run button, and the output streams back into the note. The shell behind each block belongs to that note, so a `cd` in one block is still there in the next. It is free and Apache-2.0 licensed, with no account and no database, and your notes stay plain `.md` files on your own machine or a server you run.
+
+## What it is
+
+Ledge is a desktop and mobile app for people who keep commands in notes. You write Markdown, fenced code blocks in it get executed in place, and the output appears underneath the block that produced it rather than in a separate console window somewhere else.
+
+The persistence is the part that makes it different from a script runner. Each note owns one shell. A `cd`, an exported variable, or an activated virtualenv carries into the next run, so a sequence of blocks that depends on each other behaves the way a real terminal session does.
+
+The author released it on Hacker News on 29 September 2026 with the title "Show HN: Ledge.sh - Runnable Markdown Notes" and picked up 205 points and 88 comments. The recurring comparison in that thread was org-babel, the Org-mode system for Emacs users that does roughly the same thing. The difference the author draws is access: Ledge does not need Emacs, it uses Markdown rather than Org syntax, its shells are interactive by default, and the mobile app can run the code too.
+
+The project is at `github.com/ledgesh/ledge` under Apache-2.0. The site lists a price of zero and says no account is required, and there is no database on the side. Your notes are Markdown files on your computer, or on a server you run yourself.
+
+## Why it matters
+
+A developer notebook that runs code is not a new idea, and the first HN comment on the thread said exactly that, comparing it to Jupyter notebooks with a bash backend. That comparison misses the design decision, which is that the document stays a Markdown file and the shell stays a real shell.
+
+That difference surfaces in the details. A runnable block only offers to execute once its fence is closed, because until then the contents are not settled. A shell that is not installed refuses the run and names the path it could not find rather than quietly falling back to something else. Ledge spawns your actual login shell, and it marks where a block's output starts and stops with a hook that only zsh and bash provide.
+
+For anyone who already keeps a notes file of half-working commands, the appeal is less about a new capability and more about the notes becoming usable instead of a graveyard. You click the block you half-remembered and see what it does now.
+
+## Getting it running
+
+Ledge ships as a download rather than a package you install from a registry. On Apple Silicon, grab the DMG and drag it to Applications. On Linux, you need WebKitGTK 4.1 (Ubuntu 22.04, Debian 12, Fedora 38 or newer), and on Windows 11 it wants WSL. iPhone and iPad versions are on the App Store, and Android is in beta.
+
+```bash
+# macOS (Apple Silicon)
+curl -L -o Ledge.dmg https://github.com/ledgesh/ledge/releases/latest/download/macos-arm64-Ledge.dmg
+
+# Linux, x64
+curl -L -o Ledge-Setup.tar.gz https://github.com/ledgesh/ledge/releases/latest/download/linux-x64-Ledge-Setup.tar.gz
+tar xzf Ledge-Setup.tar.gz && ./installer
+```
+
+To keep notes on a server you control, the server install is a single script. The server holds the notes, spawns the shells, and keeps them running; the app becomes a window onto it.
+
+```bash
+curl -fsSL https://ledge.sh/server.sh | sh
+```
+
+The first note Ledge creates contains a shell block you can run right away, and the output arrives under the block:
+
+```bash
+curl -s https://api.github.com/zen
+```
+
+### Notes that know where they belong
+
+A note can declare the directory and environment its shells start in, using frontmatter. Every shell the note spawns then begins in that place with that environment, which means the blocks run where the code is rather than wherever you last happened to be.
+
+```markdown
+---
+cwd: ~/Projects/my-app
+env:
+  NODE_ENV: development
+profile: stripe
+---
+```
+
+A `profile` line pulls in secrets kept outside the notes folder, so an API key does not end up committed to a repo that contains your notes. Blocks that talk to a real service can then reference the credential by name.
+
+### Languages and the terminal
+
+Shell blocks run in the note's persistent inline shell. Interpreted languages such as `python`, `node`, `ruby`, `ts` and `php` run as a file handed to that interpreter, one fresh process per run, with no state carried between runs. TypeScript uses the Bun runtime bundled with the app, so `ts` blocks work with nothing installed. SQL fences run against whatever database your interpreter mapping points at.
+
+Consider a note with these two shell blocks, run in order:
+
+```sh
+cd /tmp
+export FLAVOR=nautical
+```
+
+```sh
+pwd
+echo "this shell is feeling $FLAVOR"
+```
+
+The second one prints `/tmp` and `this shell is feeling nautical`, because both blocks hit the same shell. The `cd` and the `export` happened in the shell the second block ran in, not in a fresh one.
+
+The terminal drawer, opened with a keyboard shortcut, gives every note a full terminal as well. It is a separate shell from the inline one and belongs to that note alone. A CLI ships alongside the app for scripting the whole thing from a normal terminal:
+
+```bash
+ledge list
+ledge read "Shipping Notes"
+ledge append "Release Notes" --heading "Shipped" --body "Fixed the retry loop"
+ledge run "Daily check"
+```
+
+Notes are addressed by title, and a duplicate title never clobbers an existing file, it gets a numbered one instead.
+
+## What to watch for
+
+Ledge is a young project with a small footprint, and some of its edges are worth knowing before you put anything important in it. The mobile app needs a server to reach your notes, and the Android build is still beta. The Windows path depends on WSL, and the Linux build wants a fairly recent WebKitGTK.
+
+Security is handled with more care than most note apps bother with. Notes kept on a remote server need that server reachable, and when the connection drops, the Run and terminal buttons are greyed out rather than failing silently. Ledge pins SSH host keys: it fetches the fingerprint, shows it to you, and refuses any future connection presenting a different one, with no option to connect anyway. Profiles keep secrets outside the notes folder, and locked notes travel as ciphertext. The tradeoff is that the SSH path is the strong one, so a server set up carelessly is still a server set up carelessly.
+
+The comparison with Jupyter and org-babel in that HN thread is the honest framing. If you want an analytics notebook, Jupyter already does it. If you want an Org-mode system for Emacs, org-babel already does it. Ledge is for the specific case where you want plain Markdown, a real login shell, and the freedom to run the same note from a laptop, a server and a phone without changing the file format.
+
+## Source and Accuracy Notes
+
+- Project page: https://ledge.sh - verified via direct visit
+- Source repository: https://github.com/ledgesh/ledge
+- License: Apache-2.0, verified from the project's LICENSE file link and stated on the project page
+- HN launch thread: https://news.ycombinator.com/item?id=49902382 - "Show HN: Ledge.sh - Runnable Markdown Notes", 205 points, 88 comments, posted 29 September 2026
+- Install commands, language support, frontmatter keys and CLI verbs were taken from the official documentation at https://ledge.sh/docs
