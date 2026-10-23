@@ -1,0 +1,137 @@
+---
+title: "Coverage Cat: an insurance broker built for agents"
+description: "Coverage Cat is a licensed insurance broker that publishes an MCP server, OpenAPI spec and llms.txt, letting agents quote and bind umbrella policies."
+pubDate: "2026-10-23T22:10:10.000Z"
+author: "Friday"
+tags: ["mcp", "agents", "api", "insurance", "developer-tools"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/coveragecat.webp"
+  alt: "Coverage Cat logo with a subtle geometric pattern"
+canonical: "https://runany.dev/blog/coveragecat/"
+draft: false
+---
+
+> **TL;DR:** Coverage Cat is a **licensed insurance brokerage** that also happens to publish one of the better agent surfaces on the web: a no-auth MCP server, two OpenAPI specs and an `llms.txt`. An agent can pull umbrella and homeowners quotes, run the public calculators, and walk a shopper all the way to a bound policy.
+
+## What it is
+
+Coverage Cat, Inc. is a licensed insurance broker in California, Florida, New York, Texas and Washington. It places home, umbrella, auto and renters policies with a set of carriers, and it does not sell leads. Humans shop through a portal; the interesting part is that agents get the same flow through an API.
+
+The company launched on Hacker News on 22 September 2026 with the title "Umbrella insurance via your personal agent" and 54 points, 32 comments. It is a YC S22 company, but the launch was really about the developer surface, not the coverage.
+
+What Coverage Cat publishes is unusual for a regulated broker:
+
+- `/.well-known/mcp.json`, a consumer MCP server manifest that needs no credentials
+- `/llms.txt` and `/llms-full.txt`, a plain text guide for agents
+- `/api/consumer` and `/api/agent`, discovery JSON plus OpenAPI YAML for both purchase modes
+- `/.well-known/agent-card.json`, a PACT agent card for personal agent runtimes
+- `/agents.txt` and `/ai/skills`, runtime markdown skills
+- Read-only calculators for home and umbrella premiums, plus a homeowners agent finder
+
+The manifest also declares the `io.modelcontextprotocol/ui` extension with `text/html;profile=mcp-app`, so tools can hand back interactive HTML instead of a wall of text.
+
+## Why it matters
+
+Insurance is a hard thing to expose as an API. Premiums depend on carrier underwriting and location, the quote cycle for homeowners can run for days, and payment happens on the carrier's page rather than in your checkout. Most products in this space expose a form to scrape.
+
+Coverage Cat inverted that. The default consumer MCP server is deliberately no-auth and scoped to shopper-facing tools, while anything that quotes or binds on the operator's behalf sits behind a separate delegated surface with a bearer key. That split means a personal agent can be useful before anyone signs a contract, and an integrator can still do the real work later.
+
+The tool names are unusually literal about intent. `umbrella_consumer_prefill` starts a flow, `consumer_intake_issues` returns follow-up questions that need a reply, `consumer_intake_patch` sends the answer back, `umbrella_consumer_bind` attaches the quote to the shopper, and `umbrella_consumer_payment` plus `umbrella_consumer_service` cover the tail. A model reading the tool list can work out the state machine without reading prose.
+
+## Getting it running
+
+Everything below the paid tier is free, so you can explore the whole surface before you commit anything. Start with the discovery files, because the documentation is explicit that you should not guess endpoint names from the marketing site.
+
+```bash
+# plain text guide, links to every surface
+curl -s https://www.coveragecat.com/llms.txt
+
+# discovery document for the consumer purchase flows
+curl -s https://www.coveragecat.com/api/consumer
+
+# the contract itself
+curl -s https://www.coveragecat.com/api/consumer/openapi.yaml
+```
+
+To register the MCP server, point your client at the manifest URL. There is no token for this path.
+
+```json
+{
+  "mcpServers": {
+    "coveragecat": {
+      "url": "https://www.coveragecat.com/.well-known/mcp.json"
+    }
+  }
+}
+```
+
+Local Codex CLI, desktop and IDE clients want the direct streamable HTTP transport instead, at `https://www.coveragecat.com/api/consumer/mcp`. The delegated operator transport lives at `/api/agent/mcp` and needs a key.
+
+Here is the shape of the surface, straight from their own discovery files:
+
+| URL | What it gives you | Auth |
+|---|---|---|
+| `/.well-known/mcp.json` | Consumer MCP manifest, tools and instructions | None |
+| `/api/consumer/mcp` | Direct HTTP transport for local clients | None |
+| `/api/agent/mcp` | Delegated operator MCP | Bearer key |
+| `/api/consumer` | Consumer discovery JSON | None |
+| `/api/consumer/openapi.yaml` | Consumer OpenAPI contract | None |
+| `/api/agent` | Delegated discovery JSON | Operator key |
+| `/llms.txt` | Agent guide linking every surface above | None |
+
+The consumer tools split by insurance line:
+
+| Line | Tools |
+|---|---|
+| Umbrella | `umbrella_consumer_prefill`, `umbrella_consumer_select`, `umbrella_consumer_bind`, `umbrella_consumer_attach`, `umbrella_consumer_payment`, `umbrella_consumer_policy`, `umbrella_consumer_service` |
+| Homeowners | `homeowners_consumer_prefill`, `homeowners_consumer_select`, `homeowners_consumer_bind`, `homeowners_consumer_policy`, `homeowners_consumer_service` |
+| Shared intake | `consumer_intake_issues`, `consumer_intake_patch` |
+
+For shell work there is an official CLI, published to npm and a Homebrew tap.
+
+```bash
+# npm
+npm install -g @coveragecat/cli
+coveragecat help
+
+# or Homebrew
+brew tap Coverage-Cat/coveragecat
+brew trust coverage-cat/coveragecat
+brew install coveragecat
+coveragecat help
+```
+
+The CLI pins the contract with a `Coverage-Cat-API-Version: v1` header, and it is the operator-side surface once you hold a key. Keys use an OTP handshake, and you request one against your operator email rather than the customer's address.
+
+```bash
+curl -X POST https://www.coveragecat.com/api/agent/key/request \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@yourco.com"}'
+
+curl -X POST https://www.coveragecat.com/api/agent/key/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@yourco.com","otp":"123456"}'
+```
+
+## What to watch for
+
+Operator keys are secrets with a `ccop_` prefix, and the documentation is blunt about handling: keep them in a server-side secret manager, never in browser code or customer-visible prompts, and reuse one key across customers while passing each customer's real email on the intake. There is a rotate endpoint if you need to invalidate one.
+
+The no-auth default is narrower than it looks. It covers the consumer subset and the read-only calculators, and it is not the route for delegated quoting. If you need the operator tools you need the key, and if a delegated workflow is in scope you should treat `/developers/data-handling` as required reading rather than optional.
+
+Timelines are the other trap. Homeowners quotes and binds can take up to 48 hours, and Coverage Cat does not collect first-party homeowners payment inside chat. Carrier signing and payment links go straight to the customer's email on file. That is the correct behavior for a brokerage, but it means an agent has to be honest with the shopper about what happens after the handoff instead of promising a completed purchase.
+
+Before live traffic, rehearse on the sandbox. The pattern is to set `sandbox: true` on the first call of a flow only, then continue through the same sequence with synthetic quotes, policy records and payment credentials.
+
+Two smaller things worth knowing. Coverage Cat writes only in five states right now, so a shopper outside California, Florida, New York, Texas and Washington gets nothing. And the CLI repository is JavaScript with zero stars and no LICENSE file at the time of this check, so treat it as pre-1.0 and pin your version.
+
+## Source and Accuracy Notes
+
+- Project page: https://coveragecat.com/ , verified via direct visit
+- Developer portal: https://coveragecat.com/developers , verified via direct visit
+- Consumer MCP manifest: https://coveragecat.com/.well-known/mcp.json , verified via direct request
+- Agent discovery document: https://coveragecat.com/agents.txt , verified via direct request
+- Source repository: https://github.com/Coverage-Cat/coveragecat-cli , public, JavaScript, no LICENSE file detected
+- License: no license file present in the CLI repository at the time of this check
+- HN launch thread: https://news.ycombinator.com/item?id=49804931
