@@ -1,0 +1,144 @@
+---
+title: "Fogbender: embeddable team messaging for B2B support"
+description: "Fogbender is a B2B customer support platform with an embeddable team messaging widget, plus MIT-licensed SDKs for React, Vue, Element, and vanilla JS."
+pubDate: "2026-10-23T03:06:42.000Z"
+author: "Friday"
+tags: ["dev-tools", "customer-support", "b2b", "javascript", "open-source"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/fogbender.webp"
+  alt: "Fogbender team messaging widget embedded in a B2B customer dashboard"
+canonical: "https://runany.dev/blog/fogbender/"
+draft: false
+---
+
+> **TL;DR:** Fogbender puts a shared team messaging widget inside the customer dashboard you already built, so support conversations happen next to the product instead of in a shared Slack channel. The SDKs are MIT licensed and published on npm as framework agnostic, React, Vue, Element, and WebSocket protocol packages. Budget for one piece of backend work first: the widget only mounts once you mint a signed user token on your server.
+
+## What it is
+
+Fogbender is a support platform built for B2B software vendors rather than consumer apps. Instead of asking a customer to post in a shared channel in your company's Slack, you embed a messaging widget into the dashboard they already log into. Your support staff join from inside Fogbender, and the customer sees an ordinary chat panel that lives in the product.
+
+The homepage makes the argument bluntly. Omnichannel support tooling works fine when the person on the other end is buying milk. When the customer has a whole team of engineers working inside your product, they want one shared place rather than a ticket queue, and they want your engineers sitting in it too.
+
+The company came out of YC W22 and launched on Hacker News in September 2022 with 86 points and 28 comments. The site is maintained, with a 2026 copyright notice in the footer and a working pricing page with a seat calculator.
+
+The interesting part is that the SDK side is open source. The packages under `fogbender/fogbender-oss` carry an MIT license, which is unusual for a commercial B2B support vendor. You get the client libraries and the WebSocket protocol types, and Fogbender hosts the service behind them.
+
+## Why B2B support keeps ending up in Slack Connect
+
+Most B2B companies end up with a shared Slack channel per customer and consider that their support system. It works until it does not:
+
+- Conversations are split across channels, so nothing about a customer lives in one place.
+- Your engineers end up in Slack instead of in the customer's dashboard, where the context actually is.
+- Onboarding a new customer means a Slack invite, a channel name, and a ritual of explaining the channel.
+- The customer cannot search their own history, because the history is in your workspace.
+
+Fogbender's model is the opposite. Each customer gets a room inside your product. Your team joins that room, the customer team stays in their dashboard, and you can hand off to another teammate or to an issue tracker without losing the thread. Rooms can be internal, team to team, or visitor facing, which is how they separate "the customer said something in a shared space" from "an anonymous visitor opened a support chat."
+
+## Getting it running
+
+The core package is a framework agnostic JavaScript SDK. You install it, hand it a client URL and a token, and mount it into a DOM node:
+
+```bash
+npm install fogbender
+```
+
+If you use pnpm, yarn, or bun, the package README points at `@antfu/ni` as a one-liner that picks the right installer for you.
+
+The vanilla setup creates an instance, sets the client URL and token, and renders an iframe into the root element:
+
+```ts
+import { createNewFogbender } from "fogbender";
+
+const addFogbender = async (rootEl: HTMLElement) => {
+  const clientUrl = "https://main--fb-client.netlify.app";
+  const token = {
+    widgetId: "dzAwMTQ5OTEzNjgyNjkwNzA3NDU2",
+    customerId: "org123",
+    customerName: "Customer Firm",
+    userId: "example_PLEASE_CHANGE",
+    userEmail: "user@example.com",
+    userJWT: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    userName: "Customer User",
+    userAvatarUrl: "https://example.com/avatar.png",
+  };
+
+  const fogbender = createNewFogbender();
+  fogbender.setClientUrl(clientUrl);
+  fogbender.setToken(token);
+  fogbender.setMode("light");
+  const cleanup = await fogbender.renderIframe({ rootEl, headless: false });
+  return cleanup;
+};
+```
+
+The `cleanup` function unmounts the widget, which is what you want in a single page app that navigates between customers.
+
+On React you get a provider pattern instead, plus a set of ready made widgets including a floaty launcher, an unread badge, and a headless mode you can drive yourself:
+
+```tsx
+import {
+  FogbenderProvider,
+  FogbenderConfig,
+  FogbenderIsConfigured,
+  FogbenderRoomyWidget,
+} from "fogbender-react";
+
+export function SupportPanel({ clientUrl, token }) {
+  return (
+    <FogbenderProvider>
+      <FogbenderConfig clientUrl={clientUrl} token={token} />
+      <FogbenderIsConfigured>
+        <FogbenderRoomyWidget />
+      </FogbenderIsConfigured>
+    </FogbenderProvider>
+  );
+}
+```
+
+If you would rather not touch a bundler, the Element package ships a standards compliant web component that you can pull straight from a CDN:
+
+```html
+<script type="module">
+  import "https://esm.sh/fogbender-element";
+</script>
+
+<fogbender-simple-roomy-widget
+  client-url="https://your-client-url.example"
+  token='{"widgetId":"...","customerId":"org123","userJWT":"..."}'
+/>
+```
+
+## The packages on npm
+
+Every client library is published separately, which lets you take only what you need.
+
+| Package | Version | Purpose | Published |
+| --- | --- | --- | --- |
+| `fogbender` | 0.10.2 | Framework agnostic widget SDK for any website | 2025-04-27 |
+| `fogbender-proto` | 0.18.1 | PubSub protocol over WebSocket, with TypeScript types | 2025-04-22 |
+| `fogbender-react` | 0.6.2 | React components, provider, floaty, headless and badge | 2025-04-22 |
+| `fogbender-element` | 0.5.0 | Web Component wrapper, usable with or without a framework | 2025-04-13 |
+| `fogbender-vue` | 0.3.4 | Vue 2 and Vue 3 wrapper | 2025-04-08 |
+
+`fogbender-proto` is the interesting one for anyone who wants to go beyond the bundled UI. It implements the realtime PubSub protocol, so you can build your own chat surface or a bot that joins a room, without reverse engineering the wire format.
+
+## What to watch for
+
+The token is a server side responsibility. Every example token carries a `userJWT` that your backend signs, alongside `widgetId`, `customerId`, `userId`, and `userEmail`. There is no client side minting, so plan an endpoint that issues a token for the signed in user. The good news is that the widget renders inside an iframe, so its DOM stays isolated from the rest of your dashboard.
+
+Every sample in the repository points its `clientUrl` at `main--fb-client.netlify.app`, which is a Netlify deploy preview of the client rather than a production endpoint. Use it to hack on the examples, then swap in the client URL from your own dashboard.
+
+Pricing is counted on two separate axes: internal seats for your own team, which also get read only access to customer conversations, and customer-facing human agents. The entry Hosted tier is listed at $0 per month with unlimited end users, and the feature matrix at that tier already includes the anonymous visitor widget, the team to team widget, GitHub and Slack integrations, Slack Shared Channels, a SOC 2 certificate, and SSO. Seat counts are what push the price up, so it pays to know your headcount before you compare it to a shared Slack channel that costs nothing but your engineers' attention.
+
+The open source side is small and quiet. The repository has 13 stars, one fork, and its last push was April 2025, a few months after the npm packages were republished. That is fine if you treat the SDKs as a stable integration surface, which they appear to be. It is not fine if you need to ship a custom protocol change and expect upstream to merge it.
+
+The repository README also warns about a Parcel segfault on the first run of the vanilla example, with a rebuild as the fix. That is a Parcel problem rather than a Fogbender one, but it is the kind of thing that costs an afternoon the first time.
+
+## Source and Accuracy Notes
+
+- Project page: https://fogbender.com , docs at https://fogbender.com/docs , pricing at https://fogbender.com/pricing
+- Source repository: https://github.com/fogbender/fogbender-oss (MIT license, TypeScript, 13 stars, created 2022-08-11, last push 2025-04-27, not archived). The related `fogbender/b2b-saaskit` repo is a starter kit for apps with customer organizations.
+- License: MIT for the SDK packages, confirmed in the `fogbender` package README and the repository root.
+- HN launch thread: https://news.ycombinator.com/item?id=30332448 (86 points, 28 comments, 2022-09-08)
+- Thumbnail: the Open Graph image from fogbender.com, resized to 1200x630 and re-encoded as WebP.
