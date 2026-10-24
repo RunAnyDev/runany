@@ -1,0 +1,137 @@
+---
+title: "Corgi: a terminal multiplexer for coding agents"
+description: "Corgi is a Ghostty-based terminal multiplexer for Claude Code, Codex, Pi and OpenCode, with agent status, worktrees and a scriptable CLI."
+pubDate: "2026-10-24T16:35:00.000Z"
+author: "Friday"
+tags: ["terminal", "agents", "ai", "cli", "dev-tools", "typescript"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/corgi.webp"
+  alt: "A terminal split into panes, each running a coding agent with a status badge, one working and one waiting for input"
+canonical: "https://runany.dev/blog/corgi/"
+draft: false
+---
+
+> **TL;DR:** Corgi is a terminal multiplexer that treats coding agents as first-class panes. Run Claude Code, Codex, Pi or OpenCode in any pane and Corgi badges each one as working, waiting for you or finished, with F1 jumping straight to the agent that needs a decision. On top of that it adds Git worktrees, a diff review panel and a scriptable CLI, and it is MIT licensed.
+
+## What it is
+
+Corgi is a terminal multiplexer for people who keep several coding agents running at once. It grew out of Herdr, an existing agent-aware multiplexer, and the author rebuilt the ergonomics around a single question: with four agents running, how do you know which one is stuck waiting on you.
+
+The answer is a status column. Every agent pane gets a badge for working, needs you, finished or idle, and the sidebar tracks unread completions plus a count of tool calls made while you were away. F1, or the jump to attention shortcut, visits agents that are waiting on input before ones that already finished.
+
+Under the hood it is built on Ghostty, written in TypeScript and run on Bun, with a daemon that holds the sessions and a viewer UI on top. Panes keep running when you detach, and after a crash or a reboot Corgi restores the saved layout and output, returning recorded conversations dormant so they resume when their pane takes focus.
+
+It also fixes the small terminal annoyances that are easy to get tired of:
+
+- Cmd+V pastes an image, even over SSH
+- Clicking a link copies it, so there is no drag-selecting across wrapped lines
+- Images get a thumbnail preview rather than a wall of escape codes
+- Search and resume across sessions is quick, and token usage shows inline
+
+## Why it matters
+
+Agent workflows break the multiplexer model. A tmux pane is a program that produces output, and a terminal user watches output. An agent pane is a program that produces output and then blocks while it waits for you to approve a tool call. When four of them are open, the useful question is never what did it print, it is which one needs a decision from me.
+
+Corgi's answer is to treat that as a first-class signal rather than something you infer from scrolling. The distinction matters in practice, because the alternative is reading four panes of interleaved output to find the one asking for permission.
+
+The second half of the problem is where the agents actually work. Multiple agents on one repository means multiple Git worktrees, one per task, and Corgi builds those from the agent picker. The default folder template is `$PROJECT_ROOT/.worktrees/$NAME`, and a worktree is only created when an agent, saved command or terminal actually launches, so backing out of the picker leaves nothing behind.
+
+## Getting it running
+
+The installer is a shell script. It puts the runtime in `$HOME/.local/share/corgi`, the binary in `$HOME/.local/bin/corgi`, and adds that to your PATH for bash, zsh and fish.
+
+```bash
+curl -fsSL https://corgi.computer/install.sh | bash
+```
+
+Uninstalling uses the same script with an argument, and the `CORGI_INSTALL_ROOT` and `CORGI_INSTALL_BIN` environment variables override the paths:
+
+```bash
+curl -fsSL https://corgi.computer/install.sh | bash -s uninstall
+```
+
+The script refuses to run on an unsupported platform, and it ships exactly two builds, both checksummed against a pinned SHA-256:
+
+| Platform | Installer verdict | Download size |
+| --- | --- | --- |
+| macOS arm64 (Apple Silicon) | supported | 97,649,632 bytes |
+| Linux amd64 | supported | 132,495,536 bytes |
+| Intel macOS | rejected | none |
+| WSL | takes the Linux build, since uname reports Linux x86_64 | as above |
+
+The site advertises macOS, Linux and WSL support, so WSL is worth trying even though the installer only knows two target names. Intel Macs are out entirely.
+
+Once it is installed, run `corgi` in a project directory and pick a shortcut preset. The setup step can import existing sessions from tmux, from Herdr in either copy or handoff mode, and from cmux on macOS. The import is deliberately partial: it carries over folders, window names and split layouts, but it cannot transfer running application memory or a shell environment, and programs in the source keep running there.
+
+## How it knows what your agent is doing
+
+Corgi adds hooks to each agent's own settings so the agent reports its own lifecycle. Claude Code and Codex get hooks written into their config, Pi gets an extension, and OpenCode needs nothing. Codex asks you to trust the hooks once, in its `/hooks` panel.
+
+Where hooks stay silent, Corgi falls back to reading the agent's terminal screen. The watcher picks up the state before any hook speaks, a compaction, a turn interrupted without a hook, a prompt that was answered, and permission dialogs on screen. The documentation is explicit that these are observations rather than proof, and it marks screen-derived conclusions as such.
+
+There is a second, optional layer called Clever Corgi, which produces the activity summaries, the worktree briefs and the Smart Link names. It reuses the inference provider you are already logged into, so there is no separate API key, but the docs say plainly that these features use the provider login and consume model usage. Resource collection is the exception and never calls a model at all.
+
+| Capability | Claude Code | Codex | Pi | OpenCode |
+| --- | --- | --- | --- | --- |
+| Status and completion badges | yes | yes | yes | yes |
+| Activity summaries | yes | yes | yes | yes |
+| Context, tokens and rate limits | yes | yes | yes | yes |
+| Rename and fork a conversation | yes | yes | yes | yes |
+| Resume after a crash or reboot | yes | yes | yes | yes |
+| Subagents | yes | yes | no | yes |
+| Multiple accounts | yes | yes | yes | no |
+
+## Scripting the daemon
+
+The `corgi` command talks to a running session from any shell, and `--json` returns the daemon's reply as JSON instead of text. IDs come from `corgi list`, and `current` means the pane the command runs in rather than whichever pane has focus.
+
+```bash
+corgi list
+corgi tab new --workspace 1 --name Tests --command 'bun test src'
+corgi pane split current --right
+corgi pane send 3 --stdin --enter < /path/to/prompt.txt
+corgi pane read 3 --lines 100
+corgi pane idle --cwd /path/to/project --first
+corgi focus 3 --viewer 1
+```
+
+The `pane idle` command is the useful one for scripting. It lists the panes whose shell is sitting at its prompt, so a script can find an agent that has finished and is waiting, instead of grepping output.
+
+When a coding agent runs these commands through a pipe, Corgi compacts what the agent reads, so `--help` lists only the agent-facing commands and `pane read` trims line ends and collapses blank runs. `CORGI_AGENT_MODE=1` forces that behaviour on, `--no-agent` forces it off, and `corgi --skill` prints the bundled scripting guide for an agent to read.
+
+Remote agents work too. A local SSH, container or Slurm wrapper can claim the pane it is about to fill, which lets the screen watcher recognise an agent it did not launch:
+
+```bash
+#!/bin/sh
+corgi claim claude --owner "$$"
+trap 'corgi claim --clear --owner "$$"' EXIT
+ssh -t compute-node claude
+```
+
+Corgi also has a headless mode that starts a provider session and waits for its session ID, then sends further prompts, lists events or stops it, all addressed by provider and session rather than by a numeric ID.
+
+## What to watch for
+
+Corgi is young. The repository was created on 20 September 2026 and has 86 stars, 6 forks and 2 open issues at the time of writing. The author described building it while on a sick leave, as a challenge to try to get back to work, and said in the launch post that the result was more mixed than they had hoped. That context reads as honest rather than promotional.
+
+The feature gaps are specific. Subagents are not tracked for Pi and multiple accounts are not tracked for OpenCode. OpenCode support runs through a v2 adapter that the documentation describes as having parity gaps left to close.
+
+Two complaints came up more than once on the launch thread, and both are worth knowing before you commit to it as a daily driver. There is no way to sync or connect between machines, so a laptop and a desktop stay separate universes. And the interface has some repaint and flicker bugs that at least one tester ran into. A third objection was that the name collides with a recent YC company called Corgi Insurance, which is a real naming risk even if it is only a trademark one.
+
+Installation is a curl piped into bash with no Homebrew formula, which one commenter asked for. If you dislike that pattern, wait for a tap rather than piping it into a shell today.
+
+Clever Corgi is worth understanding before you enable it. The activity summaries and worktree briefs consume model usage from your existing provider login, and the docs are careful that these labels are inferences rather than verified facts. Resource sampling is free of that cost.
+
+The import path is the other soft spot. Copying from tmux or Herdr brings across folders, layouts and resume suggestions, but nothing executes automatically and no application memory moves with it. A failed import does not complete setup.
+
+The license is MIT, with one wrinkle the project documents itself: the notification sounds in `assets/sounds/` come unchanged from Herdr and remain under Herdr's Apache 2.0 license. The `corgi licenses` command prints the full set of bundled licenses.
+
+## Source and Accuracy Notes
+
+- Project page: https://corgi.computer/ (verified via direct visit)
+- Source repository: https://github.com/tals/corgi (MIT license, TypeScript, 86 stars at the time of writing)
+- Documentation: `docs/reference.md`, `docs/agents.md` and `docs/workspaces.md` in the repository
+- Installer: https://corgi.computer/install.sh (build version 20261023T193707Z-f5372e3990bd, two platform targets with pinned checksums)
+- HN launch thread: https://news.ycombinator.com/item?id=50214373 (115 points, 32 comments, 23 October 2026)
+- Provider support matrix, platform targets, download sizes, install paths and the Clever Corgi model-usage caveat were read from the repository README and the installed documentation; the missing-machine-sync, repaint and name-collision points come from the HN discussion
