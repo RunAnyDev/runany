@@ -1,0 +1,147 @@
+---
+title: "Alter Vault: privileged access control for AI agents"
+description: "Alter Vault is a privileged access management platform for AI agents, with vaulted credentials, default-deny policy, human approval, and a full audit trail."
+pubDate: "2026-10-24T00:06:46.000Z"
+author: "Friday"
+tags: ["ai-agents", "security", "credentials", "mcp", "sdk", "oauth"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/alter-vault.webp"
+  alt: "Alter Vault shield graphic representing credential and policy control for AI agents"
+canonical: "https://runany.dev/blog/alter-vault/"
+draft: false
+---
+
+> **TL;DR:** Alter Vault sits between your agent and the APIs it calls, brokering credentials so tokens never land in your own runtime. A default-deny policy engine checks every call, risky ones can wait for a named human approver, and each request lands in an audit trail. It is a hosted service with MIT-licensed Python and TypeScript SDKs, and the free tier covers 10,000 API calls a month.
+
+## What it is
+
+Alter Vault is a credential broker and policy layer for agents that act on behalf of real users. Instead of handing your agent an OAuth refresh token or a service API key, you register the connection in Alter and call the third-party API through Alter's SDK. Alter looks up the right credential, checks policy, and either completes the call or holds it for approval.
+
+It comes from Alter Labs in New York, a YC S25 company, and the launch landed on Hacker News on 21 October 2026 with 68 points and 49 comments. The recurring question in that thread was how this differs from putting a token in an environment variable.
+
+## Why it matters
+
+The moment an agent can act as a user, you have a multi-user authorization problem that a single API key cannot express. One user's agent should not be able to spend another user's money or read another user's inbox, and you need a record of which of the two actually happened.
+
+The usual answers are to hand the agent a long-lived key, or to keep tokens in your own secret store and pass them through the prompt. The first turns a compromised agent into a company-wide incident. The second leaves the credential inside your runtime, where it can end up in a log line, an error report or a crash dump, and it gives you no record of what the agent did with the key. Alter takes a third route. The credential stays in Alter's vault, your process sends a request, and the request goes through policy first.
+
+## Getting it running
+
+Install the SDK for your language, then point it at a key from the portal:
+
+```bash
+pip install alter-sdk
+# or
+npm install @alter-ai/alter-sdk
+```
+
+```bash
+export ALTER_API_KEY="alter_rk_..."
+```
+
+`alter init` walks you through creating an app in the portal and linking the local key. After that, the SDK handles the whole loop: open a consent flow, store the connection, then make calls against it.
+
+```python
+import asyncio, os
+from alter_sdk import App, HttpMethod
+
+async def main():
+    async with App(api_key=os.environ["ALTER_API_KEY"]) as app:
+        # 1. Open a consent flow and store the connection
+        results = await app.connect(providers=["google"])
+        grant_id = results[0].grant_id
+        print("grant_id:", grant_id)
+
+        # 2. Call the third-party API through Alter
+        response = await app.request(
+            HttpMethod.GET,
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            grant_id=grant_id,
+            query_params={"maxResults": 5, "singleEvents": True},
+        )
+        events = response.json().get("items", [])
+        print(response.status_code, [event.get("summary", "Untitled") for event in events])
+
+asyncio.run(main())
+```
+
+The TypeScript SDK is the same shape in camelCase, with `@alter-ai/alter-sdk` as the import path and `grantId` in place of `grant_id`:
+
+```typescript
+import { App, HttpMethod } from "@alter-ai/alter-sdk";
+
+const app = new App({ apiKey: process.env.ALTER_API_KEY! });
+try {
+  const response = await app.request(
+    HttpMethod.GET,
+    "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+    {
+      grantId: process.env.GOOGLE_GRANT_ID!,
+      queryParams: { maxResults: 5, singleEvents: true },
+    },
+  );
+  const body = (await response.json()) as { items?: Array<{ summary?: string }> };
+  console.log(response.status, body.items?.map((event) => event.summary ?? "Untitled") ?? []);
+} finally {
+  await app.close();
+}
+```
+
+## Two ways to hand over a credential
+
+Alter exposes two request paths, and the difference between them matters more than it first looks.
+
+| | Retrieve mode | Proxy mode |
+|---|---|---|
+| Call | `app.request()` | `app.proxy_request()` |
+| Where the token goes | Into your process, injected into the outgoing request | Stays in Alter's backend |
+| Good for | Ergonomics, and using a provider's own SDK | Cases where the credential must never touch your runtime |
+
+Retrieve mode is the default and the simpler path. Proxy mode is the one to reach for when the token would otherwise be visible to a process you do not fully control, such as a sandbox running code you did not write.
+
+## Policies, approvals and identity
+
+The vault is the easy part. What makes Alter worth a look is the four layers wrapped around it:
+
+- **Credential Vault.** OAuth tokens and managed API keys, encrypted at rest, with the encryption keys held outside the application database. Postgres stores metadata and vault references; the provider tokens never land there.
+- **Policy Engine.** Default deny, evaluated down to the parameter level. If a policy cannot be evaluated, the request is denied rather than allowed by default.
+- **Agent Identity.** Each agent gets its own key, its own grants and its own audit trail, and can be tied to an OIDC identity provider or delegated from another identity.
+- **Human in the loop.** A sensitive call can be held until a named person approves it, so a risky action stops instead of firing.
+
+Around those sits an audit trail recording the caller, the principal, the provider, the response status and the latency for every call. It is tamper-evident, exportable, and streams to a SIEM. The catalog covers 140 OAuth providers, and you can connect a custom API if yours is not on the list.
+
+## What it costs
+
+Pricing is per API call rather than per seat, and the free tier is generous enough to try on a real project.
+
+| Plan | Price | Calls included | Overage | Audit retention |
+|---|---|---|---|---|
+| Free | $0 | 10,000 / mo | None, usage pauses at the limit | 30 days |
+| Starter | $50 / mo | 100,000 / mo | $0.50 per 1,000 | Unlimited |
+| Growth | $250 / mo | 1,000,000 / mo | $0.50 per 1,000 | Unlimited |
+| Enterprise | Custom | Custom | Custom | Unlimited |
+
+One completed provider request through Alter's proxy counts as one API call. SDK management work such as opening a session, listing grants or resolving an identity does not count, so the setup and bookkeeping calls around an agent loop do not eat into the allowance.
+
+## What to watch for
+
+The service is hosted, so your credentials live in Alter's infrastructure. You are adding a third party to your trust boundary and to your latency budget. The team publishes monitored controls and documents at trust.alterauth.com, and SOC 2 is listed as in progress rather than certified, which matters if you have a compliance deadline.
+
+Both SDKs sit at 0.29.0 and pre-1.0, so expect some churn in the API surface. They are MIT licensed and published on PyPI and npm. The only public repository I found under the Alter GitHub org is an OpenClaw plugin, so the server side is not open source.
+
+The CLI is broad but shallow in places. `alter policy`, `alter audit`, `alter approvals` and `alter agents` cover the common jobs, and `alter doctor` handles diagnostics. Claude Code users can add Alter's own MCP server for onboarding:
+
+```bash
+claude mcp add --transport http alter-onboarding https://mcp.alterauth.com/mcp
+```
+
+## Source and Accuracy Notes
+
+- Product page: https://alterauth.com/ — verified via direct visit
+- Documentation: https://docs.alterauth.com/ — quickstart, pricing and integration guides read directly
+- SDKs: `alter-sdk` on PyPI and `@alter-ai/alter-sdk` on npm, both MIT licensed at version 0.29.0
+- Public repository: https://github.com/AlterAIDev/openclaw-alter-plugin (TypeScript, MIT)
+- Pricing and plan limits: https://alterauth.com/pricing
+- HN launch thread: https://news.ycombinator.com/item?id=50176908 (21 October 2026, 68 points, 49 comments)
+- License: the SDKs are MIT; the hosted control plane is proprietary
