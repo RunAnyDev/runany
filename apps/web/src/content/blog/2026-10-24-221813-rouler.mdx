@@ -1,0 +1,133 @@
+---
+title: "Rouler: steer Windows traffic per app across VPNs"
+description: "Rouler is split tunnelling for Windows. Point each app, IP or subnet at the network interface you choose, and run WireGuard, Tailscale and Mullvad side by side."
+pubDate: "2026-10-24T15:18:13.000Z"
+author: "Friday"
+tags: ["windows", "networking", "vpn", "split-tunnelling", "dev-tools", "rust"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rouler.webp"
+  alt: "Windows desktop with several network interfaces stacked in a row, each routing a different application to a separate tunnel"
+canonical: "https://runany.dev/blog/rouler/"
+draft: false
+---
+
+> **TL;DR:** Rouler is split tunnelling for Windows. You write rules that send a given app, IP or subnet out the network interface you pick, so a privacy VPN can carry your browser while a work tunnel carries Slack and everything else stays on Ethernet. It ships its own Rust network driver, needs no route-table edits, and runs a free public beta on Windows 10 and 11.
+
+## What it is
+
+Rouler sits between your applications and the Windows routing stack. A rule matches an app, optionally narrowed to a destination IP or subnet, and Rouler sends that traffic out the interface you choose. Anything without a matching rule goes through normal Windows routing, exactly as it would without Rouler installed.
+
+The interesting part is that Rouler does not own your routes. It works with network interfaces rather than with VPN clients, so it does not care whether the interface belongs to the official WireGuard client, Tailscale, Mullvad, OpenVPN or AmneziaWG. Your VPN clients keep running as they normally do, with nothing to import and no configuration to translate.
+
+Under the hood is a custom Windows network driver written in Rust. Rouler applies a rule just before Windows makes its routing decision, then leaves the rest alone. The design goals are stated plainly on the site: no system hooks, no virtual network adapters, no user-mode proxy, no custom NAT, and nothing that trips game anti-cheat.
+
+Rouler is a solo project by an independent developer in Australia. It reached Hacker News on 20 October 2026 as "Show HN: Rouler", taking 28 points and three comments, one of which was a pricing question the FAQ on the site answers.
+
+## Why it matters
+
+Most VPN clients on Windows are all-or-nothing. The client claims the default route and your whole machine follows, which is fine until you need a second tunnel. A corporate VPN and a privacy VPN cannot both claim everything, and the usual workaround is turning off one of them.
+
+That is the problem Rouler is built around. The common failure when running two tunnels is that each one's encrypted packets have to leave over a real adapter to reach its peer, and each tunnel can pick the other as a better route than your physical NIC. The traffic then loops between the tunnels and never leaves the machine. Rouler's documentation walks through the fix, which is splitting the default route into non-overlapping prefixes so no two tunnels share one:
+
+```ini
+# Tunnel A: split the default route into halves
+AllowedIPs = 0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1
+
+# Tunnel B: split into quarters, so its prefixes don't collide with A's
+AllowedIPs = 0.0.0.0/2, 64.0.0.0/2, 128.0.0.0/2, 192.0.0.0/2, ::/2, 4000::/2, 8000::/2, c000::/2
+```
+
+Each tunnel still carries everything, but since no prefix is shared, both can activate at once. Rouler then lets you decide which application uses which one.
+
+## Getting it running
+
+The beta installer is a 4.3 MB download, and a beta key arrives by email. Rouler 0.2.3 (17 September 2026) is the current build, with 0.2.2 as the first beta release.
+
+```bash
+# Download the current beta build
+curl -L -o rouler-setup.exe https://download.rouler.io/rouler-setup-0.2.3.exe
+```
+
+Windows will show a SmartScreen warning because the EV certificate has not yet built a reputation with Microsoft. Choose "More info", then "Run anyway". The installer itself is EV-signed and the driver is signed by Microsoft, so the warning disappears once the certificate matures.
+
+You need 64-bit Intel or AMD hardware. There is no ARM build, and the interface is English only. One key covers up to five machines, which matters if you try it in a sandbox, since every fresh sandbox counts as another machine.
+
+If you would rather not install a network driver on your daily machine, Windows Sandbox gives you a throwaway Windows desktop in a window. It needs hardware virtualisation enabled in the BIOS and is available in the Pro and Enterprise editions of Windows 10 and 11, not Home:
+
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -All
+```
+
+Copy the installer into the sandbox, run it, approve the driver install, and paste your key. Before you close the sandbox, open Rouler's Settings and deactivate the licence, or the sandbox keeps one of your five slots.
+
+To check that a rule works, compare your public IP before and after. `curl` ships with Windows 10 and 11, so there is nothing to install:
+
+```bash
+# Before adding a rule for curl.exe
+curl ifconfig.me
+
+# After pointing curl.exe at your VPN interface
+curl ifconfig.me
+
+# Force a specific protocol family
+curl -4 ifconfig.me
+curl -6 ifconfig.me
+```
+
+The IP should change to the VPN's address. In Rouler's activity view the connection shows as Diverted, going out by the interface you selected.
+
+## How the traffic actually flows
+
+The activity view is the part worth understanding, because the outcome label tells you what really happened to a connection. These are Rouler's own categories, taken from its documentation:
+
+| Outcome | What it means |
+| --- | --- |
+| Diverted | Rouler moved the traffic to a different interface from the one Windows would have used |
+| Already correct | A rule applied, but Windows was already sending the traffic out that interface |
+| App chose | The application picked its own interface and Rouler let it |
+| System routed | No rule matched, so Windows' route table decided |
+| Blocked | The rule's interface could not carry the traffic, so Rouler blocked it |
+
+"App chose" is the one that surprises people. When an app selects an interface itself, Rouler stays out of the way. That covers the WireGuard client, so its packets do not loop back into the tunnel, printer discovery, file sharing and casting to a TV. The catch is privacy: if you expect every byte of Chrome to travel over your VPN, a connection Chrome sends out another interface will show as App chose rather than Diverted. The activity view is how you catch that.
+
+DNS is the other gap, and it is the one most likely to matter to you. Most Windows lookups go through a single service, Dnscache, running inside `svchost.exe`, and that service does not report which application asked. So Chrome's rule does not yet cover Chrome's DNS lookups. Apps doing their own resolution, such as a browser with DNS over HTTPS enabled, are covered normally.
+
+Rouler blocks traffic rather than letting it leak in three situations: the rule's interface cannot carry that traffic, such as IPv6 on an IPv4-only tunnel; the interface goes down, which behaves like a kill-switch scoped to that rule; or the interface's routes change underneath the rule. Each block applies only to its own rule, and outside these cases Rouler never edits your routes or adds firewall rules.
+
+## Performance and footprint
+
+The site publishes its own benchmark numbers, measured on two Windows 11 machines connected directly over a 2.5 Gb/s Ethernet cable, with the sending side running an AMD Ryzen 7 9800X3D and the receiving side a Ryzen 7 7800X3D.
+
+Latency came out at the same level with and without Rouler. UDP round-trip means were 106.9 microseconds without Rouler and 106.1 microseconds when diverted. TCP was 112.5 microseconds against 112.1 microseconds diverted. The differences are smaller than the variation between individual runs.
+
+| Mode | UDP mean | TCP mean |
+| --- | --- | --- |
+| Without Rouler | 106.9 µs | 112.5 µs |
+| Diverted | 106.1 µs | 112.1 µs |
+| Already correct | 106.9 µs | not published |
+
+Throughput is measured with a single 30-second run at full link speed, and the upload test without Rouler reached about 2.3 Gb/s (282.4 MB/s) using 19.0% of the sender's CPU. Downloads are unaffected, since Rouler never touches incoming packets. The documentation notes that steering UDP traffic costs extra CPU, and that the stress test pushes far more traffic than any real application sends.
+
+Memory use settles at about 15 MB to 20 MB within 30 seconds of starting, with the app minimised to the system tray.
+
+## What to watch for
+
+The beta is aimed at technical testers. The site says so directly, and expects people who are comfortable with IP addresses, route tables and VPN configurations. The public beta is free, but the release version will be paid, and pricing is not final. The personal licence is planned as either a one-off 79 USD purchase covering two years of updates, or a 39 USD yearly subscription. Business licences will be subscription only.
+
+Two functional limits are worth knowing before you depend on it. DNS does not follow app rules yet, as described above. And rules for packaged apps and folders are not implemented, so you can only target regular programs and Windows services.
+
+The activity view distinguishes Diverted from App chose, and that distinction is doing real work in the privacy story. If you are relying on a VPN to keep traffic away from your ISP, it is worth scanning the view for connections labelled App chose, since Rouler deliberately permits an application to route itself elsewhere.
+
+Rouler installs a network driver, which is the one thing that deserves a second look on a machine you depend on. The developer notes that many early testers have run it on everyday machines without reported issues, and suggests a VM or Windows Sandbox if you would rather not. It is closed source, with no public repository for the application or the driver, and the only public GitHub repo under the author's account is an unrelated JavaScript project called `rouler-cli`.
+
+The roadmap is short. The current phase is getting the driver right, the next phase is reliability and speed across more real setups, and later phases add packaged-app rules and a more polished interface. The project is not affiliated with or endorsed by WireGuard, Tailscale, Mullvad, OpenVPN or AmneziaWG, and it names those products only to describe what it works with.
+
+## Source and Accuracy Notes
+
+- Project page: https://rouler.io/ (verified via direct visit)
+- Documentation: https://rouler.io/docs, including "How rules behave", "Multiple network interfaces", "Performance", "Test with curl", "Run Rouler in Windows Sandbox" and "How the WireGuard kill-switch works"
+- Download page: https://rouler.io/download (version 0.2.3, 4.3 MB, released 17 September 2026)
+- HN launch thread: https://news.ycombinator.com/item?id=50161144 (28 points, 3 comments, 20 October 2026)
+- License: closed source. No public repository for the application or the Rust driver. The author's only public repo, `rouler-cli`, is an unrelated JavaScript project
+- Pricing, benchmark numbers, rule semantics and download details were read from the project's own site and documentation pages
