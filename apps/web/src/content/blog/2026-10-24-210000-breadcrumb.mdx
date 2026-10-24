@@ -1,0 +1,143 @@
+---
+title: "Breadcrumb: the Mac app that records everything for your AI"
+description: "Breadcrumb is a macOS AI context manager that records your screen, meetings and AI sessions locally, then serves them to Claude, Codex and Cursor over MCP."
+pubDate: "2026-10-24T14:00:00.000Z"
+author: "Friday"
+tags: ["macos", "ai", "mcp", "context-management", "productivity", "privacy"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/breadcrumb.webp"
+  alt: "A timeline of captured screen moments and code windows flowing into a layered memory panel that an AI agent reads from"
+canonical: "https://runany.dev/blog/breadcrumb/"
+draft: false
+---
+
+> **TL;DR:** Breadcrumb runs on your Mac and records what you actually did, then serves it to Claude, Codex, Cursor or opencode over MCP so your AI starts with real context instead of a blank chat. Rules you correct out loud get filed against a folder and replayed at the right moment. Everything stays on your own disk, encrypted with a passphrase only you hold, and the personal version is free.
+
+## What it is
+
+Breadcrumb is a macOS app from Innerloop, a one-person studio run by Justin Vincent. It sits in the background, records your screen, transcribes your calls and tracks what your coding assistants are doing, then exposes all of it to your AI tools through the Model Context Protocol.
+
+The problem it targets is the one that sits outside the chat box. A long AI conversation forgets. Context windows fill up, old turns get summarized away, and a fresh session starts with nothing but whatever you paste into it. Breadcrumb keeps the record somewhere else and lets any AI pull from it on demand.
+
+The author calls it a computer flight recorder. The name fits. A flight recorder does not steer the plane, it just keeps the tape.
+
+## How it records your Mac
+
+Breadcrumb captures every window on screen, not only the focused one, and keeps three separate clocks for each window: how long you were looking at it, how long it was doing something on its own, and how long an AI was working inside it. That third clock is the useful one, because it means you can ask what Claude Code was doing on a Tuesday afternoon without guessing.
+
+Captured moments group into chapters, titled work sessions with a time span, and those chapters roll up into a day card. The day card is the summary an AI reads first:
+
+```text
+# 2026-09-27 · day card
+FOCUS: 11h 15m
+APPS: 7h 46m Claude · 2h 34m Google Chrome · 36m Screen Sharing
+LEDGER — focused holds >= 60s, in order:
+01:05 · 5m · AI Runbook Creation
+07:31 · 22m · Claude
+```
+
+Per-app time is also split into attended and unattended seconds, which is a nicer way to count than raw focus time:
+
+```text
+# 2026-09-27 · hours by app (attended + unattended)
+8h 45m · Claude — attended 7h 46m · unattended 59m
+2h 34m · Google Chrome — attended 2h 34m · unattended 0s
+2h 19m · Claude Code — attended 0s · unattended 2h 19m
+```
+
+Meetings are transcribed locally, speakers are identified, and the audio is deleted afterwards. Zoom works today. Google Meet and Teams are listed as "fast follows", so they are not there yet.
+
+Speaker naming is the weak spot, and the author says so plainly. Breadcrumb does not build a voiceprint of you and store it to recognize you in later calls. It infers the speaker from the name showing on screen, which works most of the time and fails whenever your meeting app shows "Guest" or a nickname.
+
+## Rules that write themselves
+
+This is what separates Breadcrumb from a screen recorder with a search box.
+
+Rather than asking you to maintain an AGENTS.md, Breadcrumb notices the moment you correct your AI and offers to turn the correction into a rule:
+
+> "Never push main without my saying so. Ever."
+>
+> Want me to make this a permanent rule that every AI follows?
+
+Say yes and it is stored. Rules live in a SQLite database, one row per rule, and the app compiles them into modules that carry a one-line trigger, so a rule about writing Swift code only loads when you are writing Swift code.
+
+```text
+/breadcrumb
+├── inline            7    every prompt in this scope
+├── development.md   32    designing, writing, or reviewing Breadcrumb code
+├── builds.md         9    building or testing Swift code
+├── laravel-forge.md  8    managing Laravel Forge
+```
+
+Rules are also scoped to folders. The app watches your working directory, so sitting in `~/code/acme` pulls in the acme rules while the global ones stay in force everywhere. The author's own install carries 93 rules, of which 47 were written by the AI rather than typed by hand.
+
+## Getting it running
+
+Requirements first: macOS 15 or later, Apple silicon M1 or later, at least 16 GB of RAM. There is no account, no email, no credit card and no trial timer.
+
+```bash
+# Breadcrumb 0.2.46 for Apple silicon (DMG, about 103 MB)
+curl -L -o Breadcrumb.dmg \
+  "https://innerloop.works/downloads/Breadcrumb-0.2.46-3845.dmg"
+
+# Mount the disk image and open it in Finder
+hdiutil attach Breadcrumb.dmg
+open /Volumes/Breadcrumb
+```
+
+The image mounts a single Breadcrumb.app next to an Applications shortcut, so you drag it across and launch it. The bundle reports version 0.2.46. On first launch the app pulls three models and stops there:
+
+| What it fetches | Where from | Why |
+|---|---|---|
+| Ollama runtime | GitHub | serves the local models |
+| Gemma 3 4B | ollama.com | names your moments and meetings |
+| Parakeet | Hugging Face | speech to text for meeting audio |
+
+The voice separation model ships inside the app, so there is no fourth fetch. After that, Breadcrumb connects itself to whichever harnesses it finds already on the machine. A read-only scan lists what it found:
+
+```text
+## Claude Code — installed · connected to Breadcrumb
+## Codex — installed · connected to Breadcrumb
+## Cursor — installed · connected to Breadcrumb
+## opencode — installed · connected to Breadcrumb
+```
+
+ChatGPT also appears on the marketing page as a supported harness, though the MCP reference names Claude Code, Codex, Cursor and opencode specifically.
+
+## The MCP surface
+
+Breadcrumb exposes 34 MCP tools. The read side groups like this:
+
+| Group | Tools | What comes back |
+|---|---|---|
+| Moments | `moment_get`, `chapter_get`, `grab` | the window tree, the work session, the words on screen |
+| Your day | `day_get`, `day_get_card`, `day_get_hours_by_app` | the diary, the summary card, per-app time |
+| Meetings | `meeting_list`, `meeting_get`, `meeting_search`, `meeting_stats` | transcripts, full-text search, talk share per speaker |
+| Memory | `memory_get_relevant`, `memory_list_types`, `memory_config_scan` | saved notes, the types in use, the harness inventory |
+| Scopes | `scope_list_all` | which folder each rule belongs to |
+| Search | `search`, `grep`, `entity_get` | across the whole store |
+
+The write side lets an AI add and edit memories, map folders to scopes, and install mods. `memory_get_relevant` is the interesting one: it returns a handful of cards that strongly match the prompt you just sent, wrapped in a block that tells the AI to treat them as observations rather than instructions.
+
+Two tools, `screen_get` and `screen_open`, are still marked as in development in the reference, so pulling banked screenshots back out is not fully wired up yet.
+
+## What to watch for
+
+The obvious tension in "record everything" is that your AI will send it to whoever runs the AI. Breadcrumb keeps the data on your disk, but the privacy policy is careful to say the answer still travels to your AI provider exactly like anything you type. Run a local model and nothing leaves your Mac. Use Claude or ChatGPT and their policy applies to that conversation.
+
+Meeting consent is on you. The privacy policy asks you to tell the people on your call that the meeting is being transcribed and to get their okay. In a work setting that is a conversation with your team, and possibly with legal.
+
+The app is closed source. The personal version is free and the author says it stays free, with a teams product planned later. If you want to back development there is a refundable founding seat at $299, capped at 1024 spots, each including a numbered place, early builds and a $2,500 credit toward a future team plan.
+
+The founder's own workflow makes the strongest case for the product, and it is also the thing worth thinking hardest about. He describes asking Claude to read a meeting transcript, pull the relevant screens out of the screen timeline, spin up a local server, diagnose each bug, open 14 JIRA tickets with 12 screenshots attached, and draft a Slack update for his colleagues. He is explicit that no meeting-to-JIRA workflow exists in Breadcrumb. It emerged from rules the AI offered him one at a time while it watched him work.
+
+## Source and Accuracy Notes
+
+- Project page: https://innerloop.works/breadcrumb — verified via direct visit
+- Launch post: https://innerloop.works/blog/introducing-breadcrumb — verified via direct visit
+- MCP tool reference: https://innerloop.works/breadcrumb/mcp — verified via direct visit
+- Privacy policy: https://innerloop.works/privacy — verified via direct visit
+- Download: Breadcrumb 0.2.46 DMG, about 103 MB, closed source with no public repository
+- Download verified by direct download, the image mounts to /Volumes/Breadcrumb and contains Breadcrumb.app (bundle version 0.2.46, declared minimum macOS 14.0 while the site states macOS 15 or later)
+- HN launch thread: https://news.ycombinator.com/item?id=49924943
