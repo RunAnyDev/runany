@@ -1,0 +1,134 @@
+---
+title: "Proton Drive for Linux: mount it as a local folder"
+description: "proton-drive-fs mounts Proton Drive as an ordinary Linux folder through FUSE, pulling file contents on demand instead of syncing the whole drive to your disk."
+pubDate: "2026-10-24T01:03:03.000Z"
+author: "Friday"
+tags: ["linux", "fuse", "self-hosted", "proton-drive", "filesystem", "go"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/proton-drive-linux-fs.webp"
+  alt: "Abstract encrypted cloud hovering above a local disk folder, linked by a thin data stream, representing a Proton Drive mount on Linux"
+canonical: "https://runany.dev/blog/proton-drive-linux-fs/"
+draft: false
+---
+
+> **TL;DR:** Proton has no official Linux client, so proton-drive-fs mounts your drive as an ordinary folder through FUSE. Folder listings come from Proton's metadata and file contents download only when something reads them, which keeps a large drive off your SSD. The project is young, unofficial, MIT licensed, and packaged for Arch, Debian, Ubuntu and Homebrew. It stores a session and a derived key password, never your Proton password.
+
+## What it is
+
+proton-drive-fs is a FUSE filesystem written in Go that exposes a Proton Drive account as a directory on Linux. You point it at a mountpoint and every folder and file Proton knows about appears where any program expects a filesystem to be.
+
+Almost none of it is local. Directory listings are read from Proton's metadata API, and the bytes of a file are fetched on demand when a program opens it. There is no background job copying your drive into your home directory. Open a large video, stream it, close it, and the cached block eventually falls out of a bounded on-disk cache.
+
+Writes travel the other way. When an application saves a file, proton-drive-fs buffers the new content to a local temporary file and uploads the whole thing once the file is closed, after a short delay that gives multi-step saves time to settle.
+
+The project belongs to khaosdoctor and reached Hacker News on 8 October 2026 as "Show HN: Proton Drive for Linux", taking 122 points. The repository was created in early September and still receives regular pushes.
+
+## Why it matters
+
+Proton ships Drive clients for Windows, macOS, Android and iOS, and every one of them bundles a full sync engine. Linux is the gap, and the usual workaround is a third-party sync client, which means another tool handling your credentials and, more often than not, another copy of your entire drive on local disk.
+
+That second part is what makes a FUSE approach worth the effort. If you keep a big archive in Proton Drive, a sync client wants all of it resident. proton-drive-fs wants only what you open, and it enforces that at the filesystem layer instead of inside a sync queue, so every application inherits the behaviour without knowing anything about Proton.
+
+The blast radius stays small too. A single daemon talks to Proton's API. Your applications talk to the kernel's FUSE layer, which forwards calls to that daemon, and the daemon handles authentication, the cache and the event feed that pushes remote changes into the mount.
+
+## Getting it running
+
+Installation works through whatever channel your distro prefers. On Debian and Ubuntu, the project publishes its own APT repository:
+
+```bash
+curl -fsSL https://khaosdoctor.github.io/proton-drive-linux-fs/apt/public.key | sudo gpg --dearmor -o /usr/share/keyrings/proton-drive-fs.gpg
+echo "deb [signed-by=/usr/share/keyrings/proton-drive-fs.gpg arch=$(dpkg --print-architecture)] https://khaosdoctor.github.io/proton-drive-linux-fs/apt stable main" | sudo tee /etc/apt/sources.list.d/proton-drive-fs.list
+sudo apt update
+sudo apt install proton-drive-fs
+```
+
+Arch users can pull a prebuilt binary through any AUR helper, Homebrew ships a tap for Linuxbrew, and Go users can skip the packages entirely:
+
+```bash
+yay -S proton-drive-fs-bin
+brew tap khaosdoctor/tap && brew install proton-drive-fs
+go install github.com/khaosdoctor/proton-drive-linux-fs/cmd/proton-drive-fs@latest
+```
+
+You need Linux with FUSE 3 and read and write access to `/dev/fuse`. A Secret Service provider such as GNOME Keyring or KWallet is optional but worth having, since it moves the derived key password out of the session file and into your system keyring.
+
+The first run logs you in. Proton usually answers a first login with a CAPTCHA, so expect a browser tab to open:
+
+```bash
+proton-drive-fs login
+proton-drive-fs mount ~/proton
+proton-drive-fs status
+```
+
+The mount daemon detaches into the background and prints the log location along with the command that unmounts it. On a desktop you also get a tray icon, and `proton-drive-fs tray` runs the icon on its own.
+
+For daily use, hand the mount to systemd. Set a mountpoint in the config file first, since the unit has no default path, then register it:
+
+```bash
+proton-drive-fs autostart
+journalctl --user -u proton-drive-fs -f
+```
+
+On a headless machine use `proton-drive-fs autostart -headless` so it starts at boot rather than with your session.
+
+Configuration lives in `$XDG_CONFIG_HOME/proton-drive-fs/config.toml`, which is `~/.config/proton-drive-fs/config.toml` unless you have set the variable. The first command you run creates it with every setting commented out at its default value, so you uncomment what you want to change:
+
+```toml
+mountpoint = "/home/you/proton"
+ttl = "30s"
+poll = "10s"
+cache_size = "2GiB"
+upload_delay = "5s"
+exclude = ["*.iso", "*.tmp"]
+```
+
+A flag on the command line beats the config file, and the config file beats the built-in default. `proton-drive-fs config show` prints the merged result and tells you where each value came from, which is the fastest way to catch a typo.
+
+## How the mount behaves
+
+A few defaults shape day-to-day behaviour more than the rest:
+
+| Flag | Default | What it controls |
+| --- | --- | --- |
+| `-ttl` | `30s` | How long a directory listing stays cached before it is fetched again |
+| `-poll` | `10s` | How often the Proton event feed is polled for remote changes |
+| `-op-timeout` | `60s` | Deadline for the network calls behind a single filesystem operation |
+| `-cache-size` | `2GiB` | Total space the on-disk block and listing cache may use |
+| `-large-file` | `300MiB` | Files above this size skip the on-disk block cache |
+| `-upload-delay` | `5s` | How long a file waits after closing before it uploads |
+| `-max-uploads` | `5` | How many files upload at the same time |
+
+The cache directory holds both downloaded file blocks and persisted directory listings, so a folder you listed before reappears instantly after a remount and refreshes in the background. The tool also keeps a shelf of files that should never reach your drive and never reach Proton:
+
+- `.DS_Store`, `Thumbs.db`, `desktop.ini`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`
+- `*.swp`, `*.swo`, `*.tmp`, `*~` and editor lock files
+- Thumbnailers and indexers such as `tracker-miner-fs`, `baloo_file` and `ffmpegthumbnailer`, which are denied reads on files over the large-file threshold so a video indexer cannot pull a 4 GB file into your cache
+
+The tray icon doubles as a status light. A hollow outline means not logged in or not mounted, a solid icon means mounted and idle, a dot means a transfer is in flight, and two bars mean polling is paused. Pausing stops the event feed poll only, so reads and writes keep working while remote changes stop arriving.
+
+## What to watch for
+
+The project says it plainly: it is early and unofficial, not affiliated with Proton AG, and not supported by them. Proton's Drive API is undocumented, so an upstream change can break the client without warning. The author has tested the common paths on one Proton Drive share and expects bugs.
+
+The functional gaps are worth knowing before you depend on it:
+
+- Shared drives are not supported. Only your main Proton share appears in the mount.
+- One account at a time. The session file holds a single account, though pointing each instance at a different `XDG_CONFIG_HOME` gives you a second one.
+- One writer per file. Two applications saving the same file concurrently is not supported.
+- Editing a large file re-uploads all of it. Writes are whole-file with no partial uploads, so a 2 GB video you trim and save gets sent again in full.
+- There is no trash. Deleting removes the file from Proton and the tool cannot restore it.
+- Only one mount per user at a time. If a previous daemon is still alive, a stale lockfile in `$XDG_RUNTIME_DIR/proton-drive-fs` has to go before a new mount will start.
+
+Uploads that fail are not lost. The file stays on the mount and retries with longer waits between attempts, and if the mount stops before the upload lands it is moved to `~/.local/state/proton-drive-fs/unsaved/` rather than discarded.
+
+Two rough edges bite most often. A busy mountpoint will not unmount, and the tool tells you which processes are holding it before falling back to a lazy unmount, with `fusermount3 -uz` as the last resort. Proton can also lock an account temporarily after a few failed logins, where only waiting helps since every retry extends the lock.
+
+The session file is the other thing to understand. Your Proton password is never written to disk. What gets stored is a session file at mode `0600` inside a `0700` directory, plus a key password derived from your account password, which is what unlocks the drive's encryption keys later. With a Secret Service provider running, that key password lives in your OS keyring instead. `proton-drive-fs logout` removes both.
+
+## Source and Accuracy Notes
+
+- Project page: https://oss.lsantos.dev/proton-drive-linux-fs/ (verified via direct visit)
+- Source repository: https://github.com/khaosdoctor/proton-drive-linux-fs (MIT license, Go, created 2026-09-05)
+- HN launch thread: https://news.ycombinator.com/item?id=50003545 (122 points, 8 October 2026)
+- Install, usage, configuration and troubleshooting details were read from the project's own documentation pages
