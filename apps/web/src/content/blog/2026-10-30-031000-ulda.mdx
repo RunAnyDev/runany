@@ -1,0 +1,132 @@
+---
+title: "ULDA: client-side encrypted JSON sync on your own server"
+description: "ULDA is a JavaScript SDK and self-hosted server for client-side encrypted JSON resources, where the server stores only ciphertext and public witnesses on your own PostgreSQL."
+pubDate: "2026-10-29T20:10:00.000Z"
+author: "Friday"
+tags: ["encryption", "javascript", "self-hosted", "security"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ulda.webp"
+  alt: "Cyan ULDA logo mark centered on a dark slate gradient background"
+canonical: "https://runany.dev/blog/ulda/"
+---
+
+> **TL;DR:** ULDA gives you encrypted JSON resources that stay encrypted on your own PostgreSQL, with the client doing AES-256-GCM work and the server seeing only an ID, a public witness and an opaque payload. The witness forms a hash-linked chain, so a server that swaps in an older or edited version gets rejected on the next write. You host the whole stack, and the source is available under a community license that caps commercial use at organizations below 1 million USD in revenue.
+
+## What it is
+
+ULDA (Universal Linear Data Authentication) is a toolkit for applications whose server should store data it cannot read. The unit of work is a JSON resource. You create it through a JavaScript SDK, the SDK encrypts it with AES-256-GCM on the device, and it travels to a server you run that keeps three things per resource: a decimal ID, a public witness, and an opaque payload.
+
+Three pieces ship under the `ulda-io` GitHub organization.
+
+| Component | Where it lives | Version | Role |
+|---|---|---|---|
+| ULDA Auth | `ulda-auth` on npm | 1.1.0 | Client SDK for encrypted JSON resources over Socket.IO |
+| ULDA Core | `ulda-core` on npm | 1.0.1 | Protocol engine that creates witnesses and checks state transitions |
+| ULDA Server | `uldaio/ulda-server` on Docker Hub | 1.0.0 | Stores opaque resources in PostgreSQL and notifies subscribers |
+
+The naming is misleading if you read it cold. "Authentication" in ULDA refers to authenticating state transitions, not authenticating users. The SDK ships no usernames, no password reset and no account directory. Your application supplies accounts and access policy, and ULDA handles what happens to the bytes.
+
+## Why it matters
+
+Client-side encryption is a normal feature to ship these days. The unusual part is what the server is still allowed to check.
+
+A server holding encrypted blobs usually lands in one of two camps. Either it trusts the client completely and stores opaque bytes, or it enforces structure it can read. ULDA aims at the space between, where the server can still reject a stale or forged update without ever learning the content. That is what the witness is for.
+
+The server sees resource IDs, public witnesses, sizes and traffic patterns. It cannot tell a master file from a content file, and it cannot inspect either one.
+
+## Getting it running
+
+The SDK needs Node.js 22 or later, or a browser with ES2022, Web Crypto and WebSocket support.
+
+```bash
+npm install ulda-auth@1.1.0
+```
+
+Register a catalog, write to it and read it back:
+
+```javascript
+import { Ulda } from 'ulda-auth';
+
+export async function createNotebook(endpoint, password) {
+  const ulda = new Ulda(endpoint);
+
+  try {
+    await ulda.ready;
+    const masterId = await ulda.register(password);
+
+    await ulda.add('notes', { title: 'First note', done: false });
+    await ulda.data.notes.title.update('Updated title');
+
+    return { masterId, note: ulda.value('notes') };
+  } finally {
+    await ulda.close();
+  }
+}
+```
+
+Keep the master ID. It is the handle to the encrypted catalog and it is yours to store.
+
+The backend is a separate process. The published Docker image contains the application, the PostgreSQL adapter and the migration tools, but no database and no proxy:
+
+```bash
+docker pull uldaio/ulda-server:1.0.0
+```
+
+Local development runs a Compose stack with a PostgreSQL service, a one-off migration job and the server:
+
+```bash
+docker compose build
+docker compose up -d postgres
+docker compose run --rm -e ULDA_DB_SETUP=1 db-setup
+docker compose up -d --no-build
+curl http://127.0.0.1:3000/ready
+```
+
+Readiness includes a storage check, so a running process is not the same as a usable server. The stack listens on loopback only and PostgreSQL publishes no port. Browser clients need `CORS_ORIGINS` set to the exact origin including the port, and local HTTP testing requires an explicit opt-in flag on the constructor.
+
+## How the witness chain works
+
+ULDA Core derives a public witness from a private origin of five random blocks. Give each block a different depth, hash each position a little further, and you get the witness, which the server stores next to the ciphertext.
+
+On the next write the client drops one block and adds one, so the window advances by a single step and each shared block now needs one hash less. The client sends the new witness, and the server hashes the four overlapping blocks once and compares against what it stored. That comparison is the part a hostile server cannot fake without the private origin.
+
+Two chain modes control how far a client may run ahead of the confirmed state:
+
+| Mode | Write rule | Fits when |
+|---|---|---|
+| X (adjacent-only) | One pending write per resource, each step must follow the confirmed state | You control every client and want the strictest ordering |
+| S (skippable) | The next age may run at most 4 steps ahead of the confirmed age | Clients go offline and catch up in bursts |
+
+The default implementation profile is SHA-256 with 256-bit origin blocks and the `compactV1` codec. SHA-1 survives for compatibility with older releases, and the manifest states plainly that it should not be used for new deployments. The protocol also ships deterministic official release vectors, which is the kind of detail that separates a real protocol from a demo.
+
+## What to watch for
+
+The license is the first thing to check, and it is not a standard open-source license. ULDA ships under the ULDA Library Community Source License 1.0, dated 6 October 2026, which states that it is source-available and not OSI-approved. Terms differ per component, and servers, container images, SaaS offerings and enterprise products each need their own terms.
+
+Commercial use is permitted for a Qualifying Small Organization, defined by a consolidated gross revenue threshold of USD 1,000,000. Cross that line and you have 90 calendar days to obtain a commercial license or stop exercising the rights. End users who merely access an application built on ULDA do not have to qualify themselves.
+
+The security documentation is unusually candid, and several caveats matter for whether this fits your use case.
+
+- On the first open the client has no independently persisted witness or resource token, so it trusts the server to return the right master. Substituting a different valid master encrypted under the same password is not fully prevented at that point.
+- There is no durable age anchor across closing the SDK or restarting the application, so an old valid snapshot can be indistinguishable from the latest one.
+- `Changed.deleted` is a trusted server statement rather than a cryptographic tombstone, and a malicious server can withhold, corrupt or delete records, hide a newer valid version, or deny service outright.
+- The SDK implements no per-user roles, key revocation, password rotation or recovery of forgotten master credentials.
+- Offline edits are not queued. The server rejects conflicting updates and the application handles resolution, because there is no persistent offline write queue.
+- Client-side secrecy does not survive XSS, a malicious dependency or a compromised operating system. Plaintext and origin bytes have to be readable by JavaScript while the SDK works with them.
+
+A lost or malformed success acknowledgement after a write produces `UNKNOWN_OUTCOME`, meaning the server may have committed. The docs are explicit that this is not proof of rollback and should not be retried automatically.
+
+Scale numbers are published as defaults of the companion server rather than measured capacity: 1,000 connections, 100,000 subscription edges globally and 32,768 per connection, 64 MiB of outbound bytes globally and 16 MiB per connection, a 64 MiB single resource and 128 MiB logical operation limit, a 256 MiB staging area, and a 60 second absolute transfer lifetime.
+
+## Source and Accuracy Notes
+
+- Project page: https://ulda.io/ (verified via direct visit on 2026-10-30)
+- Live demo: https://demo.ulda.io/ (verified via direct visit on 2026-10-30)
+- Documentation: https://docs.ulda.io/
+- Source repositories: github.com/ulda-io (ulda-auth, ulda-core, ulda-server), verified via the GitHub API
+- npm packages: ulda-auth 1.1.0 and ulda-core 1.0.1 (verified via npm view)
+- License: ULDA Library Community Source License 1.0, dated 6 October 2026. Source-available and not OSI-approved, with a USD 1,000,000 revenue threshold for commercial use
+- HN launch thread: https://news.ycombinator.com/item?id=50155099 (21 points, 9 comments on 2026-10-19)
