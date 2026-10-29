@@ -1,0 +1,110 @@
+---
+title: "ForensicDbg: a Windows post-mortem debugger with MCP"
+description: "ForensicDbg reads Windows crash dumps and names the thread, frame and instruction behind the exception, then exposes the same analysis to AI tools over MCP."
+pubDate: "2026-10-29T04:10:00.000Z"
+author: "Friday"
+tags: ["debugging", "windows", "post-mortem", "mcp", "dev-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/forensic-dbg.webp"
+  alt: "ForensicDbg landing page describing a modern post-mortem debugger for Windows"
+canonical: "https://runany.dev/blog/forensic-dbg/"
+---
+
+> **TL;DR:** ForensicDbg opens a Windows crash dump and tells you which thread, frame and instruction caused the exception, with memory regions labeled by symbol and object type. It attaches to live processes, reads your own source through SourceServer, and ships an MCP server so an AI tool can query the same analysis instead of guessing from raw dump data.
+
+## What it is
+
+ForensicDbg is a user-mode post-mortem debugger for Windows, built by Stern Look and announced on Hacker News in September 2026 by Loren McQuade. It handles x86 and x64 crash dumps, attaches to running processes for a snapshot, and can register itself as the just-in-time debugger so it catches a crash the moment it happens.
+
+The pitch is interpretation, not raw dumping. WinDbg gives you everything and makes you read it. ForensicDbg does the reading first. It labels memory regions with symbol names and object types, tracks register values as they flow through the disassembly, validates callstacks so misleading frames do not send you down the wrong path, and picks out the thread, frame and instruction that actually caused the exception. A small C++ expression evaluator is built in for poking at values.
+
+Two details are worth more than they sound. It simulates the image loader to reconstruct read-only regions that a mini-dump left out, so a trimmed crash dump can still be read properly. And a natvis CustomVisualizer is treated as a plug-in that cannot run, so the object it would have drawn is shown by its members instead of being silently dropped.
+
+## Why it matters
+
+Native Windows crashes are the kind of bug where the stack trace is a symptom and the real cause is three frames up. The usual tradeoff is Visual Studio, which is friendly and limited, against WinDbg, which is powerful and archaic. The author put it that way in his launch post.
+
+That framing drew a sharp reply from HN commenter neitsa, who spends a lot of time in WinDbg and pointed to time travel debugging, JavaScript scripting, Linux core dump support, new commands and an MCP server already on the roadmap. McQuade's answer was that "arcane" would have been the better word. Both are fair. WinDbg can do almost anything if you know the incantation, and it carries a lot of baggage for being twenty-plus years old.
+
+## Getting it running
+
+ForensicDbg is in a private beta, so there is no public download. You request an invite through the form on the beta page, join the private Discord server, and the download links live in the `#release-notes` channel for both 32-bit and 64-bit builds. Start with the 64-bit version of the latest release.
+
+The download is an MSI. Double-click `ForensicDbg64_1.0.123.0.msi`, click Install, accept the Windows permission prompt if it appears, and the tool installs. The title bar keeps showing UNREGISTERED until you paste a license into Help and Enter License, although every feature currently runs while unregistered. Updates come from the same place, with Help and Update to fetching the newest build.
+
+To open a dump, use File and Open Crash Dump, or click the bug icon in the top bar, or just double-click any .dmp file on disk. Large dumps take a minute or two to interpret before the panels fill in. Attaching to a live process works through File and Attach to Process, which takes a snapshot of the current state.
+
+Symbols and source are found through the standard Windows environment variables:
+
+```bash
+set _NT_SOURCE_PATH=C:\src\mysolution
+set _NT_SYMBOL_PATH=C:\symbols;C:\symbols\public
+```
+
+SourceServer and SourceLink are supported, so a build that recorded where its source lived can be walked back to the exact line even when you have no local checkout.
+
+## The panels
+
+The layout splits into six panels that stay in sync as you move through the process space.
+
+| Panel | What it shows |
+| --- | --- |
+| Source | The source for the selected disassembly, with navigation that follows your position in the code |
+| Threads | Every thread in the process space, with the thread holding an exception highlighted |
+| Modules | Loaded modules and whether their symbols loaded, with the regions and symbols per module |
+| Regions | Memory regions with their read, write and execute permissions and a description of the contents |
+| Disassembly | Executable regions, tracking the source panel and highlighting the faulting instruction |
+| Callstack | The frames of the selected thread, with the source and disassembly panels following the selection |
+
+Clicking an address moves the whole set. A crash in a worker thread, for example, highlights that thread and its callstack on load, so you start at the exception instead of at the top of the stack.
+
+## Driving it from an AI tool
+
+The MCP server is what separates this from a prettier WinDbg. ForensicDbg ships `ForensicMcp64.exe` and exposes the analysis over stdio, with output shaped for machine consumption rather than for a human reading a window. The claim is that interpreting the data before handing it over means an AI tool spends fewer tokens and hallucinates less.
+
+The tool set grew quickly. Release 1.0.233.0 added launch, break, wait and save_dump tools, along with a GUI side that can launch a program, break, continue and reload. The attach tool takes break_on_attach, stop_on and stop_on_exit. Release 1.0.235.0 added get_handles for an event wait, and a hang playbook that explains a lost wakeup.
+
+For Claude Desktop, the server is a local command in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ForensicDbg": {
+      "command": "C:\\Program Files\\ForensicDbg\\x64\\ForensicMcp64.exe"
+    }
+  }
+}
+```
+
+Restart Claude afterwards, confirm the server shows as connected under Settings, and set the connector permissions to Always allow so it stops asking before every dump read.
+
+| Client | Status | How it is configured |
+| --- | --- | --- |
+| Claude Desktop | Supported | `mcpServers` entry in `claude_desktop_config.json` pointing at ForensicMcp64.exe |
+| Codex | Supported | Edit, Settings, Plugins, Add, Add MCP server, then the Name and Command to launch fields |
+| VS Code | Coming soon | Not available at the time of writing |
+| Qwen Code | Listed, not filled in | The guide has a section for it but no published steps yet |
+
+## What to watch for
+
+The tool is closed source and there is no public pricing on the site. Beta access is the only entry point, and it runs through a Discord invite, so you end up in a private channel looking for MSI links instead of clicking a download button.
+
+It is also Windows only, and it is a post-mortem debugger in the user-mode sense. Kernel crashes are out of scope.
+
+The quality of the interpretation is the whole product, and you can only judge it by trying it. The landing page does not help there, which was the sharpest criticism on HN. Two commenters said the demo video was hard to follow, that it was not interactable, and that fullscreening it did not make it larger. McQuade said he would try to make it easier to read and show what is going on.
+
+There is a useful hint at what the analysis looks like, though. The Stern Look blog walks through a real null dereference where `CTextWindowBase::SetSelectionBegin` does not null-check the `CRefPtr` returned by `GetLine` before dereferencing it. The post names the file, the line and the fix. A second post puts the tool through a Claude Code driven crash dump evaluation, which is the kind of comparison you would want before trusting an agent with your dumps.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.forensicdbg.com — verified via direct visit, the landing page lists the feature set across the visual debugging and AI debugging tabs
+- HN launch thread: https://news.ycombinator.com/item?id=49821086 — "Show HN: I built a post-mortem debugger for native Windows x64/x86 crashes", 38 points and 7 comments, 2026-09-23
+- Setup guide: https://www.forensicdbg.com/setup-guide — download through the private Discord, MSI install, license and update steps
+- Quickstart guide: https://www.forensicdbg.com/quickstart-guide — opening dumps, attaching to processes, panel descriptions and the symbol path environment variables
+- MCP setup guide: https://www.forensicdbg.com/mcp-setup-guide — Claude Desktop, Codex, VS Code and Qwen Code configuration
+- Releases page: https://www.forensicdbg.com/releases — latest release 1.0.235.0 on 2026-10-22, with 1.0.233.0 on 2026-10-21
+- License: proprietary commercial software, closed source. No public repository and no public pricing page, beta access is by request form at https://www.forensicdbg.com/beta
+- Author: Loren McQuade, President of Stern Look, per https://www.forensicdbg.com/about-us
