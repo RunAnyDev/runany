@@ -1,0 +1,112 @@
+---
+title: "anyon_e: an open-source laptop built from scratch"
+description: "anyon_e is an open-source laptop built from scratch by a student, with an RK3588 SoC, 4K AMOLED display, wireless mechanical keyboard, and a fully published MIT hardware design."
+pubDate: "2026-10-29T11:18:00.000Z"
+author: "Friday"
+tags: ["hardware", "open-source", "laptop", "linux", "kicad"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/anyon-e-laptop.webp"
+  alt: "The anyon_e open-source laptop booted to its own logo screen, with the detachable wireless mechanical keyboard resting in front of it"
+canonical: "https://runany.dev/blog/anyon-e-laptop/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** anyon_e is a fully open-source 13.3-inch laptop whose entire design, from schematic to CNC chassis, was published by a high school senior over one academic year. The build uses a Rockchip RK3588 module, a 4K Samsung AMOLED panel, a detachable Cherry MX mechanical keyboard, and a 62.9 Wh battery, with every KiCad file and firmware under the MIT license. It is a reference design rather than a product you can order, and the audio path is still unfinished.
+
+## What anyon_e is
+
+anyon_e is a working laptop, not a concept render. The project posted a video and a full writeup in January 2025, and the thread on Hacker News took 3,237 points. It began as the senior project of Byran Huang at Phillips Exeter Academy, running from June 2024 to January 2025, with the science department backing the work.
+
+The name comes from physics rather than branding. An anyon is a particle in two dimensions whose quantum statistics are neither bosonic nor fermionic, and the project describes itself with that distinction: integrated like bosons, distinct like fermions. The stated mission is to disprove the idea that a device has to be either repairable and open or integrated and closed.
+
+What makes it interesting to read is the honesty about scope. Most laptop hardware comes from a vendor you cannot inspect. Here the board files, the mechanical drawings, the display timings, the firmware, and the build log are all public, and the writeup is candid about the parts that did not work.
+
+## The hardware
+
+The system is built around a FriendlyElec CM3588 module, which carries a Rockchip RK3588. That SoC gives you four Cortex-A76 cores, four Cortex-A55 cores, a Mali-G10 GPU, and a 6 TOPS NPU, with PCIe 3.0 x4, dual USB 3.1, HDMI 2.1, and eDP 1.4. The module was chosen over building a board around the bare RK3588 because the SBC manufacturers publish reference schematics, which saved enormous time during bringup.
+
+| Component | Choice |
+|---|---|
+| SoC | Rockchip RK3588 in a FriendlyElec CM3588 module |
+| Display | 13.3-inch Samsung ATNA33TP11 4K AMOLED, 400 nits |
+| Storage | M.2 M-key 2242 NVMe SSD over PCIe 3.0 x4 |
+| Wireless | RTL8852BE WiFi 6 and Bluetooth 5.2 |
+| Battery | 4S 4.25Ah Li-ion, 62.9 Wh, charged over 20V 100W USB-C |
+| Ports | 2x USB-C 3.1, 1x USB-A 2.0, 3.5mm headphone jack, microSD |
+| Keyboard | Detachable wireless mechanical board, Cherry MX ULP switches |
+| OS | Ubuntu 24.04 LTS on Linux 6.1 |
+| Chassis | CNC aluminum, bead blasted and matte black anodized |
+
+The display was the hardest single part. Getting a 4K AMOLED eDP panel running on non-mainline Linux meant pulling system logs from Asus laptops that ship the same panel, reverse engineering the power-on timing values, and tuning signal integrity. During evaluation a connector swap plus a 2mm shorter board was enough to bring the 1.5GHz x4 links up. The project also established that brightness must be driven by PWM, since changing the panel voltage does nothing.
+
+The powertrain is built on an ESP32-S3 acting as the embedded controller, with a TI BQ25713 charger, a BQ77915 balancer, and an LTC2943 fuel gauge. The pack is four 4.25Ah cells in series at 3.7V, giving 62.9 Wh and a peak discharge above 134W. Power telemetry travels from the ESP32 over UART into the kernel's battery service through a small Python script and a kernel module.
+
+The keyboard is the part that earns the "integrated" half of the name. It is genuinely removable, magnetically attached, and runs ZMK firmware on an nRF52840 with Cherry MX ULP mechanical switches. A 200mAh thin lithium cell and a custom protection board squeeze the assembly under 7mm, and the keycaps are 3D printed in PLA on a Bambu Lab X1C with a 0.15mm nozzle.
+
+## The software stack
+
+The operating system is a standard Ubuntu 24.04 LTS install running a 6.1 kernel. The interesting part is the hardware description underneath it, expressed in DeviceTree source and compiled on a MacBook via Orbstack.
+
+```bash
+# DeviceTree sources (SoC, peripherals, overlays) compile to a binary blob
+dtcpp .                       # preprocess and link the .dtsi / .dts / .dts files
+dtc -I dts -O dtb -o anyon_e.dtb compiled.dts
+scp anyon_e.dtb <laptop>:~/    # push the compiled blob to the running system
+u-boot-update                 # regenerate bootloader configuration, then reboot
+```
+
+That loop was the entire hardware bringup path. Changing a display timing or enabling a PCIe lane meant editing the DTS on the Mac, recompiling, copying the blob over, and rebooting. The bootloader lives on the eMMC and the machine boots straight off the NVMe SSD.
+
+The embedded controller firmware is separate and lives in the `ec` directory. It is Arduino code built with PlatformIO, targeting the ESP32-S3-MINI-1-N8. The author's own description of it is that it is barely a state machine and mostly works, with edge cases not fully tested.
+
+## What the repository holds
+
+The GitHub repository is large, because the whole machine is in it. It carries 4,290 stars and 261 forks, and it is organised by subsystem:
+
+- `motherboard/` and `power/` for the main board and the powertrain, including schematics, layouts, and exported drawings
+- `keyboard/` for the Cherry MX ULP board with its nRF52840 and the exported STEP file
+- `display/`, `trackpad/`, `chassis/`, `audio/`, `batteries/`, `wireless/`, and `switch/` for the rest of the hardware
+- `ec/` for the ESP32-S3 embedded controller firmware
+- `pdfs/` for manufacturing-ready drawings
+- `website/` for the project site itself
+
+The chassis is CNC aluminum, designed in OnShape, with the hinge modeled from a Framework 13.3-inch kit because Framework publishes a 3D model of it. Internal structural parts mix selective laser sintering in nylon with carbon fiber filled PA6 prints.
+
+## How the build-up went
+
+The project kept a dated timeline, and the sequence shows how much iteration a first laptop takes.
+
+| Date | Milestone |
+|---|---|
+| June 12, 2024 | Project start |
+| July 16, 2024 | Motherboard PCB layout begins |
+| September 17, 2024 | Keyboard V1 complete and typing normally |
+| October 23, 2024 | Powertrain V0.2 works on the first power-up |
+| October 24, 2024 | Mainboard V1.0 and chassis taped out |
+| October 27, 2024 | Motherboard bringup, PCIe and WiFi 6 verified |
+| November 2, 2024 | Motherboard and powertrain integrated |
+| January 21, 2025 | Writeup and video published |
+
+One entry is worth reading twice. The powertrain board powered on and behaved as expected on the very first attempt, after earlier revisions had failed on a backwards MOSFET, a battery pack tied into system power, and charge and discharge FETs that were dead on the balancing IC.
+
+## What to watch for
+
+The audio path is the most obviously unfinished part. The CM3588's DAC did not work, so sound routes through a separate USB to audio converter board into a Class-D amplifier. Even that had a problem: the TPA2028 amplifier could not drive the speakers, and the CM108 chip that replaced it only reaches roughly 25 percent of the volume of an M3 MacBook Pro, at lower quality.
+
+Some deliberate cuts will surprise you. There is no Ethernet, because a 2.5G jack would have forced the lower chassis to 17mm, and a 2280 SSD does not fit, so you are limited to 2242 and 2230 drives. PCIe 3.0 x4 tops out around 4GB/s. The trackpad relies on an Azoteq PXM0057 module that has since been discontinued with no direct replacement. Quiescent current on the powertrain still sits near 50mA, which the author flagged as unoptimized.
+
+The software story is honest rather than polished. Linux support for the RK3588 is partial, and the device tree work ran against a forked kernel rather than mainline. The feature list claims local 7B-class LLM inference and about 7 hours of battery life, which are the sort of numbers worth taking as directional until you own one.
+
+And this is one person's senior project, not a company with a supply chain. There is no price, no order page, and no second unit. The value here is the published design work, and it is considerable.
+
+## Source and Accuracy Notes
+
+- Project page: https://byran.ee/posts/creation/, verified via direct visit on 2026-10-29
+- Development timeline: https://byran.ee/progress/, verified via direct visit on 2026-10-29
+- Source repository: byrantech/laptop, MIT licensed, 4,290 stars and 261 forks on 2026-10-29, primary language KiCad Layout, last push 2026-03-29
+- License: MIT, verified from the LICENSE file in the repository, copyright 2024 Yuanhao (Byran) Huang
+- Software dependencies: Joshua Riek's ubuntu-rockchip kernel and distro, Ubuntu 24.04 LTS, Linux 6.1, ZMK firmware for the keyboard
+- HN launch thread: https://news.ycombinator.com/item?id=42797260, 3,237 points on 2025-01-22
+- Quantum statistics reference cited by the project: H. Bartolomei et al., "Fractional statistics in anyon collisions," Science 368, 173-177 (2020)
