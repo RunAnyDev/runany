@@ -1,0 +1,143 @@
+---
+title: "Helo: an email API from the former Postmark team"
+description: "Helo is an email API and SMTP service built by the former Postmark team. $5 a month plus $0.00035 per email, with isolated sending channels for platforms."
+pubDate: "2026-10-29T18:09:45.000Z"
+author: "Friday"
+tags: ["dev-tools", "email", "api", "smtp", "deliverability"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/helo.webp"
+  alt: "Helo logo next to a code sample showing tabs for curl, Ruby, JavaScript, C sharp, Go and Python"
+canonical: "https://runany.dev/blog/helo/"
+---
+
+> **TL;DR:** Helo is an email API and SMTP service run by a small team that previously shipped Postmark. One plan costs $5 a month plus $0.00035 per email, with no tiers and no overage fees. Every message goes through a Channel, so transactional mail, broadcasts and each platform customer's traffic stay isolated from one another.
+
+## What it is
+
+Helo sends transactional and broadcast email over a REST API or over plain SMTP. The company behind it is Helo Ehlo LLC, a bootstrapped business with no investors and no board, run by five people who previously shipped Postmark. Bettina was head of product there, Rob was in marketing and growth, and the rest came from the engineering side.
+
+The product is an email API with a per-Channel reputation model attached. Deliverability is treated as the primary feature rather than an afterthought, which is not how this category usually presents itself.
+
+## What it costs
+
+One plan: a $5 monthly platform fee plus $0.00035 per email. There are no tiers, no annual volume commitments and no overage penalties. Everything the platform fee covers comes with it at any volume:
+
+- Unlimited users and unlimited sending domains
+- Unlimited webhooks
+- Multi-tenant sending with per-customer isolation
+- Detailed per-Channel analytics
+- Human support
+
+On its pricing page Helo runs a side-by-side against Postmark, Mailgun, SendGrid and Resend.
+
+| Monthly volume | Helo | Postmark | Mailgun | SendGrid | Resend |
+| --- | --- | --- | --- | --- | --- |
+| 10,000 emails | $8.50 | $15 | $15 | $19.95 | $20 |
+| 500,000 emails | $180.00 | $455 | $400 | $386.95 | $350 |
+
+Those are Helo's own numbers, calculated by picking the cheapest paid option at each volume, so read the table as a claim rather than an independent audit. The shape of the pricing matters more than any single cell in it. Send 82,000 emails and you pay for 82,000 emails, not for the tier above it. Send 3,500 and the bill comes to $6.23.
+
+There is a free allowance as well. A new account starts in test mode and can send 1,000 messages, but only to domains you have already verified. Those messages do not roll over, so they are for getting the integration right rather than for production traffic.
+
+## Getting it running
+
+Three things need to exist before the first send: a verified sending domain, a Channel, and an API credential.
+
+A Channel is the unit of isolation. The documentation suggests one per environment, one per email type, or one per customer. Every message must go through one, and a Channel that starts bouncing or collecting spam complaints gets flagged without dragging your other Channels down with it.
+
+After that it is a plain HTTPS call to `https://api.helohq.com/send/transactional`:
+
+```bash
+curl --location "https://api.helohq.com/send/transactional" \
+  --header "X-Helo-Channel-Id: $HELO_CHANNEL_ID" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json" \
+  --header "Authorization: Bearer $HELO_API_KEY" \
+  --data '{
+    "from": { "email": "you@yourdomain.com", "name": "Your Name" },
+    "to": [{ "email": "recipient@example.com" }],
+    "subject": "Hello from Helo",
+    "html": "<h1>Hi there, new friend.</h1>",
+    "text": "Hi there, new friend."
+  }'
+```
+
+A credential can be scoped to a single Channel. If it is allowed to send through several, you pass `X-Helo-Channel-Id` to say which one should handle the message.
+
+Official SDKs cover JavaScript, Python, Ruby, Go and C#. The JavaScript one reads like this:
+
+```javascript
+import Helo from "@helo-email/sdk";
+
+const client = new Helo(process.env.HELO_API_KEY);
+
+await client.sending.sendTransactional(
+  {
+    from: { email: "you@yourdomain.com", name: "Your Name" },
+    to: [{ email: "recipient@example.com" }],
+    subject: "Hello from Helo",
+    text: "Hi there, new friend.",
+  },
+  { channelId: process.env.HELO_CHANNEL_ID },
+);
+```
+
+If your app already speaks SMTP, the host is `smtp.helohq.com` on port 587, with 25, 2525 and 465 also open. SMTP users have to be scoped to a Channel.
+
+There is also a `helo` CLI that covers the whole API and prints JSON, which makes it easy to script or to drive from an agent:
+
+```bash
+brew install helo-email/tap/helo
+export HELO_API_KEY="your-api-key"
+export HELO_CHANNEL_ID="your-channel-id"
+
+helo sending send-transactional \
+  --from '{"email": "you@yourdomain.com", "name": "Your Name"}' \
+  --to '[{"email": "recipient@example.com"}]' \
+  --subject "Hello from Helo" \
+  --text "Hi there, new friend."
+```
+
+Use the full tap name there. A plain `helo` formula installs an unrelated app. The CLI also takes `--dry-run` to print a request instead of sending it, `--quiet` to print only the data payload for piping into `jq`, and it uses distinct exit codes: 3 for a credential problem, 5 when the API rejects the request, 6 when a retry might work.
+
+## Channels are the part worth understanding
+
+If you send one kind of email, Channels mostly tidy up your dashboard. If you send on behalf of other people, they are the reason to look at Helo in the first place.
+
+A platform that shares a single sending pool has a known failure mode. One customer has a bad day with a spam complaint spike, and because everyone shares domains and IP reputation, everybody else has a bad day too. Helo's answer is one Channel per customer, each with its own deliverability signals and its own statistics, so you can act on a bad actor without touching anybody else.
+
+The rest of the platform plumbing is there as well:
+
+- A dedicated Channel per customer, with its own reputation and its own stats
+- Domain authentication for your customers, so their mail comes from their own domain instead of yours, with SPF and DKIM set up for them
+- NS delegation, which automates the DNS records your customers would otherwise paste in by hand
+- Per-customer delivery data from the statistics API instead of one aggregated number
+
+Helo also watches deliverability and raises alerts per Channel when thresholds are crossed:
+
+| Signal | Warning | Critical |
+| --- | --- | --- |
+| Bounce rate | above 3% | above 5% |
+| Spam complaint rate | above 0.08% | above 0.1% |
+
+Consistently exceeding those levels is how a Channel ends up suspended, so it is worth mirroring the same thresholds in your own alerting rather than waiting to read them in the dashboard.
+
+## What to watch for
+
+Your account starts in test mode and cannot send outside domains you have verified, so get a domain with DNS access ready before you write any integration code. The 1,000 free messages cover exactly that phase and do not replenish.
+
+The company is small and self-funded by choice, and that cuts both ways. Nobody is pushing for an exit, so the roadmap moves at the pace of a team of five with no dedicated security or compliance staff. For an email provider that matters more than it might elsewhere, because sending reputation is slow to build and easy to lose.
+
+The open source story is uneven. The .NET SDK ships with an MIT license, but the CLI and the JavaScript, Python, Ruby and Go SDK repositories carry no license file at all. The hosted service is proprietary, and Helo says plainly that it is bootstrapped with no investors.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.helohq.com/ (verified via direct visit)
+- API documentation: https://docs.helohq.com/ (verified via direct visit)
+- Pricing details: https://www.helohq.com/pricing (verified via direct visit)
+- Source repository: https://github.com/helo-email (CLI and SDKs)
+- License: the hosted service is proprietary, the .NET SDK is MIT, and the CLI plus the JavaScript, Python, Ruby and Go SDK repositories have no license file
+- HN launch thread: https://news.ycombinator.com/item?id=49921801 (15 points, 1 October 2026)
