@@ -1,0 +1,122 @@
+---
+title: "Death Plan Switch: a self-hosted dead man's switch"
+description: "Death Plan Switch is a free, self-hosted dead man's switch for solo developers. Weekly check-in emails escalate to your contacts if you stop answering."
+pubDate: "2026-10-29T17:07:24.000Z"
+author: "Friday"
+tags: ["self-hosted", "php", "dead-man-switch", "solo-developer", "business-continuity"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/death-plan-switch.webp"
+  alt: "Death Plan Switch skull and crossbones logo on a pale background"
+canonical: "https://runany.dev/blog/death-plan-switch/"
+---
+
+> **TL;DR:** Death Plan Switch is a PHP app you host yourself that emails you once a week and asks you to press a button. If you stop answering, it asks your next of kin first, and only contacts the people who need to act if nobody can say you are fine. One PHP folder, no database, MIT licensed.
+
+## What it is
+
+Peter runs a one-person web studio in regional New South Wales. His clients' domains, hosting and servers all route through him, so if he became unreachable tomorrow, nobody would know where anything was. He wanted the boring middle part of his succession plan automated, which is the part that notices you have gone quiet and tells the right people in the right order.
+
+Death Plan Switch is that middle part. It is one PHP application with no database, no accounts and no hosted version. Once a week it emails a link, you press a button, and the clock resets. Miss it and the escalation starts: two reminders to you, then a question to your next of kin, then your other contacts.
+
+One design decision shapes everything else. Opening the link is not a check-in, you have to press a button, because corporate mail scanners open every link in every message they see. A switch that armed itself on a link click would have armed itself the first time your inbox warmed up.
+
+## The escalation ladder
+
+Every step is counted from the moment you last checked in, not from when the scheduler happens to run.
+
+| When | What happens |
+|---|---|
+| 0 hours | Check-in email goes out. Pressing the button is the check-in. |
+| 24 hours | Reminder to both of your email addresses. |
+| 48 hours | Last reminder. |
+| 72 hours | Next of kin is asked "Is everything all right?", with an All fine and a Something's wrong button. |
+| 120 hours | Next of kin is reminded. |
+| 144 hours | If nobody has confirmed you are well, every confirmed contact receives the message you wrote for them. |
+
+The weekly email goes out at the same day and hour each week, so your contacts are told at most 13 days after your last check-in. Three outcomes are possible. Your next of kin says you are fine and it ends there. Your next of kin says something is wrong and your messages go out immediately. Or you check in late, even after the switch has fired, and everyone who was contacted gets told it was a false alarm.
+
+Next of kin comes first on purpose. It means a false alarm or a week-long holiday does not wake up your clients.
+
+## What it needs to run
+
+- PHP 8.1 or newer, with the openssl and mbstring extensions.
+- A web server. Apache works as shipped, nginx needs four lines of configuration.
+- An SMTP account to send mail through. PHP's built-in mail function is not used.
+- A scheduler that can request a web address every 15 minutes, cron or otherwise.
+- HTTPS.
+- Hosting that is separate from the sites it protects, so one outage cannot take down both.
+
+That last point is the one the author is loudest about. If the switch shares a server with your client sites, the outage that takes them down takes the switch down too, and nobody gets told.
+
+## Getting it running
+
+Upload the release to a private address on your server and make the data folder writable by the user your pages run as. On a typical VPS that is `sudo chown -R www-data data`.
+
+```bash
+git clone https://github.com/romeo19361/deathplanswitch.git /var/www/switch
+sudo chown -R www-data /var/www/switch/data
+```
+
+Open the address in a browser and the installer takes over. It checks the PHP version, checks that the data folder cannot be read over the web, and refuses to continue until that holds. Nothing private is written before that passes. Then you set a password, pick the day and hour your weekly email arrives, and enter your SMTP details. A test email with a six-digit code proves the mail path works before anything gets armed.
+
+The one technical step is the crontab line, and the installer writes it out for you with the right path and user:
+
+```bash
+*/15 * * * * /usr/bin/php /var/www/switch/cron.php >/dev/null 2>&1
+```
+
+It has to run as the same user as your web pages, since both write to the data folder. Run it as anyone else and cron stops with an error rather than quietly breaking permissions.
+
+On nginx you need to deny the private directories yourself, because nginx ignores the .htaccess files that protect them on Apache:
+
+```nginx
+location ~ ^/(data|app|cli|tests|docs)/ { deny all; }
+```
+
+Moving the data folder out of the web root is the stronger option, and the app supports it. Create a config.local.php beside index.php:
+
+```php
+<?php
+define('DPS_DATA', '/home/you/private/switch-data');
+```
+
+The app does not take any of this on trust. It keeps a harmless probe file in the data folder and fetches it over the web, during install and once a day after that. If the file comes back readable, the switch refuses to arm, emails you, and reports a fault on its health address.
+
+## Rehearsing before you trust it
+
+The repository ships a time-shift script that makes an install believe time has passed, so you can walk the whole escalation in an afternoon without waiting six days:
+
+```bash
+php tests/timeshift.php 168 --run    # a week later, the check-in email goes out
+php tests/timeshift.php 24 --run     # a day later, the first reminder
+php tests/timeshift.php 24 --run     # the last reminder
+php tests/timeshift.php 24 --run     # your next of kin is asked
+php tests/timeshift.php 48 --run     # your next of kin is reminded
+php tests/timeshift.php 24 --run     # the switch fires
+```
+
+Real emails go to real contacts, so rehearse with addresses you control or warn people first. The tests folder is left out of release downloads, so pull it from the repository, and delete it from the server when you are done.
+
+## Where it stops being clever
+
+The scheduler is the single point of failure, and the project is honest about it. Cron breaks during migrations and PHP upgrades. Three things guard against that: the weekly email is the heartbeat, every page warns you when the scheduler has not run for a day, and there is a secret health address that answers 200 when all is well and 503 when the scheduler has stopped, mail is failing, or the data folder is exposed. Point a free uptime monitor at that address and something outside your server will tell you.
+
+Then there is the fact that it cannot know why you stopped checking in. If you are hospitalised, unconscious, or simply away for a long weekend, the switch cannot tell that apart from the worst case. You can pause it for up to 28 days and it restarts by itself, which covers a holiday but not much else.
+
+The security model has two edges worth knowing. Anyone who can read your mailbox can check in for you, which keeps the switch quiet indefinitely, so your email account matters as much as the app. And the secret trigger and health addresses land in your web server access log, where Settings can replace them if that bothers you. Passwords are hashed with PHP's password_hash, forms carry CSRF tokens, pages send a strict Content-Security-Policy, and there is no password reset by email at all, because server access is the proof.
+
+Your SMTP password and the text of your messages sit in plain text inside the data folder. That is exactly why the folder needs to be locked down, and why the messages should point to where things are rather than carry logins themselves.
+
+The project is MIT licensed but takes no pull requests, on the grounds that it is a security-sensitive tool and outside code is not merged. Fork it freely instead. If you want to know the current state, `php cli/status.php` prints the switch state and any faults, and `php cron.php --verbose` runs the scheduler once and prints what it did.
+
+## Source and Accuracy Notes
+
+- Project page: https://deathplanswitch.com/ - verified via direct visit on 2026-10-30
+- Source repository: romeo19361/deathplanswitch, MIT license confirmed via the GitHub API and the LICENSE file, 77 stars, primary language PHP, latest release Version 1.0.0 published 2026-10-08
+- Bundled dependency: PHPMailer 7.1.1 in app/lib/PHPMailer, unmodified, under LGPL 2.1
+- HN launch thread: https://news.ycombinator.com/item?id=50161408 (111 points, 2026-10-20, author romeo19361)
+- The 13-day maximum contact delay, the escalation timings and the nginx and config.local.php examples are taken from the project README and docs/nginx.conf.example
+- The dead man's switch category name follows the author's own wording for the tool
