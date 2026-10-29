@@ -1,0 +1,161 @@
+---
+title: "proc: target processes by port, PID, name or path"
+description: "proc is a Rust CLI for process management that targets processes by port, PID, name or path, with JSON output and stable exit codes for coding agents."
+pubDate: "2026-10-29T12:08:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "cli", "rust", "process-management", "agents"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/proc-cli.webp"
+  alt: "Abstract dark hero graphic with one bright cyan node selected from a grid of dim process nodes, linked by thin lines to a server block"
+canonical: "https://runany.dev/blog/proc-cli/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** **proc** is a single Rust binary that finds and stops processes by port, PID, name or path, so a busy port turns into `proc free :3000` instead of an `lsof` pipeline. It ships 19 commands on macOS, Linux and Windows, prints one JSON document per command with `--json`, and returns fixed exit codes that coding agents can act on without parsing tables. MIT licensed, still young, and already moving fast.
+
+## What proc is
+
+proc is a command-line tool for process management, written in Rust and published by yazeed as a replacement for the shell archaeology most people do by hand. The scope is deliberately narrow. Instead of learning which flags `lsof` wants, or piping PIDs into `kill` and wondering whether the port actually came free, you type what you already know: a port, a PID, a process name, or a file.
+
+The binary is static and has no runtime dependencies. Version 2.0.1 is current, and the project has shipped 19 releases since March, which means the command surface is still settling even though the core vocabulary has not moved.
+
+The author is explicit about what it does not cover. The bundled agent skill lists the exclusions up front: not containers, not system services, not remote hosts. It is a workstation tool for the processes you started yourself.
+
+## Why it matters
+
+Every self-hosted project eventually hits the same wall. Your dev server will not start because port 3000 is already held by something you started three hours ago in a tmux session you have since forgotten about. The usual recovery path involves three different tools and a moment of uncertainty about whether you just killed the wrong thing.
+
+proc collapses that into commands where the target is the argument:
+
+| Task | Old way | proc |
+|---|---|---|
+| What is on port 3000 | `lsof -i :3000 -P -n` | `proc on :3000` |
+| Free the port | `lsof -t -i:3000` piped into `kill` | `proc free :3000` |
+| Wait for a process to exit | a `while ps aux` loop | `proc wait node` |
+| Pause a running build | `kill -STOP` on a PID list | `proc freeze node` |
+| Find leftover dev servers | no standard tool | `proc orphans --in .` |
+
+The `why` subcommand is the one that changes habits. It walks the parent chain of whatever is holding a port, so an orphaned server in a closed terminal tab shows up as a named ancestor rather than an unexplained PID.
+
+## Target syntax
+
+The same target rules apply everywhere, which is what makes the tool learnable in an afternoon.
+
+| Target | Example | Matches |
+|---|---|---|
+| Port | `proc on :3000` | whatever is listening on that port |
+| PID | `proc info 1234` | that one process and nothing else |
+| Name | `proc kill node` | the whole process name, case insensitive |
+| File | `proc for ./server` | processes running it, or holding it open |
+| Folder | `proc in .` | processes started there or below it |
+
+Targets mix freely, so `proc kill 1234 :3000 node` is valid. A process matched twice is only acted on once.
+
+One detail is worth internalizing before you get surprised. A name matches the whole process name, the way `killall` and `pkill` read it, not the way `pkill -f` does. Typing `node` finds `node` and leaves `nodemon` and your editor alone. When you do want the loose behavior, add `--cmd` and it matches any part of the name or the full command line.
+
+## Getting it running
+
+Homebrew on macOS, with the tap added for you:
+
+```bash
+brew install yazeed/proc/proc
+```
+
+The install script covers macOS, Linux and anything else with a shell, including Alpine and older releases, because the binaries are static:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yazeed/proc-cli/main/install.sh | bash
+```
+
+Scoop handles Windows, and npm, cargo and nix all publish the same binary elsewhere:
+
+```bash
+npm install -g proc-cli
+cargo install proc-cli
+nix profile install github:yazeed/proc-cli
+```
+
+Then check it:
+
+```bash
+proc --version
+proc ports
+```
+
+If you plan to use it in Docker, note that it needs host namespaces to see anything useful. `--pid=host` exposes the host processes and `--net=host` exposes the host ports, which the port-related commands need.
+
+## The command surface
+
+Nineteen commands split into two groups on the project site.
+
+| Group | Commands |
+|---|---|
+| Discovery | `on`, `why`, `for`, `by`, `in`, `list`, `info`, `ports`, `tree`, `watch`, `stuck`, `orphans` |
+| Lifecycle | `kill`, `stop`, `freeze`, `thaw`, `free`, `wait`, `unstick` |
+
+The read-only commands never touch anything. The lifecycle ones do, and they differ in how hard they hit.
+
+`kill` sends SIGKILL and ends the process immediately. `stop` sends SIGTERM first, waits ten seconds, then forces it, so a server gets a chance to close its sockets. `--signal INT` sends the interrupt you would get from Ctrl+C instead. `freeze` and `thaw` are SIGSTOP and SIGCONT, which lets you park a heavy build without losing it.
+
+`free` is the one worth remembering. It stops the process holding a port, forces it if it will not go, then waits until the port is genuinely free before reporting success.
+
+`orphans` finds processes whose parent has exited, which is what a dev server left behind by a closed terminal actually looks like. System services are excluded so the output stays useful. `stuck` looks for processes running longer than five minutes that are either burning CPU or blocked, sampled twice a second apart.
+
+## Exit codes and JSON output
+
+Every command prints one JSON document with `--json`, and `watch` streams one document per refresh. That matters more for agents than for humans, because the exit code carries the meaning.
+
+```bash
+proc on :8080 --json | jq '.process | {pid, cwd, uptime_secs}'
+{
+  "pid": 177,
+  "cwd": "/home/dev/code/shop",
+  "uptime_secs": 35
+}
+```
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | error |
+| 2 | not found |
+| 3 | permission denied |
+| 4 | invalid input, unsupported on this OS, or confirmation needed |
+
+Exit 4 is the interesting one, because it means nothing was changed. The JSON error adds a `reason` field with one of `invalid_input`, `needs_confirmation` or `not_supported`. A command that would end a process and runs with `--json` but without `--yes` exits 4 and lists the processes it would have touched under `needs_confirmation`.
+
+The result is a tool that refuses to act ambiguously. A script can check `proc on :8080 --json` and treat exit 0 as "the port is taken" and exit 2 as "nothing is listening", without parsing a single line of human-readable output.
+
+## Teaching an agent to use it
+
+The project ships an agent skill that teaches Claude Code, Codex, Cursor, Gemini CLI and others when reaching for proc is the right move:
+
+```bash
+npx skills add yazeed/proc-cli
+```
+
+Claude Code users can install it as a plugin instead. The skill teaches the agent to preview with `--dry-run` before acting, to read the structured JSON, and to ask before touching a process it did not start. It also states the rule the tool enforces: `--json` never counts as a yes, and a name is a search rather than approval.
+
+proc backs that up on its own side. Nothing that stops, kills or pauses a process runs without `--yes` unless a person confirms at the prompt. It is a small safety model, and it is enforced in the tool rather than trusted to the agent.
+
+## What to watch for
+
+A few things to know before you depend on it.
+
+`freeze` and `thaw` are macOS and Linux only, since they rely on signals that Windows does not share. The rest of the command set works on all three platforms.
+
+Comma-separated targets still work but are deprecated and will be removed in a future major release. Write them as separate arguments now.
+
+The name matching is strict by design, and it will occasionally look like a bug when you expected `pkill -f` semantics. Adding `--cmd` is the fix.
+
+Finally, this is a young project with a fast release cadence and a solo maintainer. The command vocabulary has been stable since March, but version 2.0.1 is the one to pin against if you are automating around it.
+
+## Source and Accuracy Notes
+
+- Project page: https://proc-cli.com/ — verified via direct visit
+- Source repository: yazeed/proc-cli
+- License: MIT, verified from the GitHub API and the project footer
+- HN launch thread: https://news.ycombinator.com/item?id=50239041
+- Version checked: 2.0.1, published by yazeed
