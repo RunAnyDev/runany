@@ -1,0 +1,125 @@
+---
+title: "Nonio: a self-hosted community platform that pays creators"
+description: "Nonio is a MIT-licensed, self-hostable Reddit-style community platform whose standout idea is splitting your subscription between the creators you upvote."
+pubDate: "2026-10-29T07:16:09.000Z"
+author: "Friday"
+tags: ["self-hosted", "community-platform", "social-media", "go", "javascript"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nonio.webp"
+  alt: "Nonio landing page illustration with the NONIO wordmark and three panels showing a creator drawing, a viewer watching, and a subscription split between upvoted creators"
+canonical: "https://runany.dev/blog/nonio-self-hosted-community-platform/"
+---
+
+> **TL;DR:** Nonio is a Reddit-style community platform you can run yourself, and its actual hook is the money. Instead of selling ads, it takes a subscription and splits it between the creators whose posts you upvote, so popularity translates directly into income for the people making the content. The whole stack is one Go API, a MySQL database, a vanilla JavaScript frontend, and four separate media CDN services, all MIT licensed and bundled into a single repository you can start with one script.
+
+## What it is
+
+Nonio describes itself as "a platform for creators", and the landing page makes the argument directly: free content platforms are built for advertisers, not for the people producing the content, so the people producing the content get nothing. Nonio flips that by having subscribers pay a recurring fee and having that fee distributed to the authors of the posts they upvote.
+
+That mechanic is visible in the interface. The landing page splits into three ideas: creators make things, viewers consume and enjoy all of it, and the subscription gets split between everything you upvote. Upvoting is therefore not a vanity metric. It is the mechanism that routes money, which is also why the economics depend on upvotes meaning something.
+
+Underneath the product framing sits a complete, working community platform. Posts can be blogs, rants, jokes, images, videos, links, and audio. There are tag-based subscriptions, comments and comment threads, and an API that the frontend is meant to be a thin representation of.
+
+## Why it matters
+
+Two things are unusual here. The first is that the entire system is open source under the MIT license, with the client, server, and media pipeline all in one tree. The second is that the payment model is documented and implemented in the open rather than described vaguely in a launch post.
+
+The author, Jacob Joseph Cameron Miller, spent four years on it before posting to Hacker News, and the thread shows someone who has thought hard about the tradeoffs. When a commenter asked whether paying people for upvotes would create bad incentives, the response was to point at how the moderation problem gets harder when payment is involved. Another commenter asked for an ActivityPub integration so the community would not be isolated to one instance; the answer was that it had been considered but was not there yet. Those two threads are the honest shape of the project: the core is finished, the edges are still open questions.
+
+The Go backend, the MySQL schema, the goose migrations, and the frontend webcomponents are all readable, which means someone who does not agree with the business model can still run the software and change it.
+
+## Getting it running
+
+Nonio is a monorepo with no submodules and no extra remotes, so a plain clone is all you need. The requirements are Go, Node and npm, GNU screen, goose for the database migrations, and Docker if you do not already have MySQL or MariaDB running on port 3306.
+
+Install goose first, since the quick start script refuses to run without it:
+
+```bash
+go install github.com/pressly/goose/cmd/goose@latest
+```
+
+Then clone and start:
+
+```bash
+git clone https://github.com/jjcm/nonio.git
+cd nonio
+./quickStart.sh
+```
+
+The script checks that `go`, `node`, `npm`, and `screen` are all on your PATH, then probes port 3306 with a raw TCP connect. If nothing answers, it starts a `mariadb:11` container named `soci-db` with database `socidb` and user `dbuser` and password `password`, and waits for the port to come up. If you already run MySQL or MariaDB on 3306, it reuses that instance as-is.
+
+Every service copies its `config.json.example` or `config.js.example` on first launch, so there is nothing to configure for local development. The script then opens one GNU screen session with a window per service:
+
+| Service | Port | What it does |
+|---|---|---|
+| `soci-frontend` | 4200 | Web frontend, vanilla JS webcomponents on a Node server |
+| `soci-backend` | 4201 | Go API (`socid`), MySQL accessed through goose migrations |
+| `soci-avatar-cdn` | 4202 | Avatar and emoji CDN with encoding |
+| `soci-image-cdn` | 4203 | Post images and thumbnails, with encoding |
+| `soci-video-cdn` | 4204 | Video upload, encode, and serve |
+| `soci-html-cdn` | 4205 | Sanitized HTML embeds |
+| `soci-db` | 3306 | MariaDB 11 container, started only if you need it |
+
+Move between windows with `ctrl+a n` and `ctrl+a p`, detach with `ctrl+a d`, and reattach with `screen -r soci`. Once everything is up, the frontend is at http://localhost:4200.
+
+There is also a terminal client for the stack, built with Bubble Tea, which handles service start and stop, health checks against MariaDB and every HTTP service, log viewing, and status display:
+
+```bash
+cd nonio-tui
+go mod download
+go build -o nonio-tui
+```
+
+The TUI monitors one more service that the quick start script does not launch, a LiveKit instance on port 7880 that handles local voice signaling and media.
+
+## What the backend actually looks like
+
+The Go API is configured through environment variables, and only one of them has no sensible default. `APP_KEY` signs the JWT tokens, and it needs to be a random string of 32 to 64 characters:
+
+```bash
+APP_KEY=$(openssl rand -hex 32) \
+APP_PORT=9000 \
+DB_HOST=localhost \
+DB_PORT=3306 \
+DB_DATABASE=socidb \
+DB_USER=dbuser \
+DB_PASSWORD=password \
+./dist/socid
+```
+
+Changing `APP_KEY` invalidates every token signed with the old one, so treat it as permanent once you set it. The database schema is applied with goose migrations from the `migrations` directory:
+
+```bash
+goose mysql "dbuser:dbpass@tcp(dbhost:dbport)/dbname" up
+```
+
+Two details in the monorepo are worth knowing before you start. The frontend README instructs that generated `.html` files are never edited directly, and that `soci-frontend/soci.css` is the source of truth for styling since Stylus was deprecated. The build step for each CDN compiles the whole package rather than just `main.go`, because the CDN services split helpers like `cacheControl` into sibling files that a single-file build cannot see.
+
+The performance work is documented rather than claimed. The repository's `CURRENT_STATE.md` records measured medians on a seeded local stack over a slow4g lane: home cold FCP dropped from 2656 ms to 1348 ms and LCP from 2716 ms to 1800 ms after the frontend moved to a lazy per-route component graph, and the module count at feed paint fell from 68 to 31. A separate VPS speed lab on a 1 vCPU and 1 GB box recorded a cold home LCP of 1240 ms falling to 752 ms over a real 53 ms WAN hop, with Caddy serving a single TLS origin and stripping prefixes for the API and each CDN route.
+
+## What to watch for
+
+The HN comments are the best available source of honest problems, and they are not all from 2023. Several people reported a bad first run: a login-wall on the landing page that hides what the community is even about, a signup flow that rejected a 30-character random password as not complex enough with no explanation of the requirement, and a mobile experience that people described as broken, with a landing page that was hard to read on Safari on iOS and a login screen that could not be dismissed.
+
+There is a chicken-and-egg problem the author named directly in the thread. A platform that pays creators needs paying subscribers, and paying subscribers need creators worth paying. One commenter's view was that most people lurk and comment, and only a small fraction produce content, so the payment model has to be inverted or creators will not earn enough. Another pointed out that a small, tight community with no network effect has no way to attract the users who would pay.
+
+The monetization model is also the part most likely to change. It is implemented in the open, with dev-only endpoints for setting subscription amounts, but that also means the rules for who gets paid are a policy choice rather than a law. A Reddit-compatible API was requested in the thread and is not something the project currently promises.
+
+For an operator, the interesting detail is that this is a real multi-service system rather than a single binary. You are running a Go API, a Node frontend, four Go CDN services, and MySQL, and you need screen, goose, and Docker to orchestrate it. The `nonio-simulator` directory can populate that stack with synthetic users and activity, including generated images through fal.ai, which is a practical way to see the platform populated before any real community exists.
+
+The MIT license covers both the backend and the frontend subdirectories in the monorepo, with the copyright held by Jacob Joseph Cameron Miller. The main repository sits at 112 stars and 98 open issues, and the most recent code push was on 2026-10-21.
+
+## Source and Accuracy Notes
+
+- Project page: https://non.io/ — verified via direct visit on 2026-10-29, returns HTTP 200
+- Source repository: https://github.com/jjcm/nonio — 112 stars, 1 fork, 98 open issues, JavaScript with a Go backend, last pushed 2026-10-21
+- License: MIT, copyright 2017-2021 Jacob Joseph Cameron Miller — verified from the `license.md` files in both `soci-backend` and `soci-frontend`
+- Install path: `./quickStart.sh` and the service port table, verified from the repository README and the `quickStart.sh` script source
+- Backend configuration: `APP_KEY`, `APP_PORT`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USER`, `DB_PASSWORD`, and the goose migration command, verified from the `soci-backend` README
+- Terminal client: service management, health monitoring, and log viewing for seven services including LiveKit on port 7880, verified from the `nonio-tui` README
+- Performance figures: FCP and LCP medians on the slow4g lane and the VPS WAN hop, verified from `CURRENT_STATE.md` and `SPEED_LAB.md` in the repository
+- HN launch thread: https://news.ycombinator.com/item?id=36296695 — "Show HN: Non.io, a Reddit-like platform Ive been working on for the last 4 years", 1943 points, 2023-06-12
+- Thumbnail source: https://raw.githubusercontent.com/jjcm/nonio/master/soci-frontend/docs/hero-illustration/hero-idea.png — the project's own landing page illustration, cropped to 1200x630
