@@ -1,0 +1,173 @@
+---
+title: "ai·rete·rag: A Rete Rule Engine with RAG Explanations"
+description: "ai·rete·rag runs a pure-Python Rete rule engine for the verdict and RAG for the explanation, so AI decisions stay deterministic and auditable."
+pubDate: "2026-10-29T03:17:00.000Z"
+author: "Friday"
+tags: ["rules-engine", "rag", "mcp", "python", "dev-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ai-rete-rag.webp"
+  alt: "ai·rete·rag landing page with the deterministic decisions and RAG explanations headline"
+canonical: "https://runany.dev/blog/ai-rete-rag/"
+---
+
+> **TL;DR:** ai·rete·rag splits decision-making in two: a pure-Python Rete engine returns the verdict from YAML rules, and RAG only explains it against your own policy documents. Every call returns an audit trail, including the rules that did not fire.
+
+## What it is
+
+A hosted decision service for lending, fraud, clinical and similar cases where somebody eventually has to answer "why did the system say that?" It was posted to HN in September 2026 by its solo author, ZaharaHussain, who built it after watching teams put an LLM in charge of decisions that need to be auditable, then bolt guardrails on afterward.
+
+The design answers that in a specific way. Two stages run in series:
+
+1. A Rete rule engine evaluates YAML rules against your facts. The verdict comes only from here.
+2. Retrieval pulls passages from your own policy documents, and an LLM writes a plain-English explanation of the decision that was already made, citing those passages.
+
+The ordering is the whole point. The model never decides anything, and the engine never writes prose. Same facts and same rules give the same verdict every time, with salience-based conflict resolution when several rules fire at once.
+
+## Where the verdict comes from
+
+Rules are a graph rather than a flat list. You get nested `all`, `any` and `not` groups, and a rule can assert facts that other rules consume, which gives you forward chaining. The decision trace shows the causal chain rather than a flat list of matched rows.
+
+Here is the shape of a rule set, taken from the project's own documentation:
+
+```yaml
+- name: "Approve Prime Loan"
+  salience: 20          # higher fires first
+  description: "Approve when score ≥ 720 and DTI ≤ 0.36"
+  conditions:
+    - type: loan        # must match __type__ in submitted facts
+      field: credit_score
+      op: ">="          # == != >= <= > <
+      value: 720
+    - type: loan
+      field: dti_ratio
+      op: "<="
+      value: 0.36
+  action:
+    verdict: "APPROVED"
+    reason: "Prime borrower — credit and DTI within policy"
+    product_tier: "prime"
+```
+
+Salience decides which rule wins when more than one fires. The `action` block is free-form key-value output merged into the firing detail, which is how a rule can also narrow retrieval for the explanation stage.
+
+## What the audit trail contains
+
+The `full_audit` response mode is the interesting part. It records every rule that was evaluated, not just the ones that fired, and it does so condition by condition with the actual value next to the expected one.
+
+This is a real response, trimmed, from a live call against the shared `loan` demo domain with a credit score of 645, DTI of 0.41 and LTV of 0.85:
+
+```json
+{
+  "verdict": "REVIEW_REQUIRED",
+  "confidence": 0.75,
+  "rule_firings": [
+    {
+      "rule_name": "Manual Review - Borderline",
+      "salience": 10,
+      "verdict": "REVIEW_REQUIRED",
+      "reason": "Credit score requires manual underwriter review"
+    }
+  ],
+  "rule_evaluations": [
+    {
+      "name": "Approve Near-Prime Loan",
+      "salience": 15,
+      "matched": false,
+      "verdict": "APPROVED",
+      "conditions": [
+        { "field": "credit_score", "op": ">=", "value": 680, "actual": 645, "passed": false },
+        { "field": "dti_ratio", "op": "<=", "value": 0.43, "actual": 0.41, "passed": true },
+        { "field": "ltv_ratio", "op": "<=", "value": 0.9, "actual": 0.85, "passed": true }
+      ]
+    }
+  ],
+  "rules_version": "6bb490d1fde88f748f55110c065db978026d1a51fe199600920f93c8fbfca673",
+  "documents_as_of": "2026-10-29",
+  "missing_parameters": []
+}
+```
+
+Two details worth pulling out of that. The `rules_version` hash pins the exact rule set used, so a decision can be replayed against it later. And `documents_as_of` records which day of policy documents was in force, which is the field that makes point-in-time decisions possible. There is a matching `as_of` parameter for reading the rules and documents as they stood on an earlier day, useful when a policy changed mid-case.
+
+The `missing_parameters` list is a second opinion in the other direction. When it is non-empty, more facts could still change the verdict, and the API names the most decisive ones first.
+
+## Three response modes
+
+| Mode | LLM call | What you get back |
+| --- | --- | --- |
+| `verdict_only` | None | Verdict and confidence, nothing else |
+| `verdict_with_explanation` | One per request | Adds the grounded plain-English rationale |
+| `full_audit` | One per request | Rule firing trace, every evaluated condition, retrieved chunks, extracted facts |
+
+`verdict_only` is worth knowing about for cost and for behavior. When a commenter on HN asked why you would summarize rules you already built instead of just displaying them, the author's answer was that you can, and that mode makes no LLM call at all.
+
+## Calling it from an agent
+
+The MCP client is the reason this is interesting to developers. It is on PyPI as `ai-rete-rag-mcp` under the MIT license, and it exposes the service as tools an agent can call:
+
+```bash
+claude mcp add ai-rete-rag -e AI_RETE_RAG_API_KEY=ik_your-key-here -- uvx ai-rete-rag-mcp
+```
+
+Or point at the hosted endpoint and skip the install:
+
+```bash
+claude mcp add --transport http ai-rete-rag https://ai-rete-rag.com/mcp \
+  --header "Authorization: Bearer ik_your-key-here"
+```
+
+The tool list covers the whole loop: `decide`, `get_parameters`, `list_rules`, `get_rule_source`, `import_policy_rules`, `put_rules`, `ingest_text`, `list_documents` and `get_usage`. `get_parameters` is the one to reach for first, since it tells you which facts a domain's rules actually test on, ordered by how decisive each one is.
+
+There is also a `decide_case` prompt that orchestrates the agent side of this: it calls `get_parameters`, maps the user's case onto those fields, records which file each fact came from in `fact_sources`, and asks for missing facts while the verdict could still move.
+
+Plain HTTP works too, against `https://ai-rete-rag.com/api/v1`. The `query` field is required alongside `domain` and `facts`:
+
+```bash
+curl -X POST https://ai-rete-rag.com/api/v1/decide \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ik_YOUR_API_KEY" \
+  -d '{
+    "domain": "loan",
+    "query": "Should this application be approved?",
+    "facts": { "credit_score": 720, "dti_ratio": 0.36, "ltv_ratio": 0.80 },
+    "response_mode": "verdict_with_explanation"
+  }'
+```
+
+Eight demo domains are available without an account, covering loan, fraud, clinical, blockchain, insurance, legal, e-commerce and ops cases.
+
+## Pricing
+
+| Plan | Price | Domains | Decisions per month | Storage |
+| --- | --- | --- | --- | --- |
+| Free | $0 | 1 | 1,000 | 10 MB |
+| Supporter | $1 / month | 3 | 10,000 | 50 MB |
+| Builder | $19 / month | 5 | 25,000 | 250 MB |
+| Standard | $39 / month | 10 | 100,000 | 1 GB |
+| Pro | $149 / month | Unlimited | 500,000 | 10 GB |
+| Enterprise | Custom | Unlimited | Custom | Custom |
+
+One call to `POST /decide` counts as one decision no matter how many rules fire or how many chunks get retrieved. Audit mode is on every plan including free, which is the right call for a product whose pitch is provability. Pro adds rule change tracking on every decision, and Enterprise adds self-hosted deployment, custom OpenAI-compatible model endpoints, and compliance review and a BAA on request.
+
+## What to watch for
+
+The engine and the platform are not open source. The MIT license covers the MCP client only, so the part you can read is the part that is not making your decisions. The GitHub repository has zero stars and one open issue on a project created in late July 2026, which tells you how early this is.
+
+The model still writes the explanation, so the reasoning prose is the part that can still be wrong even though the verdict cannot. If that matters for your use case, `verdict_only` removes the model from the loop entirely.
+
+The author is also candid about which half of the system he trusts more. In the HN thread he described the rule side as the stronger half and said retrieval is good at what is relevant but bad at what is still in force, noting that validity is a property you have to assign rather than something similarity can recover. The `as_of` and `documents_as_of` fields are his answer to that, but they only work if you date your policy documents properly.
+
+Smaller practical notes: every self-serve plan runs Claude through Anthropic, and the rule source for a domain requires signing in, so you cannot read the shared demo rules anonymously even though you can run decisions against them.
+
+## Source and Accuracy Notes
+
+- Project page: https://ai-rete-rag.com — verified via direct visit, the landing page carries a live demo with no signup
+- Source repository: https://github.com/zaharajabeen13-create/ai-rete-rag-mcp — MIT license, Python, 0 stars, 0 forks, 1 open issue, created 2026-07-31, last push 2026-10-20, MIT license file present in the tree
+- PyPI package: `ai-rete-rag-mcp` version 0.11.0, published 2026-10-17, requires Python 3.10 or newer, dependencies `httpx` 0.27 or newer and `mcp` 2.3.0 to 2.x
+- License: MIT for the MCP client only; the rule engine and the platform are closed source per the author's launch post
+- HN launch thread: https://news.ycombinator.com/item?id=49803683 — "Show HN: AI·rete·RAG – a Rete rule engine decides, RAG explains why", 46 points and 11 comments, 2026-09-22
+- API responses in this post were captured from live calls to the public API on 2026-10-29, with the demo rule set and demo policy document
+- Pricing tiers and plan features read from the live pricing page
