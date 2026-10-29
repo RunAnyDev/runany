@@ -1,0 +1,139 @@
+---
+title: "Gitea: self-hosted Git with a package registry and CI"
+description: "Gitea is a self-hosted Git forge with code review, a 23-type package registry and GitHub-compatible Actions, MIT licensed and installable with one Docker Compose file."
+pubDate: "2026-10-29T14:25:00.000Z"
+author: "Friday"
+tags: ["self-hosted", "git", "dev-tools", "ci-cd", "go"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/gitea.webp"
+  alt: "Gitea wordmark beside the green tea-cup logo on a dark grid, with a glowing git branch line"
+canonical: "https://runany.dev/blog/gitea/"
+featured: false
+draft: false
+---
+
+> **TL;DR:** **Gitea** gives a team its own Git server, code review, a package registry and CI on a single Go binary under the MIT license. Version 28 dropped the old `1.` prefix, added audit logging and bot accounts, and shipped a long batch of security fixes, so the current line is a clean upgrade target for anyone still on 1.x.
+
+## What Gitea is
+
+Gitea started in 2016 as a community fork of Gogs and has since become one of the two dominant self-hosted Git forges, the other being Forgejo. It is a single Go application that bundles repository hosting, pull requests with code review, issue tracking, a package registry, and a CI runner that speaks GitHub Actions syntax.
+
+The important part is the shape of it. There is no SaaS layer underneath and no per-seat pricing for the core product. You run a container, point a domain at it, and your repositories live on disk under your control. The official description calls it a "painless self-hosted all-in-one software development service, including Git hosting, code review, team collaboration, package registry and CI/CD".
+
+By the numbers, it is a serious project rather than a hobby. The `go-gitea/gitea` repository sits at 58,761 stars and 7,322 forks, written in Go, with the last commit landing on the same day this was written. The current release is v28.2.0, published on October 18, 2026, and the docs site tracks a `29-dev` channel alongside the stable line.
+
+## Why it matters
+
+The gap Gitea fills sits between two things people actually want. GitHub is where the code has to live because that is where the collaborators and the ecosystem are, but it is a service you rent and it is priced per seat. Plain Git over SSH is yours outright, but it has no pull requests, no code review UI, no CI and no package registry. Gitea is the middle option: a hosted-looking forge running on hardware you already have.
+
+The package registry is what separates it from a bare Git server. Gitea publishes the same package types you would normally reach for npm, PyPI, Maven, NuGet, Cargo and the rest to host on their own infrastructure: Alpine, Cargo, Chef, Composer, Conan, Conda, Container, CRAN, Debian, Go, Helm, Maven, NPM, NuGet, Pub, PyPI, RPM, RubyGems, Swift, Terraform and Vagrant, plus a generic registry for anything else. That is over twenty registries in one product, which the official docs describe as "over 20 different types of public or private software package management", and it means an internal `npm install` or `pip install` can point at your own server instead of a public one.
+
+CI is the other half. Gitea Actions is deliberately GitHub-compatible, so a workflow file that runs on GitHub usually runs on Gitea with little or no change. There is a `Gitea Runner` daemon that registers against an instance and picks up jobs.
+
+Where it sits against the alternatives:
+
+| | Gitea | Forgejo | GitLab CE | GitHub |
+|---|---|---|---|---|
+| License | MIT | GPL-3.0 | MIT (core) | Proprietary |
+| Hosted yourself | Yes | Yes | Yes | No |
+| Actions syntax | GitHub-compatible | GitHub-compatible | GitLab CI (YAML) | GitHub Actions |
+| Package registry | 23 types | 22 types | Yes | Yes |
+| Price | Free | Free | Free | Per seat |
+| Governance | CommitGo (commercial) | Codeberg e.V. (non-profit) | GitLab Inc. | GitHub Inc. |
+
+## Getting it running
+
+The fastest path is the official Docker Compose file, which pins the current release image and maps the web UI to port 3000 and SSH to port 222.
+
+```yaml
+networks:
+  gitea:
+    external: false
+services:
+  server:
+    image: docker.gitea.com/gitea:28.2.0
+    container_name: gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+    restart: always
+    networks:
+      - gitea
+    volumes:
+      - ./gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3000:3000"
+      - "222:22"
+```
+
+Bring it up and the install wizard opens on `http://localhost:3000`. Create the admin account during that wizard, because the first registered user becomes the administrator.
+
+```bash
+docker compose up -d
+docker compose logs -f server
+```
+
+The `./gitea` volume is where everything lives: repositories, the SQLite database, attachments and configuration. Back up that directory and you have backed up the instance. If you would rather use Postgres or MySQL, the same compose file supports it by adding a database service and pointing `GITEA__database__*` environment variables at it.
+
+Turning on Actions requires an edit to `app.ini`, which lives at `./gitea/gitea/app.ini` in that volume.
+
+```ini
+[actions]
+ENABLED=true
+```
+
+Then register a runner against the instance. The token comes from the instance's Actions runner registration page under your user settings.
+
+```bash
+gitea-runner register --no-interactive --instance https://git.example.com --token YOUR_TOKEN
+gitea-runner daemon
+```
+
+Once the runner is connected, workflows live in a `.gitea/workflows/` directory in the repository, as a `.yaml` file.
+
+```yaml
+name: Build and test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: go test ./...
+```
+
+For everyday command-line work there is `tea`, the official CLI. It installs through Homebrew on macOS or straight from source with Go.
+
+```bash
+brew install tea
+# or
+go install gitea.dev/tea@
+
+tea login add
+```
+
+`tea` authenticates with an application token that you generate in your Gitea user settings, which sidesteps the browser-based OAuth dance that can be awkward on a headless box.
+
+## What to watch for
+
+The Forgejo question comes up in every conversation about Gitea, and the blog covered it before in the EasyForgejo post. The short version: Forgejo is the community-governed fork, Gitea is the original now commercially backed by CommitGo. They remain API-compatible, so migrating is a matter of pointing clients at a different host, but they are diverging and you should decide which governance model you want rather than drift into one.
+
+Version numbering changed in a way that trips people up. Gitea dropped the historical `1.` prefix, so the release that used to have been 1.28.0 is now 28.0.0. If you have automation pinned to a `1.x` tag, it will not find what you expect.
+
+Security deserves attention in this release specifically. The 28.0.0 notes list a long set of advisories, and several have a common shape worth understanding: approval handling for pull requests from forks had multiple flaws where an unapproved contributor workflow could reach a self-hosted runner, and approving a run could revive jobs that had already been cancelled. There was also a case-insensitive SQL lookup in the built-in SSH server that could match a forged case-variant key to another account, and a container registry that served blobs with attacker-controlled content types, which is a stored XSS. If you run a self-hosted runner and accept pull requests from forks, treat the upgrade as urgent rather than routine.
+
+Resource use is modest. The official docs state that a Raspberry Pi 3 is powerful enough to run Gitea for small workloads, and that 2 CPU cores and 1GB RAM is typically sufficient for small teams and projects. The same page notes that Gitea wants a dedicated non-root system account on UNIX-like systems, because it manages the `~/.ssh/authorized_keys` file of that user, and that Git 2.0.0 or later is required.
+
+## Source and Accuracy Notes
+
+- Project page: [gitea.com](https://gitea.com), verified via direct visit on 2026-10-29; the legacy gitea.io domain redirects there
+- Source repository: [github.com/go-gitea/gitea](https://github.com/go-gitea/gitea), MIT licensed, 58,761 stars and 7,322 forks on 2026-10-29, last push 2026-10-29
+- Latest release: [v28.2.0](https://github.com/go-gitea/gitea/releases/tag/v28.2.0), published 2026-10-18; major version notes at [blog.gitea.com/release-of-28.0.0](https://blog.gitea.com/release-of-28.0.0/)
+- License: MIT, from the repository LICENSE file ("Copyright (c) 2016 The Gitea Authors")
+- Documentation: [docs.gitea.com](https://docs.gitea.com) for install, runner and package registry details
+- Pricing: the Open Source tier is free and self-hosted under MIT; the Enterprise tier is listed at $9.5 per user per month with a one-year commitment, adding SAML SSO, audit logs and Kubernetes AutoScaling Runners, per [about.gitea.com/pricing](https://about.gitea.com/pricing)
+- HN launch thread: [news.ycombinator.com/item?id=17006503](https://news.ycombinator.com/item?id=17006503) ("Gitea: Open source, self-hosted GitHub alternative", 638 points, 2018-05-06)
