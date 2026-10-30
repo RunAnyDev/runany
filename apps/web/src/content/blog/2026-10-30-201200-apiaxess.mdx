@@ -1,0 +1,154 @@
+---
+title: "APIaxess: recover an app's API surface with no setup"
+description: "APIaxess is a free, open source Burp Suite alternative that recovers an app's real API surface from live traffic and decompiled code, then exports it."
+pubDate: "2026-10-30T13:12:00.000Z"
+author: "Friday"
+draft: false
+tags: ["api-testing", "security-tools", "burp-alternative", "rust", "android"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/apiaxess.webp"
+  alt: "APIaxess workbench showing live traffic rows beside an API endpoint detail panel"
+canonical: "https://runany.dev/blog/apiaxess/"
+---
+
+> **TL;DR:** APIaxess is a free, open source Burp Suite alternative that works out what an app actually talks to, from the traffic it makes and the code it ships, then hands you one merged API surface you can resend, fuzz and export. It runs on your own machine with a bundled browser and emulator, so there is no proxy to configure and no CA to install by hand. Windows and Linux are supported today, macOS is listed as next.
+
+## What it is
+
+APIaxess points at a web app or an Android APK and works out what that app actually talks to. For a web target it drives a bundled Chromium through a MITM proxy. For a package it unpacks and decompiles the APK statically, runs the app in a bundled emulator to capture live traffic, then fuses the two views into a single endpoint list.
+
+The pitch in the README is that everything it needs ships with it: Chromium, a Java runtime, apktool, jadx, ffuf, Frida and an Android emulator. The Windows build is an MSI, the Linux build is a .deb package, and the engine is Rust with a separate GUI app.
+
+The engine, the capture proxy and the session store all listen on loopback. Nothing leaves the machine except an update check you can switch off.
+
+## Why it matters
+
+Mapping an app's API is mostly setup work. You stand up a proxy, install a CA certificate, fight certificate pinning, decompile the APK by hand, spin up an emulator, and glue a pile of tools together. Even then you are not certain you saw everything the app calls.
+
+APIaxess takes the position that a recovered surface should carry its own evidence. Every endpoint is labelled confirmed or inferred from code, and first-party or third-party. Your own Resend and Fuzz traffic is kept out of the recovered surface, so the export reflects the app rather than your poking. When the tool cannot do something, such as reading an app whose pinning it cannot defeat, it says so instead of showing you an empty list.
+
+The project's reference app has 17 documented endpoints across Retrofit, OkHttp, HttpURLConnection and GraphQL, including a third-party host and calls that only fire behind a tap. The static pass found 17 of 17, the live capture found 17 of 17, and the fused surface confirmed each one twice. In a sample session on their demo app, 2,481 flows merged into 128 endpoints, and nine of those were only ever reachable from the app rather than from a browser.
+
+Here is the shape of the pipeline:
+
+```text
+      web target                     Android APK
+          │                              │
+   bundled Chromium                 apktool + jadx
+          │                        (static surface)
+          │                              │
+    MITM proxy                    bundled emulator
+          │                              │
+   live traffic ──────────────── live traffic
+          │                              │
+          └──────────┬───────────────────┘
+                     │
+              fused API surface
+        confirmed / inferred x first / third party
+                     │
+        ┌────────────┼────────────┬──────────────┐
+        ▼            ▼            ▼              ▼
+      Resend        Fuzz      Intercept       Export
+                                   (OpenAPI 3.1, Postman,
+                                    HAR, Python SDK)
+```
+
+## Getting it running
+
+On Windows, both Scoop and Chocolatey carry it. The installers are unsigned for now, so Windows shows the usual unknown publisher warning on first run.
+
+```bash
+scoop bucket add apiaxess https://github.com/KatrielMoses/scoop-apiaxess
+scoop install apiaxess/apiaxess
+```
+
+On Debian or Ubuntu you install the downloaded package directly:
+
+```bash
+sudo apt install ./apiaxess_0.1.0_amd64.deb
+```
+
+Published SHA-256 checksums sit next to the downloads, and the app checks every download against them.
+
+Running `apiaxess` with no arguments starts the workbench and prints what it set up:
+
+```text
+APIaxess workbench is ready
+gui_address=127.0.0.1:7777  proxy_address=127.0.0.1:8080
+ca_fingerprint=<64-hex>
+store=…\apiaxess\workbench\session-<digest>\traffic.sqlite3
+```
+
+From there you capture against a target. The `--authorize` flag is required, and it means you are stating that you have permission to test this host.
+
+```bash
+apiaxess web northwind-retail.io --authorize --output ./session.json
+```
+
+When the session has enough traffic, export it. `--format all` writes every artifact in one pass.
+
+```bash
+apiaxess export ./session.json --format all --out ./out
+```
+
+```text
+./out/openapi.json
+./out/postman.collection.json
+./out/traffic.har.json
+./out/python-sdk/
+./out/apiaxess-evidence.json
+```
+
+The Python SDK is a runnable httpx client, so the export is something you can call rather than only read.
+
+For an APK you skip the browser and run the analysis pipeline. It is static by default, and dynamic enrichment is opt-in.
+
+```bash
+apiaxess analyze ./northwind-4.2.1.apk \
+    --allow-target api.northwind-retail.io \
+    --output ./session.json \
+    --json
+```
+
+If you would rather build it, the engine is Rust with a Node-based UI. Rust 1.88 or newer, Node 22 and pnpm 11 are the requirements.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm ui:build
+cargo run -p apiaxess
+```
+
+Then open `http://127.0.0.1:7777`.
+
+## What the interception certificate does
+
+Each session mints its own certificate authority with a fresh key pair. The signing key lives in memory for the life of the process, is never written to disk, and is never added to your system trust store. It disappears when the session ends. The fingerprint is printed at startup and served locally, so you can check it out of band while pairing a device.
+
+| Area | What happens |
+| --- | --- |
+| Certificate authority | One CA per session, key in memory, gone at exit |
+| Your browser | Untouched. Web capture uses a throwaway profile with a launch flag |
+| Your host trust store | Never modified. The Android CA goes into the disposable emulator |
+| Outbound calls | One host, `apiaxess.dev`, for an optional update check and add-ons you ask for |
+| Telemetry | None. No analytics, no licence call, no usage reporting |
+| On disk | A SQLite session file and your exports. Scratch space is swept after a day |
+
+The update check is a plain GET of a static file once a day, and the version comparison happens on your machine. Setting `APIAXESS_UPDATE_CHECK=0` turns it off entirely. The workbench also refuses to act on a socket upgrade until the origin and the session token check out, and a paired device gets its own token rather than sharing the operator's.
+
+## What to watch for
+
+The update feed is not signed yet. The ed25519 signing is built but not switched on, so the checksums come from the same server as the binaries. A compromised `apiaxess.dev` could serve a malicious build with matching hashes. The project puts this on its own trust page rather than leaving you to find it.
+
+Scope is advisory. Setting a host does not block requests to it, it labels the flows so you keep a record of what you were authorised to touch. That is a deliberate choice, but it means the tool will not stop you from going out of bounds.
+
+The two heaviest pieces are add-ons rather than installer contents. The analysis runtime is about 1.2 GB and the Android target about 1.3 GB, each fetched from `apiaxess.dev/assets/` in the app when you click for it, installed for your user only and checked against its SHA-256. There is an environment variable, `APIAXESS_ANDROID_TARGET`, for pointing at a copy you already have if you are working air-gapped.
+
+macOS is listed as next, and this is v0.1.0 from a repository created at the end of September 2026 with 8 stars and 2 forks. The project is young, so expect the interface to move.
+
+## Source and Accuracy Notes
+
+- Project page: https://apiaxess.dev, verified via direct visit on 2026-10-30
+- Documentation: https://apiaxess.dev/docs/quickstart and https://apiaxess.dev/trust, verified via direct visit
+- Source repository: `KatrielMoses/apiaxess`, Rust, licensed Apache 2.0, created 2026-09-03
+- HN launch thread: https://news.ycombinator.com/item?id=49911931, posted 2026-09-30 with 32 points
