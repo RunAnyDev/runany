@@ -1,0 +1,118 @@
+---
+title: "CopilotKit OpenBot: AI Coworkers With Their Own Computer"
+description: "CopilotKit OpenBot gives each AI coworker its own browser, files, and tools, with every action decided before it happens, at 8,190 GitHub stars."
+pubDate: "2026-10-30T02:02:00.000Z"
+author: "Friday"
+tags: ["github-trending", "ai-agents", "typescript", "ag-ui", "agent-governance"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/copilotkit-openbot.webp"
+  alt: "GitHub social preview card for CopilotKit/OpenBot"
+canonical: "https://runany.dev/blog/copilotkit-openbot/"
+---
+
+> **TL;DR:** OpenBot is CopilotKit's open-source project for AI coworkers that each get their own computer: a browser, files, and tools, with every action decided beforehand and recorded afterwards. It is MIT licensed, TypeScript, at 8,190 stars, and it runs on Bun.
+
+## What it is
+
+The description states the model plainly: "Open-source AI coworkers that each get a computer of their own: a browser, files and tools, with every action decided before it happens and recorded after. Bring any AG-UI agent."
+
+Two things in that sentence matter more than the rest. The first is "each get a computer of their own", which means isolation per agent rather than a shared session. The second is "Bring any AG-UI agent", which means the runtime is not tied to one framework.
+
+```console
+$ curl -s https://api.github.com/repos/CopilotKit/OpenBot \
+  | jq '{stars: .stargazers_count, forks: .forks_count, issues: .open_issues_count,
+         language, license: .license.spdx_id, topics, created_at, pushed_at}'
+{
+  "stars": 8190,
+  "forks": 1048,
+  "issues": 52,
+  "language": "TypeScript",
+  "license": "MIT",
+  "topics": ["ag-ui", "agent-governance", "ai-agents", "browser-automation", "copilotkit"],
+  "created_at": "2026-08-17T00:44:59Z",
+  "pushed_at": "2026-10-29T20:07:51Z"
+}
+```
+
+Note the issue count: 52 open issues against 8,190 stars. Compare that with the neighbouring repository on this list, which has a much larger tracker. Low issue volume on a high star count usually means either an unusually polished codebase or an unusually quiet one. Either way, it is worth reading the tracker before you commit.
+
+## Sixteen agent adapters in the root directory
+
+The clearest evidence for "bring any AG-UI agent" is the shape of the repository. The root contains sixteen directories whose names are framework names:
+
+| Adapter | Adapter | Adapter |
+| --- | --- | --- |
+| `agent-adk` | `agent-langgraph` | `agent-mastra` |
+| `agent-ag2` | `agent-langgraph-agui` | `agent-microsoft` |
+| `agent-agno` | `agent-langroid` | `agent-pydantic-ai` |
+| `agent-antigravity` | `agent-llamaindex` | `agent-strands` |
+| `agent-bot` | `agent-claude-sdk` | `agent-computer` |
+| `agent-crewai` | | |
+
+Alongside those sit the pieces of the runtime itself: `server`, `worker`, `supervisor`, `desktop`, `mobile`, `extension`, `toolkit`, `shared`, `spire`, `charts`, `assets`, `app`, `patches`, `tests`, `examples`, and `docker`.
+
+The `desktop` and `extension` directories are what separate this from a server-side agent framework. `desktop` points at a native app, and the root also carries a `Tauri-signing-SKILL.md`, which is the kind of file you only find when the project actually ships signed desktop binaries.
+
+## Governance is the product
+
+The topic list contains `agent-governance` and `browser-automation` as separate entries. The description says every action is "decided before it happens and recorded after". Taken together, that points at a system where an agent does not get unrestricted access to a machine.
+
+You can see the machinery in the environment template, which is 37 KB. It is the largest configuration surface in the repository:
+
+```bash
+# Tokens are per-surface, not global
+KEY_ENCRYPTION_KEY=
+COMPUTER_TOKEN=
+COMPUTER_SUPERVISOR_URL=
+SUPERVISOR_TOKEN=
+AGENT_TOOL_TOKEN=
+WORKER_SHARED_SECRET=
+MANAGED_AGENT_TOKEN=
+AGENT_STALL_TIMEOUT_MS=
+TRUSTED_ORIGINS=
+```
+
+The naming pattern is the design. A token for the computer, a separate one for the supervisor, another for agent tools, and a shared secret for the worker. `AGENT_STALL_TIMEOUT_MS` implies a watchdog that detects an agent that has stopped responding, and `TRUSTED_ORIGINS` implies the HTTP surface is origin-checked rather than open.
+
+`COMPOSIO_API_KEY` and `OPENAI_API_KEY` sit alongside `DATABASE_URL` and `KEY_ENCRYPTION_KEY`, which tells you tool integrations and model access are configured at the same level as storage and encryption.
+
+## Running it
+
+The project uses Bun, pinned to a specific version in `package.json`:
+
+```bash
+# Bun 1.4.3 is the declared package manager
+git clone https://github.com/CopilotKit/OpenBot.git
+cd OpenBot
+bun install
+cp .env.example .env
+bun run dev
+```
+
+The script list in `package.json` shows the testing strategy more clearly than the README would. Beyond the usual `build`, `lint`, `typecheck`, and `test`, there is `test:live-arcade`, `test:live-composio`, `test:live-screen`, `test:mutations`, `test:server:sharded`, `test:smoke`, `composio:smoke`, and `mock:knowledge`. A mutation testing target and a sharded server test suite are two different kinds of maturity signal, and the live tests against real integrations suggest the team verifies against the real thing rather than only against mocks.
+
+There is also `generate:app-config` and a `diagram` script, which are the two you would not expect in an agent runtime.
+
+## When to use it
+
+The fit is a multi-agent workflow where agents need to touch the same machine without colliding. Separate computers per agent, each with its own browser and files, is the answer to "why did the agent overwrite my file". If your agents work in parallel on anything, that isolation is the point.
+
+The `agent-governance` positioning also suits teams that need a review trail. If every action is decided before it happens and recorded afterwards, you get an audit log without bolting one on separately.
+
+## When not to use it
+
+Sixteen framework adapters is a wide surface. If you only need one agent framework, you are inheriting a lot of code paths you will not exercise. Check the adapter you actually need before assuming the others are inert.
+
+The `.env.example` file also signals that a real deployment needs more setup than a single API key. Key encryption, a database, a supervisor endpoint, a worker secret, and a set of trusted origins are all part of the baseline. For a local experiment, the desktop and extension directories are probably the faster path in.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.copilotkit.ai/openbot
+- Source repository: CopilotKit/OpenBot (verified via GitHub API `html_url`)
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 8190
+
+A note on naming, since it matters when you search for this later. There is a separate project also named OpenBot at `nightly-labs/openbot`, a local-first desktop workspace for running Codex, Claude, and Grok side by side. The two are unrelated: different owners, different descriptions, different licenses. This post covers the CopilotKit one, and it is filed under `copilotkit-openbot` to keep the two apart.
