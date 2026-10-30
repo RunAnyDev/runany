@@ -1,0 +1,104 @@
+---
+title: "Squalk: a self-hosted forum and chat that lives on Nostr"
+description: "Squalk turns a Nostr relay into a self-hosted forum and chat, with rooms, threads, labels and search, and no accounts or passwords to manage."
+pubDate: "2026-10-30T15:00:00.000Z"
+author: "Friday"
+draft: false
+tags: ["nostr", "self-hosted", "forum", "svelte", "relay"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/squalk.webp"
+  alt: "The Nostr Protocol Forum, a Squalk-powered community forum running on a Nostr relay"
+canonical: "https://runany.dev/blog/squalk/"
+---
+
+> **TL;DR:** Squalk is a SvelteKit forum with a chat sidebar that keeps every thread on a Nostr relay instead of a database. You sign in with a Nostr key, so nobody has to create an account or reset a password. The public instance at nostr-proto.org runs the open-source v0.2.2 release, and you can host the same thing for your own community.
+
+## What it is
+
+Squalk is a forum and chat built on Nostr, meant to be run by the community it serves. The author publishes it as open source under the MIT license, and the deployment at nostr-proto.org (The Nostr Protocol Forum) doubles as the reference setup: five rooms, a hosted relay, and a set of editorial pages.
+
+What sets it apart from forum software with a database is where the data ends up. Squalk implements NIP-29, which lets a relay manage groups, and NIP-07D, the `nostrconnect://` bunker login that lets a browser sign in through another client. Threads, chat messages, labels and even the sidebar pages are ordinary Nostr events published to a relay you control. Nothing is locked inside the web app.
+
+The forum runs in one of two modes. `simple` gives you a single forum, `full` gives you as many rooms as you want, and an admin can move a simple instance up to full mode later without a rebuild. The public instance runs in full mode, split into Agora (open conversation), Help (usage questions), Protocol (NIPs and implementation), Apps (clients and relays) and Relays (running one).
+
+## Why it matters
+
+Forum software normally assumes it owns the database, and that assumption is what forces signup flows, password resets, email verification and the migration project every time you want to move. Squalk skips that layer. Identity is a keypair you already hold, and a post is a signed event that any relay can serve.
+
+For a community that wants a home base without handing over its identity layer, that is the real appeal. The public instance makes the point plainly: the rooms are standard NIP-29 groups on `wss://relay.nostr-proto.org`, so clients like Flotilla or Nostrord can join the same conversations and read and write the same messages the website shows. Your key opens every door to the community.
+
+Operators get a second benefit. Because everything is an event on a relay, search, labels and moderation policy all live in one place, and the relay itself can be swapped without touching the archive.
+
+## Getting it running
+
+Squalk needs a NIP-29 capable relay to host the groups, plus a Blossom server for uploads. The author suggests Pyramid, a relay server that does both, and it installs with one command on a blank VPS.
+
+```bash
+curl -s https://raw.githubusercontent.com/fiatjaf/pyramid/refs/heads/master/easy.sh | bash
+```
+
+Then clone Squalk and start the dev server. The project is a SvelteKit app, so the usual Node toolchain applies.
+
+```bash
+git clone https://github.com/dtonon/squalk.git
+cd squalk
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Configuration is entirely environment variables, all prefixed `PUBLIC_` because the browser reads them. The relay URL is the only required one.
+
+```dotenv
+PUBLIC_RELAY_URL=wss://relay.example.com
+PUBLIC_MODE=full
+PUBLIC_GROUP_ID=mygrouprandomid
+PUBLIC_SEARCH=yes
+PUBLIC_BLOSSOM_URL=https://blossom.primal.net
+```
+
+The variables worth knowing before you start:
+
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `PUBLIC_RELAY_URL` | yes | none | WebSocket URL of the NIP-29 relay hosting the groups |
+| `PUBLIC_MODE` | no | `simple` | One forum, or as many rooms as you like |
+| `PUBLIC_GROUP_ID` | in simple mode | none | The single forum's group id, ignored in full mode |
+| `PUBLIC_SEARCH` | no | `no` | Shows the search box, needs a relay with NIP-50 support |
+| `PUBLIC_BLOSSOM_URL` | no | none | Media uploads stay disabled while this is empty |
+| `PUBLIC_SSR` | no | `no` | Server-rendered pages instead of a static single-page bundle |
+| `PUBLIC_LABELS` | no | none | Comma-separated labels offered when composing |
+| `PUBLIC_EXTERNAL_CLIENT` | no | `https://njump.me/{e}` | Template used to open profiles in another Nostr client |
+
+For production there are two build targets. The default build produces a static bundle that any web server can host.
+
+```bash
+npm run build
+```
+
+The server-rendered target produces a Node app with crawlable HTML, real 404s, a sitemap and JSON-LD. It needs Node 22 or newer on the host.
+
+```bash
+just build-ssr
+node --env-file=.env.production build
+```
+
+The included `justfile` handles the deploy as well. `just deploy <host>` rsyncs the static bundle and purges the Cloudflare cache, while `just deploy-ssr <mode>` ships the Node build and restarts a systemd unit.
+
+## What to watch for
+
+Everything in `.env` is public. The `PUBLIC_` prefix is not a naming habit, it is a statement that the browser reads these values. Do not put a relay password or an API token in that file.
+
+Content is stored as NIP-23 long-form events of kind `30023` on the same relay, which makes the admin set the trust gate. Squalk only surfaces events whose author appears in the group's NIP-29 admin event of kind `39001`, but the relay query itself is open, so anyone can read what the relay holds.
+
+Search is not free. The search box needs a relay that implements NIP-50, which is why the public instance runs one of its own. Uploads need a Blossom server, and the feature stays switched off until `PUBLIC_BLOSSOM_URL` points at one.
+
+If you turn on `PUBLIC_SSR`, remember the server reads the relay anonymously. It renders public content only, and members see their private rooms once the client takes over.
+
+## Source and Accuracy Notes
+
+- Project page: https://nostr-proto.org/ (The Nostr Protocol Forum, running Squalk v0.2.2), verified via direct visit
+- Source repository: dtonon/squalk, MIT license, v0.2.2 release
+- Relay and Blossom server: fiatjaf/pyramid
+- HN launch thread: https://news.ycombinator.com/item?id=49909980 (September 30, 2026)
