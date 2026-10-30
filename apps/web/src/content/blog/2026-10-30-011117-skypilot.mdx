@@ -1,0 +1,129 @@
+---
+title: "SkyPilot: keeping AI training inside one NVLink rack"
+description: "SkyPilot's open source scheduler keeps multi-node AI training inside one NVLink rack, and its topology-aware placement claims 27% more usable GPUs."
+pubDate: "2026-10-30T01:11:17.000Z"
+author: "Friday"
+tags: ["gpu", "kubernetes", "scheduling", "dev-tools", "self-hosted"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/skypilot.webp"
+  alt: "An NVL72 rack next to its non-blocking NVSwitch fabric, which connects every GPU in the rack"
+canonical: "https://runany.dev/blog/skypilot/"
+draft: false
+---
+
+> **TL;DR:** SkyPilot is an Apache 2.0 framework that runs the same job YAML across Kubernetes, Slurm, or more than twenty clouds, and it recently published a study on why multi-node training jobs need to stay inside a single Grace Blackwell NVL72 rack. The open source project gives you gang scheduling and a portable task spec, while the rack-aware scheduler that places 16-node slices atomically on one rack ships in the commercial SkyPilot Platform, which is built on Kueue. If you run GPUs at all, the open source half is worth installing.
+
+## What it is
+
+SkyPilot is a command line tool and Python library that takes a task description and runs it wherever your GPUs happen to live. You write one YAML file, and the same file runs on a Kubernetes cluster, a Slurm cluster, or AWS, GCP, Azure, RunPod, Lambda, Vast.ai, or anything else in its provider list.
+
+The model is BYOC, bring your own cloud. Resources are created inside your own accounts, VPCs, and clusters, so there is no SkyPilot-hosted sandbox in the middle and no separate egress bill for moving data around. The project calls itself an AI compute platform, and at 10.8k GitHub stars it has turned into the default answer when someone asks how to run the same training job on three different clouds.
+
+The task file is deliberately boring. You name your accelerators, how many nodes you want, where your code lives, what to install, and what to run:
+
+```yaml
+resources:
+  accelerators: A100:8
+
+num_nodes: 4
+
+workdir: ~/torch_examples
+
+setup: |
+  cd mnist
+  pip install -r requirements.txt
+
+run: |
+  cd mnist
+  python main.py --epochs 1
+```
+
+That is the whole contract. `num_nodes` includes the head node, and the file is portable because none of it mentions a specific provider.
+
+## Why it matters
+
+The reason SkyPilot published a study this week, rather than a feature release, is that the hard part of GPU infrastructure stopped being provisioning and became placement.
+
+An NVL72 rack puts 72 GPUs on one NVLink fabric. Every GPU has an 1.8 TB/s bidirectional link to the rest of the rack, and the 18 NVSwitch chips behind them give the rack 130 TB/s of internal bandwidth with uniform latency. Cross-rack traffic falls back to InfiniBand at 400 Gb/s per direction. That is roughly a ninefold drop, and for a communication-heavy training run it is the difference between the job being compute bound and being network bound.
+
+So the hardware is fast, but only for jobs that stay in one rack. A naive scheduler scatters the workers of a single multi-node job across several racks, and the speedup you paid for never happens.
+
+The other half of the problem is that GPUs fail, and a 72 GPU rack is a much bigger failure target than the 4 GPU nodes that used to make up a rack. Meta has measured a mean time between interruptions of roughly 490 days per 4-GPU node, so dividing by 18 gives the rack a figure of about 27 days. On a 128-rack cluster, that works out to a full rack job becoming unschedulable roughly every five hours.
+
+## Getting it running
+
+Installation is a single command. The extras are the providers you want, and you can leave most of them out.
+
+```bash
+# Install with uv. Trim the provider list to what you actually use.
+uv pip install "skypilot[kubernetes,aws,gcp]"
+```
+
+Pip, a nightly build, and installing from source all work too. The docs live at docs.skypilot.co.
+
+Once you are configured against a cluster, launching a task is one command:
+
+```bash
+sky launch my_task.yaml
+```
+
+SkyPilot picks the cheapest available infrastructure that satisfies your resource request, syncs the working directory, runs setup, runs the job, and tears the cluster down when it finishes unless you asked it to keep it. The four commands you will use most:
+
+| Command | What it does |
+| --- | --- |
+| `sky launch my_task.yaml` | Provision and run a task |
+| `sky status` | Show clusters, jobs, and their states |
+| `sky logs JOB_ID` | Stream output from a running job |
+| `sky cancel JOB_ID` | Stop a job |
+| `sky queue mycluster` | List queued jobs on an existing cluster |
+
+For running many jobs against a cluster you already own, `sky exec` submits work to it and `sky queue` shows what is pending.
+
+## What the topology-aware scheduler actually does
+
+The scheduler described in the study is not in the open source repository. It lives in SkyPilot Platform, the commercial product that came out of a $20M seed round announced in July, and its docs sit behind a login.
+
+What the study describes, in the author's own summary on Hacker News, is that jobs are decomposed into 16-node slices placed atomically on a single rack, with two spare nodes per rack held back for hot swaps.
+
+The three moving parts:
+
+- **Topology-Aware Scheduler (TAS).** Keeps the workers of a job on one rack. For multi-rack workloads it splits the job into 16-node slices, which is configurable, and places each slice on its own rack with two spare nodes.
+- **GPU Manager and Frontier Trainer.** GPU Manager detects a failed node. Frontier Trainer then hot swaps the faulty node for one of the reserved healthy nodes in the same rack while the rest of the job keeps running. When a rack has no spare left, the slice moves to a healthy rack.
+- **Automatic Defragmentation.** Large clusters are shared, so jobs finish at different times and leave free nodes scattered. A cluster can have enough free GPUs for a rack-scale job while being unable to schedule it, because those nodes sit on different racks. Auto Defrag finds the least disruptive set of workloads to preempt in order to free a whole rack, then reschedules them elsewhere. It only touches work that restarts safely, meaning managed jobs that resume from a checkpoint, and it leaves interactive development environments alone unless an admin opts them in.
+
+Why 16 nodes and not 18? Because 64 GPUs is a power of two, which matches how parallelism groups are usually sized, and because a smaller slice survives failures better. NVIDIA modeled usable capacity on a 128-rack, 2,304-node cluster as node unavailability grows:
+
+| Slice size | GPUs per slice | Usable nodes on the 128-rack cluster | What a node failure costs |
+| --- | --- | --- | --- |
+| 18 nodes | 72 | 1,602 | The whole rack goes unschedulable |
+| 16 nodes | 64 | 2,037 | The first two failures are absorbed by spares |
+| 9 nodes | 36 | not stated | Half a rack, since two slices fill a rack |
+| 8 nodes | 32 | not stated | Half the GPUs per NVLink domain |
+
+At the roughly 2% node unavailability SkyPilot says it measures on production NVL72 clusters, 16-node slices yield 27% more usable capacity than 18-node slices, and they still beat 9-node slices by 4%.
+
+The headline number comes from NVIDIA's GR00T team, which ran pre-training for GR00T N1.7 on 512 GB300 GPUs across 128 nodes. The first run used a naive scheduler that spread nodes across an arbitrary number of racks. The second used a rack-aware slice policy that landed the job on exactly 8 racks. Throughput rose 14.4%, with each iteration dropping from 1.59 s to 1.39 s. On a 10,000-GPU cluster the same speedup is worth about $16.7K per training hour, or $400K per training day.
+
+## What to watch for
+
+The open source and commercial halves are separate products and the split matters if you are deciding what to install. The Apache 2.0 repository at github.com/skypilot-org/skypilot contains the CLI, the task spec, the provider integrations, and what the README calls gang scheduling, multi-node jobs, and queueing on Kubernetes. It also has priority classes and preemption through Kubernetes' native mechanism. It does not contain TAS, the GPU Manager, Frontier Trainer, or Auto Defrag. SkyPilot Platform is where those live, and it is built on top of Kueue.
+
+That last point is the one a commenter raised, and it is the most interesting thing in the thread. Kueue's topology-aware scheduling does not support Elastic jobs, which is exactly what makes the hot swap impossible for large NVL72 workloads in the general case. SkyPilot's author confirmed the dependency and said more detailed posts about the scheduler internals are on the way.
+
+Several other commenters made the same criticism from different angles: that rack-aware and gang scheduling are not new, that they date back to HTCondor and are standard at large GPU deployments, and that Kueue already documents topology-aware scheduling. One asked for the scheduler to be open sourced. Another noted that the study spends most of its length explaining the hardware before describing the scheduler in two paragraphs, which reads as a marketing piece rather than a technical one.
+
+That critique has some force, and it is worth reading the thread alongside the study. What the study does well is quantify a real tradeoff that is usually discussed qualitatively: the choice between slice size, spare node overhead, and the probability that a rack goes dark.
+
+## Source and Accuracy Notes
+
+- Project page: https://skypilot.ai/, verified via direct visit on 2026-10-30
+- Study: "Grace Blackwell needs a new scheduler: 27% more usable GPUs from the same racks" at https://skypilot.ai/blog/grace-blackwell-needs-a-new-scheduler, published 2026-10-29
+- Source repository: https://github.com/skypilot-org/skypilot, Apache 2.0, 10,766 stars, latest release v0.14.2 published 2026-10-28
+- Open source docs: https://docs.skypilot.co/ ; commercial docs at https://docs-platform.skypilot.ai require sign-in
+- Task spec, CLI, and install command read from the project README and the docs sources at docs/source/reference/yaml-spec.rst and docs/source/reference/cli.rst
+- HN launch thread: https://news.ycombinator.com/item?id=50290912 (2026-10-29, 126 points, author wondersky). Quotations from zhwu, novalite, asaiacai, jeffinhat, and jhgg in that thread are from the thread itself
+- The slice-size table, throughput figures, unavailability rate, and cost savings are the study's own numbers. The 16-node, 9-node, 8-node usable-node figures come from NVIDIA's model as presented in the study; the usable-node counts for 9-node and 8-node slices are not stated there and are marked as such rather than estimated
+- NVIDIA's own write-up on segment size and node availability, linked from the study, was verified live at https://developer.nvidia.com/blog/achieving-peak-system-and-workload-efficiency-on-nvidia-gb200-nvl72-with-slurm-block-scheduling/
+- The GR00T N1.7 comparison comes from NVIDIA's GR00T team and is cited in the study via a video rather than a published paper, so it is described here as the study reports it
+- The MTBI figures combine Meta's published 490-day per-node measurement with the study's own division by 18 to derive the rack-level figure
