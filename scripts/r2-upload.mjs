@@ -16,8 +16,9 @@
 // `npx wrangler` which picks up Cloudflare auth from `~/.config/.wrangler/`).
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -57,13 +58,49 @@ if (!existsSync(filePath)) {
 
 const key = `blog/thumbnails/${slug}.webp`;
 
-try {
+function put(cmd) {
   execSync(
-    `npx -y --package=wrangler wrangler r2 object put "${bucket}/${key}" --file "${filePath}" --remote`,
+    `${cmd} r2 object put "${bucket}/${key}" --file "${filePath}" --remote`,
     { cwd: root, stdio: ["ignore", "inherit", "inherit"] }
   );
-  console.log(`Upload OK → ${key}`);
-} catch (e) {
-  console.error(`Upload FAILED: ${e.message?.slice(0, 200) || e}`);
-  process.exit(1);
 }
+
+// Verify the object actually landed. On 2026-10-30 wrangler reported
+// "Upload complete" for a thumbnail that was never retrievable from R2 and
+// 404'd on the CDN, so a silent no-op used to pass as success.
+function verify() {
+  const tmp = join(tmpdir(), `r2-verify-${slug}-${Date.now()}.webp`);
+  try {
+    execSync(`npx wrangler r2 object get "${bucket}/${key}" --file "${tmp}" --remote`, {
+      cwd: root,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    const remote = statSync(tmp).size;
+    rmSync(tmp, { force: true });
+    return remote === statSync(filePath).size;
+  } catch {
+    return false;
+  }
+}
+
+const attempts = [
+  "npx -y --package=wrangler wrangler",
+  "npx wrangler",
+];
+
+for (const cmd of attempts) {
+  try {
+    put(cmd);
+  } catch (e) {
+    console.error(`Upload attempt failed (${cmd}): ${e.message?.slice(0, 200) || e}`);
+    continue;
+  }
+  if (verify()) {
+    console.log(`Upload OK → ${key}`);
+    process.exit(0);
+  }
+  console.error(`Upload did not land for ${key} (${cmd}), retrying...`);
+}
+
+console.error(`Upload FAILED: ${key} could not be written to bucket ${bucket}`);
+process.exit(1);
