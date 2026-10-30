@@ -1,0 +1,134 @@
+---
+title: "Ballet: AI-written workflows that run as deterministic code"
+description: "Ballet turns a plain-English workflow description into a playbook that runs as compiled code, so the same ticket or webhook produces the same result every time."
+pubDate: "2026-10-31T05:23:00.000Z"
+author: "Friday"
+draft: false
+tags: ["automation", "workflow", "ai-agents", "dev-tools", "integration"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ballet.webp"
+  alt: "Abstract illustration of connected business systems joined by a single workflow pipeline"
+canonical: "https://runany.dev/blog/ballet/"
+---
+
+> **TL;DR:** Ballet is an agent operations platform where you describe a workflow in plain English and it compiles that description into a playbook that executes as code, not as a live chat with a model. A model writes the playbook once, then the playbook runs the same way every time, so the same ticket or webhook produces the same result. It is still early access, sold as design-partner onboarding rather than self-serve, and there is no public pricing page.
+
+## What it is
+
+Ballet is built by the team behind Brainfish, a company registered as Brainfish Pty Ltd and running out of Sydney, San Francisco and Bengaluru. The product calls itself an agent operations platform, and its unit of work is the playbook: an ordered list of steps that runs the same way every time.
+
+The design choice that defines everything else is the split between authoring and execution. A model helps you write the playbook, meaning the decision logic behind a repeatable task such as the refund window, the VAT rate, or which queue a ticket belongs in. Once written, the playbook executes as compiled code. Ballet bills those as two separate lines on purpose, because agent usage is what it costs to write and revise a playbook, while compute is what it costs to run one.
+
+That is the argument against live AI agents, and also against traditional workflow builders. Those want a field mapped to a field by hand. Agents decide slightly differently each run. Ballet's own benchmark claims 54 matching answers out of 54 across 8 runs, a median reply time of 0.08 seconds and no model tokens, against 42 out of 54 for GPT-5.6 Sol 35-54 and Claude Sonnet 5 on the identical tasks, running roughly 40 times slower and costing $67 to $112 a month at 10,000 complex tasks. Those are the vendor's numbers on a benchmark the vendor wrote, published in their own docs rather than by a third party, so read them as a claim with a methodology attached.
+
+## How a playbook is built
+
+Playbook steps come in two kinds, with branching and sequencing layered on top of both.
+
+| Step type | What it does |
+| --- | --- |
+| Code | Runs JavaScript, TypeScript, Python or bash in an isolated sandbox with explicit inputs and outputs |
+| HTTP | Calls an external API with a defined request and response shape |
+
+AI steps exist only where a step genuinely needs judgment, such as classifying an ambiguous support ticket or pulling structure out of unstructured text. Anything that has to be exact, like updating a field or issuing a refund, runs as a fixed rule. The docs put it plainly: determinism is not about avoiding AI, it is about controlling where intelligence gets applied.
+
+The worked example on their site is worth reading through. A deal moves to Closed Won in Salesforce, the last call on that deal is read from Gong, a handover is drafted from what was said, and it goes to the account owner in Slack. Ballet shows the plan back to you as four readable steps before anything runs, and asks one question: should deals over $50k wait for the owner to approve? A step is pinned to exact inputs like this.
+
+```text
+Description
+Draft the handover from the call: what they bought, what was promised, and the risks.
+Runs as
+AI agent Claude · only this step uses AI
+Input mappings
+transcript {{get-call.transcript}}
+account {{trigger.Account.Name}}
+owner {{trigger.Owner.Email}}
+Waits for a person
+When Amount is over 50,000 , the account owner approves first
+```
+
+A playbook exists in two places at once. There is a Play tab showing the steps as a graph, where you can simulate any single step, and a Code tab where the same step is a file. The draft step above was 24 lines of JavaScript. You can edit either one directly, or describe the change to the Console in plain English and let it rewrite the step.
+
+## Connecting the systems it touches
+
+This is where the product claims to differ most from a connector catalogue. Connectors live under a registry and cover Salesforce, HubSpot, Zendesk, Gong, Genesys Cloud, ServiceNow, Freshdesk and Cursor among others, plus any MCP server you point it at.
+
+Authentication is deliberately boring.
+
+| Method | Example services |
+| --- | --- |
+| OAuth with discovery and PKCE | Slack, Linear, Notion, GitHub |
+| API key in the Authorization header | Brainfish, Stripe, Supabase, Datadog |
+| Custom headers | Provider-specific credentials such as a client ID and secret |
+
+A custom MCP server is entered as an HTTP or SSE endpoint with whatever headers it needs, and credentials are referenced rather than pasted:
+
+```yaml
+# Connectors > Add connector
+url: https://mcp.example.com/sse
+headers:
+  Authorization: Bearer ${MY_TOKEN}
+```
+
+For a service with no connector and no documentation at all, the claim is that Ballet writes the integration as part of the build. Their own connector list shows exactly that case, a "Billing service" described as an internal API with no docs, marked "Written by Ballet".
+
+Playbooks can attach connectors at the playbook level too, so one workflow can be given narrower reach than the whole workspace has.
+
+## Running playbooks from your own code
+
+A playbook starts from a manual run, a schedule, a webhook, or a message from Slack, the Chrome extension or the Claude connector. The Chrome extension opens a side panel next to the tab you are already in, and you can ask it to find the right playbook by describing the job instead of remembering a name.
+
+Workspace API tokens let you drive runs from your own environment. Owners create them in Settings, and the value is shown once. The token travels as a Bearer credential, and you poll the run until it reaches a terminal state. The API path also needs a complete input body, which the docs flag as manual work.
+
+```bash
+export BALLET_API_TOKEN="..."
+export BALLET_HOST="https://<your-workspace-host>"
+
+# Start the run and capture the run id
+RUN_ID=$(curl -s --request POST \
+  --url "$BALLET_HOST/api/playbooks/:id/run" \
+  --header "Authorization: Bearer $BALLET_API_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"input":{}}' | jq -r .runId)
+
+# Poll until the run finishes
+while true; do
+  RUN=$(curl -s -H "Authorization: Bearer $BALLET_API_TOKEN" \
+    "$BALLET_HOST/api/runs/$RUN_ID")
+  echo "$RUN" | jq -r .status
+  case "$(echo "$RUN" | jq -r .status)" in
+    completed|failed|cancelled) echo "$RUN" | jq .; break ;;
+  esac
+  sleep 2
+done
+```
+
+## Governance and the early-access reality
+
+The governance side is more built than the marketing page suggests. Every playbook version lists what it adds, what it changes and what it can reach, in plain words, with the code behind it available to anyone who asks. Approval gates attach to a step, so a refund over $500 waits for a billing lead and a deal over $50k waits for the account owner. Runs are recorded step by step and can be replayed. Access is scoped per tool and per playbook.
+
+Security is inherited from Brainfish rather than built by Ballet. The site claims SOC 2 Type II and ISO 27001 2022, GDPR compliance, and a Trust Center holding reports, policies and the subprocessor list. Roles separate Owners, who can create API tokens and change billing, from Builders and Members, who cannot. The AI Gateway decides which models are reachable, either Ballet Models on their own billing or your own provider credentials, and Members are locked out of that setting.
+
+Now the catch, and it is a large one. Ballet is not open to anyone yet. Access goes through an early access form at ballet.dev/signup, the team reviews each request, and a small group of design partners is onboarded with a live workflow review and pricing locked in before general availability. Their own documentation describes the product as "Coming June 2026", and that banner was still on the site at the end of October 2026.
+
+## What to watch for
+
+Reception on the launch thread was rough, and some of it was fair. One commenter pointed out that a 30-minute session modelling your workflow on your real systems underestimates how bad those systems are, since the vendors with good APIs already did the hard part and the real targets are moving objects that break months later. Another asked what the benchmark does not cover, which is what happens when a run fails or a dependency changes shape. Ballet's answer is that every run is recorded and that the platform flags changes and proposes fixes.
+
+A more structural objection came from people who work with orchestration tools for a living: the runtime is the value, not the builder, and drag-and-drop is dead but hand-coding is not going away either. That criticism has a specific answer in the design, since the playbook is code with a Git sync behind it. A Collection can be attached to a repository so changes go through pull request review before they ship, and drift between the workspace and the remote is flagged rather than merged silently.
+
+There is no public pricing page either. Billing runs through Stripe with Pro and Team tiers, a monthly AI allowance measured in credits, and separate lines for agent usage and compute. Design-partner pricing is locked in, but the numbers are not published, and there is no self-serve signup to test any of this against your own stack today.
+
+A third party running that benchmark would settle most of the argument. Until then the deterministic story is coherent on paper, the governance surface looks unusually well considered for a tool this early, and the entry price is a conversation with the sales team rather than a credit card.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.ballet.dev/ (verified by direct visit on 2026-10-31; ballet.dev returns HTTP 308 to the www host)
+- Documentation: https://docs.ballet.dev/ (raw article markdown is served at https://ballet.dev/docs/articles/<slug>.md)
+- Benchmark article: https://ballet.dev/docs/articles/deterministic-operations-measured-A0mAp58RxY (vendor published, no third-party replication found)
+- HN launch thread: https://news.ycombinator.com/item?id=49280184 (37 points, 13 comments, posted 2026-08-13 by danielkimber)
+- Company: Brainfish Pty Ltd, with offices listed as Sydney, San Francisco and Bengaluru
+- Pricing: no public pricing page, the /pricing path returns HTTP 404; billing is handled through Stripe and tiers are named Pro and Team
+- Availability: early access only, request form at https://www.ballet.dev/signup, no public self-serve signup
+- Licence: proprietary and closed source, no public repository or published licence found
