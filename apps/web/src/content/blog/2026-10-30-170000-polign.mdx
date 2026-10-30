@@ -1,0 +1,168 @@
+---
+title: "Polign: agent memory and vector search in a bucket you own"
+description: "Polign puts vector and hybrid search on top of an object store, and its Recall layer gives AI agents typed memory with rule-based corrections."
+pubDate: "2026-10-30T10:00:00.000Z"
+author: "Friday"
+draft: false
+tags: ["self-hosted", "agent-memory", "vector-database", "python"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/polign.webp"
+  alt: "Polign wordmark with the tagline Memory for AI agents. In a bucket you own."
+canonical: "https://runany.dev/blog/polign/"
+---
+
+> **TL;DR:** Polign is a vector database that treats an object store as the database itself, so the only thing you need is a bucket you already pay for. Its open source Recall layer gives agents typed memory where a correction supersedes the old value without a model deciding which one wins, and the earlier belief stays queryable. Self-hosted use is free, and the server is a single static binary with no dependencies.
+
+## What it is
+
+Two pieces sit under the Polign name. `polign_db` is the database: a hybrid vector and BM25 search engine whose durable state lives in S3, GCS, Azure Blob, Oracle OCI, MinIO, Cloudflare R2, or a local directory. `Polign Recall` is the agent memory layer built on top of it, a typed store where every fact is a subject, a predicate, and a value.
+
+The unusual part is the shape of the system. Most vector databases are a cluster that owns your data, with the index living on the cluster's own disks. Polign inverts that. The bucket is the system of record and the serving nodes are disposable caches in front of it:
+
+```text
+writes                          reads
+        │                               │
+┌───────▼───────────────────────────────▼───────┐
+│                serving nodes                   │   stateless, scale to zero
+│        RAM tier, optional NVMe cache          │
+└───────┬───────────────────────────────▲───────┘
+        │ append                        │ ranged reads
+┌───────▼───────────────────────────────┴───────┐
+│                  your bucket                   │   the system of record
+│      write log, segments, manifests            │   S3, GCS, Azure, MinIO, R2
+└───────────────────────────────────────────────┘
+```
+
+A write appends to a write log that lives in the bucket, then a background process drains that log into immutable segments holding vectors, a search graph, ids, and metadata. Publishing a new set of segments is a swap of one tiny pointer object, and that pointer is the only thing in the bucket that ever gets overwritten. Everything else is written once, so a reader never sees a half-applied batch.
+
+## Why it matters
+
+The author built this after watching agent memory fail in two separate ways, and the two fixes turn out to be the same product.
+
+The first failure is representational. When a model manages its own memory, it has to decide whether recalled text is new information or a correction, and whether a new instruction contradicts something already stored. Those are schema decisions that most systems leave to the model, so the model rereads old passages and guesses. Polign moves the decision into the data layer. The model extracts a fact, the database decides what the fact means.
+
+You can see it in the demo. Stating a preference and then changing it works like this:
+
+```text
+you> I use Vim as my editor.
+  → remember_preference({"subject":"user","predicate":"prefers_editor","value":"vim"})
+  ← {"stored":{"id":"m-...","value":"vim","status":"active"}}
+
+you> Is my step goal above 8000?
+  → recall({"subject":"user","predicate":"daily_step_goal","value_min":8000})
+  ← {"count":1,"records":[{"value":9000}]}
+```
+
+That comparison against 8000 happens inside the database. The model never had to read a paragraph of text and decide whether 9000 is larger than 8000.
+
+The second failure is economic. A hot vector index sitting in RAM or fast SSD, replicated for availability, is expensive, and most agent workloads query memory infrequently. The author's observation from working on Google Cloud Storage was that the operational cost of serving simple semantic storage was mostly the cost of keeping that index hot. Serving reads from object storage instead keeps query cost flat as the corpus grows.
+
+The public demo makes the numbers concrete: it serves 12.5 million Wikipedia passages out of S3 while the server idles around 37 MiB RSS, and the embedder plus web app fit on a 2 GB ARM machine. Most of that memory goes to embedding generation and query concurrency rather than the database.
+
+## Getting it running
+
+The fastest path to a working agent memory is the Python package, which pulls in the recall binary and the database server for you. It needs Python 3.10 or later and no model or embedding API key.
+
+```bash
+pip install polign-recall
+```
+
+```python
+from polign_recall import Client
+
+with Client(local_dir="./recall-data") as memory:
+    memory.remember("user", "prefers_editor", "vim")
+    memory.remember("user", "prefers_editor", "neovim")
+
+    print(memory.recall("user", "prefers_editor")[0].value)   # neovim
+
+    events = memory.history("user", "prefers_editor")
+    print([event.value for event in events])                   # ['vim', 'neovim']
+
+    before = memory.recall("user", "prefers_editor", as_of=events[0].observed_at)
+    print(before[0].value)                                    # vim
+```
+
+The rule that `prefers_editor` holds a single value did the superseding, not a model. The history call still returns both values, and the `as_of` read reconstructs what was believed at the moment of the first statement. That is the piece most agent memory systems throw away.
+
+A bare `Client()` with no directory uses `~/.local/share/recall`, which every agent on the machine shares, including the Claude Code plugin. The first client to open a directory starts a local database server for it on localhost, and later processes attach to that same server.
+
+To drive the raw database instead, install the binaries:
+
+```bash
+curl -fsSL https://get.polign.com | sh
+```
+
+That script detects the platform, verifies the release checksum, and puts six binaries on your PATH. Homebrew works too with `brew install polign/tap/polign`. The server speaks HTTP on port 23000 and gRPC on port 23001, and the `polign` CLI talks to the HTTP port by default.
+
+Point it at storage and write something:
+
+```bash
+# a local directory needs no credentials at all
+./polign-server -store fs:/var/lib/polign
+
+polign put articles guide-1 \
+  -values 0.12,-0.03,0.98 \
+  -meta title="Getting started" \
+  -meta text="How to get started with..."
+```
+
+Swap the scheme for `s3://`, `gcs://` or `az://` and you get the same durable data plane backed by a bucket. Without `-store` the server keeps everything in memory with no bucket behind it, which is the quick way to start on a laptop but not the durable mode.
+
+Search works in three shapes, and you pick by what you pass in:
+
+```bash
+polign search articles -values @query.json -k 5                      # by meaning
+polign search articles -text "getting started" -k 5                 # by keyword, BM25
+polign search articles -values @query.json -text "getting started"   # both, merged
+```
+
+Filters apply during the search rather than after it, so asking for five results with a filter returns the five best matches instead of whatever survives a trim. Values are typed, so a number filter compares numerically and a boolean matches by value.
+
+To expose the memory to an agent over MCP, run the recall binary in server mode:
+
+```json
+{
+  "mcpServers": {
+    "recall": {
+      "command": "/absolute/path/to/recall",
+      "args": ["mcp", "-write"],
+      "env": {
+        "RECALL_BACKEND": "polign",
+        "RECALL_BACKEND_URL": "http://127.0.0.1:23000",
+        "RECALL_COLLECTION": "recall_demo"
+      }
+    }
+  }
+}
+```
+
+The agent then gets plain text tools named remember, recall and forget, plus two more that read history. There are ready-made integrations for LangGraph, Pydantic AI and LiveKit, a Go package, and a Vapi integration.
+
+## What it costs
+
+| Plan | Price | What you get |
+| --- | --- | --- |
+| Self-hosted | $0 | Recall on polign_db in your own bucket, or on an existing Qdrant. No license file, no node or query limits. |
+| Design partner | $0 for 60 days, then $12k per year | Ten seats, a named Polign engineer wiring Recall into your agent, one use case with written success criteria. |
+| Production agreement | $24k per year | One number to budget, a named contact with response times, supported versions and upgrade help, roadmap priority. |
+| OEM | Custom | The right to redistribute polign_db inside a product you sell and run in customer environments. |
+
+Paid agreements are annual only. Nothing is metered, and there is no monthly plan or usage line on the invoice.
+
+## What to watch for
+
+The `polign_db` server binary is closed source. The client libraries, the Recall server, and the demo are all Apache 2.0 and open on GitHub, and each release is free to run under its included license, but shipping polign_db to your own customers requires the OEM agreement.
+
+There are a few sharp edges in the search behavior that are worth knowing before you build on it. A collection's vector dimension is fixed by its first write, and every later vector has to match it. Documents and queries must be embedded with the same model, and mismatches return plausible-looking nonsense rather than an error. Keyword and hybrid search need the server running with `-store`, and the text index reads from a metadata field named `text`, so a record stored without it is invisible to keyword search until the background index catches up. Over plain HTTP, metadata reads come back as strings unless the request opts in with `typed_metadata`.
+
+The Recall layer avoids all of that for the memory case, since it does its own embedding locally and needs no API key. The trade-off is that it is a specific model of memory. Subjects, predicates, and values with rule-based supersession covers preferences, facts, and thresholds well. Free-form notes and long documents still want the general vector and hybrid search underneath.
+
+## Source and Accuracy Notes
+
+- Project page: https://polign.com/blog-edge-agent-memory, verified via direct visit on 2026-10-30
+- Documentation: https://polign.com/docs/polign-db/run and https://polign.com/docs/quickstart
+- Open source repositories: `Polign/recall`, `Polign/polign` (client), `Polign/polign_memory_demo`, all licensed Apache 2.0. The polign_db server binary is closed source.
+- Pricing: https://polign.com/pricing, verified via direct visit
+- HN launch thread: https://news.ycombinator.com/item?id=49450816, posted 2026-08-26 with 36 points
