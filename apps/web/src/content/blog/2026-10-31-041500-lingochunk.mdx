@@ -1,0 +1,132 @@
+---
+title: "LingoChunk: audio into Anki decks and shadowing practice"
+description: "LingoChunk transcribes your audio into word-level timed transcripts, builds Anki decks with native audio clips, and adds shadowing practice with loop controls."
+pubDate: "2026-10-31T04:15:00.000Z"
+author: "Friday"
+draft: false
+tags: ["language-learning", "anki", "ai", "audio", "productivity"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lingochunk.webp"
+  alt: "LingoChunk interface showing a German transcript with word-level timestamps and an English translation column"
+canonical: "https://runany.dev/blog/lingochunk/"
+---
+
+> **TL;DR:** LingoChunk takes an audio file and turns it into a word-level timestamped transcript, a set of Anki flashcards with native-speaker audio attached, and a shadowing player that loops a chosen span with a set gap and repeat count. The demo runs with no signup on seven public-domain episodes. Pricing is switched off while the service is in early access, and the app itself is closed source.
+
+## What it is
+
+LingoChunk is a language learning web app built around one idea: the best study material is the audio you actually want to hear, so let that audio produce the exercises instead of hunting for a matching textbook chapter.
+
+The author, `alder`, built the first version for his own German and Greek study. It started as a script that made Anki cards from native-language audio. The cards needed two things beyond a word and a translation: the base form of the word, so that "ging" groups under "gehen" rather than sitting as an unrelated vocab item, and the surrounding sentences where the word was used. Later he realised the transcript already carried word-level timings, which opened up the second half of the app: the shadowing player.
+
+Upload audio and the pipeline runs in stages. Soniox does speech-to-text and returns word-level timestamps. spaCy handles segmentation, part-of-speech tagging and lemmatisation. An LLM pass then corrects the lemma when spaCy got it wrong, which is where most of the vocabulary accuracy comes from. The author described this on the launch thread as starting from the source and extracting only the words that appear in it, rather than the reverse, and said it keeps the meaning tied to the context the learner met it in.
+
+## The study view
+
+Opening an episode gives you a two-column transcript with a timestamp beside every sentence. The German sits on top, the English translation underneath, and each column has its own Show, Blur and Hide control. Blur is the useful one: it obscures the text so you can attempt a recall before revealing it, and it works on the word level within a sentence.
+
+The player underneath carries the shadowing controls. You click the first and last word of the passage you want to practise, and it loops that span with a set gap between repetitions and a repeat count. Speed is a separate multiplier, and there is a custom span mode beyond the fixed presets. In the Storm demo episode the player shows SPD at 1x, GAP at 1s and REP at 1x, covering 8 minutes 16 seconds.
+
+There is a microphone button in the gap control. It plays the chunk, records your attempt, and plays the recording back. The recording never leaves the device. Nobody grades it, which matters if you are the kind of learner who wants pronunciation scoring.
+
+The right-hand panel breaks an episode into Episode words, Episode expressions and Grammar chunks. Grammar chunks are marked as included with Premium and were locked in the demo. Below the transcript you get a running count of how many flashcards are ready, split into new, learning and review.
+
+| Tab | What it does |
+| --- | --- |
+| Listen | Timestamped bilingual transcript, blur controls, gap and repeat player |
+| Practise | Shadowing loop over a selected span, with a local record-and-playback mic |
+| Flashcards | Browse the deck, study in the built-in SRS, export to Anki |
+| Lessons | Structured lesson material built from an episode |
+| Tools | Grammar chunks, expression lists, episode vocabulary |
+
+The built-in scheduler is FSRS-5. On the launch thread the author said he believes FSRS-5 is close to constant time and should scale, but added that he has not run performance testing on it yet.
+
+## Cards and Anki export
+
+The Flashcards tab is where the loop closes. A deck is generated straight from the episode, and each card carries the native audio clip so you hear the word in the mouth that produced it rather than a synthesised version.
+
+The demo German episode produced 40 flashcards, built from 20 starter words at A1 to A2 level. The deck ships with a choice of light or dark Anki theme, a Study now button, and a Download Anki button that produces a deck file you can import directly.
+
+There is a deliberate absence here. The app does no text-to-speech at all. When asked on the thread whether he would add generated audio from text, the author said he experimented with several speech-to-text options including self-hosted Whisper, but settled on Soniox as reliable despite the cost. On the AI side he tried Gemma 3 1B, which he found surprisingly good and very cheap but extremely slow, and ended up with Gemini Flash for enrichment. The privacy policy lists Anthropic Claude, Google Gemini and Groq as the LLM enrichment providers.
+
+Card types are selectable, and the app distinguishes normal cards from gapfill cards, where the missing word is blanked inside the sentence rather than asked for in isolation. The built-in SRS blurs the word and beeps it when you play the sentence on the front of the card. The author noted this is not carried into the Anki export, though he said it is technically possible.
+
+## Getting it running
+
+The demo needs no account. Open the try page, pick a language, and start an episode:
+
+```text
+https://lingochunk.com/try
+```
+
+Seven curated episodes are available, drawn from LibriVox and Spoken Wikipedia: a German reading from Theodor Storm, a Spanish piece by Alarcón, a Japanese folk tale, a Chinese text by Lu Xun, a Ukrainian folk story, a French entry on Marie Curie, and a Czech poem by Viktor Dyk. Each episode lets you choose the translation language before it opens.
+
+To work on your own audio you need an account, which is free while plans are switched off. The site accepts direct uploads and YouTube URLs, with a proxy upload limit of 100 MB.
+
+Two open-source companions exist under the `lingochunk` GitHub organisation, and the app itself is not open source. The MCP server is the more interesting one, because it exposes your vocabulary, transcripts and audio clips to a coding agent:
+
+```bash
+# Install as a Claude Code plugin (server plus lesson skills)
+/plugin marketplace add lingochunk/lingochunk-mcp
+
+# Or run it as a standalone MCP server
+npx -y @lingochunk/mcp
+```
+
+The server carries 40 tools. Nineteen read from your account, nineteen write to it, and two serve guidance. You create a personal access token in Settings, then API access, and grant scopes like `vocab:read` and `content:read`. The agent can pull your FSRS-graded vocabulary, read timestamped transcripts, fetch a short-lived presigned URL for the native audio, search for examples of a word across your listening history, and export Anki decks.
+
+The second project is a browser extension that records a lesson with your teacher or language partner and sends it to LingoChunk. Recording is local-first: audio is written to IndexedDB every few seconds, nothing leaves the device until you press send, and a browser crash costs you a few seconds at most.
+
+```bash
+git clone https://github.com/lingochunk/lingochunk-recorder.git
+cd lingochunk-recorder
+npm install
+npm run build
+```
+
+Then load `dist/chrome` as an unpacked extension in Chrome or Chromium. Firefox supports recording and upload but not mixing your microphone with a lesson tab, which is a browser limitation rather than a choice.
+
+## Language coverage
+
+Coverage is uneven, and the credits page is unusually precise about where the gaps are. Fifteen input languages are supported and more than 30 output languages. The app's configuration file narrows gapfill card support to seven: German, English, Spanish, French, Italian, Portuguese and Russian.
+
+Words are analysed with spaCy trained pipelines, and each one carries its own licence. German and English use MIT-licensed models, Spanish and Polish are GPL 3.0, French is LGPL-LR, and Portuguese, Dutch, Swedish and Japanese are CC BY-SA 4.0. Czech, Italian and Greek use no trained pipeline at all.
+
+```text
+German   de_core_news_sm   MIT
+English  en_core_web_sm    MIT
+Spanish  es_core_news_sm   GPL 3.0
+French   fr_core_news_sm   LGPL-LR
+Russian  ru_core_news_sm   MIT
+```
+
+The models run unmodified on the author's own servers. Japanese furigana comes from SudachiDict via spaCy's Japanese pipeline, corrected with JmdictFurigana, and Japanese decks exported since 26 September 2026 state their CC BY-SA 4.0 obligations in the deck description.
+
+Chinese and Japanese as source languages are explicitly experimental. When a commenter asked about segmentation and pinyin, the author confirmed spaCy's `zh_core_web_sm` plus the pypinyin library, and said he is not a Chinese language expert and relies on user feedback. He later deployed a Simplified to Traditional switch after that thread, driven by an OpenCC link someone else contributed. Greek also gets an honest rating: better than it was, but not on par with German.
+
+## What to watch for
+
+Pricing is the biggest open question. The plans page currently says plans are not available right now, and the billing configuration endpoint returns `enabled: false` with three tiers defined but no prices. Behind that disabled flag sit Basic, Premium and Pro, denominated in euro, differing in monthly audio minutes (60, 120 and 300) and maximum file duration (30, 60 and 120 minutes). Premium is what unlocks grammar chunks and grammar notes. Treat the eventual numbers as unconfirmed.
+
+The service is young and the author is candid about the rough edges. On the launch thread he agreed the UI fonts needed urgent work and that the initial impression on a 4K monitor was that everything was tiny. The starter decks are rough too: a tester found the German demo deck featured filler from the LibriVox introduction and words like URL and site, and the author promised to filter out function words and review what goes in. He also confirmed an infinite-loop bug that only produced three repetitions.
+
+There is a hard dependency on third-party services, which matters if you care about where your audio goes. The privacy policy names Hetzner for hosting, Cloudflare R2 for object storage, Soniox for transcription, and Anthropic, Google and Groq for enrichment, with the last four all in the United States and transfers covered by Standard Contractual Clauses. Audio goes to Soniox transiently for transcription, while the LLM providers receive text snippets derived from transcripts rather than raw audio. Original uploads are deleted within minutes of processing, leaving only the extracted audio, and the policy states plainly that uploaded content, transcripts and decks are never used to train any AI model. Guest sessions are capped at 12 hours and cleaned up within about 24. The author runs it as a one-person operation through his own company, LingoChunk Ltd, registered in England and Wales.
+
+Copyright is your problem, and the terms are direct about it. You warrant that you own the audio or have the right to upload it, you may not upload confidential or sensitive recordings without authorisation, and you may not redistribute the extracted audio publicly or commercially. Decks are for personal study. Educational or classroom use does not by itself create copyright permission, and the company states it does not pre-screen uploads. A public domain source like LibriVox is the safe path.
+
+Finally, the alternatives are worth knowing. `audio2anki` by hiAndrewQuinn runs entirely locally and turns a YouTube URL into Anki cards. `talkhabit` does the shadowing side from YouTube videos, though it needs auto-generated captions and works best on monologue video. If your audio is already on YouTube and you want everything on your own machine, either of those may fit better than a hosted service that sends your audio to a US transcription API.
+
+## Source and Accuracy Notes
+
+- Product page: https://lingochunk.com/ , checked directly on 2026-10-31
+- Demo episodes: https://lingochunk.com/try , seven curated episodes played in the browser on 2026-10-31
+- Pricing page: https://lingochunk.com/pricing , shows plans unavailable on 2026-10-31
+- Terms of Service: https://lingochunk.com/terms , last updated 2026-10-08
+- Privacy Policy: https://lingochunk.com/privacy , last updated 2026-10-29
+- Credits and licences: https://lingochunk.com/credits , last updated 2026-09-26
+- LingoChunk MCP server: https://github.com/lingochunk/mcp , MIT licence
+- LingoChunk Recorder extension: https://github.com/lingochunk/lingochunk-recorder , MIT licence
+- HN launch thread: https://news.ycombinator.com/item?id=48671886 , 92 points and 37 comments, posted by `alder` on 2026-06-25
+- App licence: closed source. The public API, the MCP server and the browser extension are MIT-licensed and open, the web app is not
+- Plan limits, the demo episode list and the sub-processor list above come from the live site and its public billing and configuration endpoints on 2026-10-31
