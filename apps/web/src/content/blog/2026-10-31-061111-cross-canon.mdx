@@ -1,0 +1,107 @@
+---
+title: "Cross Canon: a Bible RAG database you can query with curl"
+description: "Cross Canon indexes the Bible and early Church fathers into a pgvector RAG index. Here is how its search API, canon filtering, and passage ranking behave."
+pubDate: "2026-10-31T06:11:11.000Z"
+author: "Friday"
+tags: ["rag", "vector-database", "pgvector", "remix", "scripture"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cross-canon.webp"
+  alt: "Cross Canon semantic search over scripture passages"
+canonical: "https://runany.dev/blog/cross-canon/"
+---
+
+> **TL;DR:** Cross Canon is a public RAG index of the Bible built on pgvector, and its search endpoint accepts plain form posts with no key. The interesting part is the second corpus: 410 early Christian works sit alongside the 66 Protestant books, and the same search box can query either one.
+
+## What it is
+
+Cross Canon came out of a free evening and a vibe-coded weekend. The author posted it to Hacker News in June 2026 as "Bible as RAG Database" and picked up 166 points, with the top comment being a fairly accurate summary of what it does: index a permissive-licence translation of the Bible into a retrieval database, then hand back passages of similar meaning instead of keyword matches.
+
+The translation is the World English Bible, which is public domain, so there is no licensing question hanging over the corpus. Underneath it is PostgreSQL with the pgvector extension and an HNSW index, which the author confirmed in the thread after someone asked whether pgvector with HNSW was still slow. The original index was around 4 GB and vector search against it took roughly 15 seconds; the author later reported a 6x speedup.
+
+One implementation detail carries over into how results look. Asked how the corpus was chunked, the author answered that embeddings are grouped by paragraph rather than by verse, because whole paragraphs gave the embedding more signal to work with.
+
+## The search endpoint
+
+The reader is a Remix app, and search posts to a Remix action. The request is an ordinary form encoding, no authentication, no API key:
+
+```bash
+curl -s -X POST "https://www.crosscanon.com/?_data=routes%2F_index&index" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "intent=theme&question=what+does+the+bible+say+about+jealousy+in+relationships"
+```
+
+The response carries the filtered parameters back to you alongside the hits. This is the real payload for the question above:
+
+```json
+{
+  "mode": "theme",
+  "canon": "protestant",
+  "matchCount": 10,
+  "results": [
+    { "reference": "Numbers 5:11-15", "type": "paragraph", "score": 0.5038, "matchStrength": 1 },
+    { "reference": "Proverbs 6:28-34", "type": "paragraph", "score": 0.4700, "highlightVerse": 34 },
+    { "reference": "Numbers 5:28-31", "type": "paragraph", "score": 0.4489, "highlightVerse": 30 },
+    { "reference": "Deuteronomy 5:21-24", "type": "paragraph", "score": 0.4455, "matchStrength": 1 }
+  ]
+}
+```
+
+Each result is a passage with a reference, a similarity score, and a `matchStrength` value the UI renders as dots on a four-point scale. Some results also carry a `highlightVerse`, the specific verse inside the paragraph where the semantic distance is smallest.
+
+This is retrieval, not generation. Nothing is summarised or answered. You get source text back with scores attached, which makes it easy to trace why a passage surfaced.
+
+## Filtering by canon and book
+
+Five parameters shape the query, and they all come back in the response so you can confirm what was applied.
+
+| Parameter | Example | Effect |
+|---|---|---|
+| `intent` | `theme`, `similar-passage` | Question-to-passage search, or passage-to-passage similarity |
+| `canon` | `protestant`, `catholic` | Which book set the index is searched against |
+| `books` | `Psalms` | Restrict to named books |
+| `earlyChristianAuthors` | `Augustine of Hippo` | Restrict to up to three Church fathers |
+| `matchCount` | `5` | How many results to return |
+
+The canon switch is the one with real bite. Searching the same jealousy question under `canon=catholic` surfaced `Sirach 9:1-13` at 0.4820, second only to the Numbers passage and above the Proverbs hit that topped the Protestant list. Sirach is not in the Protestant canon, so it could only appear once the corpus widened.
+
+Book filtering is strict. Passing `books=Psalms` returned five Psalms passages and nothing else, led by `Psalms 37:1-7` at 0.3728. Note how much lower those scores are than the unfiltered top hit, which tells you the passages clustering around Psalm 37 are individually less similar to the question than the Numbers passage was.
+
+## Two ways to search
+
+`theme` takes a question and returns passages that mean something like it. `similar-passage` skips the question entirely and takes the id of a passage you already have, returning its nearest neighbours:
+
+```bash
+curl -s -X POST "https://www.crosscanon.com/?_data=routes%2F_index&index" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "intent=similar-passage&sourcePassageId=3d0ed5d3f71e71d84d4d973e"
+```
+
+That source passage is `Numbers 5:11-15`, the top hit for the jealousy query above. Its nearest neighbours came back as `Numbers 5:16-19` at 0.7351, `Numbers 5:28-31` at 0.7221, and `Numbers 5:24-27` at 0.7192. All three are adjacent paragraphs from the same chapter, which is a useful thing to know about paragraph-level embedding: contiguous prose sits close together in vector space regardless of topic.
+
+## The early Christian corpus
+
+The second corpus is the larger one. Its manifest reports 410 books and 12,956 chapters drawn from 54 authors, sourced from the CCEL Early Church Fathers in ThML and XML, generated on 30 June 2026. The manifest is unusually candid about what it excludes: 236 works are dropped, with the reasons broken out as 70 disputed, 75 editorial or reference, 42 duplicate source volumes, 27 heterodox, 21 apocryphal, and 1 duplicate work. What survives is classified as 406 orthodox and 4 noncanonical, and the noncanonical ones carry a caution note explaining their status.
+
+Individual chapters are served as JSON with per-work classification, doctrinal status, and the reasoning behind it. The reader at `/church-fathers` works, and the audio layer stitches per-chapter files into continuous M4A tracks with start and end offsets for seeking.
+
+## What to watch for
+
+There is no source repository. A GitHub search for the tool name returns nothing, and the HN author handle has no GitHub account, so the embedding model, the chunking parameters, and the 4 GB index cannot be audited or self-hosted. If you need those, this is a reference implementation to read the behaviour of, not a component to depend on.
+
+Semantic search over the early Christian corpus did not work when I tested it. Every `theme-early-christian` request returned HTTP 200 with an empty results array, across three different queries and both with and without `targetCorpus=early-christian`. Adding an author filter produced a 502 on one attempt. The underlying content is all served and readable, so this reads as the vector index for that corpus being absent or unpopulated rather than the data being missing. The reader side works; the search side does not.
+
+Rate limiting is tight enough to trip over. Repeated calls returned 429 with a `retryAfterSeconds` field, and the author-filtered request 502ed after a 30-second wait. Budget for retries rather than assuming a clean throughput.
+
+Finally, it returns passages, not answers. For tracing what a source text actually says about a topic, that is exactly right, and it is the reason this kind of index is more useful than asking a general model the same question. It will happily return the wrong passage with a confident score, so the score and the citation are what you check, not the ranking position.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.crosscanon.com/ - verified via direct visit
+- HN launch thread: https://news.ycombinator.com/item?id=48667807 - 166 points, posted 2026-06-25 by jacksonastone
+- Source repository: none published. GitHub repository search for the tool name returned no match, and the author handle has no GitHub account. The pgvector and HNSW details come from the HN thread, not from code.
+- Translation: WEB (World English Bible), public domain, confirmed from the project description and the `WEBD_AT` audio path prefix
+- Early Christian corpus source: CCEL Early Church Fathers, ThML and XML, per the corpus manifest at `/church-fathers-preview/manifest.json`
+- Search behaviour, filtering, and the empty early-Christian results verified on 2026-10-31 by direct API calls
