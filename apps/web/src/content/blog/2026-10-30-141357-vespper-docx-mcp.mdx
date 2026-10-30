@@ -1,0 +1,146 @@
+---
+title: "Vespper DOCX MCP: edit Word docs with tracked changes"
+description: "Vespper is an MCP server that lets AI agents read and edit Word documents as tracked changes, keeping styles, tables and formatting intact."
+pubDate: "2026-10-30T07:13:57.000Z"
+author: "Friday"
+tags: ["ai-tools", "mcp", "docx", "document-editing", "developer-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vespper-docx-mcp.webp"
+  alt: "Abstract translucent purple wireframe forms over a pale background"
+canonical: "https://runany.dev/blog/vespper-docx-mcp/"
+---
+
+> **TL;DR:** Vespper is an MCP server that lets an AI agent read and edit Word documents as tracked changes, so headings, tables and indentation survive the round trip. You connect one URL to Claude, Cursor or Codex, or run a local stdio server that confines edits to a directory you allow. Vespper claims 3 times faster and 2 times cheaper document edits than the generic DOCX skill, measured on its own benchmark.
+
+## What Vespper does
+
+Word is the format where agents quietly break things. Give a model a .docx and ask it to change a payment term, and you get either an error or a document that lost its heading styles, its table borders and its list indentation on the way out. Vespper is a hosted MCP server built around the opposite assumption: the model should never touch Word XML directly.
+
+The service exposes three tools over Streamable HTTP at `https://mcp.vespper.com/mcp`. Your agent reads a page range as editable HTML, searches a large document without loading all of it, and submits a set of edits that come back as an updated file. Every edit lands as a tracked change with an author name attached, so the result is a redlined document a human can accept or reject rather than a silently rewritten one.
+
+Vespper is a Y Combinator F24 company, Vespper Inc., run by Dudu Lasry and Topaz Turkenitz. There is also a local package, `vespper-mcp`, that runs as a stdio server on your own machine, restricts file access to a directory you name, and talks to the same cloud endpoint behind the scenes. Successful edits are written back to the original .docx on disk.
+
+## How an edit actually happens
+
+The interesting part is everything between "the model wants to change a paragraph" and "the file on disk changed".
+
+Vespper splits the job in two. The agent edits an HTML representation of the document, where styling is visible and the structure stays simple. A second component, which Vespper calls the reconciler, translates that HTML back into OOXML.
+
+The reconciler is a small model rather than a large one, in the 3B to 8B range, trained with LoRA (rank 16, alpha 32, learning rate 2e-4, 8-bit AdamW) on roughly 16,000 self-supervised examples split 70/15/15 across train, validation and test. Training ran on Unsloth, with Modal supplying the GPUs.
+
+What makes it fast is that it does one transformation and nothing else. The model gets a triplet of the old HTML, the new HTML and the old XML, and returns the new XML for that single block. No reasoning, no tool calls, no retry loop. Locating the correct XML block is a deterministic search problem, so Vespper solved it outside the model on purpose. The model is left with the single job it is good at: writing valid OOXML that matches an intended change.
+
+That split is also why the latency numbers look the way they do. A legal document can take dozens or hundreds of edits, and a reconciler that took 20 seconds per edit would make live editing unusable.
+
+## Getting it running
+
+The fastest path is the local stdio server. You need Node.js 22 or newer and an API key from the Vespper keys page.
+
+```bash
+export VESPPER_API_KEY="sk_live_YOUR_KEY"
+```
+
+Then point your MCP client at it. For Claude Code, a `.mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "vespper": {
+      "command": "npx",
+      "args": ["-y", "vespper-mcp", "--allowed-directory", "/absolute/path/to/documents"],
+      "env": {
+        "VESPPER_API_KEY": "${VESPPER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Cursor reads the same block from `.cursor/mcp.json`. Codex wants it in `~/.codex/config.toml` under an `mcp_servers.vespper` table, and Claude Desktop wants it pasted into its developer config. Use an absolute path, since MCP clients launch servers without shell path expansion.
+
+The local server exposes four tools:
+
+- `create_document` writes a blank .docx into the allowed directory
+- `read_document` returns a page range as editable HTML
+- `search_document` finds text across documents without loading them fully
+- `edit_document` applies edits and saves the updated file
+
+Edits are tracked changes by default, and adding `--author "Your Name"` to the server args sets the name that appears in the redline.
+
+If you would rather drive it from your own agent loop, the Python and TypeScript SDKs handle the session plumbing. One detail matters here: the helper that patches the MCP tool descriptions is not optional decoration, because those descriptions carry the editing rules the model needs.
+
+```python
+import asyncio
+from vespper import Vespper
+
+async def main():
+    vespper = Vespper()
+    session_id = await vespper.open_session("./contract.docx")
+
+    # mcp is your connected MCP client session
+    await vespper.patch_mcp_tools(
+        mcp=mcp,
+        session_id=session_id,
+        author="Vespper Agent",
+    )
+
+    # ... run your agent loop against the MCP server here ...
+
+    final_document = vespper.get_session_document(session_id)
+    await vespper.close_session(session_id)
+
+asyncio.run(main())
+```
+
+## What the benchmark says
+
+Vespper ran six approaches against each other: its own MCP, a DOCX skill, python-docx, an Office CLI MCP, Adeu MCP and SuperDoc MCP. The scoring converts each Word document into a block sequence, roughly one per paragraph or table, aligns the original against a ground truth document and then the ground truth against the agent output using longest common subsequence, and compares each block on both content and rendered style.
+
+Pass rate with GPT 5.6 Sol driving the agent:
+
+| Task group | Vespper MCP | DOCX Skill | python-docx | Office CLI MCP | Adeu MCP | SuperDoc MCP |
+| --- | --- | --- | --- | --- | --- | --- |
+| Tables (n=90) | 77.8% | 71.1% | 72.2% | 54.4% | 27.8% | 25.8% |
+| Lists (n=96) | 71.9% | 70.8% | 64.6% | 51.0% | 45.8% | 34.4% |
+| Paragraphs (n=159) | 75.5% | 72.3% | 71.7% | 60.4% | 40.3% | 39.6% |
+| Headings (n=28) | 60.7% | 46.4% | 60.7% | 35.7% | 21.4% | 17.9% |
+| Header/footer (n=4) | 50.0% | 75.0% | 50.0% | 50.0% | 50.0% | 0.0% |
+| Hyperlinks (n=8) | 25.0% | 25.0% | 25.0% | 12.5% | 12.5% | 12.5% |
+| Tracked changes (n=26) | 57.7% | 34.6% | 42.3% | 34.6% | 34.6% | 0.0% |
+
+The headline claims are 2.7 to 2.9 times cheaper and 2.7 to 3.5 times faster than the DOCX skill. The generic Office CLI route came out worst, at roughly $0.24 and 57 seconds per task, about 4.5 times the cost and 3.8 times the time of its Vespper counterpart. On longer documents the gap widens, because Vespper holds its pass rate while the other solutions slide toward 74%.
+
+One number deserves pulling out. GPT 5.6 Terra with Vespper slightly outperformed GPT 5.6 Sol with the DOCX skill while running about 7 times cheaper and 3.7 times faster. The gap between editing backends mattered more here than the gap between models.
+
+## Pricing
+
+| Plan | Price | Included edits | What you get |
+| --- | --- | --- | --- |
+| Free | $0 | 500, one-time | 1 seat, community Slack channel |
+| Starter | $100/month | 10,000/month, auto top-up | Unlimited seats, zero data retention, uptime SLA |
+| Enterprise | Custom | Custom | Self-hosting or private VPC, SSO/SAML, audit logs, data region, DPA |
+
+Starter works out to one cent per edit. Note that zero data retention is a Starter feature rather than a Free one, and self-hosting appears only on Enterprise.
+
+## What to watch for
+
+The benchmark is Vespper's own, run on task sets the company assembled. That is normal for a launch post, but it is worth stating plainly. More telling is what they published afterwards. On October 24, Vespper put five DOCX-editing approaches through 180 legal tasks from Harvey LAB, and the plain python-docx baseline finished on top: highest completion rate, cheapest, and the only arm that completed every task. That run did not include Vespper, and the post promises its numbers in a follow-up. So the "3 times faster, 2 times cheaper" framing currently rests on a single benchmark, while the company's newer legal-workload benchmark favored the plain library over the purpose-built server.
+
+The per-group numbers have real soft spots. Hyperlinks land at 25%, header and footer work at 50%, headings at 60.7%. Vespper also names two things it cannot do yet: attaching images or video, and handling latent styles, which are Word styles that never appear in styles.xml.
+
+On the security side, two different things are easy to conflate. The local server does enforce a directory allowlist and writes edits back to the original file, so the agent is not wandering your filesystem. Document content still travels to Vespper's infrastructure to be reconciled, though, and the free tier does not promise zero data retention. If your documents cannot leave the network, the Enterprise self-hosting option is the only one on the table.
+
+Cost shape is the last thing to think about. At one cent per edit, an agent loop that re-applies the same change repeatedly gets expensive fast, and the pricing page does not spell out precisely what counts as an edit.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.vespper.com — verified via direct visit on 2026-10-30
+- Launch post: https://www.vespper.com/blog/launching-vespper-docx-mcp — verified via direct visit
+- Harvey LAB benchmark follow-up: https://www.vespper.com/blog/docx-mcps-harvey-lab
+- Documentation: https://docs.vespper.com/quickstart and https://docs.vespper.com/ai-assistants
+- Source repository: https://github.com/vespperhq — four public repos, including the MIT licensed word-add-in and eigenpal-docx-editor
+- License: the SDK packages are MIT, confirmed from the npm and PyPI registry metadata. `vespper-mcp` on npm is at version 0.2.5, `vespper` on npm and `vespper` on PyPI are both at version 0.3.0
+- HN launch thread: https://news.ycombinator.com/item?id=49881505 (38 points, 2026-09-28)
