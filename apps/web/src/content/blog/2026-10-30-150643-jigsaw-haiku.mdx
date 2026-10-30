@@ -1,0 +1,154 @@
+---
+title: "Jigsaw Haiku: a daily puzzle where the picture is a haiku"
+description: "Jigsaw Haiku publishes one jigsaw puzzle a day: a watercolor landscape cut into pieces, with a three-line haiku written across it. New puzzle every morning."
+pubDate: "2026-10-30T08:06:43.000Z"
+author: "Friday"
+tags: ["puzzle", "web-app", "javascript", "generative-ai", "small-web"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/jigsaw-haiku.webp"
+  alt: "Watercolor mountain landscape breaking apart into glowing cyan jigsaw puzzle pieces on a dark slate background"
+canonical: "https://runany.dev/blog/jigsaw-haiku/"
+---
+
+> **TL;DR:** Jigsaw Haiku hands you a watercolor painting cut into 17 to 19 irregular jigsaw pieces, with a three-line haiku printed across the artwork. Place the pieces correctly and the painting and the poem come back together. One new puzzle every day, and the whole archive is plain JSON you can read without an account.
+
+## What you get each morning
+
+A watercolor painting cut into jigsaw pieces, with a three-line haiku printed across it. You open the page, get the day's puzzle, and drag pieces into place on a board.
+
+The site comes from an independent developer who also runs The Daily Baffle, a collection of harder hand-built word puzzles. This one is deliberately softer. The goal was something pleasant to look at rather than something hard to solve.
+
+There is no score, no streak, no account and nothing to sign up for. A board sits under a fog layer that thins as you make progress, which is the one piece of showmanship in an otherwise quiet puzzle. You solve it or you do not, and a new one shows up the next day.
+
+The archive is the part that surprised me. The manifest lists 361 puzzles, one per day, running from September 2026 through August 2027. The daily part is a pre-published queue, not a live generator.
+
+## How a puzzle is built
+
+Each puzzle is a JSON document describing a board, a painting, a poem and a set of pieces. The board is a 5 by 15 grid of cells, but the pieces do not line up with those cells one to one. A piece is a list of cell coordinates, so one piece can cover three rows and two columns, and the edges between pieces are the curved tabs and blanks of a real jigsaw.
+
+The poem is rendered as SVG text on top of the painting, then clipped by the piece shapes along with the artwork. That is why the text comes apart when the puzzle does. Put the pieces back in the right order and the letters fall into their original lines at the same time.
+
+Here is the published payload for October 30, 2026, trimmed to the interesting fields:
+
+```json
+{
+  "id": "p1y360om",
+  "art": "/puzzles/art/060-glacier-valleys.jpg",
+  "artCrop": { "off": 0.436, "sy": 1, "z": 1 },
+  "rows": 5,
+  "cols": 15,
+  "trayScale": 0.6,
+  "generator": { "pieces": 18, "seed": null },
+  "haiku": [
+    "something enormous",
+    "went through here slowly,",
+    "and never looked back"
+  ],
+  "text": {
+    "family": "Poem",
+    "file": "/fonts/PlayfairDisplay-Medium.ttf",
+    "left": 0.4,
+    "baselines": [1.465497076023392, 2.9859649122807017, 4.506432748538012],
+    "size": 1.1695906432748537
+  }
+}
+```
+
+Two details in there are worth pausing on. The text block names a font family of "Poem" but points at a Playfair Display Medium file, so the poem is set in a serif face no matter what the family string claims. And the generator block carries a `seed` slot, but it is null on this puzzle, so the cut pattern is not reproducible from the published data.
+
+Each piece also carries a colour class, which is how the app tints the pieces so you can tell them apart in the tray:
+
+```json
+{
+  "id": "piece-1",
+  "color": "piece-color-yellow",
+  "shape": [
+    { "row": 0, "col": 0 },
+    { "row": 1, "col": 0 },
+    { "row": 2, "col": 0 },
+    { "row": 2, "col": 1 }
+  ]
+}
+```
+
+The payload also includes a `solution` map from piece id to its true grid position, and a `phrase` field with the poem flattened to lowercase and stripped of punctuation. That gives you everything needed to verify a finished board in a script.
+
+## Reading the archive
+
+Because the whole thing is static files, any puzzle can be pulled down with curl. The manifest gives you the list of dates:
+
+```bash
+curl -s https://jigsawhaiku.com/puzzles/manifest.json | head -20
+```
+
+Then fetch a specific day, or point the app at one with the `puzzle` query parameter:
+
+```bash
+# today's puzzle
+curl -s https://jigsawhaiku.com/puzzles/2026-10-30.json
+
+# open a specific puzzle in the app
+open "https://jigsawhaiku.com/?puzzle=/puzzles/2026-09-11"
+```
+
+If you like the poems and want them in a file, this pulls the full year down and prints one line per day:
+
+```python
+import json
+import urllib.request
+
+
+def get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    return json.loads(urllib.request.urlopen(req, timeout=30).read())
+
+
+manifest = get("https://jigsawhaiku.com/puzzles/manifest.json")
+for date in manifest["dates"]:
+    puzzle = get(f"https://jigsawhaiku.com/puzzles/{date}.json")
+    print(date, "|".join(puzzle["haiku"]))
+```
+
+The artwork sits beside the puzzles at `/puzzles/art/`, one JPEG per day, named for its subject. The glacier valley on October 30 is `060-glacier-valleys.jpg`, and the first day of the run is `001-frozen-lakes.jpg`.
+
+## What the developer used
+
+The developer posts on Hacker News as windowshopping and says the code was written entirely by Claude, working from a written design spec. The effect he was most unsure about was the window through the fog, and that one came out right on the first pass.
+
+The haikus are handwritten, with the help of a large generated list of nature concepts and possible metaphor angles. The artwork is generated by Gemini and ChatGPT.
+
+He is candid about the tradeoff. He would rather have hand painted the pictures, but that would have been prohibitively expensive and time-consuming, and without generation the puzzle likely would not exist at all. That is a fair call for a daily project with a year of backlog behind it, and it also means every painting in the archive comes from the same handful of models, so the visual style stays remarkably consistent from one day to the next.
+
+The site itself is a static React app hosted on Render with no backend, which is why the manifest and the puzzle files are the entire database. No accounts, no server-side state.
+
+## What to watch for
+
+The archive being fully pre-published is the fact to keep in mind. The manifest ends at August 27, 2027, so the next eleven months of puzzles are already written, generated and fixed. None of that changes how the site feels to use, but the content pipeline is finished rather than running, and if the project is abandoned the archive simply stops there.
+
+The piece count drifts a little from day to day, which matters if you care about the difficulty curve:
+
+| Puzzle | Rows x cols | Pieces | Haiku |
+| --- | --- | --- | --- |
+| 2026-09-01 | 5 x 15 | 19 | silent, glass-like ice, / deep blue water trapped below, / winter holds its breath |
+| 2026-09-02 | 5 x 15 | 19 | the beach, standing up, / sand that learned to hold a pose / long enough for grass |
+| 2026-09-11 | 5 x 15 | 18 | the insurance form / has no box for this. no doubt / that will change quite soon |
+| 2026-10-30 | 5 x 15 | 19 | something enormous / went through here slowly, / and never looked back |
+
+Sampling across the run shows every puzzle on the same 5 by 15 board, with 17, 18 or 19 pieces depending on the day. The board size never changes, so what varies is how the cuts land and how long the poem runs.
+
+There is no public repository. A GitHub search for the project name returns nothing, and the site ships a built JavaScript bundle, so the piece generator, the fog effect and the win detection are all closed. Nothing stops you from writing your own solver against the published JSON, but you get the answers, not the machinery that produced them.
+
+The last thing is the one that actually decides whether you come back. These puzzles are not hard. The author aimed for something beautiful and relaxing rather than something challenging, and the pieces are large enough that most people finish in a sitting. Whether a painting and a poem landing together is your kind of thing is not something a screenshot can tell you.
+
+## Source and Accuracy Notes
+
+- Project page: https://jigsawhaiku.com, verified via direct visit on 2026-10-30
+- Puzzle manifest: https://jigsawhaiku.com/puzzles/manifest.json, 361 dates spanning 2026-09-01 through 2027-08-27, read directly
+- Sample puzzle payloads: https://jigsawhaiku.com/puzzles/2026-10-30.json and https://jigsawhaiku.com/puzzles/2026-09-01.json
+- Related project: https://dailybaffle.com, the author's puzzle site
+- Source repository: none public. A GitHub repository search for the project name returned zero results
+- License: none published. The site serves a built JavaScript bundle with no source code and no license file
+- HN launch thread: https://news.ycombinator.com/item?id=49568162, 118 points and 34 comments on 2026-09-04
