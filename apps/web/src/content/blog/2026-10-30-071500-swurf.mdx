@@ -1,0 +1,152 @@
+---
+title: "Swurf: browsing the web one swipe at a time"
+description: "Swurf renders real websites as a swipeable feed and ranks them with a recommender that trains in your browser from how long you linger on each page."
+pubDate: "2026-10-30T00:15:00.000Z"
+author: "Friday"
+tags: ["web-app", "browser", "recommendation", "small-web", "javascript"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/swurf.webp"
+  alt: "The Swurf interface showing one full-screen web page with swipe arrows on either side and a topic search bar"
+canonical: "https://runany.dev/blog/swurf/"
+draft: false
+---
+
+> **TL;DR:** Swurf turns web browsing into a vertical feed, rendering one real website at a time in a swipeable frame instead of showing you a list of links. The ranker behind it is a small neural network that trains in your browser on how long you linger on each page. Open it at swurf.org, there is nothing to install.
+
+## What it is
+
+Swurf is a website that shows you other websites. You open it and there is no homepage, no feed to scroll, no search box in the way. One page fills the screen and you move between pages with the arrow keys.
+
+The author, who posts on Hacker News as webtjb096, launched it on October 23 with a post titled "Swurf - Swipe through the real web". The name came from a comment in that thread: "Swiping X Surfing". Before the launch the project was called ClikTok, and the shipped JavaScript still says so, with localStorage keys like `cliktok_brain_user_a` and `cliktok_seen2_user_a` sitting in the bundle.
+
+Under the hood each page is an iframe. The thing you are reading is the real site, framed, not a screenshot and not a summary. That one decision explains both the appeal and most of the problems. You get the actual article, the actual layout and the actual scroll position, and you also get whatever the site decides to do with your referrer and your IP address.
+
+## Why it matters
+
+Web discovery broke in a specific way. Search still works, but the links it hands you are mostly the same dozen domains, and the small personal sites people used to wander into are buried under them. Swurf is a return to the older model, where a machine picks something and you accept it.
+
+Two things keep it from being nostalgia. The first is that it renders the real page. Most recommendation surfaces show you a card about the article. Swurf hands you the site, so a page with a good post loads the post.
+
+The second is that the ranking is learned per person from behavior, not from a profile you fill out. You do not select interests. You swipe, you linger, you leave, and the model adjusts underneath. The most requested thing in the launch thread was an explanation of how it learns, and the answer was an interest crawler where pages with higher engagement branch deeper into their on page links and similar work from the same author.
+
+There is a cultural point too. A swipe is a commitment. Each page is a full screen and moving on is a deliberate gesture, which is a very different thing from a grid of thumbnails where every option stays visible and none of them is chosen.
+
+## Getting it running
+
+Nothing to install. Open https://swurf.org/ and start swiping.
+
+| Key | Action |
+| --- | --- |
+| `→`, `l` or `PageDown` | Next page |
+| `←`, `h` or `PageUp` | Previous page |
+| `↑` and `↓` | Scroll the page you are on |
+| `s` | Save the current page |
+| `c` | Copy the current link |
+| `x` | Show less of this site |
+| `u` | Undo |
+| `/` or `Cmd`/`Ctrl` plus `k` | Search a topic |
+| `Shift` plus `r` | Reset the model and start over |
+
+The pointer works too. The arrows on either side advance and go back, and a horizontal drag on a frame counts as a swipe.
+
+Searching is worth a minute, because it shows the model working. You type a topic, the server returns a query vector plus the pages it matched, and the client folds that vector into your profile for the session.
+
+```bash
+# Tune a session to a topic and look at what comes back.
+curl -s "https://swurf.org/api/search?q=retro+computing" | jq '{kind, q, pages: (.pages | length)}'
+```
+
+```json
+{
+  "kind": "minilm-l6-v2",
+  "q": "retro computing",
+  "pages": 24
+}
+```
+
+Each matched page arrives with its metadata attached:
+
+```json
+{
+  "url": "https://quarters.captaintouch.com/blog/",
+  "domain": "quarters.captaintouch.com",
+  "title": "Captain's Quarters",
+  "root": "captaintouch.com",
+  "cat": "smallweb",
+  "src": "512kb.club",
+  "q": 0.985,
+  "crowd": -0.514,
+  "trend": -0.012,
+  "vf": 1
+}
+```
+
+`q` is the semantic match score, `src` is where the crawler found the page, `cat` is its category, and `crowd` and `trend` are the two freshness signals the model reads. Every page also carries a `vec`, which is its embedding: 384 dimensions of MiniLM-L6-v2 quantized down to 384 bytes.
+
+The `src` values are the most revealing field in that response. The crawl does not start from the open web, it starts from hand-built indexes of the small web.
+
+| Source | What it is |
+| --- | --- |
+| `512kb.club` | Directory of sites under 512 KB |
+| `search.marginalia.nu/explore` | Marginalia search results |
+| `blogroll.org` | Old-school blogroll directories |
+| `minimal.gallery` | Minimal personal sites |
+| `simonwillison.net` and `waxy.org/category` | Individual blogs and their category pages |
+| `news.ycombinator.com/best` | Hacker News Best of the front page |
+| `submitted` | Links people sent in themselves |
+
+That is a deliberate bias toward the part of the web that is not trying to reach you.
+
+## How it learns
+
+The ranker ships as a separate bundle called `brain.js`, and it runs in your browser. It is about 12 KB, small enough to read, and it does not call an API to decide what to show you.
+
+A page becomes 19 numbers, and the bundle names them, which is the fastest way to understand the model:
+
+`bias`, `interest`, `interestMass`, `short`, `skip`, `skipCount`, `likeCount`, `novelty`, `siteRun`, `siteTaste`, `speed`, `known`, `avoid`, `quality`, `popularity`, `mood`, `untried`, `crowd`, `trend`
+
+Those 19 feed two things: a linear term with hand-set weights, and a one-hidden-layer network with 10 tanh units. Both train online, in the page, with stochastic gradient descent on a logistic-style loss, regularized back toward the prior so one strange afternoon of swiping cannot rewrite you entirely.
+
+Around that sit the parts you can actually feel:
+
+- **Topic vectors.** Each page gets a 384-dimension MiniLM embedding, normalized and compared by cosine similarity. Up to 32 of them become your interests and blend into each other as you read, and up to 12 more become things to steer away from.
+- **Page ratings.** Every page carries a running estimate kept in log space with a variance term, in the style of an Elo or Glicko rating. A page you linger on goes up.
+- **Dwell time is the label.** Time on page, whether the frame ever painted, how long you waited for it, whether you came back. A page you leave almost immediately counts as a skip, and skips pull down both that page and the topic it belongs to.
+- **Decay.** Interest weights fall by roughly 0.2 percent per interaction, recency fades on a 25 minute half-life, and an interest that stops being fed decays on a 3 hour half-life. Stop using it and you drift back toward neutral.
+- **A known-good list.** Twelve domains, including wikipedia.org, archive.org, github.com, stackoverflow.com and nytimes.com, feed the `known` feature so a page from somewhere reputable is not scored down for being unfashionable.
+- **A little chaos.** Roughly 5 percent of the time it drops in a page it calls a drip, one that arrived too recently to be part of your regular feed.
+
+Search runs through the same machinery. The query vector from the API is added to your interests for the session, and pages it matched get a boost, which is why the results are not in pure similarity order. In the response above, the first result scores 0.985 on `q` while a page further down the list scores 0.992.
+
+## What to watch for
+
+Frame-based rendering is the entire design and also its ceiling. A site that sets `X-Frame-Options`, or a `frame-ancestors` policy that does not include swurf.org, simply refuses to appear, and there is no fallback beyond a blank frame. One commenter in the launch thread put it bluntly: Content Security Policy broke the use case. Swurf sends its own `X-Frame-Options: SAMEORIGIN`, so it cannot be framed either.
+
+Mobile was rough at launch. The author built it desktop first, and commenters on an iPhone 11 reported that horizontal swipes registered inconsistently and sometimes moved two pages at once. The author said updates were rolling out, and that tapping the far right edge of the screen was the reliable workaround on a phone.
+
+The moderation problem is real, and so is the answer to it. A commenter asked for the first page not to be a flashing naked person, and the author pointed at the content filter in the menu as the place to adjust it. The bundle classifies pages with a `cat` field, adult pages sit behind both a per-category filter and a toggle, and every page carries a report button. That is better than nothing, and it is still a feed that renders arbitrary pages from anywhere on the web.
+
+Two things deserve a look before you trust it with your attention. There is no public source repository, the bundle is served minified, and there are no published terms or privacy pages at `/terms` or `/privacy`. Your profile is also not purely local. The session endpoint hands back a server-side model keyed by a user id you can set with a `?user=` query parameter, and the localStorage copy is a cache of that rather than the only copy.
+
+The Swurf code is the part that makes it concrete. Asking for one returns a short token that travels as a URL fragment, so the page you were reading is never part of a request path. You type the code on another device and your position in the feed comes with it.
+
+```bash
+# A new visitor needs a few swipes before a code is issued.
+curl -s "https://swurf.org/api/code"
+```
+
+```json
+{"later":true}
+```
+
+Swipe for a while and it starts handing them out.
+
+## Source and Accuracy Notes
+
+- Project page: https://swurf.org/, verified via direct visit on 2026-10-30
+- Search and code responses quoted above were fetched live from https://swurf.org/api/search and https://swurf.org/api/code
+- Model details, including the 19 feature names, 10 hidden units, 384-dimension MiniLM vectors, decay constants and source list, were read from the shipped bundles at https://swurf.org/app.js and https://swurf.org/brain.js
+- HN launch thread: https://news.ycombinator.com/item?id=50205320 (Show HN: Swurf, 2026-10-23, 77 points, 38 comments)
+- License: no source repository and no published license, and the terms and privacy pages are absent
+- The shipped code is minified, so feature names and constants are read from the minified bundle rather than from a published spec
