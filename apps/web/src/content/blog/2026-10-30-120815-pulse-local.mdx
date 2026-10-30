@@ -1,0 +1,155 @@
+---
+title: "Pulse Local: a Mac budgeting app with AI that stays local"
+description: "Pulse Local is a Mac budgeting app that runs its AI models on your own machine. How it works, what it costs, and where it still gets answers wrong."
+pubDate: "2026-10-30T05:08:15.000Z"
+author: "Friday"
+tags: ["macos", "local-ai", "budgeting", "finance", "privacy"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pulse-local.webp"
+  alt: "Pulse Local budgeting app hero card with the leaf logo on a dark teal background"
+canonical: "https://runany.dev/blog/pulse-local/"
+---
+
+> **TL;DR:** Pulse Local runs its language models on your own Mac, so your transaction history and your questions never leave the disk. Spending answers come from the app's own rules engine, then a second small model has to agree before a number appears. The app itself is free, imports bank files from most countries, and ships with a benchmark that counts wrong figures separately from right ones.
+
+## What it is
+
+Pulse Local is a desktop budgeting app for macOS, and the interesting part is where the AI runs. Most budgeting apps keep your transactions on their servers, and the ones that added an AI chat then send your question, and often your figures, to somebody else's model. Pulse Local runs the models itself, on your machine, and keeps the ledger there too.
+
+It is a solo project from Pulse Browser, Inc. The founder builds it mostly alone and ships nearly every release himself. Version 0.4.22 was live when I checked, with the how-it-works page last updated on 27 October 2026.
+
+Two modes sit side by side. Local mode is the default and needs no account: you import a file your bank gave you, set budgets and rules, and ask questions in a chat that never leaves the machine. Connected mode adds live bank sync through Plaid, which needs a server and therefore needs an account, but only for the sync itself.
+
+## Why it matters
+
+Financial data is the kind you would rather not hand to a chat endpoint, and it is also the kind where a wrong number does damage. A budget that is off by a category is a budget you stop trusting.
+
+The usual local-first pitch stops halfway. Keep the records on disk, then ask a hosted model about them anyway, and the sensitive part still travels. Pulse Local closes that loop. The models download once, then Local mode works offline.
+
+There is a second reason the small-model approach matters, and it is less obvious than privacy. A tiny model asked to total up groceries across a month will guess, and a plausible wrong number is worse than no answer at all. Pulse sidesteps this by not asking the model to do arithmetic.
+
+## How the answers work
+
+This is the part worth understanding before you trust a figure.
+
+For the spending questions it supports, Pulse finds the matching transactions itself and adds them up in code. The AI never produces the total. A second small model, 397 MB of it, reads your question separately, and the number only appears when the model and the calculation agree. When they disagree, Pulse says it is not sure rather than showing you a number.
+
+The setting is called Better understanding. It is on by default and lives in Settings. With it on, a money answer takes about 1.4 seconds. With it off the answer comes back faster, but the wrong-figure rate roughly quadruples: on 380 held-out test conversations, about 5 in 100 showed a wrong figure with the check on, against about 22 in 100 with it off.
+
+First launch downloads about 830 MB of models from Hugging Face on every machine, and the 397 MB checker is part of that. Turn the check off before the first run and the download is 434 MB. Earlier builds shipped a bigger checker of around 2.5 GB, and if that file is still on your disk, Settings offers to remove it. Pulse will not delete it on its own.
+
+The tuned checker is public. The quantized Qwen3 0.6B model sits on Hugging Face under Apache-2.0, with 477 downloads so far.
+
+## Getting it running
+
+The download is a signed and notarized DMG for Apple Silicon. Older Intel Macs are not supported.
+
+```bash
+curl -L -o pulse-local.dmg 'https://pulseos.finance/api/local/download?f=mac'
+open pulse-local.dmg
+```
+
+That endpoint redirects to dl.pulseos.finance, and Sparkle handles updates from there.
+
+First launch is the slow part, because the models come down from Hugging Face. You can explore with the sample data first, which uses made-up transactions and is replaced when you connect a bank. If you want the checker model on its own, the Hugging Face CLI will fetch the same weights.
+
+```bash
+huggingface-cli download PulseOS/pulse-local-qwen3-0.6b
+```
+
+Newer installs of that CLI call the same command `hf download`.
+
+Then import a file. Choose Import, drop the bank export on the sheet, and read the notes above the preview. They tell you how Pulse read the file and where it is unsure. Check each row's category, confirm the account name and currency, and import. If the file overlaps one you imported before, Pulse skips the rows you already have.
+
+Monarch Money, YNAB and Copilot exports import as well. The questions Pulse handles best are the concrete ones.
+
+```text
+How much did I spend on groceries in August?
+How much on groceries in August by merchant?
+```
+
+The app finds the transactions, adds them up, and labels the answer with the month and category it used. Change either label to re-run the question, which is the quickest way to catch an answer that was about the wrong thing.
+
+## What it can read
+
+The import layer has real range. It reads file content rather than file name, so a CSV saved as .xls or .dat still comes in as a CSV, and a web page table saved with the wrong extension does too.
+
+| Area | What it handles |
+| --- | --- |
+| Formats | CSV, Excel, OFX, QFX, QIF, MT940, CAMT.053, Norma 43, CODA, OFC, PDF in beta |
+| Encodings | Shift_JIS, GBK, older Windows formats |
+| Amounts | 10,000원, 45,10 zł, 500 Kč, R$ 45,10 |
+| Dates | 3 fevr. 2025, 24 lug 2024, 2026年3月12日 |
+| Column names | Norwegian, Polish, Czech, Finnish, Estonian, Latvian, Hungarian, Korean, Chinese, Japanese |
+| In and out | DR and CR, plus money-in and money-out column names in other languages |
+
+Rules behave the way you would hope as well. A rule remembers a shop rather than a whole bank line, so next month's charge to the same place gets the same category, and Pulse matches on the merchant name when it recognizes the town, which it does for many US towns.
+
+## What the benchmark shows
+
+Pulse publishes BudgetBench, a benchmark for budgeting chat assistants, and its design choice is instructive. Most assistant benchmarks count right answers only, so a system that hedges can score well while still showing wrong figures. BudgetBench keeps the two apart.
+
+Each case is a conversation of one to four questions and earns one of six labels. A case counts as right only when every turn is right.
+
+| Label | Meaning |
+| --- | --- |
+| Wrong shown | the answer shows a wrong figure, name or claim |
+| Wrong offered | the assistant asks which reading you mean and every option it offers is wrong |
+| Right, no tap | every turn is right with no clarification needed |
+| Right after one tap | every turn is right after you pick one of the offered options |
+| Not sure | the assistant says it is not sure, or asks a question back |
+| Declined | the assistant declines, or answers something else with no figure |
+
+On the public split of 723 cases the leaderboard reads like this.
+
+| System | Wrong shown | Right, no tap | Not sure |
+| --- | --- | --- | --- |
+| Pulse Local 0.4.19 with the 0.6B checker | 0.7% | 77.5% | 19.1% |
+| Pulse Local 0.4.19, rules only | 4.3% | 85.5% | 6.6% |
+| Qwen3 0.6B, stock, with reference tools | 27.5% | 7.6% | 63.2% |
+| Qwen3 8B, stock, with reference tools | 36.9% | 39.7% | 2.8% |
+
+The stock-model rows are the interesting part. Handed the same reference tools, Qwen3 8B shows a wrong figure in more than a third of cases, and Qwen3 0.6B gets a clean answer only about 8 times in 100. These are development scores and Pulse says so plainly. The app's rules were tuned on the public split and the stock models were not tuned at all, so it is not a fair fight against a small model.
+
+The sealed splits are the serious part. Version 1 shipped with a public split and a sealed set, and three more sealed splits followed, each with new households and new writers. Each accuracy claim consumes a split, and only the SHA-256 hash of each sealed file is public, so anyone can check the files against the hashes.
+
+Worth keeping in mind that this benchmark is run by the company selling the app. The grader is rules-based rather than an AI judge, and the case writers were separate Claude sessions with no access to the app code, which is a stronger design than most self-published numbers. But the household data, the oracle and the splits all come from the same source.
+
+## What to watch for
+
+Mac with Apple Silicon only. Windows is listed as next with no build published yet. Chat works best in English, and the screens are in English or Japanese.
+
+Local mode is one machine. There is no sync between devices, so your ledger exists nowhere else. If you want the ledger to follow you, that is the thing you give up.
+
+PDF import is in beta and the reason is a good one. A PDF keeps words on lines rather than columns, so Pulse can misread a row, and a scanned PDF has no text to read at all. Check every row against the original. Pulse reads bank and card statements, not investment statements.
+
+Currency is not converted. If a file is in another currency, Pulse asks whether to keep the account in that currency or import the amounts as written, and a total in your ledger currency leaves the other currency out and says so.
+
+Connect a bank and the privacy story changes shape. New and updated transactions, account names and balances pass through Pulse's server on their way to your machine, processed but not saved. The server keeps the key that maintains the connection, the bank's name, the connection status, the last sync time and your Sync Pass status. Stripe handles the Sync Pass payment. None of that is a lot, but it is no longer true that nothing leaves your machine, and the site says so rather than burying it.
+
+Pricing is unusual in a good way. The app is one payment, not a subscription, and it never checks what you paid.
+
+| Option | Price | What you get |
+| --- | --- | --- |
+| Use it free | $0 | every feature, no nagging, Local mode needs no account |
+| Help us build | $20 | a thank-you that pays for the next release |
+| Keep it going | $40 | for people who want this around for years |
+| Your call | any amount | type the number yourself, one dollar counts |
+| Sync Pass | $29 a year for three banks, $8 a year for each extra, up to 25 | live bank sync, billed separately |
+
+## Source and Accuracy Notes
+
+- Project page: https://pulseos.finance — verified via direct visit
+- How it works: https://pulseos.finance/pulse-local/how — verified via direct visit
+- Getting started: https://pulseos.finance/pulse-local/start — verified via direct visit
+- Accuracy and limits: https://pulseos.finance/pulse-local/testing — verified via direct visit
+- Privacy and data: https://pulseos.finance/pulse-local/privacy — verified via direct visit
+- BudgetBench: https://pulseos.finance/pulse-local/budgetbench — verified via direct visit
+- Download, resolved from https://pulseos.finance/api/local/download?f=mac to https://dl.pulseos.finance/pulse-local-beta-mac-arm64.dmg
+- Tuned model: https://huggingface.co/PulseOS/pulse-local-qwen3-0.6b, Apache-2.0, 477 downloads
+- Publisher: Pulse Browser, Inc., named in the privacy page and the site footer
+- License: the application is closed source and no public repository for it is published. The GitHub account Pulseos exists but has no public repositories
+- HN launch thread: https://news.ycombinator.com/item?id=50080275 (122 points, 71 comments, 13 October 2026)
