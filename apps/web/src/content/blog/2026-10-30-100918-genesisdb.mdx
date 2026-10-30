@@ -1,0 +1,137 @@
+---
+title: "GenesisDB: an event sourcing database over plain HTTP"
+description: "GenesisDB is an MIT-licensed event sourcing database in Go. Commit, fetch and query CloudEvents over plain HTTP with GDBQL, SSE and GDPR erasure."
+pubDate: "2026-10-30T03:09:18.000Z"
+author: "Friday"
+tags: ["database", "event-sourcing", "go", "open-source", "self-hosted"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/genesisdb.webp"
+  alt: "GenesisDB project page showing the event stream interface"
+canonical: "https://runany.dev/blog/genesisdb/"
+---
+
+> **TL;DR:** GenesisDB 2.0 went open source in October 2026 under the MIT license. It is an event sourcing database written in Go that stores every state change as an immutable CloudEvent and serves it over plain HTTP with NDJSON responses. Commit, fetch, query, subscribe and erase are the whole API, so one docker run command and curl are enough to start.
+
+## What it is
+
+GenesisDB does not store rows. It stores events. When something changes in your system you write an event describing that change, and the current state of an entity is derived by replaying its events in commit order. The record of a change is never overwritten or deleted, only appended to.
+
+Version 2.0 shipped in October 2026 and turned the engine from a hosted product into an MIT-licensed project at github.com/genesisdb-io/genesisdb. The codebase is Go, and it runs as a single static binary or as a container image published for linux/amd64 and linux/arm64.
+
+The detail that sets it apart from most event stores is that there is no driver to install. The HTTP interface is the interface. Events follow the CloudEvents 1.0 specification, responses come back as NDJSON with one JSON event per line, and the query language GDBQL is the only thing you have to learn beyond JSON itself.
+
+The operational pieces you would otherwise assemble by hand all ship with it:
+
+- Prometheus metrics and OpenTelemetry tracing exposed by the server
+- A built-in MCP server so an agent can query the event stream directly
+- Schema validation expressed in GDBQL
+- A VS Code extension and a Postman collection for poking at a running instance
+
+## Why it matters
+
+The usual reason to reach for event sourcing is auditability. When a regulator, a customer or your own support team asks why a balance is what it is, the honest answer is a replay of the events that produced it rather than a row that was quietly overwritten last quarter.
+
+The cost of that answer is that most event store implementations force a choice. You either run a mature relational database with a well understood consistency story and bolt on a log, or you run an event-first store and rebuild the query capabilities yourself. Teams that need both end up operating two systems with two failure modes.
+
+GenesisDB tries to close that gap on the operational side rather than the modelling side. It is a single process that holds events, serves reads and writes over HTTP, and tells you how it is doing through standard metrics and tracing.
+
+The GDPR story is the part worth reading closely. Event logs and personal data are in tension by default, because deleting a row breaks the replay that makes the log trustworthy. GenesisDB keeps the event structure and the hash chain intact while stripping personal data out of reference payloads. That is a specific engineering decision with a specific tradeoff, not a checkbox.
+
+## The five operations
+
+| Operation | Endpoint | What it does |
+| --- | --- | --- |
+| Commit | POST /api/v2/commit | Writes a batch of CloudEvents atomically, optionally guarded by preconditions |
+| Fetch | POST /api/v2/fetch | Reads a subject and all of its descendants in commit order |
+| Query | POST /api/v2/query | Runs a GDBQL query across the store, from filters to grouped aggregates |
+| Subscribe | POST /api/v2/subscribe | Streams new events over Server-Sent Events |
+| Erase | erasure endpoint | Removes personal data from reference payloads and keeps the audit trail |
+
+Subjects are hierarchical paths, and that is where the model earns its keep. A fetch on `/customer` returns the events for `/customer` plus everything beneath it, so pulling one aggregate back together does not need a query or a join.
+
+## Getting it running
+
+The container image is the fastest way to see it work. The auth token is required and must be at least 32 bytes:
+
+```bash
+export GENESISDB_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+docker run --rm --name genesisdb \
+  -e GENESISDB_AUTH_TOKEN \
+  -p 127.0.0.1:8080:8080 \
+  -v genesisdb-data:/app/data \
+  genesisdb/genesisdb:latest
+```
+
+If you would rather not run a container, the binary installs with Go or downloads from the releases page:
+
+```bash
+go install github.com/genesisdb-io/genesisdb/v2/cmd/genesisdb@latest
+genesisdb
+```
+
+Either way the server binds to 127.0.0.1 on port 8080 and keeps its data in `./data`. Confirm it is alive, then commit a first batch of events:
+
+```bash
+curl localhost:8080/ping
+# Pong
+
+curl localhost:8080/api/v2/commit \
+  -H "Authorization: Bearer $GENESISDB_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      { "source": "io.genesisdb.app", "subject": "/customer/1", "type": "io.genesisdb.app.customer-added", "data": { "name": "Bruce Wayne" } },
+      { "source": "io.genesisdb.app", "subject": "/customer/2", "type": "io.genesisdb.app.customer-added", "data": { "name": "Selina Kyle" } }
+    ]
+  }'
+```
+
+The response is the stored events with their ID, time, hash and predecessor hash, one per line. Reading them back needs no query, and asking questions does need one:
+
+```bash
+curl localhost:8080/api/v2/fetch \
+  -H "Authorization: Bearer $GENESISDB_AUTH_TOKEN" \
+  -d '{ "subject": "/customer" }'
+
+curl localhost:8080/api/v2/query \
+  -H "Authorization: Bearer $GENESISDB_AUTH_TOKEN" \
+  -d "{ \"query\": \"STREAM e FROM events WHERE e.subject UNDER '/customer' MAP { id: e.id, name: e.data.name }\" }"
+```
+
+## Talking to it from your language
+
+Because the API is plain HTTP, any HTTP client works and the official SDKs are thin wrappers over it.
+
+| Language | Install command |
+| --- | --- |
+| Go | go get github.com/genesisdb-io/genesisdb-io-client-go/v2 |
+| Python | pip install genesisdb-client |
+| Rust | cargo add genesisdb |
+| Java | io.genesisdb:genesisdb:2.0.0 |
+| .NET | dotnet add package GenesisDB.Client |
+| PHP | composer require genesisdb/client-sdk |
+| Swift | .package(url: "github.com/genesisdb-io/genesisdb-io-client-swift") |
+
+There is also a JavaScript and TypeScript client, and a documented cURL path for people who want to keep the dependency count at zero. The engine can be embedded directly in a Go program as well, which removes the network hop entirely if you are already writing Go.
+
+## What to watch for
+
+The repository shows 10 GitHub stars as I write this. This is a young project with a small community around it, not a database with years of production use behind it. The 1.x releases existed as a hosted product and 2.0 is the first version where the engine itself is fully open source, so the public history of the open source form is short. The docs do include an upgrade guide from 1.x, which helps if you followed the project earlier.
+
+Event sourcing is not free, and this does not change that. You own the projection code. Every read model is yours to maintain, and a bug in your replay logic shows up as wrong answers rather than as an error.
+
+GDBQL is a new dialect to learn. It is not SQL and it is not GraphQL, and while it covers filters, maps and grouped aggregates, it is small enough that you will read the whole language reference once rather than skim it.
+
+On the deployment side, the token is mandatory, TLS is not part of the default local setup, and the data directory is local to the process. The deployment guides cover Docker, Kubernetes and a one-click DigitalOcean droplet, but they do not describe replication or multi-node clustering, so treat it as a single-node store until the maintainers document otherwise.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.genesisdb.io/ — verified via direct visit on 2026-10-30
+- Documentation: https://docs.genesisdb.io/quickstart — verified via direct visit on 2026-10-30
+- Source repository: github.com/genesisdb-io/genesisdb, MIT license, Go, last pushed 2026-10-29
+- HN launch thread: https://news.ycombinator.com/item?id=50294300 (13 points, 2026-10-29). An earlier thread for the same project from September 2025 sits at item 45247381
+- The GSC token is expired in this runtime, so no cannibalization check ran for this post
