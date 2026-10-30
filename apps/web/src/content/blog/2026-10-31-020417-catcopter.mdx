@@ -1,0 +1,135 @@
+---
+title: "Catcopter: cats with paw rotors fight in your browser"
+description: "Catcopter is a free multiplayer browser game where cats with propellers on their paws fight over catnip. Five classes, five modes, no download."
+pubDate: "2026-10-30T19:04:00.000Z"
+author: "Friday"
+draft: false
+tags: ["browser-game", "multiplayer", "games", "three-js", "websocket"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/catcopter.webp"
+  alt: "Catcopter title art showing an orange cat with a helicopter rotor on its head flying over a tropical island"
+canonical: "https://runany.dev/blog/catcopter/"
+---
+
+> **TL;DR:** Catcopter puts you in a cat with a rotor on its head, inside a browser tab, with no download and no account. You pick one of five classes and one of five modes, then fight other people over catnip until the bell rings. Three.js draws the scene in the browser, and a Node.js WebSocket server with Rapier physics handles everything else.
+
+## What it is
+
+Catcopter is a multiplayer browser game about cats with propellers on their paws. You land on the page, type a name for your cat, pick a server, pick a mode, pick a class, and press Play. Nothing installs and there is no account to make.
+
+The camera sits behind your cat, the map is a stretch of tropical islands over open water, and the thing you fight over is catnip. Land a big enough hit and the catnip pops loose, half of it going to whoever hit you and half dropping on the ground where anyone can scoop it up. The round ends when the bell rings and the catnip counter settles.
+
+Rounds run five minutes. The scope is deliberately small, and the whole thing loads in a tab. That combination is what makes it easy to click once at lunchtime and then realize you have lost forty minutes to Striker players.
+
+## The five cats
+
+Each class changes health, speed, flight time, weapon and special ability. The numbers below are the real tuning values, read out of the class table the client ships in its JavaScript bundle rather than from marketing copy.
+
+| Class | Health | Speed | Boost | Flight time | Primary weapon | Special |
+| --- | --- | --- | --- | --- | --- | --- |
+| Striker | 70 | 22 m/s | 36 m/s | 35s | Blaster | Turbo and Ram |
+| Gunship | 100 | 14 m/s | 20 m/s | 60s | Machine Gun | Overdrive |
+| Flak | 100 | 13 m/s | 18 m/s | 60s | Flak Cannon | Jam Shell |
+| Bomber | 150 | 11 m/s | 15 m/s | 70s | Belly Gun | Bombs |
+| Mechanic | 80 | 9.5 m/s | 13 m/s | 90s | Welder | Build Turret |
+
+Striker is the odd one out. It flies on jet wings rather than paw rotors, it is the fastest cat in the game at 22 m/s and 36 m/s on boost, and it is the only class that cannot hover. That last point is not a limitation so much as a fuel gauge, since hovering is what drains the 35 second battery in the first place. Everyone else hovers and gives up some speed to keep it.
+
+Flak is the answer to a boosted Striker. The Flak Cannon fires shells that splash over a 4.5 meter radius and jam anything nearby for a second and a half, which is long enough to stop a ramming run in place.
+
+Mechanic is the slowest cat at 9.5 m/s, and also the one that stays up the longest. Ninety seconds on a charge is half again as long as the Gunship, and it can drop laser turrets on the ground and keep them running while it flies circles overhead.
+
+Bomber takes the opposite trade. One hundred and fifty health, the slowest turning of the five, and a Belly Gun that hits for 7 every 0.14 seconds. Its bombs hit for 45.
+
+## The five modes
+
+| Mode | Teams | Round | Win condition |
+| --- | --- | --- | --- |
+| Catnip Brawl | No | 5 min | Most catnip when the bell rings |
+| Team Battle | Yes | 5 min | Most knock-outs, first to 40 |
+| Steal the Chicken | Yes | 8 min | Carry their golden chicken home, 3 captures |
+| Castle Siege | Yes | 5 min | Attackers topple the keep, defenders hold it |
+| Tube Race | No | 5 min | Two laps of the tube, first cat home |
+
+Team Battle splits the lobby into Strawberry and Blueberry, and every knock-out counts for your side. Steal the Chicken adds a rule that reshapes the classes: a carrier cannot fly. Your Striker becomes a ground cat until it drops the chicken, which turns the run home into a different game from the fight that won it.
+
+Tube Race drops the combat entirely and runs a two lap race around a tube through snow, dunes, Patagonia and the islands, with a ten second warmup.
+
+## Getting it running
+
+There is no install step and no command to run. Open the site, and the page gives you a name field, a server picker with Europe, North America and Auto, a mode picker, and a class picker.
+
+The controls are short enough to list in full:
+
+- Tap Space to jump, hold it for a second to take off. Flying drains your battery, and landing recharges it.
+- Hold to shoot, slide to aim, double tap to swap weapons.
+- Hold the fire button to see every weapon you have collected.
+- On a phone, turn it sideways. Left thumb is the stick for turning, moving and boosting. Right thumb handles FIRE and FLY.
+- Falling in the sea does not kill you. You swim to shore.
+
+Catnip and knock-outs level you up, and every level goes into Weapons, Flight, Health or Speed, so a bad round still moves you forward.
+
+Since there is no command line, the way to look under the hood is the client bundle the browser downloads. Both the class table and the mode table are plain JavaScript objects that ship to the client, which makes them easy to read:
+
+```javascript
+// shipped in the client bundle, trimmed
+striker: {
+  id: "striker", name: "Striker",
+  flightForm: "jet", maxHp: 70,
+  flySpeed: 22, boostSpeed: 36, canHover: false,
+  flightSeconds: 35, rechargeSeconds: 3,
+  primary: "striker_blaster",
+  special: "turbo", specialName: "Turbo + Ram", specialCooldown: 6
+}
+```
+
+The transport is a region specific WebSocket, one per data center, and the page picks based on the server you selected:
+
+```javascript
+// the play socket the browser opens
+const PLAY_SOCKETS = {
+  eu: "wss://eu.catcopter.com/play",
+  us: "wss://us.catcopter.com/play",
+};
+```
+
+You can confirm those hosts are the game server rather than a CDN in front of one:
+
+```bash
+curl -sI https://eu.catcopter.com/play | grep -iE 'uwebsockets|via'
+# uwebsockets: 20
+# via: 1.1 Caddy
+```
+
+## How it is built
+
+The developer spelled out the stack on the launch thread: Node.js on the server, WebSockets for transport, Rapier for physics, and mostly Three.js on the client. The site shell around the game is a Next.js app. The server headers line up with that, since uWebSockets is the Node library the game server runs on, sitting behind Caddy.
+
+The art was generated rather than drawn. Asked directly whether the assets looked AI made, the developer said they were all generated and that getting the cat faces right was the hardest part of it.
+
+What makes the project more than a weekend demo is the tuning. Five classes with distinct flight models, jet wings for one of them and a flying bowl for another. Five modes with their own timers and win conditions. A physics-driven game where a Strikers boost and ram connects hard enough to knock a pile of catnip into the water. None of that comes free from a code generator.
+
+The author also explained why he built it this way. He said he was never interested in game development, only in gameplay design, and generative models let him try that without spending months on code and assets first. That is the trade the whole project rests on.
+
+## What to watch for
+
+Browser support is the open question. One commenter reported that it did not work in Firefox and that Chrome pegged the CPU on their machine. Another said Firefox was fine for them. The developer called Firefox his nemesis and said he would test it, so the picture is genuinely unresolved rather than settled.
+
+On mobile, a commenter asked for a full screen button. The answer was "Roger that", with nothing confirming it shipped. The mobile layout itself is built around landscape play with a left stick and separate FIRE and FLY buttons, so it works, but it is a phone port rather than a native app.
+
+There is a cookie consent banner and a Google Analytics tag with Consent Mode. Visitors in the EU and UK get an opt-in prompt before analytics storage is granted, and ad storage is denied for everyone regardless. Terms and a privacy policy are linked in the footer.
+
+The raw socket refuses unauthenticated handshakes, answering a manual upgrade request with a 403. Scripting a bot into a match is not a weekend project.
+
+The game is free. Its structured data lists the price as zero and there is no monetization anywhere on the page. It is closed source too, with no public repository linked, so the client bundle is the closest thing to published documentation that exists.
+
+## Source and Accuracy Notes
+
+- Project page: https://catcopter.com, verified via direct visit on 2026-10-31
+- Class, weapon and mode values were read from the JavaScript bundle the client loads at https://catcopter.com
+- Play sockets: wss://eu.catcopter.com/play and wss://us.catcopter.com/play, as referenced by the client bundle
+- Stack details (Node.js, WebSockets, Rapier, Three.js) come from the developer's own comment on the HN thread
+- HN launch thread: https://news.ycombinator.com/item?id=50305320, posted 2026-10-30 with 41 points and 20 comments
+- Community channels: https://discord.gg/jeVrQGUSZ6, https://www.instagram.com/catcoptergame/, https://www.tiktok.com/@catcoptergame
+- Closed source. The site links to no public repository and publishes no licence.
