@@ -1,0 +1,153 @@
+---
+title: "Breadboard: publish web apps from a visual canvas"
+description: "Breadboard pairs a Figma-like canvas for web app UI with stacked instruction blocks for logic, then publishes the result to a live URL in one click."
+pubDate: "2026-10-31T00:07:08.000Z"
+author: "Friday"
+draft: false
+tags: ["dev-tools", "no-code", "visual-builder", "web-development", "hypercard"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/breadboard.webp"
+  alt: "Abstract glowing blocks joined by thin wires on a dark grid canvas"
+canonical: "https://runany.dev/blog/breadboard/"
+---
+
+> **TL;DR:** Breadboard lets you draw a web app interface on a Figma-like canvas, attach behavior as stacked instruction blocks, and publish the whole thing to a live URL in one click. What ships is plain HTML plus a generated JavaScript module and HyperScript, so the output is readable rather than an opaque blob. The catch is that every published app lives inside Breadboard's own hosting, and at launch the author had not finished exporting your work as a download.
+
+## What it is
+
+Breadboard is a visual app builder by Nurie Jeong and Simone Quattrocchi. Simone described it in the Show HN post as a mix of Figma-style UI design with Shortcuts-style logic, so you can build, preview, and publish interactive web apps straight from the canvas.
+
+There are two halves to it. The canvas handles layout: import a design file, or sketch with a style editor and a library of ready-made components. The logic editor handles behavior: instead of a code file you stack instructions that read like a sentence, and the stack is the program.
+
+The detail worth knowing is the preview. There is no separate preview pane. What you see while editing is the exported app with a small shim on top for screen routing, so the thing you are editing and the thing that gets published are one artifact instead of two implementations that quietly drift apart.
+
+## Why it matters
+
+Most visual builders make you accept one of two compromises. Either the interface is fixed and you only wire behavior, or the behavior is fixed and you only arrange pixels. Breadboard's pitch is that layout and logic belong on the same surface, and that you should be able to hand the app to a non-developer and have them adjust it without asking you first.
+
+The second half of that pitch is where the interesting design sits. The "Build with AI" feature does not call a model on your behalf. It helps you write the prompt to send to whatever AI you already use, then tells you which block to stack next. That is a much smaller claim than an AI pair programmer, but it is a more honest one, and it means the tool does not need its own model access to be useful.
+
+## What actually ships
+
+A published Breadboard app is a static bundle. The HTML shell loads HyperScript from a CDN and mounts a single module:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="index.css" />
+    <script src="https://unpkg.com/hyperscript.org@0.9.14"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <script src="index.js" type="module"></script>
+</body>
+</html>
+```
+
+Each UI component becomes a custom element with a shadow root and a set of variants you can swap at runtime. Attribute changes are watched, and the shadow tree is reprocessed by HyperScript after every render:
+
+```javascript
+class BreadboardComponent extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.variants = {};
+    }
+
+    static get observedAttributes() {
+        return ['variant', 'data-style-override'];
+    }
+
+    connectedCallback() {
+        this.style.display = 'contents';
+        this.render();
+        this._observer = new MutationObserver(() => this.updateBindings());
+        this._observer.observe(this, { attributes: true });
+    }
+
+    render() {
+        const variantName = this.getAttribute('variant') || 'Default';
+        const html = this.variants[variantName] || this.variants['Default'] || '';
+        if (this.shadowRoot.innerHTML !== html) {
+            this.shadowRoot.innerHTML = html;
+            this.updateBindings();
+            _hyperscript.processNode(this.shadowRoot);
+        }
+    }
+}
+```
+
+Your stacked instructions compile into HyperScript commands and expressions registered against the runtime. This is the Swiss transit demo, whose logic reads a query parameter into the app state:
+
+```javascript
+window._hyperscript.addCommand('location_search', function (parser, runtime, tokens) {
+    if (!tokens.matchToken('location_search')) return;
+    var nameExpression = parser.requireElement('expression', tokens);
+    return {
+        args: [nameExpression],
+        op: function (context, name) {
+            const params = new URLSearchParams(window.location.search);
+            context.result = params.get(name || '');
+            return runtime.findNext(this, context);
+        }
+    };
+});
+```
+
+Custom blocks also expose a second form as a leaf expression, so the same capability can be used inline inside a larger instruction. The generated code even carries its own warning about the one mistake a custom block author makes:
+
+```javascript
+// Commands must set context.result, NOT return the value
+context.result = params.get(paramName);
+```
+
+You can inspect any published app the same way, which is the fastest way to understand what the runtime does with a block:
+
+```bash
+curl -sL https://long-wind-1522.breadboards.app/index.js | head -40
+```
+
+## Pricing and access
+
+Every plan sits behind a "Request access" button rather than an open signup, including the free tier.
+
+| Plan | Price | What it adds |
+| --- | --- | --- |
+| Lite | $0 / month | Design with any UI kit, 5 breadboards.app domains, basic AI co-pilot, publish with a watermark, 50MB of asset storage |
+| Standard | $15 / month | Everything in Lite, plus custom domains, unlimited app projects, no watermark, 50GB of asset storage |
+| Pro | $59 / month | Everything in Standard, plus server-side logic, an integrated database, 100GB of asset storage |
+
+The Standard and Pro rows also carry a "Free until launch" note, so nobody is being charged for the paid tiers yet. Storage is the limit you will notice first, since assets live in the platform rather than in your repository.
+
+## The HyperCard comparison and where it strains
+
+Breadboard is explicitly pitched as a HyperCard revival, and that comparison got the sharpest response in the thread. Don Hopkins, who has written about HyperCard's design history, pushed on the central point: in HyperCard the editor and the live app were the same thing, a user could flip into edit mode on any stack they had, and there was no meaningful line between app developer and app user. In his words, anything less totally misses the point.
+
+Simone agreed with the critique and pointed at the implementation as a partial answer. The playground preview is not a simulation of the app, it is the exported app, and a user can restyle it, add components, and change the logic directly. Published apps are a different story, since they serve the published bundle rather than the editable workspace.
+
+Two other commenters pointed at different successors. One noted that LiveCode, from the people behind Revolution and MetaCard, imports HyperCard stacks directly and is arguably the more literal continuation. Another linked Decker, an open source project with a retro aesthetic that some people will not like. Breadboard's advantage over both is that it is aimed at shipping web apps today rather than preserving a stack format from 1989.
+
+## What to watch for
+
+Hosting is the biggest open question. Published apps are stored in Cloudflare R2 and served over Cloudflare, and on the free tier they live on Breadboard-owned subdomains. A commenter on the thread raised the obvious procurement question: if your app lives inside someone else's environment, you have to disclose them as a subprocessor. The Standard plan fixes the domain half of that problem but not the hosting half.
+
+Exports were not yet downloadable when the author posted, which means a project on the platform today is not something you can take with you. Until that ships, treat Breadboard apps as hosted artifacts rather than as source code you own.
+
+Runtime dependencies are worth a look too. HyperScript loads from unpkg.com, so the published apps inherit a third-party CDN in their critical path, and the demo apps call open-meteo.com and opendata.ch. One commenter had to allow those hosts through their firewall before the demos would load at all.
+
+Finally, the free tier stamps a watermark on what you publish, and access to even that tier needs a request. That is a reasonable shape for an early product, but it means you cannot evaluate the platform end to end without waiting.
+
+## Source and Accuracy Notes
+
+- Project page: https://breadboards.io/ , verified via direct visit on October 31 2026
+- Documentation: https://documentation.breadboards.io/
+- Author blog: https://medium.com/@breadboards.io
+- Published demo apps inspected directly: https://late-cat-2043.breadboards.app (weather) and https://long-wind-1522.breadboards.app (transit)
+- HN launch thread: https://news.ycombinator.com/item?id=47039051 , Show HN on February 16 2026, 93 points, posted by simquat
+- Authors named on the site footer: Nurie Jeong and Simone Quattrocchi
+- Plan names, prices, and limits: read from the pricing section of the homepage, including the "Free until launch" note on the paid tiers
+- Hosting and export statements attributed to the author in the HN thread, so they reflect February 2026 rather than a fresh confirmation
+- License: none published, access is request based and the product is closed source
+- Runtime dependency confirmed in the exported bundle: hyperscript.org 0.9.14, loaded from unpkg.com
