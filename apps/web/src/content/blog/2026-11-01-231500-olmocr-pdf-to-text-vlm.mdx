@@ -1,0 +1,150 @@
+---
+title: "olmOCR: Turn PDFs Into Clean Markdown With a 7B Vision Model"
+description: "olmOCR is Ai2's Apache-2.0 toolkit that turns PDFs, scans and images into clean Markdown with a 7B vision language model, benchmark and training code included."
+pubDate: "2026-11-01T16:15:00.000Z"
+author: "Friday"
+tags: ["pdf", "ocr", "python", "self-hosted", "ai-models"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/olmocr.webp"
+  alt: "olmOCR wordmark on a dark teal background next to a pink outlined document icon"
+canonical: "https://runany.dev/blog/olmocr-pdf-to-text-vlm/"
+draft: false
+---
+
+> **TL;DR:** olmOCR is an Apache-2.0 toolkit from the Allen Institute for AI that converts PDFs, PNGs and JPEGs into clean Markdown using a 7B vision language model. It handles equations, tables, handwriting and multi-column layouts in a single pass, ships the benchmark and the training code, and you can run it on your own GPU or point it at any OpenAI-compatible inference endpoint.
+
+## What it is
+
+olmOCR takes a document you feed it and gives back structured plain text. The current model, olmOCR-2-7B-1025, reads a page image and emits Markdown for headings and document structure, HTML for tables and LaTeX for equations, all in one pass. No separate table detector, no separate math recognizer, no post-processing script to stitch the pieces back together.
+
+The project lives at `allenai/olmocr` on GitHub and has 19,813 stars and 1,652 forks. The model itself, `allenai/olmOCR-2-7B-1025-FP8`, is on Hugging Face under an Apache-2.0 license with 111,961 downloads and 261 likes. The PyPI package is `olmocr`, currently at version 0.4.27 and published March 12, 2026.
+
+The interesting part is the training method. olmOCR 2 was built on Qwen2.5-VL-7B and fine-tuned on olmOCR-mix-1025, a dataset of 270,000 PDF pages spanning academic papers, historical scans, legal documents and brochures, plus 20,000 pages of hard handwritten and typewritten material.
+
+## Why it matters
+
+Classic OCR tools fall over on exactly the documents you most want to archive. A scanned two-column journal article with a half-page table and a few inline equations is where character-level extraction produces a wall of misordered text. That failure is not fixable with clever post-processing rules, because the damage happens at the layout level.
+
+Ai2's approach was to treat document structure as a verifiable property and train against it directly. The team wrote deterministic verifiers that assert things like "table structure preserved", "math faithfully transcribed" or "reading order consistent", then turned those into unit tests. A synthetic document pipeline samples real PDF pages with difficult content, uses Claude Sonnet 4 to analyze the layout and re-render it as clean semantic HTML, refines that HTML until it visually matches the original, and derives exact Markdown targets plus programmatic test cases from the HTML source. The result was olmocr-synthmix-1025: 2,186 PDF pages carrying 30,381 verifiable test cases, generated at no cost.
+
+Training then used Group Relative Policy Optimization, a reinforcement learning algorithm, with pass/fail rewards from those unit tests. Completions that pass more checks score higher, so the model learns to emit faithful structured output instead of an approximation that looks plausible.
+
+## How the benchmark stacks up
+
+olmOCR-Bench covers more than 7,000 test cases across 1,400 documents. Overall scores on the current leaderboard put olmOCR v0.4.0 at 82.4 plus or minus 1.1, ahead of PaddleOCR-VL at 80.0 and DeepSeek-OCR at 75.7.
+
+| System | Old scans, math | Tables | Multi-column | Overall |
+|---|---|---|---|---|
+| olmOCR v0.4.0 | 82.3 | 84.9 | 83.7 | 82.4 |
+| PaddleOCR-VL | 71.0 | 84.1 | 79.9 | 80.0 |
+| DeepSeek-OCR | 73.6 | 80.2 | 66.4 | 75.7 |
+| Marker 1.10.1 | 66.8 | 72.9 | 80.0 | 76.1 |
+| MinerU 2.5.4 | 54.6 | 84.9 | 78.2 | 75.2 |
+| Mistral OCR API | 67.5 | 60.6 | 71.3 | 72.0 |
+| Nanonets-OCR2-3B | 46.1 | 86.8 | 81.9 | 69.5 |
+
+The overall number hides where the difference actually sits. On old scans containing math, olmOCR scores 82.3 against PaddleOCR-VL's 71.0 and Nanonets-OCR2-3B's 46.1. Tables are the one column where it does not lead, with PaddleOCR-VL and Nanonets both edging ahead.
+
+## Getting it running
+
+Start with the system dependencies. olmOCR renders pages with poppler, so it needs poppler-utils plus a reasonable font set on Debian or Ubuntu.
+
+```bash
+sudo apt-get update
+sudo apt-get install poppler-utils ttf-mscorefonts-installer msttcorefonts \
+  fonts-crosextra-caladea fonts-crosextra-carlito gsfonts lcdf-typetools
+```
+
+Then create a clean Python environment. The upstream README is explicit that installing into an existing Python environment is a bad idea, because the dependency set is difficult to resolve. Python 3.11 or newer is required.
+
+```bash
+conda create -n olmocr python=3.11
+conda activate olmocr
+pip install olmocr[gpu] --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+The `gpu` extra pulls in PyTorch and the local inference stack, roughly 2GB of dependencies. If you already run a vLLM server somewhere, drop the extra and install the base package instead, which avoids the heavy GPU dependencies entirely.
+
+```bash
+pip install olmocr
+```
+
+Convert a document with a single command. The output lands in a workspace folder, with Markdown files written under the `markdown` subdirectory.
+
+```bash
+curl -o sample.pdf https://olmocr.allenai.org/papers/olmocr_3pg_sample.pdf
+olmocr ./localworkspace --markdown --pdfs sample.pdf
+cat localworkspace/markdown/sample.md
+```
+
+For a hosted endpoint, pass `--server` and `--model`. Any OpenAI-compatible API works, including vLLM you started yourself.
+
+```bash
+olmocr ./localworkspace \
+  --server http://remote-server:8000/v1 \
+  --model allenai/olmOCR-2-7B-1025-FP8 \
+  --markdown --pdfs *.pdf
+```
+
+If you are standing up vLLM yourself, the model name has to match exactly what you pass to `--model`:
+
+```bash
+vllm serve allenai/olmOCR-2-7B-1025-FP8 --max-model-len 16384
+```
+
+Ai2 lists three providers they have tested against: Cirrascale at $0.07 per million input tokens and $0.15 per million output tokens, DeepInfra at $0.09 and $0.19, and Parasail at $0.10 and $0.20. At that rate point the README quotes a cost under $200 per million pages converted, which is the number to benchmark against commercial OCR APIs.
+
+## Running it in Docker
+
+The image bundles the model, so expect a large pull.
+
+```bash
+docker pull alleninstituteforai/olmocr:latest-with-model
+docker run --gpus all \
+  -v $(pwd):/workspace \
+  alleninstituteforai/olmocr:latest-with-model \
+  -c "olmocr /workspace/output --markdown --pdfs /workspace/sample.pdf"
+```
+
+There is also a base image without the model if you would rather manage model downloads yourself.
+
+## Scaling past one machine
+
+The workspace argument doubles as a work queue location. Point it at S3 and each worker node pulls work from the same bucket.
+
+```bash
+# first node
+olmocr s3://my_bucket/pdfworkspaces/exampleworkspace --pdfs s3://my_bucket/pdfs/*.pdf
+
+# every node after that
+olmocr s3://my_bucket/pdfworkspaces/exampleworkspace
+```
+
+Ai2 also supports cluster execution through Beaker, their internal job scheduler, with `--beaker --beaker_gpus 4` to request GPUs per worker.
+
+## What to watch for
+
+The hardware floor is real. Local inference needs a recent NVIDIA GPU with at least 12GB of VRAM, tested on the RTX 4090, L40S, A100 and H100, plus 30GB of free disk. Without a suitable GPU you are on the hosted-provider path.
+
+The model's scope is narrower than the marketing around OCR can suggest. Ai2 describes olmOCR 2 as reaching state-of-the-art performance for real-world OCR of English-language digitized print documents, so handwritten notes in other languages, forms with intricate field semantics and screen-native PDFs with selectable text are all outside the tested envelope. The benchmark measures transcription quality, not whether the output is semantically useful for your pipeline.
+
+Quality is measurable, which is unusual. olmOCR-Bench and the released training code mean you can fine-tune against a small sample of your own pages and check whether it actually helped, instead of eyeballing a handful of outputs.
+
+One operational detail worth handling early. If you hit "too many open files" errors, raise the limit before you go looking for a bug.
+
+```bash
+ulimit -n 65536
+```
+
+## Source and Accuracy Notes
+
+- Project page: https://olmocr.allenai.org/ — verified via direct visit; currently redirects to the Ai2 playground at https://playground.allenai.org/model/olmocr-2-7b-1025
+- Source repository: https://github.com/allenai/olmocr — 19,813 stars, 1,652 forks, created 2024-09-17, last pushed 2026-03-25
+- Model weights: https://huggingface.co/allenai/olmOCR-2-7B-1025-FP8 — 111,961 downloads, 261 likes
+- License: Apache-2.0, confirmed in the repository LICENSE file and on the Hugging Face model card
+- PyPI package: `olmocr` 0.4.27, requires Python 3.11 or newer
+- Technical reports: arXiv 2502.18443 (v1) and https://arxiv.org/abs/2510.19817 (v2)
+- Release announcement: https://allenai.org/blog/olmocr-2 (October 22, 2025)
+- HN launch thread: https://news.ycombinator.com/item?id=43174298 — 313 points on February 25, 2025
+- Thumbnail source: the official Ai2 olmOCR 2 social graphic, resized to 1200x630
