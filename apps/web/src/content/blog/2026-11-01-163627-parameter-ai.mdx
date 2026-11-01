@@ -1,0 +1,95 @@
+---
+title: "Parameter: AI Pentesting Agents That Prove Their Findings"
+description: "Parameter runs AI pentesting agents continuously against your web apps, APIs, and cloud infrastructure, and its researchers proved one on ChatGPT itself."
+pubDate: "2026-11-01T09:36:27.000Z"
+author: "Friday"
+draft: false
+tags: ["dev-tools", "security", "pentesting", "ai-agents"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/parameter-ai.webp"
+  alt: "Parameter wordmark above blue circuit-like blocks on a black background"
+canonical: "https://runany.dev/blog/parameter-ai/"
+---
+
+> **TL;DR:** Parameter's AI agents probe a running web app, its APIs, and its cloud infrastructure on a schedule and on every release, then report only findings they could actually exploit. The company's Labs blog shows what that kind of depth turns up: a chain of a graph and an HTML preview in ChatGPT that produced a full account takeover, which OpenAI fixed in October 2026.
+
+## What it is
+
+Parameter is a security company built around AI agents that behave like attackers rather than signature matchers. You point it at a URL and hand over credentials, and its agents work through authentication flows, business logic, and injection paths on their own, reporting findings as they validate them. Most runs finish the same day.
+
+The interesting part is what happens to the results, because a finding that exists only as a scanner alert is worth very little to an engineer. Parameter says it will not put a finding in the report unless an agent produced a working exploit for it, and claims under 1% false positives on that basis.
+
+Around the pentesting product sit four others: Sentinel for catching vulnerabilities before code merges, Watchtower for tracking exposed assets over time, Cloud security for configuration drift, and Supply chain for reachable dependency risk.
+
+## How a run works
+
+Three steps, and the first one is much shorter than the scoping call you would expect from a traditional firm.
+
+1. **Connect.** Give it a URL and credentials. The connection is scoped and read-only, and source code access is optional, used only to deepen coverage.
+2. **Test.** Agents probe continuously across APIs, auth flows, and business logic, in whitebox, greybox, or blackbox mode depending on what you grant.
+3. **Report.** Each finding ships with reproduction steps, a working proof of concept, and remediation guidance, so the same run can feed an engineer, a customer, and an auditor.
+
+Scoping is where this differs from a traditional engagement. A manual pentest is a person booked weeks out testing one snapshot of your app. Parameter's pitch is that comparable coverage runs on every release, which only makes sense if scoping becomes near-automatic.
+
+## The Labs writeup that got it on Hacker News
+
+The post that put Parameter's name up was not a product launch. It was a research writeup published October 28, 2026: how the team turned an ordinary public ChatGPT share into attacker-controlled JavaScript running inside a signed-in session, which meant reading another person's private conversations. OpenAI classified it P1 and fixed it on October 26.
+
+The chain is worth reading because each link was a reasonable feature on its own. ChatGPT renders an HTML code block as a small working page inside a restricted frame on a different web address, so code in the preview cannot touch the main page. That isolation held. What broke was on the other side of the wall.
+
+A graph in the same conversation loaded MathLive, a math library that installs a message listener in the main ChatGPT page for its on-screen keyboard. Cross-frame messaging works like a mail slot: the sandboxed preview cannot walk into the main page, but it can drop a message through. That is fine as long as the receiver checks who sent it. MathLive's controller used an origin policy of "none", meaning it accepted messages from any web address, and the message format allowed raw HTML to be passed in as keyboard layout data. Rendering the keyboard assigned that HTML into the page through a helper named `createHTML`, which marked the string as trusted rather than sanitizing it. The helper was a Trusted Types identity wrapper, and an identity policy does not make an attacker-controlled string safe.
+
+From there the researchers needed a real execution context. An `iframe` with a `srcdoc` attribute carries its HTML directly in the attribute, and creating one without a `sandbox` attribute handed the frame the `chatgpt.com` web identity, so it could reach back into the parent page. Content Security Policy still blocked inline scripts, but it allowed YouTube, and YouTube's oEmbed endpoint had a JSONP callback parameter that it placed into the response before returning its validation error. The browser loaded that response as a script, because YouTube was already permitted.
+
+The defensive pattern that would have stopped it is short:
+
+```javascript
+window.addEventListener("message", (event) => {
+  if (event.source !== this.allowedWindow) return;         // the exact window, not just an origin
+  if (event.origin !== "https://trusted.example") return;  // origin allowlist
+  if (event.data?.type !== "app#setting") return;
+  this.applySettings(event.data); // settings carry plain values, never raw HTML
+});
+```
+
+Two rules from that writeup travel further than the specific bug: a receiver should check both the sender's origin and the exact window that was given permission, and dynamically created documents should stay sandboxed when their content can be influenced by an untrusted frame. The research team also points out that blocking the YouTube endpoint would have removed one path to script execution while leaving an untrusted preview able to insert HTML into the main site.
+
+What stood out reading it is how narrow the first fixes were compared to the shape of the final bug. YouTube was the last workaround, not the cause.
+
+## Pricing and getting in
+
+Three tiers, and all three end in a sales conversation, so no price list is public.
+
+| Tier | Scope | What you get |
+| --- | --- | --- |
+| Single App | Fixed, one application and its primary APIs | Time-boxed audit report, SOC 2 or ISO 27001 ready, same-day results, free retesting |
+| Rightsized | Sized automatically from your repos, endpoints, and roles | Multi-service and multi-repo coverage |
+| Continuous | Custom, runs on every deploy | Enterprise SLA and a dedicated success manager |
+
+Getting in is two steps. You can create an account yourself at `app.parameter.ai` with an email address, Google, Microsoft, or SSO, and the marketing copy claims first findings within 24 hours. What is not public is the price. Every tier ends in a sales conversation, and no tier lists a number, so treat the table above as a scope comparison rather than a quote.
+
+Two things work without talking to anyone. The CVSS calculator at `/tools/cvss-calculator` scores a vulnerability against the v3.1 spec with the definition of every metric on screen, and it runs entirely in the browser with no account. It accepts a vector string, which is the format you want when someone quotes you a score and you would rather check the arithmetic:
+
+```text
+CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H
+```
+
+There is also a sample pentest report linked from the product page, worth reading before a demo since it shows the shape of the output engineers actually receive.
+
+## What to watch for
+
+The agents run against live applications, so scope and timing are the things to settle before a run starts. Parameter says agents confirm a finding and then hold, that there is no escalation without opt-in, and that testing against production is never blind. That is a sensible posture, but it still means the people running it need to agree on what the agents are allowed to touch.
+
+The false-positive claim is load-bearing and hard to check from outside. Under 1% only makes sense next to the claim that nothing is reported unless it was exploited, and that is exactly the property you cannot verify without running a test against a system you control.
+
+On compliance, the company holds a SOC 2 Type I with the Type II observation period still underway, offers HIPAA and GDPR agreements on request, and states that data is processed in the US and never leaves your assigned infrastructure. Customer data is not used to train foundation models.
+
+## Source and Accuracy Notes
+
+- Product and pricing pages: https://www.parameter.ai/ and https://www.parameter.ai/pentesting, verified by direct visit on November 1, 2026
+- Research writeup: https://www.parameter.ai/labs/we-found-a-gap-at-openai by Mukul Goyal, published October 28, 2026
+- Company and Y Combinator backing: https://www.parameter.ai/about, listed on Y Combinator at https://www.ycombinator.com/companies/parameter
+- HN thread for the research writeup: https://news.ycombinator.com/item?id=50314699
+- Free CVSS calculator: https://www.parameter.ai/tools/cvss-calculator
+- OpenAI fixed the reported issue on October 26, 2026 and awarded a $5,000 bounty, per the writeup's timeline
