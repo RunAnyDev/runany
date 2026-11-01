@@ -1,0 +1,138 @@
+---
+title: "WallHop: paste a link, read the paywalled article"
+description: "WallHop is a free hosted paywall bypass that returns article links as clean readable HTML, with raw and JSON API endpoints you can script."
+pubDate: "2026-11-01T22:04:57.000Z"
+author: "Friday"
+tags: ["web-tools", "proxy", "go", "reading"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wallhop.webp"
+  alt: "WallHop wordmark with the tagline Read the article, skip the wall"
+canonical: "https://runany.dev/blog/wallhop/"
+---
+
+> **TL;DR:** WallHop is a hosted proxy that takes an article URL and returns the story with the paywall and ads stripped out. You can paste a link, prefix a URL with a slash, or call its `/raw` and `/api` endpoints from a script. It is free, needs no account, and the author covers hosting costs through Ko-fi.
+
+## What it is
+
+WallHop came out of a Show HN post in October 2026 titled "12ft.io is gone, so I built a replacement". The homepage states the pitch plainly: "wallhop is a free paywall bypass. Paste any article link to read it without paywall popups, ads or clutter. No signup, no extension."
+
+The interesting part is what sits behind it. WallHop is a hosted, heavily modified instance of `everywall/ladder`, an open-source Go proxy with just over 9,200 GitHub stars. Ladder is not a scraper with a blacklist of paywall selectors. It sits in the request path, applies per-domain rules before the upstream fetch, applies response rules after it, and hands you back rewritten HTML.
+
+That design explains why WallHop needs no browser extension and no account. Everything happens server-side, so a phone browser, a curl command, and a nightly script all hit the same endpoint and get the same result.
+
+The author frames the intended use narrowly, and it is worth repeating rather than paraphrasing: "Paywalls pay for journalism. If there's a paper or news site you read every day, please subscribe to it. WallHop is for the one-off article someone texts you from a site you'll never visit again."
+
+## Four ways to hand it a link
+
+The service accepts input in four shapes, all served from the same origin with no authentication.
+
+| Method | What you do | Best for |
+| --- | --- | --- |
+| Paste | Drop a URL into the box on the homepage | One-off reads on a desktop |
+| URL prefix | Put a slash in front of any link, so the URL starts with `wallhop.io/https://` | Sharing links, quick jumps |
+| Bookmarklet | Drag a `javascript:` snippet onto your bookmarks bar | Any page, one click |
+| iOS Shortcut | Install the shared shortcut served from `/shortcut` | The share sheet on a phone |
+
+The prefix trick is the one that travels best. Since the target URL is the path, `https://wallhop.io/https://example.com` resolves without any escaping, which makes it easy to paste into a chat message or a note.
+
+The iOS route deserves a mention because it is the least obvious of the four. WallHop ships a Shortcuts link that accepts a URL from the share sheet, which means you can pipe an article from Safari straight into the service without opening a tab first.
+
+## Scripting the raw and API endpoints
+
+Two paths sit alongside the human-facing homepage. `/raw/` returns the rewritten HTML document, and `/api/` wraps the same document in JSON.
+
+```bash
+# Rewritten HTML, straight to a file
+curl -sL "https://wallhop.io/raw/https://example.com" -o /tmp/article.html
+
+# JSON wrapper, body extracted
+curl -s "https://wallhop.io/api/https://example.com" | jq -r '.body' > /tmp/article.html
+```
+
+The API response carries two fields. `body` is the full document as a string, and `version` identifies the rule revision that handled the page, which came back empty on the plain site I tested. Since `body` is JSON-encoded HTML, `jq -r .body` is the step that turns it back into markup.
+
+## What the rewriting actually does
+
+The transformation is more surgical than "delete the paywall div". WallHop injects a stylesheet that hides ad and tracking containers in one pass. This excerpt came out of a live `/api/` response:
+
+```html
+<style id="nopaywall-adhide">
+  .ad__slot, [id^="google_ads_iframe"], ins.adsbygoogle, .adsbygoogle,
+  [id^="taboola-"], .dotcom-ad, .wp-ad-wrapper { display:none!important }
+</style>
+```
+
+Because the rule set lives in CSS rather than in the page's own JavaScript, it survives the markup reshuffling that publishers do when they change their ad vendors. The heavy lifting for the actual paywall sits in the per-domain ruleset instead, which is where the upstream project does its real work.
+
+## How the bypass rules work
+
+Ladder's ruleset is YAML keyed by domain. Here is a trimmed entry from the upstream `ladder-rules` repository:
+
+```yaml
+- domain: example.com
+  googleCache: true
+  useFlareSolverr: false
+  headers:
+    x-forwarded-for: none
+    referer: none
+    user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36
+    cookie: privacy=1
+  injections:
+    - position: head
+      append: |
+        <script>
+          window.localStorage.clear();
+        </script>
+    - position: h1
+      replace: |
+        <h1>An example with a ladder ;-)</h1>
+```
+
+Every rule can override request headers, so a site that serves one version to logged-in readers and another to anonymous readers can be handed the right cookies and referer. Injections can be dropped into the head or used to replace the first `h1`, which is often where subscription prompts sit.
+
+Publisher paywalls are not uniform across regions, and the ruleset reflects that. The upstream repo keeps country folders for `ca`, `ch`, `de`, `gb`, and `us`, so a UK paywall gets a different rule than a Canadian one.
+
+Ladder itself is a thin Go service built on Fiber and goquery, and it exposes more surface than WallHop surfaces:
+
+- Header rewriting for CORS and Content-Security-Policy, plus custom User-Agent and `X-Forwarded-For` values
+- Regex rules that rewrite markup and asset URLs on the way back
+- A raw-HTML mode and a JSON API, the same two WallHop exposes
+- Optional FlareSolverr integration for sites sitting behind Cloudflare
+- Domain allowlists, Basic Auth, access logs, and Docker images for amd64 and arm64
+
+## Running your own copy of ladder
+
+The upstream binary is a better bet if you want this to keep working after WallHop disappears, and the install is short:
+
+```bash
+./ladder -r https://raw.githubusercontent.com/everywall/ladder-rules/main/ruleset.yaml
+# then open http://localhost:8080
+```
+
+Docker images and Linux, macOS, and Windows binaries are published on the same releases page. The upstream README is blunt about one thing: if you expose your instance publicly, turn on Basic Auth, because an open proxy on your hardware is an open proxy on your hardware. A commenter on the WallHop thread also pointed to `wasi-master/13ft`, another open-source alternative in the same family.
+
+## What to watch for
+
+Publisher terms and the law come first. Bypassing a paywall can breach the terms of service of the site you are reading, and a handful of jurisdictions restrict circumvention tools specifically. The ladder README is explicit that the project is "for legitimate testing, research, and quality assurance purposes only" and should be used in compliance with applicable law and the target site's terms. WallHop's hosted version does not carry that framing prominently, so treat the upstream project as the better-documented reference.
+
+Fragility is the next issue. Site-specific rules break whenever a publisher changes markup, and WallHop's author has been adding rules by request. In the launch thread, someone asked for a bypass for irishexaminer.com, and the author shipped a working example within the same day. That responsiveness is the product, and it depends on one person.
+
+Privacy has a real cost here. The proxy sees your IP address and every URL you send through it, and the server keeps access logs. A self-hosted instance keeps that data on your own hardware instead.
+
+It does not beat everything. Ladder's own documentation says plainly that it does not circumvent fingerprinting, rate limiting, or behavioral analysis, and that publishers serving cloaked content treat crawlers and browsers differently.
+
+The WallHop code is not public yet. I could not find a public repository for the fork as of writing, and the author said in the HN thread that he planned to publish it once he had cleaned it up. The upstream project is GPL-3.0 and was still receiving commits in late October. Given that WallHop is a derivative work of a GPL-3.0 project, publishing the source is the expected path.
+
+Finally, the service is free and funded by a single operator through Ko-fi. That is the right trade for a hobby project, and it also means the domain can vanish without warning.
+
+## Source and Accuracy Notes
+
+- Project page: https://wallhop.io/ (verified via direct visit on 2026-11-02)
+- Upstream project: `everywall/ladder` (Go, GPL-3.0) at https://github.com/everywall/ladder
+- Ruleset repository: `everywall/ladder-rules` (MIT)
+- HN launch thread: https://news.ycombinator.com/item?id=50038634 (289 points, 133 comments)
+- Author project page: https://a.wafflehacker.dev
+- Thumbnail: the site's own `og.png`, resized to 1200x630 WebP
