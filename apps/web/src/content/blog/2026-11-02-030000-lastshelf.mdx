@@ -1,0 +1,147 @@
+---
+title: "LastShelf: an emergency map for your family's documents"
+description: "LastShelf maps your family's documents, bills and trusted contacts, then gives the people you trust step-by-step instructions for an emergency."
+pubDate: "2026-11-01T20:00:00.000Z"
+author: "Friday"
+tags: ["ai", "privacy", "productivity", "consumer"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/lastshelf.webp"
+  alt: "LastShelf product page showing the four-step family continuity workflow"
+canonical: "https://runany.dev/blog/lastshelf/"
+---
+
+> **TL;DR:** LastShelf builds an emergency map of the documents, bills and accounts a family would need on a bad day, then hands trusted contacts step-by-step instructions for what to do first. It reads your Gmail with read-only access, pulls biller names, amounts and due dates out of it with large language models, and never moves money on your behalf. It costs nothing to use today, and it only works for people living in the United States.
+
+## What it is
+
+Most households have one person who knows where everything important is. The will, the insurance policy, the safe deposit box key, which bills cannot slip. Schuyler Brown, the founder, found out how fragile that arrangement is when his father was diagnosed with Stage 3 kidney cancer. Asking a frightened man to go document his will and his insurance while facing surgery added a second kind of stress to an already bad week, so Brown built LastShelf to carry that work instead.
+
+The product is a family continuity planner. You answer questions about your documents, contacts, accounts and debts. LastShelf turns that into a structured plan, spots what is missing, and publishes instructions that the people you nominate can follow without guessing.
+
+That is the whole pitch, and it is narrower than most apps in this category. LastShelf is not a binder, not a password manager, and not a budgeting tool. The About page states four principles, and they describe the design better than any feature list would:
+
+- Clarity over clutter
+- Sensitive by default
+- Tell, don't do
+- You stay in control
+
+The homepage frames the work as four motions. You document what you have, add the details only you know, let the app discover what your plan is missing, then generate the guide your family reads in a crisis.
+
+## How it works
+
+The How it works page breaks the setup into six moves:
+
+1. Guided setup covers people, documents, accounts and critical expenses.
+2. Connected sources, read-only Gmail and optional financial connections, surface bills, statements and invoices you would otherwise forget.
+3. Everything discovered lands in front of you for approval.
+4. You add what only you know, including wills, medical wishes, life insurance, safe deposit details and pointers into your password manager.
+5. LastShelf checks for new bill activity so the plan does not quietly go stale.
+6. Trusted contacts get step-by-step instructions for what to find, who to call, and which bills need attention.
+
+The approval loop in step 3 is the part that makes the rest tolerable. No discovered bill or extracted account detail becomes part of the plan until you confirm it. Missed-payment detection is best-effort, and there is always a manual mark-as-paid override.
+
+The Discover motion is where the product earns its keep. Your answers produce a ranked list of the gaps that matter most, with a practical path to closing each one, rather than a generic checklist that treats a missing medical directive the same as an unsigned envelope.
+
+## Where your data goes
+
+The privacy policy is unusually specific for a company this small, and it is where most of the real information is. Pagerguild, the legal entity behind LastShelf, publishes what it holds and what it refuses to hold on a dedicated Trust page.
+
+| What LastShelf holds | What it never holds |
+|---|---|
+| Read-only Gmail access, granted in the Google consent flow | The ability to pay a bill on your behalf |
+| The documents, details, contacts and approved bills you choose to save | Your Gmail, bank or password manager password |
+| The trusted contacts you designate, by name and email | Raw password storage, or shared primary-user logins |
+| Audit history and handoff context | Data from non-US banking or currencies |
+
+The mechanics underneath that table are worth reading. Google OAuth access and refresh tokens are encrypted before storage with AES-256-GCM, and the encryption keys and client secrets live in server-side environment secrets that never reach the browser. Product data sits with the database host behind row-level security, so an authenticated user sees their own records and nothing else. The company says it avoids logging raw OAuth tokens, raw email bodies and full account numbers.
+
+What reaches a third party is narrower than you might fear, and the privacy policy enumerates it rather than hiding it behind a generic subprocessor list. Large language models do see selected Gmail body text and bill attachments, and that is the actual product. The analytics provider receives operational events such as scan status, with sensitive fields stripped, and never raw email bodies, subjects, OAuth tokens or attachments. The policy also states that Gmail data is not used for advertising or for generalized AI model training, and that use of Google API data follows the Google API Services User Data Policy including its Limited Use requirements.
+
+For a financial connection, LastShelf uses Plaid to identify recurring bill payments and links them to the vendors you confirm.
+
+The extraction step produces a small, well-defined set of fields from each bill it finds:
+
+```json
+{
+  "biller_name": "from the email body or the PDF statement",
+  "amount": "extracted from the bill",
+  "due_date": "extracted from the bill",
+  "payment_link": "extracted from the bill",
+  "account_reference": "detected, encrypted at rest, masked for trusted contacts"
+}
+```
+
+Those five fields are named in the privacy policy, and the account reference is stored separately from the user-visible bill record, encrypted at rest, reachable only through server-side functions after authentication.
+
+Trusted contacts are treated as helpers, not tenants. They can receive help-alert emails and limited, revocable handoff access to the instructions, documents, contacts and bills you choose. They never see your primary dashboard, they cannot connect their own data sources, and they do not get general access to your financial data.
+
+## Getting it running
+
+There is nothing to install. You create an account, work through the eight setup questions, and optionally connect Gmail. A free readiness check on the marketing site asks six yes-or-no questions and tells you whether your family could currently find the documents, insurance details, debts and payment instructions they would need.
+
+Because the vendor's own pages carry the load-bearing promises, it is worth reading them yourself rather than trusting a summary. Both pages print the date they were last changed:
+
+```bash
+# Both legal pages carry a last-updated line
+curl -s https://lastshelf.ai/terms   | grep -oE 'Last updated: [A-Za-z]+ [0-9]{4}'
+curl -s https://lastshelf.ai/privacy | grep -oE 'Last updated: [A-Za-z]+ [0-9]{4}'
+
+# The free-to-use clause is section 16 of the Terms
+curl -s https://lastshelf.ai/terms | grep -oE 'currently free to use[^.]*\.'
+
+# The legal-validity disclaimer sits in the limits section
+curl -s https://lastshelf.ai/terms | grep -oE 'does not create, validate, execute[^.]*\.'
+```
+
+Before you connect a Gmail account, keep your own copy of the same six categories somewhere you control. This is not a substitute for the product, but it is what you hand a family member when the vendor or the service is unavailable:
+
+```yaml
+# A plain-text shelf map you own. Keep it in a password manager, not in email.
+contacts:
+  trusted:
+    - name: "..."       # who can step in
+      phone: "..."      # reachable without your inbox
+documents:
+  will:                # location, not a copy of the document
+    location: "..."
+  medical_directive:
+    location: "..."
+  life_insurance:
+    carrier: "..."
+    policy_number: "..."
+    agent: "..."
+bills:
+  - name: "..."
+    due_day: "..."
+    account_reference_last4: "..."   # masked, full value stays in the bank
+accounts:
+  - name: "..."
+    institution: "..."
+    username: "..."     # password stays in your password manager
+```
+
+## What to watch for
+
+The service is free right now, and section 16 of the Terms is explicit that this is not a promise. It says the Services are currently free to use with no payment method required, and that Pagerguild may introduce optional paid features later. It also promises material terms will be disclosed in advance and that you will not be charged without affirmative agreement. No pricing page exists on the site today, so treat the free tier as a launch-period condition rather than a permanent plan.
+
+The scope is narrow in a way that will matter if you are not in the United States. The Terms say the Services are currently designed for users in the US, that you must be at least 18, and that out-of-scope transactions are flagged rather than silently dropped.
+
+Disconnecting an integration does not clear your history. Section 17 says that disconnecting Gmail stops future access and revokes stored tokens where possible, but it does not automatically delete historical bill records, document metadata, account references, audit logs or analytics records. There is a separate account deletion flow if you want a clean break, and the Privacy page confirms that revoking Gmail deletes the stored tokens and flips your connection status.
+
+The legal limits are unusually blunt, and they are worth reading before you assume a document has force. Pagerguild states that LastShelf does not create, validate, execute, notarize, witness, record or file wills, powers of attorney, healthcare directives or any other instrument, and that uploading a document to LastShelf does not make it legally valid, recorded, filed or accepted by any court, hospital, insurer or financial institution. The Terms also say automated outputs may be incomplete, stale, inaccurate, incorrectly categorized or unavailable, and that you must review and verify all of them. Total liability is capped at what you paid in the preceding twelve months, and disputes go to arbitration under the Federal Arbitration Act.
+
+There is a deeper design point hiding under all of that. LastShelf tells, it does not act. It will never pay a bill, move money, or file anything, by design. That is a genuine safety property for something holding your financial and medical details. It is also why the product only works if a human stays in the loop, because the final step of a good emergency plan is somebody calm reading it. Start with the free readiness check, then decide whether the account and the Gmail connection are worth the rest.
+
+## Source and Accuracy Notes
+
+- Product page: https://www.lastshelf.ai/ (verified via direct visit)
+- How it works: https://lastshelf.ai/how-it-works
+- Trust page: https://lastshelf.ai/trust
+- Privacy policy: https://lastshelf.ai/privacy (last updated May 2026)
+- Terms of Service: https://lastshelf.ai/terms (Pagerguild, Inc., last updated July 17, 2026)
+- About page: https://lastshelf.ai/about
+- HN launch thread: https://news.ycombinator.com/item?id=48847298 (47 points, 33 comments, July 9, 2026)
+- Thumbnail: the product's own og-image.png
