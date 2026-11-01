@@ -1,0 +1,177 @@
+---
+title: "PantheonGPU: open-source GPU health and stress testing"
+description: "PantheonGPU is an open-source suite of 45+ GPU workloads for CUDA and ROCm. It stresses compute, memory, interconnect and AI paths, then returns a verdict per card."
+pubDate: "2026-11-01T12:15:00.000Z"
+author: "Friday"
+draft: false
+tags: ["gpu", "cuda", "rocm", "diagnostics", "benchmarking", "devops"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/pantheongpu.webp"
+  alt: "Stylized accelerator card under diagnostic stress testing, with telemetry waveforms and thermal bars behind it"
+canonical: "https://runany.dev/blog/pantheongpu/"
+---
+
+> **TL;DR:** PantheonGPU runs 45+ named workloads against a single NVIDIA or AMD card and returns a verdict per GPU, not a vague online status. Coverage spans compute pipelines, memory and cache behaviour, interconnect links and AI inference paths, and the same command runs on CUDA, ROCm or a mock backend with no hardware at all. The integration files turn that verdict into a yes or a no for Slurm, PBS, ReFrame and GitHub Actions.
+
+## What it is
+
+PantheonGPU is a GPU stress and diagnostics suite. The command is `pantheon`, and the unit of work is a named workload rather than a generic burn-in loop. You name a card and it exercises one specific path on that card: FP16 tensor arithmetic, uncoalesced memory reads, peer to peer DMA, a KV cache churn pattern, a rotary position embedding transform. Each workload reports in its own unit, bandwidth in GB/s, latency tests in operations per second, compute tests in whatever they actually measure.
+
+The core is C++ with a Python package wrapped around it, and it ships from PyPI, conda-forge, its own apt repository, a Fedora COPR, and container images for both CUDA and ROCm. Pantheon detects CUDA, ROCm/HIP or mock mode at startup, so the same command works on a workstation, on a cluster node, or on a laptop with no card attached while you test your own pipeline.
+
+## Why it matters
+
+A GPU in a monitoring dashboard is a telemetry feed. Temperature, fan speed, utilisation, memory used. Those numbers stay perfectly healthy on a card that computes wrong answers. A card with degraded HBM can show full utilisation while returning corrupt results, and a marginal VRM can pass a quiet idle morning and then throttle during a training burst. The only way to know is to make the card do the thing it is supposed to do and check the answer.
+
+Pantheon is built around that idea. Every workload targets a named failure mode, and the names make the intent plain. Memory Retention Bake writes a known payload, heats the device with compute work, then checks whether the memory kept it. Memory Asymmetric Thermal hammers one isolated memory region while drawing compute power, to build a package thermal gradient and see whether the memory side suffers for it. Atomic Virus forces concurrent wide-stride atomic read-modify-write operations to stress L2 arbitration.
+
+For fleet operators the interesting part is comparison. Run the same workload on one card and on a sibling that is identical on paper, and any divergence in memory bandwidth, thermal behaviour or interconnect counters points at the one card that differs. That is the difference between "node 42 looks odd" and "the card in slot 3 is the problem".
+
+## Getting it running
+
+The shortest path is pipx, which installs the CLI in its own environment and keeps it out of your system Python:
+
+```bash
+pipx install pantheon-gpu
+pantheon --test baseline_metrics --duration 10
+```
+
+Baseline Metrics is the reference measurement. It initialises the GPU without doing compute or memory work, so the other numbers have an idle baseline to compare against.
+
+Then run something that targets a real weakness:
+
+```bash
+pantheon --test fp64_virus --duration 30 --gpu 0
+```
+
+FP64 Chokehold holds sustained double-precision fused multiply-add work, which is where a card quietly running its FP64 path at a fraction of spec gives itself away.
+
+If you would rather not install anything on the host, the container images carry the toolkit with them:
+
+```bash
+docker run --rm -t --gpus all -v "$PWD:/reports" \
+  ghcr.io/pantheongpu/pantheon:latest --test tensor_virus --duration 60
+```
+
+AMD cards use a different image and different device flags:
+
+```bash
+docker run --rm -t --device=/dev/kfd --device=/dev/dri --group-add video \
+  -v "$PWD:/reports" \
+  ghcr.io/pantheongpu/pantheon:latest-rocm --test tensor_virus --duration 60
+```
+
+Building from source needs a CUDA toolkit or hipcc, plus make and g++, then a platform flag:
+
+```bash
+make PLATFORM=CUDA -j$(nproc)     # or PLATFORM=HIP for AMD
+```
+
+The CLI also takes `--mem` to cap how much memory a workload may touch, `--verify` to run the verification pass after the stress pass, and `--profile` to write a profile alongside the report. Useful flags on a shared node where you cannot afford to hog the card.
+
+## What the workloads cover
+
+| Group | Count | What it puts under load |
+| --- | --- | --- |
+| Core and compute | 10 | FP16 tensor math, FP64 throughput, integer ALUs, special function units, matrix cores |
+| Fixed function | 2 | Ray traversal hardware and the video encoder |
+| Memory and cache | 10 | Sequential and aggressive bandwidth, bank thrash, cache arbitration, retention under heat |
+| Memory diagnostics | 5 | Cell level faults: stuck-at, transition, coupling, address decoder |
+| Interconnect and architecture | 7 | NVLink, Infinity Fabric, PCIe, TLB, crossbar traffic, stream scheduling |
+| Baseline | 1 | Idle reference metrics |
+| AI and ML | 14 | Decode, prefill, KV cache churn, fused attention, speculative decode, MoE routing |
+
+Ten compute workloads, and each one isolates a specific datapath. Omni Virus overlaps memory sweeps, FP16 tensor math, FP32 vector math and SFU work to load several pipelines at once. Voltage Virus uses volatile math to force rapid ALU state switching and expose rail and VRM stability limits. SFU Virus hammers the high latency transcendentals, SIN, COS, EXP, LOG and reciprocal square root, which live on a separate unit from the ALUs and fail independently of them.
+
+The memory diagnostics group works as a funnel rather than a set of independent checks. March Test runs a March C- sequence in both address directions, which finds stuck-at, transition and coupling faults that order independent tests cannot see. Memory Hammer reads aggressor pairs around an untouched victim cell, looking for disturbances caused by neighbours rather than by writes. GALPAT gallops one flipped cell against every other cell in a region, which exposes address decoder faults but is quadratic, so it gets aimed at a region another test already implicated. The bridge between them is a `--fault_map` option on the workload binaries, which records the failing addresses.
+
+## Reading the verdict
+
+Each run prints a verdict per card. Here is an H100 that is thermally throttled and throwing correctable PCIe errors:
+
+```text
+VERDICT GPU 0, NVIDIA H100 80GB HBM3: WATCH  (thermally throttled on 2; correctable errors on 8)
+  ! thermal: memory_read thermally throttled, GPU at 95 C, memory_read_agg thermally throttled, GPU at 94 C
+  ! correctable errors on 8 workload(s): pcie.bad_tlp +9, pcie.lcrc +6
+  note: PCIe link recovery events on 8 workload(s): link power-state cycling, not a fault
+```
+
+That last line matters. A PCIe link recovery is ordinary power state cycling, and Pantheon deliberately separates it from the errors that should stop a card going into service.
+
+For schedulers, the integration layer collapses that into an exit code:
+
+| Exit code | Verdict | Meaning |
+| --- | --- | --- |
+| 0 | HEALTHY | Every workload completed and nothing was found |
+| 0 | SKIPPED | The job has no GPU, so nothing was tested |
+| 1 | WATCH | The card works, and something deserves a look: heat, correctable errors, or a workload that did not complete |
+| 2 | FAULT | A memory test failed, or the card counted uncorrectable errors during the run |
+| 3 | INCOMPLETE, NO GPU TESTED, NOT RUN | Nothing was tested or the run did not finish. It is never a pass |
+
+The verdict comes from the reports rather than from the exit code of Pantheon itself. Pantheon exits with an error when a workload fails, while errors that a card counted during a run that completed land in the report only.
+
+## Putting it in front of a scheduler
+
+The integration files live under `integrations/` in the source repository and are plain files you copy, not packages that ship with the wheel. They work with Pantheon 1.2.2 and later.
+
+The Slurm epilog tests the cards of any job that had a GPU, for ten seconds, and drains the node when a card has a fault. Only a fault drains it. A warning goes to the log.
+
+```bash
+install -m 755 pantheon_node_check.py /usr/local/sbin/pantheon_node_check.py
+install -m 755 slurm/epilog.sh /etc/slurm/epilog.d/50-pantheon.sh
+```
+
+The same check works as a Node Health Check for Slurm or PBS, which matters because the built-in NHC GPU check calls a utility NVIDIA no longer ships:
+
+```bash
+* || export TIMEOUT=90
+* || check_pantheon
+```
+
+ReFrame gets a regression test that reports the score and the highest temperature of each card as performance values, so a card that got slower shows up against the reference for its node type:
+
+```bash
+reframe -C settings_example.py -c pantheon_check.py -r --exec-policy serial -S devices=0 -S duration=5
+```
+
+And for self-hosted CI runners there is a GitHub Action that checks the cards before a job uses them:
+
+```yaml
+jobs:
+  train:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: pantheongpu/gpu-health-check@v0
+      - uses: actions/checkout@v4
+      - run: python train.py
+```
+
+## What to watch for
+
+This is a young project. The repository was created at the end of August 2026 and the latest release is v1.2.4 from mid October. It is Apache 2.0 licensed and the code is readable, which is the main reason to trust the numbers, but the user base is still small.
+
+The workloads deliberately make the card hot. Average power during a run, as the median across the cards in the project's own database:
+
+| Workload | A100 SXM4 40GB (limit 400 W) | L40S (limit 350 W) | H100 PCIe (limit 350 W) |
+| --- | --- | --- | --- |
+| galpat, memory pattern test | 101 W | 87 W | 91 W |
+| march_test, memory pattern test | 176 W | 185 W | 176 W |
+| memory_read, memory bandwidth | 283 W | 218 W | 346 W |
+| incinerator, compute | 307 W | 265 W | 289 W |
+
+Plan the duration around that. A memory bandwidth workload on an H100 PCIe pulls 346 W, and a power cap of 350 W leaves almost no headroom.
+
+Two more caveats. The public benchmark explorer collects results from third-party cloud and community systems including Vast.ai and RunPod, and the site states plainly that these are not collected, certified or endorsed by NVIDIA or AMD. And on a node with neither nvcc nor hipcc, Pantheon falls back to a CPU backend that tests no hardware at all, which the check reports as NO GPU TESTED with exit code 3.
+
+The project is also candid about the limits of its own validation. The integration files were exercised on a one-node test cluster under Slurm 23.11.4 using the CPU backend, plus an RTX 3060 for the ReFrame path, and the maintainers state they have not run them on a cluster with real GPUs under Slurm, on AMD cards, or with MIG devices.
+
+## Source and accuracy notes
+
+- Project page: https://pantheongpu.com (verified by direct visit on 2026-11-01)
+- Documentation and test catalogue: https://pantheongpu.com/tests/ (verified by direct visit on 2026-11-01)
+- Source repository: https://github.com/pantheongpu/pantheon (C++ core, Python packaging, created 2026-08-28)
+- License: Apache-2.0, confirmed from the repository metadata and stated in the site footer
+- Latest release: v1.2.4, published 2026-10-17
+- Benchmark methodology and driver coverage: https://pantheongpu.com/methodology/ (verified by direct visit on 2026-11-01)
+- HN launch thread: https://news.ycombinator.com/item?id=49350637 (13 points, 2026-08-18)
