@@ -1,0 +1,157 @@
+---
+title: "Hacker Books: every book mentioned on Hacker News"
+description: "Hacker Books turns 239,537 Hacker News comments into a searchable shelf of 16,543 books, ranked by how many distinct readers mentioned each one."
+pubDate: "2026-11-01T17:30:00.000Z"
+author: "Friday"
+tags: ["books", "hacker-news", "dataset", "data-analysis", "python"]
+category: "review"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hacker-books.webp"
+  alt: "Hacker Books wordmark beside a grid of the eight most-mentioned book covers on Hacker News"
+canonical: "https://runany.dev/blog/hacker-books/"
+draft: false
+---
+
+> **TL;DR:** Hacker Books turns every book named in Hacker News comments into a browsable shelf of 16,543 titles, ranked so the distinct readers behind a book count for more than the raw number of times it was mentioned. The whole ranking also ships as a single CSV, so you can pull it down and run your own analysis instead of living in the web app.
+
+## What it is
+
+Hacker Books is a static web app that catalogues the books people name in Hacker News comments. The current build covers 16,543 books across 295,907 mentions in 239,537 comments by 59,659 different commenters, running from 2007 through 2026.
+
+Two numbers are tracked per book. Mentions counts how many comments referenced it. Distinct commenters counts how many separate accounts did. The published score weighs distinct commenters more heavily than raw mentions, so one person posting about a book forty times cannot push it to the top of the shelf.
+
+There are four ways in. Top all-time is the main ranking. Rising highlights books whose mentions are climbing, and it only considers books with at least five mentions so a single comment cannot create a spike. For You is computed in your browser from the books you open, with no account and no network request. The fourth is topic browsing, with 29 shelves running from Fiction and Literature down to Lisp and Functional.
+
+Opening a book gives you a bar chart of mentions per year, the HN comments that mention it with the title highlighted in the text, and the books that tend to appear alongside it.
+
+## How a mention becomes a row
+
+The project documents its extraction pipeline, which is the part worth reading, because it explains the shape of the counts.
+
+1. It starts from a public archive of every Hacker News item and comment, published as the open-index/hacker-news dataset on Hugging Face under an Open Database License.
+2. Regexes and light NLP look for phrases that look like book references: quoted titles, "by Author" constructions, links to Amazon, Goodreads or Open Library, and ISBNs.
+3. Candidates are matched to Open Library works, which gives a stable ID, the author list, the first publication year, cover art and subject headings.
+4. Every title that resolved is then searched for again across the whole corpus, so a book still gets counted in comments where nobody linked it.
+5. A small language model is used only on genuinely ambiguous titles, things like Dune, Influence or Range, to decide whether a comment is really about the book.
+
+Step five is the one to hold in mind. A title such as Dune shows up in comments about sand, about the Frank Herbert novel and about a hundred other things, and no regex can separate them. The model is applied narrowly, but it is applied.
+
+## What the ranking looks like
+
+| Rank | Book | Distinct commenters | Mentions | First mentioned |
+|---|---|---|---|---|
+| 1 | The art of computer programming, Donald Knuth | 1,161 | 1,848 | 2007 |
+| 2 | Gödel, Escher, Bach, Douglas R. Hofstadter | 1,049 | 1,432 | 2007 |
+| 3 | Snow Crash, Neal Stephenson | 1,004 | 1,328 | 2007 |
+| 4 | Thinking, fast and slow, Daniel Kahneman | 890 | 1,182 | 2011 |
+| 5 | How to Win Friends and Influence People, Dale Carnegie | 877 | 1,097 | 2007 |
+| 6 | Atlas Shrugged, Ayn Rand | 805 | 1,063 | 2007 |
+| 7 | The Black Swan, Nassim Nicholas Taleb | 756 | 971 | 2007 |
+| 8 | The Mythical Man-Month, Frederick P. Brooks | 759 | 952 | 2007 |
+| 9 | Brave New World, Aldous Huxley | 764 | 912 | 2007 |
+| 10 | Clean Code, Robert C. Martin | 731 | 948 | 2007 |
+
+Rank is not a mention sort. The Mythical Man-Month sits at number 8 with 759 distinct commenters and 952 mentions, while The Black Swan sits at 7 with 756 commenters and 971 mentions: the book that more people brought up ranks higher even though it was named fewer times. It is not a plain commenter sort either, since Brave New World has more distinct commenters than either of them and still lands at 9. The scores run from 100 down to the low 90s across these ten, and the site describes the blend qualitatively without publishing the formula, so treat the exact order of neighbouring books as approximate.
+
+Nine of the top ten were first mentioned in 2007, the year HN comments opened up, so the shelf carries a heavy tail from the first wave of commenters. Thinking, fast and slow is the lone arrival after that, at 2011.
+
+| Topic | Books |
+|---|---|
+| Fiction and Literature | 3,698 |
+| Politics and Society | 2,276 |
+| Other | 2,090 |
+| History | 1,644 |
+| Business and Management | 1,361 |
+| Programming | 898 |
+| Computer Science | 771 |
+| AI and Machine Learning | 201 |
+| Lisp and Functional | 107 |
+
+## Working with the data
+
+The full ranking is a single CSV, 16,543 rows, no key and no login.
+
+```bash
+curl -sL https://hackerbooks.org/data/hackerbooks.csv -o hackerbooks.csv
+head -2 hackerbooks.csv
+```
+
+Columns are rank, openlibrary_work, title, authors, first_published, hn_commenters, hn_mentions, first_mentioned, last_mentioned, topics and openlibrary_url. Topics are semicolon separated, so a book can sit in several shelves at once.
+
+Counting books per topic takes a few lines:
+
+```python
+import csv, collections
+
+rows = list(csv.DictReader(open("hackerbooks.csv", encoding="utf-8")))
+
+topics = collections.Counter()
+for r in rows:
+    for t in (r["topics"] or "").split(";"):
+        t = t.strip()
+        if t:
+            topics[t] += 1
+
+print(topics.most_common(5))
+```
+
+```text
+[('fiction', 3698), ('politics-society', 2276), ('other', 2090), ('history', 1644), ('business', 1361)]
+```
+
+Or you can stream the file without saving anything and filter as the rows arrive:
+
+```bash
+curl -sL https://hackerbooks.org/data/hackerbooks.csv | python3 -c "
+import csv, sys
+for r in csv.DictReader(sys.stdin):
+    if 'programming' in r['topics']:
+        print(r['rank'], r['title'], r['hn_commenters'])
+" | head -5
+```
+
+```text
+1 The art of computer programming 1161
+8 The Mythical Man-Month 759
+10 Clean Code 731
+11 Introduction to Algorithms 727
+12 Code Complete 661
+```
+
+## Driving the site from the keyboard
+
+The whole app is keyboard-first, which suits a site whose readers already live in a terminal.
+
+| Key | Action |
+|---|---|
+| `/` | Focus the search box |
+| `j` / `k` | Move to the next or previous book |
+| `Enter` | Open the focused book |
+| `Esc` | Close a panel or step back |
+| `g h` | Go to Home |
+| `g t` | Go to Top all-time |
+| `g r` | Go to Rising |
+| `g f` | Go to For You |
+| `?` | Toggle the help panel |
+
+Search takes aliases as well as titles, so taocp, sicp and k&r find their books without the full name. Covers load from a Hacker Books mirror first and fall back to Open Library, and when neither has art the site draws a typographic placeholder from a hash of the title, which is why the grid never shows a broken image.
+
+## What to watch for
+
+A mention is not a recommendation. The project says so outright: a book counts whether people praise it, criticise it or argue about it. Atlas Shrugged and The Mythical Man-Month are on the shelf because they come up constantly, not because anyone likes them, so reading the ranking as a taste list is a mistake. What it measures is attention.
+
+The counts also say nothing about the shape of a discussion. Mentions are mentions, so a book named once in a 400-comment thread and a book named once in a two-comment thread look identical. The per-year chart on each book page is more telling than the total, since it shows whether the conversation is still happening or died years ago.
+
+The browser view is a subset of the data. First paint loads a 600-book index and the full set of 16,543 is fetched lazily when you search or filter, which is the reason to grab the CSV. Comments on a book page are a capped sample too, the most discussed first, revealed 15 at a time, and the site states plainly that the rest live in the dataset.
+
+Privacy is the easiest part to like here. There are no accounts and no tracking, and For You never leaves your browser: the topic affinity and the last 400 books you opened are kept in localStorage and can be cleared whenever you want.
+
+## Source and Accuracy Notes
+
+- Project page: https://hackerbooks.org, verified by direct visit on 2026-11-02
+- Book-level dataset: https://hackerbooks.org/data/hackerbooks.csv, 16,543 rows, generated 2026-11-01
+- HN launch thread: https://news.ycombinator.com/item?id=50326821, 125 points and 21 comments, posted 2026-11-01 by roansh
+- Upstream comment archive: open-index/hacker-news on Hugging Face, Open Database License, last updated 2026-08-23
+- Book metadata and covers: Open Library
+- Sister project: HackerTube by Andrej Karpathy at https://hackertube.org
+- The project states it is not affiliated with Y Combinator or Hacker News
