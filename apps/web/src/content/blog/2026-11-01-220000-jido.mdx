@@ -1,0 +1,203 @@
+---
+title: "Jido: an Elixir agent framework built on OTP supervision"
+description: "Jido is an Elixir agent framework where agents are pure functions, with typed actions, CloudEvents signals, and pluggable LLM strategies."
+pubDate: "2026-11-01T22:00:00.000Z"
+author: "Friday"
+draft: false
+tags: ["elixir", "ai-agents", "agent-framework", "otp"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/jido.webp"
+  alt: "The Jido wordmark in bright green above the tagline A Runtime for Reliable Multi-Agent Systems on a black background"
+canonical: "https://runany.dev/blog/jido/"
+---
+
+> **TL;DR:** Jido is an agent framework for Elixir that treats an agent as plain data, so every decision is a pure function you can unit test without touching a network or a model. Version 2.0, shipped in March 2026, was a rewrite with a slimmer API, **Apache-2.0** licensing, and about 1,900 GitHub stars. The `jido` Hex package has passed 267,000 downloads, and because it runs on the BEAM, OTP supervisors restart crashed agents on their own.
+
+## What it is
+
+Jido is an open-source framework for building multi-agent systems in Elixir, maintained by Mike Hostetler and published under the Apache-2.0 license. The project started in December 2024 as a bot platform called BotHive, changed its name when the author decided to bet on the BEAM as the runtime for agent workloads, and reached version 2.0 in March 2026. The current release is 2.4.0, published on October 8, 2026.
+
+The pitch on the homepage is building AI agents that run in production, and the reason it reaches for Elixir instead of TypeScript or Python is concurrency. Each agent gets its own lightweight process with isolated memory, so one failing agent does not take the rest down, and an OTP supervisor notices the crash and restarts it in milliseconds. The site makes the argument that the same runtime powers WhatsApp and Discord, which is the kind of comparison that tends to land with people who have run large fleets of long-lived connections.
+
+The conceptual surface is small. There are agents, actions, signals, directives, and strategies. Everything else is built out of those five.
+
+## Why it matters
+
+Most agent frameworks start from an LLM call and add process management afterward. Jido inverts that. The LLM is a pluggable strategy sitting on top of a runtime designed for supervising long-lived processes.
+
+The inversion shows up in the API. An agent is a struct holding state, actions, and tools. Actions go in through a single function, `Jido.Agent.cmd/2`, and what comes back is an updated agent plus a list of directives. Directives describe the side effects the runtime should perform, and they are typed data rather than function calls. Nothing happens inside `cmd/2` itself.
+
+The payoff is testability. You can assert on the returned agent state and on the directive list without mocking a model, a database, or an HTTP client. For a category of software where the usual answer is "run it and see what the LLM does", that is a meaningful shift.
+
+It also means the AI layer is optional. The core ships strategies that have nothing to do with language models, and the AI strategies plug into the same contract.
+
+## Getting it running
+
+You need Elixir 1.18 or later and OTP 27. Phoenix is optional, since Jido works in a plain Mix project.
+
+```bash
+mix new my_agent_app --sup
+cd my_agent_app
+```
+
+Add the dependencies. The core framework, the AI layer, and the LLM client are separate packages, and the AI ones pull in the third.
+
+```elixir
+# mix.exs
+defp deps do
+  [
+    {:jido, "~> 2.0"},
+    {:jido_ai, "~> 2.0"},
+    {:req_llm, "~> 1.6"}
+  ]
+end
+```
+
+```bash
+mix deps.get
+mix compile
+```
+
+Runtime configuration belongs in `config/runtime.exs` rather than `config/config.exs`, so provider keys stay out of compiled artifacts.
+
+```elixir
+# config/runtime.exs
+import Config
+
+config :req_llm,
+  openai_api_key: System.get_env("OPENAI_API_KEY")
+```
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+```
+
+Then confirm both applications boot from an IEx session.
+
+```bash
+iex -S mix
+```
+
+```elixir
+iex> Application.ensure_all_started(:jido)
+{:ok, _}
+iex> Application.ensure_all_started(:jido_ai)
+{:ok, _}
+```
+
+## Agents as data
+
+A core agent needs no model and no API key. You define it with a name, a schema for its state, and a list of actions it can take.
+
+```elixir
+defmodule MyAgent do
+  use Jido.Agent,
+    name: "my_agent",
+    description: "A simple agent",
+    strategy: Jido.Agent.Strategy.Direct,
+    actions: [MyApp.Actions.ProcessOrder],
+    schema: [
+      order_count: [type: :integer, default: 0]
+    ]
+end
+```
+
+You drive it with a pure function.
+
+```elixir
+{:ok, updated_agent, directives} = Jido.Agent.cmd(agent, {ProcessOrder, order_id: "123"})
+```
+
+That one call is the whole core: actions in, updated agent and directives out. The agent stays a value the entire time.
+
+`Jido.AgentServer` turns that value into something running. It wraps an agent in a supervised GenServer and adds signal routing, directive execution, and parent-child agent hierarchies. Starting one returns a pid, and asking it a question is a normal function call.
+
+```elixir
+{:ok, pid} = Jido.AgentServer.start(agent: MyApp.SupportAgent)
+{:ok, answer} = MyApp.SupportAgent.ask_sync(pid, "Where is order #4521?", timeout: 60_000)
+```
+
+## Strategies decide how actions run
+
+A strategy is the pluggable piece that interprets `cmd/2`. The core ships two that never call a model:
+
+| Strategy | What it does |
+| --- | --- |
+| `Direct` | Runs actions sequentially, in order |
+| `FSM` | State machines with transition guards, where an action is allowed only from certain states |
+
+Jido AI adds six more for model-driven work, all implementing the same contract:
+
+| Strategy | When it fits |
+| --- | --- |
+| ReAct | The default. Reason, call tools, feed results back, repeat |
+| Chain-of-Thought | Step-by-step reasoning when depth matters more than cost |
+| Tree-of-Thoughts | Explore several branches before committing to one |
+| Graph-of-Thoughts | Non-linear reasoning across a graph rather than a chain |
+| TRM | For tasks that need a different reasoning tradeoff |
+| Adaptive | Picks a strategy based on the incoming request |
+
+ReAct covers most tool-calling work, and the author says as much.
+
+The same extension point has been used for something with no LLM at all. The separate `jido_behaviortree` package adds behavior tree execution, which is a completely different execution model plugged into the same interface.
+
+## The AI layer
+
+`jido_ai` turns raw LLM calls into structured agent intelligence. An AI agent declares its tools and a model, and the framework handles the loop.
+
+```elixir
+defmodule MyApp.SupportAgent do
+  use Jido.AI.Agent,
+    name: "support_agent",
+    description: "Customer support agent with tool access",
+    tools: [
+      MyApp.Tools.LookupOrder,
+      MyApp.Tools.CheckInventory,
+      MyApp.Tools.CreateTicket
+    ],
+    model: "anthropic:claude-sonnet-4-20250514",
+    max_iterations: 6,
+    system_prompt: "You are a customer support agent. Be concise and helpful."
+end
+```
+
+Tools are `Jido.Action` modules, so anything you can define as an action becomes something the model can call.
+
+Underneath, Jido AI uses ReqLLM, an Elixir LLM client the author built because one did not exist. It is streaming-first and multi-provider, covering 665+ models across 11 provider implementations. It is now at version 1.6 with outside contributors, and the author reports several companies running it in production.
+
+## Actions and signals split out
+
+Version 2.0 split the two most reused pieces into their own packages.
+
+`jido_action` is the universal action contract: a composable, validated command with compile-time schema validation, lifecycle hooks, and automatic conversion to ReqLLM's tool format. It ships with more than 25 pre-built tools and a DAG-based workflow planner for multi-step execution.
+
+`jido_signal` is the messaging layer, and it deliberately avoids inventing a protocol. Signals follow the CloudEvents v1.0.2 specification, with a trie-based router, a pub/sub bus, and nine dispatch adapters. That choice means agents can talk to anything else that speaks CloudEvents, not just to each other.
+
+## The ecosystem around it
+
+Jido 2.0 also shipped `ash_jido`, which makes agents a first-class citizen in Ash. You add a `jido` DSL block to an Ash resource and its CRUD actions become AI-callable tools, with authorization policies, data layers, and type safety intact. Meanwhile `ash_ai` is moving to ReqLLM as its LLM client, which puts the two ecosystems on the same footing.
+
+The ecosystem page lists further packages for browser automation, memory systems, evaluation harnesses, and MCP integration.
+
+Two details matter if you plan to point an agent at the documentation. The site ships an `llms.txt` file, and appending `.md` to any public route returns clean markdown instead of HTML. There is also a live MCP docs server at `https://jido.run/mcp/docs`, exposing `search_docs`, `get_doc`, and `list_sections`.
+
+## What to watch for
+
+Elixir is not optional, and it is not a small ask. If you do not already know OTP, the docs include a dedicated track for newcomers, but reading the codebase assumes supervision trees, GenServers, and signals. The framework's own argument for the BEAM is precisely the thing you need to understand to use it well.
+
+Version 1.0 existed for about a year, and the author describes it as overengineered, with abstractions that did not pay off in practice. 2.0 is a response to that, which means the API is still moving. The package was updated on October 19, 2026 and the repository had a single open issue at the time of writing, so maintenance is active, but expect churn if you pin to `~> 2.0` and keep it for a long time.
+
+The wider ecosystem is younger than the core. That is normal for a framework that shipped its rewrite eight months ago, but it means the surrounding packages are more speculative than the framework itself.
+
+## Source and Accuracy Notes
+
+- Project page: https://jido.run/ (verified by direct visit on 2026-11-01)
+- Source repository: github.com/agentjido/jido (Apache-2.0 license, Elixir, 1,900 stars, 121 forks, 1 open issue)
+- Launch post: https://jido.run/blog/jido-2-0-is-here
+- HN launch thread: https://news.ycombinator.com/item?id=47263036 (323 points, 2026-03-05)
+- Hex package `jido`: 267,244 all-time downloads, 14,495 in the past week, updated 2026-10-19
+- Latest release: v2.4.0, published 2026-10-08
+- Docs: https://jido.run/docs and https://hexdocs.pm/jido
+- The older domain agentjido.xyz redirects to jido.run
+- Install steps, code samples, strategy lists, and download counts read from the project docs, Hex, and the GitHub API on 2026-11-01
