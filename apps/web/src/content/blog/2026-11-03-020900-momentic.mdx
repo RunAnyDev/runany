@@ -1,0 +1,162 @@
+---
+title: "Momentic: AI agents that find bugs by using your app"
+description: "Momentic runs AI QA agents against your app: Mo hunts real bugs in a live browser, while YAML tests and an MCP server cover CI."
+pubDate: "2026-11-02T19:09:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "testing", "ai-agents", "qa"]
+category: "dev-tools"
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/momentic.webp"
+  alt: "Momentic wordmark with its geometric logo mark beside the tagline The agentic quality platform"
+canonical: "https://runany.dev/blog/momentic/"
+---
+
+> **TL;DR:** Momentic is a YC W24 QA platform built around a custom agent harness that drives a real browser or device to find bugs in a running app. Its exploratory product, Mo, matched 269 of 1,396 labeled bugs in an average one hour pass, roughly three times the nearest competitor. A separate YAML test suite, CLI, and MCP server plug the same engine into your repository and your CI.
+
+## What it is
+
+Momentic is a San Francisco company, backed by Y Combinator in the W24 batch, that sells AI agents which test software. The pitch is that coding agents made writing software much faster, but nobody knows whether the result works, so verification became the bottleneck. Momentic attacks that bottleneck by pointing an agent at a running application and letting it break things.
+
+The homepage counters are the kind companies like to inflate, but they are at least self-reported and specific: 77,813 tests created, 70,607,819 test runs executed, 117,010 bugs caught. Customer logos on the site include Notion, Runway, Webflow, GPTZero, and Coframe.
+
+There is a second product underneath, and it is the one you will actually install. Momentic also ships a conventional end-to-end testing framework where the test files are YAML you commit to your repository, and where a coding agent can write, run, and repair those files through an MCP server.
+
+## Two products wearing one name
+
+The confusing part is that the docs split into two CLIs with two names, and getting this wrong is the first thing that breaks.
+
+`momentic` and `momentic-mobile` are the YAML test framework for web and mobile. Mo, the exploratory agent, is a separate product with a separate CLI named `qa`. The docs warn about this explicitly, because `npx mo` resolves to an entirely unrelated project.
+
+| Product | npm package | CLI | What it does |
+| --- | --- | --- | --- |
+| YAML test suite | `momentic` | `npx momentic run` | Runs committed YAML tests, locally or in CI |
+| Mobile test suite | `momentic-mobile` | `npx momentic-mobile run` | Same YAML format against iOS simulators and Android emulators |
+| Mo | `qa` | `qa start` | Exploratory session against a running app from a written brief |
+
+Physical devices are not supported anywhere in the product line. Web tests run on Chromium, iOS tests on simulators, Android tests on emulators, either yours or Momentic's.
+
+## Getting the YAML suite running
+
+The install path is the wizard. It signs you in through the browser, installs the matching CLI, writes a `momentic.config.yaml` plus a sample test, and runs that sample.
+
+```bash
+npx @momentic/wizard@latest
+```
+
+The sample test it writes is the whole value proposition in miniature. Steps are plain English or structured YAML, and the framework mixes preset actions with AI-driven goals in the same file:
+
+```yaml
+fileType: momentic/test/v2
+id: silver-river-lantern
+url: https://shop.example.com
+before:
+  - module: ../modules/log-in.module.yaml
+steps:
+  - click: Checkout
+  - type:
+      text: jeff@example.com
+      into: Email input
+  - assert: An order confirmation is visible
+after:
+  - Empty the cart
+```
+
+An `AI action` step is the interesting one. Instead of naming a selector, you describe an outcome and the agent works out how to get there. The framework also caches resolved locators between runs, escalates from in-run locator fixes to permanent auto-healing, and can quarantine a test when the underlying UI changed on purpose.
+
+Running them needs an API key. `npx momentic login` writes one to `~/.momentic/auth.json`, and `MOMENTIC_API_KEY` overrides it for CI.
+
+```bash
+npx momentic login
+npx momentic run                  # every web test
+npx momentic run example-test     # one test by name substring
+```
+
+## Wiring it into a coding agent
+
+This is the part that feels current rather than bolted on. Momentic runs an MCP server as a local stdio process, so Claude Code, Cursor, or Codex gets a live browser plus tools to browse, edit, run, and triage tests. The server needs Momentic CLI 2.54.0 or later.
+
+```bash
+npx momentic install-mcp --client claude-code
+```
+
+For Claude Code specifically, the equivalent manual registration is a single command:
+
+```bash
+claude mcp add --transport stdio momentic -- npx momentic mcp --config /absolute/path/to/momentic.config.yaml
+```
+
+After restarting the client, the agent should list tools prefixed `momentic_`, such as `momentic_get_artifacts`. The same setup works for mobile by registering a separate `momentic-mobile` server.
+
+In CI, the tests are ordinary YAML files and the exit code gates the merge:
+
+```yaml
+name: CI
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    types: [opened, synchronize]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MOMENTIC_API_KEY: ${{ secrets.MOMENTIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+```
+
+GitLab, CircleCI, Jenkins, Travis, Buildkite, and Azure DevOps all have documented equivalents.
+
+## What QA Bench actually measured
+
+Momentic published a benchmark on November 2, the same day it launched on HN, and the repo is MIT licensed so anyone can rerun it. It is worth reading the raw numbers rather than the headline, because the headline and the cost table point in opposite directions.
+
+The setup: 1,396 labeled bugs across 20 product areas in four open-source applications (Gitea, Metabase, Twenty, Saleor), each agent given one product area in a fresh sandbox and either 30 or 60 minutes, graded by an LLM judge against approved reference bugs. Counts average three runs per area, except Devin, which got a single pass.
+
+| Configuration | Bugs matched at 60 min | Precision | Cost per bug |
+| --- | --- | --- | --- |
+| Mo | 269.3 | 84.2% | $2.67 |
+| Codex (GPT-6.1 Sol) with Playwright MCP | 86.3 | 86.0% | $0.80 |
+| Claude Code (Opus 5.5) with Playwright MCP | 59.0 | below Mo | $4.09 |
+
+Mo finds 3.1 times as many real bugs as Codex and 4.6 times as many as Opus 5.5, at 35 percent less cost per bug than Opus 5.5 and more than three times the cost per bug than Codex. Codex is more precise. Almost none of the 1,396 labeled bugs are found in a single pass: Mo matched 19.3 percent of them on average.
+
+Two details worth noticing. The browser tool mattered as much as the model, with Playwright MCP finding 10 to 58 percent more reference bugs than agent-browser for both Codex and Opus 5.5. And the budget change moved the numbers unevenly: going from 30 to 60 minutes, Mo's matches rose 52 percent while Codex Sol with Playwright MCP rose 16 percent and fell 5 percent with agent-browser.
+
+The founders are refreshingly blunt in the launch thread about the moat. One commenter asked whether to expect BYOA, and Jeff, a co-founder, said they wrestled with it and that plugging an off-the-shelf frontier model into their harness did not produce a result worth shipping, because much of the engineering went into tuning agents for element grounding and visual understanding.
+
+## What to watch for
+
+Pricing is credit-based, and the credit unit is unusually granular. A normal test step costs one credit, while a step generated by an AI action or by failure recovery costs two. A typical run is about ten steps, which works out to roughly 200 runs a month on the free tier and 1,000 on the paid one. Overage on the paid tier runs $0.01875 per credit and the free tier hard stops at its limit instead. Credits reset each billing cycle and do not roll over.
+
+| Plan | Price | Credits | Concurrent browsers |
+| --- | --- | --- | --- |
+| Free | $0 | 2,000 per month | 5 |
+| Pay-as-you-go | $125 per month | 10,000 per month | 25 |
+| Enterprise | custom | custom | custom |
+
+The data handling is documented in more detail than most tools of this size bother with. Model providers are listed by name (Anthropic, OpenAI, Google Vertex, xAI, Mistral, OpenRouter, AWS Bedrock, Azure), and Momentic states it has zero-data-retention agreements with all of them. SOC 2 Type 2 certification and annual penetration test reports sit behind a trust center. Run artifacts stay local unless you pass `--upload-results`.
+
+Two caveats sit in the same page. AI traces go to a third-party observability provider and are retained indefinitely by default. And self-serve accounts may have their data used to improve the agents, while enterprise customers can opt out of training entirely and arrange a zero-data-retention policy. That split matters if you are testing an app with anything sensitive in it, and the docs themselves advise running against dedicated test environments with fake data.
+
+The biggest unknown is durability, not capability. Mo is explicitly non-deterministic because exploratory testing is, and the regression product depends on proprietary YAML that only Momentic's CLI can translate into browser actions. A founder conceded the lock-in directly on HN, arguing that the format is natural language and therefore portable in practice. Whether a natural-language test format survives a company disappearing is a question worth asking before you move a suite onto it.
+
+## Source and Accuracy Notes
+
+- Project page: https://momentic.ai/ - verified via direct visit, including the homepage counters, product pages and pricing
+- Documentation: https://momentic.ai/docs/ - verified via direct visit; the docs expose every page as Markdown by appending `.md` to the URL
+- Pricing: https://momentic.ai/pricing - verified via direct visit, including credit costs, overage rate and plan limits
+- AI data use and retention: https://momentic.ai/docs/account/ai-data-use.md - verified via direct visit
+- Benchmark writeup: https://momentic.ai/blog/qa-bench - by Wei-Wei Wu, CEO, November 2, 2026; verified via direct visit
+- Benchmark harness: https://github.com/momentic-ai/qa-bench - MIT licensed, TypeScript, verified via the GitHub API
+- CLI repository: https://github.com/momentic-ai/qa - public, the `qa` CLI for Mo
+- HN launch thread: https://news.ycombinator.com/item?id=50339913 - 62 points and 45 comments at time of writing, with replies from co-founders Jeff, Henry, and Gabe
+- Company: Momentic, San Francisco, Y Combinator W24
+- Benchmark figures are Momentic's own, produced by a benchmark Momentic built, designed, ran, and graded. The harness is public and MIT licensed so third parties can rerun it, but the published numbers are not independently reproduced as of November 2026
