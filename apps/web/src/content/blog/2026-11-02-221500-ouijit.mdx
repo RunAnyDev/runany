@@ -1,0 +1,175 @@
+---
+title: "Ouijit: a kanban board your coding agents can drive"
+description: "Ouijit is a desktop task board that runs coding agents in parallel, one Git worktree and terminal per card, with a CLI the agents use to move their own work."
+pubDate: "2026-11-02T15:15:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai-agents", "git-worktree", "claude-code", "open-source"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ouijit.webp"
+  alt: "Ouijit wordmark logo on a black background"
+canonical: "https://runany.dev/blog/ouijit/"
+draft: false
+---
+
+> **TL;DR:** Ouijit is a free desktop app that puts a kanban board on top of your coding agents. Every card owns a Git worktree and a terminal, hooks start the right agent when you drag it, and the agent can file follow-up tasks and flip its own card through the `ouijit` CLI.
+
+## What it is
+
+Ouijit is an Electron desktop app for macOS and Linux that treats a coding agent session as a task card. The card sits on a board with four columns, To Do, In Progress, In Review and Done. Drag it and the app opens a terminal in its own Git worktree and runs whatever hook you configured.
+
+The project lives at [github.com/ouijit/ouijit](https://github.com/ouijit/ouijit) and ships under AGPL-3.0. As of 2026-11-02 it carries 177 stars and 8 forks, the repository was created on 2026-02-03, and the latest release is v1.10.3 from 2026-10-15. There is no account, no sign-in and no telemetry. Everything is stored in a local SQLite database, with a localhost REST API behind the CLI.
+
+The name is a pun on the integrated development environment, and the board is the point. Most tools in this space give you a way to spawn many agents. Ouijit gives you a place to put the work and lets the agent write back to it.
+
+## Why a board instead of another terminal
+
+Starting five agents at once is easy. The hard part is the surface they all share. With a plain terminal multiplexer you get panes, and the actual list of what everyone is doing still lives in your head, in a Linear ticket, or in a notes file the agent never sees.
+
+Ouijit makes the board that shared surface. A card carries the task description, the prompt, the branch, the worktree, the terminal and the diff. The agent does not just produce output in a pane, it can open more cards and move its own card forward. An agent that notices the login bug is a side effect of what it is building can file it as a task without you copying anything out of the transcript.
+
+That also gives you a status display that is honest. The card shows whether the agent is thinking or waiting on you, and a sound or OS notification fires when a turn ends, so you are not watching five scrollbacks to find out who finished.
+
+## What happens when a card moves
+
+Dragging a card into In Progress is the whole flow. Ouijit creates a branch and an isolated worktree, opens a terminal inside it and asks what command to run. You type the agent invocation once and it is remembered as the project's start hook, so from then on every card you drag starts its own agent on its own copy of the repo.
+
+Five lifecycle hooks define the boundaries: start, continue, run, review and done. Each hook can run a different command, and each one keeps its own sandbox setting.
+
+| Hook | Fires when |
+| --- | --- |
+| start | A card moves into In Progress |
+| continue | Work resumes on a card that was already running |
+| run | A runner or panel starts alongside the terminal |
+| review | A card moves into In Review |
+| done | A card moves into Done |
+
+Claude Code, Codex, Pi and OpenCode get live status on the card and have the `ouijit` CLI reference injected into their session, so they know the command exists without being told. Any other CLI still runs in the terminal, it just does not get the status indicator.
+
+## Two ways to copy the repo
+
+Worktrees are created by copy-on-write, an APFS clone on macOS and a reflink on Linux, so a worktree appears almost instantly no matter how large the repository is. Each project picks one of two modes for what lands in the copy.
+
+| Mode | What arrives in the worktree | Reach for it when |
+| --- | --- | --- |
+| Quick start | Tracked files plus gitignored ones such as `node_modules` | The agent needs to run the app immediately |
+| Clean checkout | Tracked files only | You want the agent to begin from a fresh clone state |
+
+Worktrees live under `~/Ouijit/worktrees/` and new projects are created in `~/Ouijit/projects`, both of which you can move in settings.
+
+## The agent can move its own card
+
+Every terminal Ouijit opens has the `ouijit` command on PATH, host and sandboxed alike. It talks to the running app over a localhost API authenticated by a per-session token, which is why it only works from inside an Ouijit terminal. Every successful command prints a single JSON value to stdout and exits zero, and errors go to stderr, so the output pipes cleanly.
+
+This is the part that turns the board into something an agent can participate in:
+
+```bash
+# file a follow-up task
+ouijit task create "Add rate-limit headers to the public API" \
+  --prompt "429 + Retry-After on every public route"
+
+# move a card, firing the review hook
+ouijit task set-status 5 in_review
+
+# start a task straight from the shell, no dialog
+ouijit task start 5 --run-hook
+
+# set the start hook for every card in this project
+ouijit hook set start --command 'claude "$OUIJIT_TASK_DESCRIPTION"'
+
+# stage a review comment on a pull request
+ouijit pr draft add 116 --file src/api.ts --line 88 \
+  --body "throws when the token is missing"
+
+# put the plan and the running app beside the terminal
+ouijit markdown add ./plan.md
+ouijit preview add http://localhost:3000
+```
+
+Because the output is JSON, you can ask questions of the board from a shell:
+
+```bash
+ouijit task list | jq '.[] | select(.status == "in_progress") | .name'
+```
+
+The task list is grouped into todo, in_progress, in_review and done. `ouijit task current` reports which card owns the terminal you are sitting in, and the project is detected by walking up to the nearest Git root, following the `.git` file back to the main repository when you are inside a worktree.
+
+## Reviewing the diff where the agent can see it
+
+Each task terminal carries a diff of its worktree against its merge target, against uncommitted changes, or against any base you pick, with word-level highlighting. A note you leave on a diff line is delivered to the agent working in that worktree, and the note re-anchors as the code moves underneath it.
+
+Lenses are the more unusual feature. A lens is a named instruction kept with the project, something like "lead with what could break in production". The agent applies it to a single change and answers with the parts of that change: a titled group, a line on why those files belong together, and the hunks that make it up. A file that spans two parts appears in both, and whatever no part claims still gets a heading at the end.
+
+Pull request handling is marked experimental. There is a PR inbox, review comments staged locally until you send them, and merging. It drives the `gh` CLI, so `gh auth login` is the only setup.
+
+Beside that sits a single issues list fed by GitHub, Linear or both. The groups cover triage, in progress, assigned to you, this cycle and the repo's open issues, with an `ENG-231` and a `#299` sitting side by side. Turning an issue into a task starts it on the branch name Linear suggested, and the pull request opened from it carries the identifier so the issue moves when the work lands.
+
+## Panels, palette and session resume
+
+Panels attach to a terminal as tabs: a runner for the dev server or any script, a web preview of what is being built, and markdown files with Mermaid diagrams rendered, so a plan can sit next to the agent reading it.
+
+The command palette on ⌘K, or Ctrl+K on Linux, jumps between terminals, projects, tasks and pull requests, ranked by how often you return to each one. Opening a task that was never started creates its worktree on the way through.
+
+Quitting saves the session, and the next launch offers to bring your terminals back in their worktrees with panels intact. Themes are system, light, dark or five presets, and you can define your own as design-token overrides. The rest of the box covers a multi-project home view, health checks for the agent CLIs, first-run onboarding, an editor launcher, terminal font settings and auto-update on macOS with release notes.
+
+## Sandboxing a task terminal
+
+Any hook, terminal or runner can run sandboxed, and you pick the backend per terminal from the task's Open in menu.
+
+| Backend | Where it runs | What bounds it |
+| --- | --- | --- |
+| nono | In place on the host worktree | Seatbelt on macOS, Landlock on Linux, filesystem limited to the worktree and Git data |
+| Custom launcher | Wherever you point it | The launcher owns the boundary entirely |
+
+Under nono the terminal still runs on the host, so the `ouijit` CLI shim stays on PATH with its token scoped to that task's own data. The `.git` directory is mounted with `hooks/` and `config` read-only, which lets commits land while keeping the host-side remote code execution surface unwritable.
+
+Each hook keeps its own setting and each runner chooses when it starts, so an agent can run sandboxed while the dev server beside it stays on the host.
+
+## Getting it running
+
+The requirements are modest: macOS 13 or later on Apple Silicon or Intel, or Linux x64, Git 2.20 or newer on your PATH, and an agent CLI you already use. The downloads are self-contained, so nothing else is needed to run the app.
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/ouijit/ouijit/releases/latest/download/ouijit-darwin-arm64.dmg
+# macOS (Intel)
+curl -LO https://github.com/ouijit/ouijit/releases/latest/download/ouijit-darwin-x64.dmg
+# Linux (x64)
+curl -LO https://github.com/ouijit/ouijit/releases/latest/download/ouijit-linux-x64.zip
+```
+
+On macOS open the DMG and drag Ouijit.app into Applications. On Linux unzip the archive and put the binary somewhere on your PATH. Then add a project from the sidebar, press ⌘N to write the first task, and drag the card into In Progress.
+
+Building from source needs Node.js 20 or newer, the repo pins 22 in `.nvmrc`, plus C and C++ build tools for the native modules better-sqlite3, node-pty and koffi. On macOS that is `xcode-select --install`, on Debian or Ubuntu it is `sudo apt install build-essential python3`.
+
+```bash
+git clone https://github.com/ouijit/ouijit.git
+cd ouijit
+npm install
+npm start
+```
+
+## What to watch for
+
+The license is the first thing to read. AGPL-3.0 obliges you to offer the source of a modified version to users you give network access to. Running the app locally on your own machine does not trigger that, but it matters to anyone who wants to wrap it in a service.
+
+Platform coverage is narrow. v1.10.3 ships darwin-arm64, darwin-x64 and linux-x64 binaries plus a Debian package. There is no arm64 Linux build and no Windows release.
+
+The CLI is deliberately tethered. It only works from inside an Ouijit terminal because the token is per session and the app has to be running, so you cannot drive the board from an unrelated shell. Only Claude Code, Codex, Pi and OpenCode get the injected reference and the live status indicator, other CLIs work but run blind on the card.
+
+Sandboxing under nono is not a VM. It constrains what the process can touch with kernel-level rules, but it does not isolate the process from the host the way a container does.
+
+The copy-on-write worktree needs APFS or a reflink-capable filesystem. On a network share or an older Linux setup the copy falls back to a plain checkout and stops being instant, which is the feature people notice most.
+
+The pull request inbox and review comments are the experimental corner. The issues integration is the more settled half.
+
+Finally, this is a young project. The repository was created in February 2026 and still carries 5 open issues against 177 stars, so expect the shape of things to move.
+
+## Source and accuracy notes
+
+- Project page: https://ouijit.com/ - visited directly on 2026-11-02, including the FAQ at https://ouijit.com/faq/
+- Documentation: https://ouijit.com/docs/ - every page is plain Markdown at https://ouijit.com/docs/cli/ and siblings
+- Source repository: https://github.com/ouijit/ouijit - TypeScript and Electron, AGPL-3.0, 177 stars and 8 forks when checked
+- Release verified: v1.10.3, published 2026-10-15, assets darwin-arm64, darwin-x64, linux-x64 and a Debian package
+- HN launch thread: https://news.ycombinator.com/item?id=48347043 - posted 2026-05-31, 13 points at time of writing
+- Thumbnail: the project's own og:image at https://ouijit.com/assets/og-image.png, a 1200x630 PNG, converted to WebP and served from the runany.dev CDN
