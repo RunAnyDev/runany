@@ -1,0 +1,173 @@
+---
+title: "Wakeshift: push events that wake Claude Code and Cursor"
+description: "Wakeshift is an MCP server and SDKs that wake Claude Code, Codex, Cursor, or ChatGPT when your app emits an event. Define, attach, emit."
+pubDate: "2026-11-02T11:10:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "mcp", "ai-agents", "typescript"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wakeshift.webp"
+  alt: "An app emitting a ci.finished event that wakes a sleeping Claude Code agent"
+canonical: "https://runany.dev/blog/wakeshift/"
+draft: false
+---
+
+> **TL;DR:** Wakeshift connects your backend to the coding agent your user already runs, so a failed CI run wakes the agent instead of waiting for the next human prompt. You define typed events, attach them to the MCP server you already publish, and call `emit` when something happens. TypeScript, Python, and Go SDKs are open source under Apache 2.0, and the hosted service starts free with 50,000 deliveries a month.
+
+## What it is
+
+Wakeshift is infrastructure for waking AI coding agents from your own backend. You describe the events your app offers (a CI run finished, a payment failed, a deploy went out), and Wakeshift wakes every agent that asked to hear about one. Claude Code, Codex, Cursor, ChatGPT work chats, opencode, GitHub Copilot CLI, Antigravity CLI, OpenClaw, and Hermes Agent are all covered.
+
+The integration is three calls. `defineEvent` declares a typed event, `attach` hangs it off the MCP server you already publish, and `emit` fires it. There is no separate agent-side API to build and no per-agent harness code, because the wiring follows MCP Events (SEP-3415). Clients that speak the spec subscribe natively, and Wakeshift bridges everyone else through a `subscribe_events` tool it adds to your server.
+
+What you get for the effort:
+
+- **Typed events.** Arguments and payloads are zod schemas, so a subscriber can route on `owner` and `repo` and filter on an optional `branch`.
+- **Per-subscriber authorization.** Your `authorize` callback runs before every subscription, so a user cannot watch a repo they cannot see.
+- **Idempotent delivery.** Pass the webhook delivery ID to `emit` and retries collapse into one occurrence.
+- **Personal events.** An event marked `personal` routes a single occurrence to one user instead of broadcasting.
+- **Webhook entry points.** `publishUrl` returns a capability URL for services that can only POST, like GitHub or Stripe.
+- **Delivery visibility.** `status` tells you how many conversations are subscribed and how each one is being reached: stream, poll, hooks, or webhook.
+
+## Why it matters
+
+The default shape of a coding agent is pull. It finishes its turn and goes to sleep, and it only wakes when a human types something. That works fine while somebody is at the keyboard, and it falls apart the moment the interesting event happens while nobody is looking. CI goes red at two in the morning. The agent that could fix it is sitting idle next to a green cursor.
+
+Polling is the usual workaround, and it is not a good one. You write a watcher that polls the CI provider, or a cron job that shells out to the agent CLI. Both put provider credentials and agent invocation somewhere you have to maintain, and both miss the window where the agent could have started while the failure was still fresh.
+
+Wakeshift takes the push route instead. Your webhook handler calls `emit`, the event reaches Wakeshift, and the agent is woken with the failure text attached, framed as information coming from your app rather than as an instruction from the user. That framing is deliberate and it matters, because an agent that treats your event as a command is a prompt-injection problem waiting to happen.
+
+## Getting it running
+
+The path of least resistance is a CI bot, because that is the case the docs lead with. Register an app in the Wakeshift console, put the key in your environment, and define the event. The key is shown once and looks like `wst_` followed by 50 characters. It never leaves your server: the SDK signs each request with it.
+
+```sh
+npm install @wakeshift/sdk @modelcontextprotocol/server @modelcontextprotocol/node zod
+```
+
+The TypeScript SDK is ESM only and needs Node 22.18 or later, which runs a `.ts` file directly. Set `"type": "module"` in your `package.json` so your code and the SDK load the same copy of the MCP SDK.
+
+```ts
+import { McpServer } from "@modelcontextprotocol/server"
+import { z } from "zod"
+import { Wakeshift } from "@wakeshift/sdk"
+
+const wake = new Wakeshift({ key: process.env.WAKESHIFT_KEY! })
+
+const ciFinished = wake.defineEvent("ci.finished", {
+  description: "CI finished on a GitHub repo",
+  args: z.object({
+    owner: z.string().describe("The repo's owner, lowercase: acme"),
+    repo: z.string().describe("The repo's name, lowercase: api"),
+    branch: z.string().optional().describe("Only this branch"),
+  }),
+  payload: z.object({ branch: z.string(), conclusion: z.string(), name: z.string(), url: z.string() }),
+  authorize: (subscriber, { owner, repo }) => canSeeRepo(subscriber.user, `${owner}/${repo}`),
+  text: (run, { owner, repo }) => `CI ${run.conclusion} on ${owner}/${repo} ${run.branch}: ${run.name}`,
+})
+
+function newServer() {
+  const server = new McpServer({ name: "ci-bot", version: "1.0.0" })
+  wake.attach(server, { identify: (ctx) => ({ user: userOf(ctx.http?.authInfo) }) })
+  return server
+}
+```
+
+`attach` adds three tools to your server (`subscribe_events`, `unsubscribe_events`, `list_subscriptions`) and serves `events/list`, `events/subscribe`, and `events/unsubscribe` for clients that speak MCP Events. The `identify` callback is how your app says who is behind a request, and without it personal events and `list_subscriptions` refuse to work.
+
+Then emit from wherever the thing happens:
+
+```ts
+if (req.headers["x-github-event"] === "workflow_run" && body.action === "completed") {
+  const run = body.workflow_run
+  const [owner, repo] = body.repository.full_name.toLowerCase().split("/")
+  await ciFinished.emit(
+    { owner, repo },
+    { branch: run.head_branch, conclusion: run.conclusion, name: run.name, url: run.html_url },
+    { id: String(req.headers["x-github-delivery"]) },
+  )
+}
+```
+
+The return value tells you what happened: `{ matched, duplicate, unmatched, ended }`. That last field matters. Subscriptions end when a user leaves a team or a game times out, and `ended` is how you learn to forget them.
+
+Python and Go work the same way. `pip install wakeshift` or `go get github.com/wakeshift/wakeshift-go@latest`:
+
+```python
+import asyncio
+import os
+from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel
+from wakeshift import Wakeshift
+
+class Repo(BaseModel):
+    owner: str
+    repo: str
+
+class Run(BaseModel):
+    conclusion: str
+
+wake = Wakeshift(os.environ["WAKESHIFT_KEY"])
+ci_finished = wake.define_event(
+    "ci.finished",
+    description="CI finished on a GitHub repo",
+    args=Repo,
+    payload=Run,
+    text=lambda run, r: f"CI {run.conclusion} on {r.owner}/{r.repo}",
+)
+
+server = MCPServer("ci-bot")
+wake.attach(server)
+
+asyncio.run(ci_finished.emit({"owner": "acme", "repo": "api"}, {"conclusion": "failure"}))
+```
+
+## How each agent wakes
+
+Not every agent can be woken the same way, and the differences matter when you are writing documentation for your users.
+
+| Agent | Wakes while idle | Install needed | What the user approves |
+|---|---|---|---|
+| Claude Code | Yes | None, hooks are optional | Nothing extra, or "don't ask again" in manual permission mode |
+| Codex | Yes | Once | Trusting the new hook after a restart |
+| Cursor CLI and IDE | Yes | None, hooks are optional | Cursor asks once before it starts a background command |
+| ChatGPT work chats | Yes, each occurrence starts a run | None | The user asks ChatGPT to monitor the event |
+| GitHub Copilot CLI | Yes | None | One approval each time it returns to waiting |
+| opencode | Yes | Once | Nothing, but opencode needs a restart after the install |
+| Antigravity CLI | Yes | None | Antigravity may ask to allow a background command |
+| Hermes Agent | Yes, while it runs | Once | Hermes may ask to approve the install command |
+| Cursor cloud agents | No | None | Occurrences arrive with the agent's next call to a Wakeshift tool |
+
+The last row is the one to watch. A cloud agent that is not holding a stream gets its occurrences on its next tool call, so the wake is not instant and a queued event can sit there for a while.
+
+## What it costs
+
+| Plan | Price | Included deliveries | Rate limit | Event history |
+|---|---|---|---|---|
+| Free | $0 | 50,000 a month | 10 per second | 7 days |
+| Starter | $29 a month | 50,000, then $0.10 per 1,000 | 50 per second | 30 days |
+| Custom | Agreed | Agreed | Agreed | Agreed |
+
+Retries and filtered events never count against the quota, so a flaky provider does not burn your budget.
+
+## What to watch for
+
+For agents that cannot subscribe natively, something has to be installed on the user's machine. Wakeshift's tool result asks the agent to run a one-time install of the `wakeshift` program, which contains the hooks and connectors, and the agent asks the user first. The open-source parts are published in the `wakeshift/connectors` repository under Apache 2.0, with plugins for Hermes Agent and OpenClaw, and the docs page per agent explains exactly what the install touches and how to undo it. Read it before you tell your users to approve it.
+
+The hosted core is the part you are paying for and the part that sits between your events and your users' agents. The SDK sends requests to `app.wakeshift.ai`, and `WAKESHIFT_CORE` only points it at a different console address such as staging. The routing and wake delivery still run through Wakeshift's core, so if you need that layer inside your network, you should ask what self-hosting looks like before you depend on it.
+
+Events carry whatever you put in the payload, and those payloads pass through Wakeshift's core. If your events include customer data, set `deleteOnDelivery: true` on the event so the text and payload are erased once delivered, and use personal events for anything a specific user should not see reflected in another user's stream.
+
+The SDKs are young. The TypeScript package is at 0.7.1 and the Python package at 0.6.0, the TypeScript build is ESM only, and the zod version constraint catches people out (import from `"zod"`, never `"zod/v4"`, or the MCP SDK rejects the schema with a mixed-zod error). Account sign-ups also fill up, and when that happens you land on a waitlist. An invite link from an existing user skips it.
+
+Security problems go to support@wakeshift.ai rather than a public issue.
+
+## Source and Accuracy Notes
+
+- Project page: https://wakeshift.ai, verified via direct visit
+- Quickstart: https://wakeshift.ai/docs/quickstart
+- Agent support matrix: https://wakeshift.ai/docs/agents
+- Source repositories: `wakeshift/wakeshift-node`, `wakeshift/wakeshift-python`, `wakeshift/wakeshift-go`, `wakeshift/connectors`
+- License: Apache-2.0 across all four repositories, and the npm package `@wakeshift/sdk` declares Apache-2.0 as well
+- Pricing and rate limits: read from the pricing section on wakeshift.ai
+- HN thread: https://news.ycombinator.com/item?id=50305218 surfaced Wakeshift through one of its own apps, Sketch Stadium. Wakeshift itself has no dedicated launch thread
