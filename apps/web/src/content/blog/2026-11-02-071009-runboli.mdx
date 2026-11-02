@@ -1,0 +1,129 @@
+---
+title: "Finish the Story: a personal site inside Halo 3's Guardian"
+description: "Finish the Story is a personal website you explore from inside Halo 3's Guardian, rebuilt in the browser with Three.js and a treasure hunt of memories."
+pubDate: "2026-11-02T00:12:00.000Z"
+author: "Friday"
+tags: ["browser-game", "three-js", "webgl", "games", "ai-assisted"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/runboli.webp"
+  alt: "First-person view from inside a Halo 3 Guardian on a Forerunner platform, with the Finish the Story title over a teal sky"
+canonical: "https://runany.dev/blog/runboli/"
+---
+
+> **TL;DR:** Finish the Story is a personal website you explore from inside Halo 3's Guardian. You spawn into a rebuilt copy of the After School map in your browser, move around with WASD, and find photos, stories and quests scattered through the geometry. It runs on Next.js and Three.js, needs no signup, and most of the game layer was written by Codex running through Astra.
+
+## What it is
+
+Runbo Li never wanted a resume page, so he made a website you can walk around in. The Guardian from Halo 3 gets rebuilt as a browser scene, and inside that scene Li hides a treasure hunt through his own life.
+
+The entry point is a period-accurate Halo 3 main menu. From there it goes through the lobby, you spawn into the map, and you wander. The menu buttons are the originals: solo game, campaign, matchmaking, custom games, Forge Theater. That is where the joke lands. It is a personal site that refuses to present itself as one.
+
+The Guardian you control is the one you fought in as a teenager. Li grew up treating it as a third place, a free-for-all with MLG settings where his friends waited for everyone to log on before switching to customs or ranked. The site rebuilds that exact space, and the memories sit inside it as objects you have to find: photographs, short stories, quests, mini-games, Easter eggs.
+
+Movement is WASD plus mouse on desktop, with no account and no signup. Touch controls work on mobile too, though Li notes the field of view is roughly 20 degrees in portrait, so a laptop is the better way to see it.
+
+## Where the geometry came from
+
+The Guardian mesh is not AI-generated. Li pulled an original asset export from the Halo Archive, a fan-run community that has been extracting and redistributing Halo models and textures for years. The export is an OBJ with 115,250 faces, the original UV coordinates and 42 referenced diffuse textures, loaded through Three.js.
+
+Everything stacked on top of that mesh was AI-generated: shaders, lighting, scenario tags, physics, animations, collision, movement, sky and fog, lifts, pickups, weapon handling and quest routing.
+
+| Layer | Where it came from |
+|---|---|
+| Guardian mesh, UV coordinates, 42 diffuse textures | Original export from the Halo Archive |
+| Shaders, lighting, sky and fog | AI-generated |
+| Physics, collision, movement, animations | AI-generated |
+| Lifts, pickups, weapon handling, quest routing | AI-generated |
+| Pickup placement and the memory content | Placed and written by hand |
+
+Placement was the part that did not scale. Every pickup had to be positioned against the geometry by hand, using callout maps and a dev-only coordinate locator. Li reckons it took ten iterations just to get the blue lift on Camo sitting parallel with the ledge.
+
+Here is a minimal version of the load, using the same Three.js modules:
+
+```js
+import * as THREE from 'three';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+
+const mtl = new MTLLoader();
+
+mtl.load('/assets/guardian.mtl', (materials) => {
+  materials.preload();
+
+  new OBJLoader()
+    .setMaterials(materials)
+    .load('/assets/guardian.obj', (guardian) => {
+      guardian.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+      });
+
+      scene.add(guardian);
+    });
+});
+```
+
+The numbers Li reports are checkable against your own extraction, if you have one:
+
+```bash
+# Faces in the exported OBJ
+grep -c '^f ' guardian.obj
+
+# Distinct diffuse textures referenced by the material file
+grep -oE 'map_[A-Za-z0-9_]+\.(png|tga|dds)' guardian.mtl | sort -u | wc -l
+
+# Total payload size of the geometry and texture set
+du -ch guardian.obj guardian.mtl textures/ | tail -1
+```
+
+## The AI did the coding
+
+The build figures are worth setting out on their own.
+
+| Measure | Value |
+|---|---|
+| Lines of TypeScript | 20,552 |
+| Source files | 118 |
+| Model tokens consumed | 973M |
+| Agent runtime | 37 hours |
+| Li's own time | 25 to 30 hours |
+
+Li built it with Codex using Astra, and says it wrote essentially all of the code. He also makes the obvious point a few times over: coding was not the hard part. The hard parts were the decisions a model cannot make for you. Which memories belonged in the map, where each one should sit, and whether a change was actually fun. His version of the feedback loop was describing bugs that were not visible on screen, then playing it again and again until movement and flow felt right.
+
+That split is the opposite of the usual AI-coding story. The generator handled the volume, 20,000 lines across 118 files, and the human handled the taste. A model can give you a lift that renders. It cannot tell you whether the lift belongs where you put it.
+
+## Getting it running
+
+There is nothing to install. Open runboli.com, click through the Halo 3 menu, and you are in the map.
+
+| Input | Action |
+|---|---|
+| `W` `A` `S` `D` | Move |
+| Mouse | Look |
+| Touch controls | On-screen movement and look |
+
+The one real engineering problem is the download. Geometry and textures add up to 21 MB, which is too much to stall on in front of anyone. Li hides it inside the lobby countdown and scorecard screen, so assets arrive while the shaders warm up. The target is 60 FPS, and it holds up on a recent MacBook in Chrome.
+
+## What to watch for
+
+Li lists his own rough edges without hedging:
+
+- Picking up a power weapon causes occasional lag
+- The lifts do not feel quite natural, since replicating the vacuum effect of the original lifts turned out to be hard
+- On some browsers, Firefox among them, audio needs a click before it starts
+
+The bigger thing to watch is the licensing. This is an unofficial, non-commercial fan project. The geometry, textures, UI and many of the sound effects are Halo material and belong to their respective owners. Li ships a credits and disclaimer screen that says so plainly, and he says if Microsoft or Halo Studios asked him to take it down or change something, he would. That is the right posture for a project like this, and it also means you should not treat the asset pipeline as a template for anything you plan to sell.
+
+## Source and Accuracy Notes
+
+- Project page: https://runboli.com, verified by direct visit on 2026-11-02, HTTP 200
+- Show HN thread: https://news.ycombinator.com/item?id=49732259, posted 2026-09-16 by Runbo Li (HN: runshouse), 29 points and 9 comments
+- Figures for face count, texture count, asset size, lines of code, file count, tokens and runtime are as reported by the author in the Show HN post. The project source is not published, so these are not independently verifiable
+- Stack verified from the served application: Next.js App Router with Tailwind CSS, and Three.js via `THREE.ShaderMaterial` and `THREE.GLTFExporter` in the campaign chunk
+- Asset source: the Halo Archive, a fan-run community at discord.gg/haloarchive that distributes extracted Halo models and textures for non-profit fan art and modding
+- License: non-commercial unofficial fan project, no open-source license published, no source repository
+- Thumbnail: the project's own og:image at https://runboli.com/images/finish-the-story-social-v2.jpg, resized to 1200x630
