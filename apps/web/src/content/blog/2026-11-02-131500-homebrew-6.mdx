@@ -1,0 +1,118 @@
+---
+title: "Homebrew 6.0.0: Tap Trust and a Faster Internal API"
+description: "Homebrew 6.0.0 makes third-party taps opt-in, defaults to the internal JSON API, sandboxes Linux installs, and fixes three security advisories that allowed code execution."
+pubDate: "2026-11-02T06:15:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "macos", "linux", "package-manager", "security"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/homebrew-6.webp"
+  alt: "Homebrew social card for the 6.0.0 release announcement"
+canonical: "https://runany.dev/blog/homebrew-6/"
+---
+
+> **TL;DR:** Homebrew 6.0.0 makes third-party taps opt-in, so `brew install user/repo/formula` starts failing until you trust that source. It also flips the internal JSON API on, sandboxes Linux installs with Bubblewrap, and fixes three security advisories, one of which allowed root code execution during a macOS install.
+
+## What changed in Homebrew 6.0.0
+
+Homebrew 6.0.0 shipped on 11 June 2026, and it is the rare `brew` release that changes what your scripts do by default. The headline is tap trust. The second is that Homebrew now pulls all of its metadata down in a single bundle, so updates talk to the network less.
+
+| Area | What changed |
+| --- | --- |
+| Tap trust | Third-party taps must be explicitly trusted before their Ruby runs |
+| Internal API | The smaller JSON API is the default and `HOMEBREW_USE_INTERNAL_API` is deprecated |
+| Linux sandbox | Bubblewrap sandboxing on Linux, matching the long-standing macOS behaviour |
+| Ask mode | `brew install` and `brew upgrade` show a dependency summary and confirm before acting |
+| Security | Three advisories fixed, including root code execution via the macOS `.pkg` installer |
+
+## Tap trust changes what you can install
+
+A Homebrew tap is not a package index. It is a Ruby program that Homebrew loads on your machine to resolve dependencies and expose external commands. Until 6.0.0, every tap you added was trusted implicitly, so a compromised third-party repository inherited your user's privileges the moment you ran `brew install` or `brew update`.
+
+6.0.0 flips that. Official Homebrew taps stay trusted by default, but everything else needs a decision from you, made on purpose.
+
+Trusting one item is the safer move when you only want one formula out of a tap:
+
+```bash
+brew tap user/repository
+brew trust --formula user/repository/formula
+brew install formula
+```
+
+Casks and external commands take the same shape:
+
+```bash
+brew trust --cask user/repository/cask
+brew trust --command user/repository/command
+```
+
+If you administer the tap yourself, or you use it constantly, trust the whole thing instead:
+
+```bash
+brew trust user/repository
+```
+
+`brew trust` lists what is currently trusted, `brew untrust` lists what is not and revokes entries when given one, and `brew doctor` warns about untrusted third-party taps. `brew tap-info` now carries a `trusted` field, which makes the trust state scriptable.
+
+Two details catch people out. Trust binds to the canonical formula name, so an alias or a former name will not inherit trust from its target, and a renamed formula needs its own trust decision. And `brew bundle` gained a `trusted:` option so a Brewfile can carry the decisions with it, while `brew bundle dump` records them and marks custom-remote taps as trusted.
+
+The environment variables that used to switch this model off, `HOMEBREW_REQUIRE_TAP_TRUST` and `HOMEBREW_NO_REQUIRE_TAP_TRUST`, are both deprecated. The Homebrew documentation is blunt about it: trust the specific tap, formula, cask or command you need instead of disabling the model.
+
+## The internal JSON API is now the default
+
+Homebrew's internal JSON API collapses all of Homebrew's metadata into a single download. It was opt-in through `HOMEBREW_USE_INTERNAL_API` from 5.0.0 onward, and in 6.0.0 it becomes the default, with the variable deprecated since it now only requests behaviour you already get.
+
+The practical effect is fewer network round trips on `brew update` and `brew upgrade`, and less metadata pulled down each time. On CI runners and metered connections this is the change you will notice first.
+
+## Linux gets the sandbox macOS already had
+
+Homebrew has run build, test and postinstall phases inside a sandbox on macOS for years. 6.0.0 moves that macOS sandbox logic into shared code and turns on Bubblewrap sandboxing on Linux for developers by default.
+
+The release also hardens sandboxed install phases, sandboxes cask executable hooks, allows logs inside the build sandbox, and installs Bubblewrap on hosted Ubuntu. Jobs that only need to check syntax skip the sandbox setup entirely.
+
+## Three security advisories, fixed
+
+| Advisory | Issue |
+| --- | --- |
+| GHSA-7699-qf8c-q47m | The POST download strategy discarded the resolved URL, bypassing the documented HTTPS-to-HTTP redirect protection |
+| GHSA-6689-q779-c33m | Git hooks in the macOS `.pkg` postinstall could reach root code execution |
+| GHSA-59v8-x8q4-px5c | The macOS installer trusted a user-controlled `/var/tmp` plist and could hand Homebrew ownership to a local attacker |
+
+Beyond those, Homebrew now filters sensitive environment variables during Ruby evaluation and defers `HOMEBREW_*` secrets to download time, so a formula's build script does not inherit your credentials. You can require checksums for casks with `HOMEBREW_CASK_OPTS_REQUIRE_SHA`.
+
+## Support tiers are shrinking
+
+Two platform deadlines land close together, and one of them is already in effect.
+
+macOS 27 (Golden Gate) drops Intel support. In September 2026 macOS Intel x86_64 moved to Tier 3, which means no CI support and no new bottles built for it. In September 2027 the platform becomes unsupported entirely and the related code is deleted. If you are still on an Intel Mac, that is a maintenance clock rather than a deprecation notice.
+
+On Linux, the Ubuntu 24.04 CI migration raised the baseline to glibc 2.39. Ubuntu 22.04 ships glibc 2.35, so it drops to Tier 2: no new bottles are built for it and `brew doctor` warns. The `ghcr.io/homebrew/brew` Docker image remains the way to run Homebrew on an older glibc.
+
+## brew bundle picks up parallel installs
+
+`brew bundle` now installs formulae in parallel, running jobs automatically by default, which turns a long Brewfile sync from a sequential chore into a short one. The release adds:
+
+- parallel formula installation with automatic job count
+- `npm` and `krew` extensions, plus cleanup support for npm, cargo, go and uv
+- `winget` support on Windows
+- a `--describe` flag on `brew bundle add`
+
+Smaller changes make `brew bundle krew` run through `kubectl-krew` directly, respect `CARGO_HOME` and friends for cargo, and try `mas install` before falling back to `mas get`.
+
+## What to watch for
+
+Ask mode is the change most likely to get on your nerves. For developers, `brew install` and `brew upgrade` now print a dependency summary and wait for confirmation, and the upgrade prompt is skipped only when there is nothing to do.
+
+The trust model is stricter than a flag. Commands that evaluate formulae or casks load only official or explicitly trusted entries, so automation that installs from a third-party tap starts failing until you add trust to the Brewfile or the script itself, which is exactly why `brew bundle` gained `trusted:`.
+
+Performance work rounds it out. `brew leaves` runs roughly 30 percent faster, bottle tab fetching is parallelised during upgrades, and startup loads fewer Ruby libraries.
+
+## Source and Accuracy Notes
+
+- Project page: https://brew.sh/2026/06/11/homebrew-6.0.0/ (verified via direct visit on 2026-11-02)
+- Tap trust documentation: https://docs.brew.sh/Tap-Trust (verified via direct visit on 2026-11-02)
+- Source repository: Homebrew/brew (https://github.com/Homebrew/brew)
+- License: BSD 2-Clause (verified from the LICENSE.txt file in the Homebrew/brew repository)
+- HN launch thread: https://news.ycombinator.com/item?id=48490024 (1481 points, posted 2026-06-11)
