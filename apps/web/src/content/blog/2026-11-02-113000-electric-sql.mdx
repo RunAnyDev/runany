@@ -1,0 +1,127 @@
+---
+title: "ElectricSQL: sync Postgres into local-first apps"
+description: "ElectricSQL syncs Postgres tables into local-first apps over HTTP using Shapes, an Elixir sync service and PGlite. Now part of Neon at Databricks."
+pubDate: "2026-11-02T04:45:00.000Z"
+author: "Friday"
+tags: ["postgres", "local-first", "sync", "typescript", "open-source"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/electric-sql.webp"
+  alt: "Abstract rendering of a glowing database core sending a luminous ribbon of data toward several small device outlines"
+canonical: "https://runany.dev/blog/electric-sql/"
+---
+
+## TL;DR
+
+> **TL;DR:** ElectricSQL runs a sync service in front of Postgres and streams subsets of your tables, called Shapes, into apps that then read locally. The sync service is an Elixir application you run in Docker, the client is a small TypeScript package, and PGlite puts an entire Postgres inside the browser. Electric joined Neon at Databricks in August 2026 and Electric Cloud is winding down, so self-hosting is now the path forward.
+
+## What it is
+
+ElectricSQL started in 2023 as a way to replicate Postgres tables into SQLite so apps could keep working offline. It has since grown into a broader data layer, and the current product line covers four pieces:
+
+| Component | What it does |
+|---|---|
+| Postgres Sync | The read-path sync engine that replicates rows out of Postgres over an HTTP API |
+| PGlite | Postgres compiled to WebAssembly, so a database runs inside the browser or a Node process |
+| TanStack DB | A reactive client store built on top of the sync primitives |
+| Durable Streams | Persistent, addressable streams over plain HTTP for agent loops |
+
+The central concept is a Shape. A shape is a subset of a table, and it is the unit that actually gets synced. Shapes are defined by:
+
+- a **table**, for example `items`
+- an optional **where clause** that filters which rows belong to the shape
+- an optional **columns clause** that selects which columns are included
+- an optional **queryable columns** clause that restricts what subset snapshots may query
+
+Shapes are single table for now, so filtering on related data means reaching for a subquery, and a shape definition is immutable once it exists. Many clients can sync the same shape, and shapes are allowed to overlap.
+
+On the client, `ShapeStream` consumes the raw change log and `Shape` materialises that log into an object you can read from.
+
+## Why it matters
+
+The problem it solves is that a Postgres-backed app is hostile to offline use. Every read crosses the network, the interface feels sluggish on a bad connection, and building a local cache that stays correct as the data changes is a project in its own right.
+
+Electric moves that work into the sync layer instead. Postgres stays the source of truth, the client keeps a replica of the rows it cares about, and writes go through the write-path sync guide rather than through the application. For an app that needs to feel instant, that was the missing piece.
+
+Adoption behind it is not small. Over the week ending October 29, 2026, PGlite pulled 36,191,779 npm downloads and the TypeScript client pulled 2,122,023.
+
+## Getting it running
+
+Electric is a sync service that sits in front of Postgres and reaches it through a `DATABASE_URL`. The quickest start is the official Compose file, which brings up Postgres 16 with logical replication already switched on:
+
+```bash
+curl -O https://electric-sql.com/docker-compose.yaml
+docker compose up
+```
+
+That gives you Postgres on port 54321 and the Electric sync service on port 3000. To point it at a Postgres you already run:
+
+```bash
+docker run \
+    -e "DATABASE_URL=postgresql://..." \
+    -p 3000:3000 \
+    -t \
+    electricsql/electric:latest
+```
+
+Your Postgres needs logical replication enabled, and the account Electric connects as needs the `REPLICATION` role. The compose file handles the first part with `wal_level=logical`, and the permissions guide covers the second.
+
+The client is an ordinary npm package:
+
+```bash
+npm i @electric-sql/client
+```
+
+## Using the client
+
+The docs are emphatic that production apps should not let the browser talk to the sync service directly. The shape request should pass through your own API, which decides what each user is allowed to see:
+
+```typescript
+import { ShapeStream, Shape } from '@electric-sql/client'
+
+const stream = new ShapeStream({
+  url: 'http://localhost:3001/api/items',
+})
+const shape = new Shape(stream)
+shape.subscribe((data) => console.log(data))
+```
+
+On the server, that endpoint forwards only the Electric protocol parameters and sets the table and the filter, so the client never sees the SQL:
+
+```typescript
+import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from '@electric-sql/client'
+
+app.get('/api/items', async (req, res) => {
+  const electricUrl = new URL('http://localhost:3000/v1/shape')
+
+  ELECTRIC_PROTOCOL_QUERY_PARAMS.forEach((param) => {
+    if (req.query[param]) {
+      electricUrl.searchParams.set(param, req.query[param])
+    }
+  })
+
+  electricUrl.searchParams.set('table', 'items')
+  electricUrl.searchParams.set('where', `user_id = '${req.user.id}'`)
+
+  const response = await fetch(electricUrl)
+  // stream the response back to the client
+})
+```
+
+## What to watch for
+
+The thing to understand before you expose anything is that the Electric HTTP API is public by default. It connects to Postgres as an ordinary database user and makes anything that user can read available to any client that can reach the API. The docs state it plainly: you must secure it. The options are an API token set through `ELECTRIC_SECRET`, network rules or a firewall, and an authorizing proxy in front of the service. The token should be added by the proxy rather than shipped to the browser, since anything the client sends shows up in the request. End-to-end encryption is also possible, by encrypting data before it leaves the client and decrypting it when it comes off the replication stream. Restricting what the Postgres role can read is the other half of the answer.
+
+Second, Electric Cloud is winding down. When Electric joined Neon at Databricks in August 2026, the company said everything it had previously open sourced stays open sourced, but cloud users were told to self-host or move to another provider. If you relied on the hosted service, that is the thing to act on.
+
+Finally, the sync service is an Elixir application. It ships as a Docker image and you can build it from source with asdf, but Docker is the supported path.
+
+## Source and Accuracy Notes
+
+- Project page: [electric-sql.com](https://electric-sql.com)
+- Source repository: [electric-sql/electric](https://github.com/electric-sql/electric), Apache 2.0, 10,420 stars at time of writing
+- Acquisition announcement: [neon.com/blog/electric-joins-neon](https://neon.com/blog/electric-joins-neon), August 11, 2026
+- HN launch thread: [news.ycombinator.com/item?id=37584049](https://news.ycombinator.com/item?id=37584049), 617 points, September 20, 2023
+- Download figures: npm downloads API, `@electric-sql/pglite` and `@electric-sql/client`, week of October 23 to 29, 2026
