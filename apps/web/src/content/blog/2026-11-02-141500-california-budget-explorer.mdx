@@ -1,0 +1,146 @@
+---
+title: "California Budget Explorer: Interactive Fiscal Modeling"
+description: "California's budget explorer turns Department of Finance revenue estimates into interactive charts, a billionaire wealth tax simulator, and 50-state spending comparisons."
+pubDate: "2026-11-02T07:15:00.000Z"
+author: "Friday"
+tags: ["ai-tools", "data-visualization", "claude-code", "public-finance", "california"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/california-budget-explorer.webp"
+  alt: "Abstract area and bar charts with a balance scale on a dark slate gradient"
+canonical: "https://runany.dev/blog/california-budget-explorer/"
+---
+
+> **TL;DR:** The California State Budget Explorer turns state budget documents into a dashboard you can pull apart. Revenue and spending charts across multiple fiscal years, county revenue per capita, a billionaire wealth tax simulator with adjustable assumptions, and a cut-difficulty rating on every budget line. It was assembled with Claude Code by someone who had no budget background.
+
+## What it is
+
+The California State Budget Explorer at california-budget.com is a single-page app that turns California budget documents into something you can actually interrogate. The page title is "California State Budget Explorer" and everything renders client-side from a large embedded dataset, so there is no server, no login, and no API to sign up for.
+
+The author, SB on GitHub as sberens, posted it to Hacker News in February 2026 with an unfussy description: "I asked claude code to research the budget and turn it into an interactive dashboard." He credited the async subagent mode for researching "about a dozen budget line items at once across multiple years," and estimated it "probably 20-40x's my throughput" on research work. He also mentioned using Anthropic's frontend design skill for the interface, while noting he still had to do "a lot of last mile debugging to make charts/animations/responsiveness work well."
+
+The interesting part is not the chart rendering. It is that the model is opinionated about what it does not know, and it lets you argue with its assumptions.
+
+## What you can do with it
+
+The app is organized into seven modeling sections: policy, reserves, revenue, expenditure, economic, constitutional, and demographic. In practice you get:
+
+- Big Three revenue forecasts (personal income tax, sales and use tax, corporation tax) with the Budget Stabilization Account and other revenue broken out in an appendix
+- Spending by department, with the Proposition 98 K-12 arithmetic worked through
+- County-level revenue with per-capita ranking, where San Francisco leads on per-capita sales tax revenue
+- 50-state comparisons for spending, corporate tax rates, and graduation rates
+- A billionaire wealth tax simulator built on ACA 3, switched off by default
+- Taxpayer concentration by income bracket, from $25K-$50K up to $5M and above
+- A CSV export of the computed tables, named `california-budget-<date>.csv`
+
+## Every line carries a cut-difficulty rating
+
+This is the feature I have not seen in another public budget dashboard. Each budget item is mapped to a constraint level, hard, medium, or easy, with a short explanation of the law and politics behind it.
+
+| Line item | Level | Why |
+| --- | --- | --- |
+| K-12 education | hard | Prop 98 constitutionally guarantees a minimum near 40% of the General Fund; changes need a two-thirds legislative vote or voter approval |
+| Medi-Cal | hard | Federal matching funds (50% FMAP) create entitlement obligations, so eligibility expansions are hard to reverse and cuts risk forfeiting federal dollars |
+| UC, CSU, CCC | medium | UC has constitutional autonomy, CSU and CCC have statutory protections, and multi-year compacts plus tuition policy create political constraints |
+| Corrections (CDCR) | medium | Plata v. Brown court orders mandate healthcare standards and CCPOA contracts protect staffing, though a falling prison population has allowed some reductions |
+| Sales and use tax | medium | Prop 13 requires a two-thirds vote for increases, and local add-ons need voter approval |
+| Corporation tax | medium | Rates need a two-thirds vote, tech concentration adds volatility, and interstate competition constrains increases |
+| Reserves | easy | Prop 2 sets deposit rules but permits emergency withdrawals, so reserve levels are largely discretionary |
+
+The annotations are keyed off item identifiers, so the same lookup drives every chart and table:
+
+```js
+if (id.startsWith("exp-k12"))
+  return {
+    level: "hard",
+    explanation: "Proposition 98 (1988) constitutionally guarantees minimum K-12 funding at ~40% of General Fund. Changes require 2/3 legislative vote or voter approval."
+  };
+```
+
+For a tool that models a budget, this is more useful than the numbers. It tells you which assumptions can move and which ones are constitutional furniture.
+
+## Where the numbers come from
+
+The app ships a registry of 66 sources. Each entry carries a type, a URL, the date it was accessed, and a note explaining why it was included. Most were accessed on 2025-12-29.
+
+Official sources cover the California Department of Finance revenue estimates and Governor's Budget summaries, the Legislative Analyst's Office fiscal outlook, Franchise Tax Board statistics, CDTFA sales and use tax rates, Department of Education enrollment, CDCR population, and the Board of Equalization property tax reports. Research sources cover the NBER millionaire migration paper, Stanford SIEPR work on tax flight, KFF on Medicaid spending, NAEP 2024, and Vera Institute incarceration data.
+
+```json
+{
+  "id": "ca-aca3-wealth-tax",
+  "name": "California ACA 3: Wealth Tax Proposal",
+  "type": "web",
+  "url": "https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202320240ACA3",
+  "dateAccessed": "2025-12-29",
+  "notes": "Assembly Constitutional Amendment 3 (Lee). Proposes 1.5% annual tax on worldwide net worth exceeding $1 billion, 1% on net worth over $50 million."
+}
+```
+
+## The assumption sliders
+
+Seventeen parameters are adjustable, each tagged with a category, a default, a range, the sources behind it, and the line items it feeds. Changing any of them recalculates every projected value in the app.
+
+| Parameter | Category | Default |
+| --- | --- | --- |
+| Personal Income Tax Growth Rate | revenue | 4.5% |
+| Sales and Use Tax Growth Rate | revenue | 3% |
+| Corporation Tax Growth Rate | revenue | 2.5% |
+| Insurance Gross Premiums Tax Growth | revenue | 4% |
+| Other Revenue Growth Rate | revenue | 2% |
+| LCFF Cost-of-Living Adjustment | expenditure | 2.3% |
+| Higher Education Growth Rate | expenditure | 5% |
+| Medi-Cal General Fund Growth Rate | expenditure | 5% |
+| CDCR Growth Rate | expenditure | 3% |
+| Other Expenditure Growth Rate | expenditure | 3% |
+| Starting Reserve (FY 2023-24) | reserves | $22,000M |
+| Enable Billionaire Wealth Tax | policy | off |
+| Billionaire Tax Revenue (One-Time) | policy | $50,000M |
+| Billionaire Exodus Rate | policy | 10% |
+| Billionaire Share of PIT | policy | 15% |
+| Billionaire Share of Corp Tax | policy | 10% |
+| Billionaire Share of Sales Tax | policy | 2% |
+
+The parameter shape makes the modeling intent explicit, because every slider names the lines it touches and the research that justifies its default:
+
+```json
+{
+  "id": "billionaireExodusRate",
+  "category": "policy",
+  "name": "Billionaire Exodus Rate (%)",
+  "unit": "percent",
+  "defaultValue": 10,
+  "minValue": 0,
+  "maxValue": 50,
+  "stepSize": 1,
+  "sources": [
+    { "sourceId": "nber-millionaire-migration", "detail": "2.2% millionaire migration rate per 1pp tax increase" },
+    { "sourceId": "stanford-tax-migration", "detail": "Elite migration responds to tax differentials but limited by business ties" },
+    { "sourceId": "ca-ftb-migration", "detail": "CA sees ~$25B/year AGI outmigration to low-tax states" }
+  ],
+  "affectedItems": ["rev-pit", "rev-corp", "rev-sales"]
+}
+```
+
+## What to watch for
+
+It is a model, not a forecast. Every headline figure is the product of a growth rate you can change, so treat the outputs as scenarios and go read the sources listed on each one.
+
+The wealth tax is a proposal, not law. ACA 3 never passed, the simulator ships disabled, and the $50,000M default yield is an input rather than a forecast.
+
+The migration elasticity is the softest number in the model. The 2.2% figure comes from a 2016 paper on millionaire migration, and the default 10% exodus rate is the author's own judgment layered on top of it.
+
+A commenter on the HN thread flagged that the higher education line jumps about $8B year over year and does not reconcile with the subcategories underneath it. The author replied that it came from a one-time appropriation change outside the standard budget process. If you are citing that line, check it first. Another commenter asked whether the figures are constant or nominal dollars, and there was no toggle for it.
+
+The source code is not public. The author's GitHub account lists zero public repositories, and the site publishes no license, so you can read the model but not fork it.
+
+Finally, the honest caveat from the builder: Claude Code handled the research far better than the frontend. Expect the charts to look better than the numbers reconcile.
+
+## Source and Accuracy Notes
+
+- Project page: https://california-budget.com , verified via direct visit on 2026-11-02, returns HTTP 200 and renders as "California State Budget Explorer"
+- HN launch thread: https://news.ycombinator.com/item?id=46891290 , "Show HN: Interactive California Budget (By Claude Code)", 39 points on 2026-02-04, author sberens
+- Data sources: 66 registry entries with dated URLs, including CA Department of Finance, Legislative Analyst's Office, Franchise Tax Board, CDTFA, CDE, CDCR, Board of Equalization, NBER Working Paper 29639, Stanford SIEPR, KFF and NAEP 2024
+- Source code: not published. The GitHub account sberens lists 0 public repositories, and no license is published on the site
+- Facts in this post were read from the shipped application bundle and the HN thread, not from a rendered session
