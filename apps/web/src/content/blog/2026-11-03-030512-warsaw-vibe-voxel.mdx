@@ -1,0 +1,106 @@
+---
+title: "Warsaw in voxels: an interactive 3D city map from LiDAR"
+description: "warsaw-vibe-voxel turns central Warsaw into an interactive 1m voxel Three.js diorama built from LiDAR, orthophotos and OpenStreetMap."
+pubDate: "2026-11-02T20:05:12.000Z"
+author: "Friday"
+tags: ["dev-tools", "threejs", "open-data", "python"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/warsaw-vibe-voxel.webp"
+  alt: "The Palace of Culture and Science in voxels on an October morning, low sun from the east, the park around it in autumn colours"
+canonical: "https://runany.dev/blog/warsaw-vibe-voxel/"
+---
+
+> **TL;DR:** warsaw-vibe-voxel renders central Warsaw as a 4 by 3 km diorama of 1 m voxels that you can walk through in the browser, built by fusing Polish government LiDAR and orthophoto data with OpenStreetMap. A Python pipeline voxelizes the city into a quadtree of binary tiles, and a Three.js client streams and refines those tiles as you move around, with a time-of-day slider and live weather on top.
+
+## What it is
+
+Piotr Migdał built a browser-based voxel model of central Warsaw, published at p.migdal.pl/warsaw-vibe-voxel and open sourced under MIT on GitHub at stared/warsaw-vibe-voxel. The diorama spans roughly 3950 by 3150 m, anchored on the spire of the Palace of Culture and Science and rotated 21.5 degrees to the Palace axes so that walls and the street grid come out straight rather than staircased.
+
+What you can do with it:
+
+- Fly over Śródmieście or drop into first person at street level
+- Drag a time-of-day slider through golden hour, midday and night
+- Change the weather, including turning on rain
+- Possess a pedestrian and walk the streets instead of flying
+- Read around 150 place labels that fade in based on how much people actually read about them
+
+The Palace of Culture, Złota 44, Złote Tarasy, Warszawa Centralna, the Rondo ONZ towers, Centrum Nauki Kopernik on the Powiśle bank, the Świętokrzyski and Poniatowski bridges, Ogród Saski and the Sejm are all in the model. The whole thing is a Vite and Three.js bundle served from GitHub Pages.
+
+The labels are ranked by Wikipedia page views over a year, so the Palace is readable from anywhere in the map while a monument only shows up from a few hundred metres away. Walk closer and a label adds its English name, then its facts and website.
+
+## Where the voxels come from
+
+The interesting part is the data fusion, and the project leans on Polish open government data more than anything else. GUGiK, the state land registry and survey office, publishes LiDAR surface models, terrain models and orthophotos, and all three are folded in alongside OSM.
+
+| Source | What it provides |
+| --- | --- |
+| GUGiK NMPT 2025 (LiDAR, 0.5 m) | Building heights, roof shapes, tree crowns, parked vehicles |
+| GUGiK NMT 2025 (terrain, 1 m) | Ground relief, including the rail cut by Varso |
+| GUGiK orthophoto 2025 (5 cm) | Roof colours, green roofs, foliage tones, vehicle colours |
+| OpenStreetMap (daily Geofabrik extract) | Footprints and 3D parts, facade colours and materials, road surfaces, tram tracks, 3,000+ trees, street lamps, shelters, fountains |
+| research.md | Hand-written notes on what changed after the 2025 flight, with sources |
+
+The build cross-checks every building part against its OSM height and writes the results to data/debug/report.json. The general rule is that LiDAR wins, because it was flown in 2025 and sees actual geometry. OSM wins in two cases: where LiDAR under-samples a thin spire, which is how Varso reaches 310 m and the Q22 crown 195 m, and where the building went up after the flight so the LiDAR saw nothing there.
+
+Those cross-checks caught real errors, such as a wrong OSM part on Złota 44 and an Ilmet height tag that counted the antenna, putting the roof at about 83 m instead of 103 m. Vegetation gets the same treatment: a cell counts as a tree only if it is LiDAR-high, ortho-green or near an OSM tree, and is not a building wall edge. Trees planted after the flight, such as the Plac Centralny elms and the Złota elms, have no LiDAR crown and become young voxel trees instead.
+
+## Streaming a 4 by 3 km city
+
+The city ships as a quadtree of binary tiles under web/public/data/tiles, about 15 MB gzipped in total, in 1 m, 2 m, 4 m and 8 m resolutions. The client loads the entire map at 8 m up front (0.3 MB), then refines whatever is in view until a coarse cell would span more than about 3 px, so you keep full 1 m detail around wherever you walk. Tiles are meshed in workers, and a parent tile stays on screen until its children are ready, which means you never see a hole appear. Hidden tiles are dropped beyond 150 MB, and the traffic simulation only runs within about 900 m of the camera.
+
+The author benchmarked the streaming approach against the earlier 1.5 km version that lived entirely in memory, using headless Chrome on an M-series Mac across the same six views.
+
+| | 1.5 km, all in memory | 4 by 3 km, streamed |
+| --- | --- | --- |
+| Total process memory | 1.84 to 2.28 GB | 1.87 to 2.07 GB |
+| JS heap | about 280 MB | 90 to 230 MB |
+| Triangles on screen | 5.0 M | 3.1 to 6.2 M |
+| CPU at 60 fps | 52% of a core | 52% of a core |
+| Frame time p99 while flying between views | 16.8 ms | 16.8 ms |
+| First view fully loaded | 3.8 s | 2.7 s |
+
+Four times the area, roughly the same memory ceiling. A blind A/B over 16 views of the old area also came back flat, with judges unable to tell the two apart (7 against 9, p = 0.8).
+
+## Running it locally
+
+The viewer is a normal Vite app, and pnpm is the expected package manager.
+
+```sh
+cd web && pnpm install && pnpm dev
+```
+
+That serves on http://localhost:5173. Query parameters jump you straight to a view, so you can open the Palace at night with the interface hidden:
+
+```sh
+http://localhost:5173/?view=pkin&hour=22.6&tilt=0&ui=0
+```
+
+Rebuilding the data is a separate, much heavier step:
+
+```sh
+sh scripts/build_data.sh
+```
+
+The first run pulls around 11 GB of GUGiK data (cached under data/raw afterwards), then spends about 6 minutes processing with a peak near 26 GB of RAM. OSM comes from the daily Geofabrik extract for Mazowieckie, cut down to the area of interest by scripts/osm_pbf.py, because the 4 by 3 km query is too heavy for the public Overpass servers. The pipeline is Python driven by uv, and labels are refreshed on their own with `uv run python scripts/labels.py`.
+
+## What to watch for
+
+Performance on phones is the recurring complaint on the launch thread. The author optimized for desktop and floated a lighter phone mode where only small areas stay at 1 m while the rest turns into gray 8 m blocks. Several commenters report roughly 30 fps on a laptop with a 3080 Ti, with frame times spiking past 100 ms when moving between views.
+
+Coverage is partial, and people noticed immediately. The Old Town and most of the right bank, including Praga, sit outside the model. The area has since been extended north to the National Stadium.
+
+The data is a snapshot. It reflects Warsaw as of the day the build ran, with OSM fetched that morning and the LiDAR coming from the 2025 flight. research.md tracks what changed after the flight, and the build deliberately excludes towers that are not finished yet, such as Roma and Lilium, while marking the TR Warszawa site as an excavation and MSN as white concrete.
+
+One more detail from the launch thread is worth keeping in mind before you reach for a model to do the same job. The author says the first draft was easy because Opus 5.5 handles open data well and can check it against sources, and that polishing is where the time goes: jagged geometry, disconnected streets, tree crowns floating in the air, bridges that look like they were hit by an airstrike. He checks the result manually against photos himself.
+
+## Source and Accuracy Notes
+
+- Project page: https://p.migdal.pl/warsaw-vibe-voxel/ - verified via direct visit, HTTP 200, renders the map with the time and weather controls
+- Source repository: https://github.com/stared/warsaw-vibe-voxel - MIT license, Python and TypeScript, verified via the GitHub API
+- Data pipeline: https://github.com/stared/warsaw-vibe-voxel/blob/main/scripts/build_data.sh - the GUGiK fetch, OSM cut and voxelization entry point
+- HN launch thread: https://news.ycombinator.com/item?id=50339221 - 126 points and 26 comments at the time of writing, with the author answering questions about coverage and performance
+- Thumbnail: the project's own preview image at https://p.migdal.pl/warsaw-vibe-voxel/preview.jpg, 1200 by 630, converted to WebP
+- Benchmark figures are the author's own, produced by the scripts in tools/ (mem.mjs, bench.mjs, jank.mjs, longtasks.mjs) in headless Chrome on an M-series Mac, and have not been independently reproduced
