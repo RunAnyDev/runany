@@ -1,0 +1,123 @@
+---
+title: "EPublish: Turn an HTML Manuscript into an EPUB"
+description: "EPublish is a 28KB Java CLI that turns an HTML manuscript into an ebook-ready EPUB, generating the cover page, table of contents and copyright page."
+pubDate: "2026-11-02T09:14:35.000Z"
+author: "Friday"
+tags: ["epublish", "epub", "ebook", "self-publishing", "java"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/epublish.webp"
+  alt: "A stack of manuscript pages turning into a digital book with a cover and table of contents"
+canonical: "https://runany.dev/blog/epublish/"
+---
+
+> **TL;DR:** EPublish turns a plain HTML manuscript into an EPUB that Amazon Kindle Direct Publishing will accept, generating the cover page, table of contents and drop caps along the way. The whole thing is a single 28KB Java JAR you run straight from the command line, with no account and no runtime dependencies. Andrew Oliver built it while writing his novel *Means and Motive*, and ships it as a free download.
+
+## What it is
+
+EPublish is a command-line tool that converts an HTML manuscript into an EPUB file. Point it at a `novel.html` and it writes a `novel.epub` with the packaging, front matter and typography already handled.
+
+The author is Andrew Oliver, whose site frequal.com covers Java and other software topics. He wrote the tool while drafting *Means and Motive*, a murder mystery set in the western Maine foothills, and publishes it as a free download from his own domain.
+
+Under the hood it is a single Maven-built JAR. I downloaded it and pulled it apart: 28,468 bytes, built with Apache Maven 3.6.3 against JDK 1.8, main class `com.frequal.epublish.App`. The packaged POM lists JUnit as a test-scoped dependency and nothing else, so the JAR carries no runtime dependencies and `java -jar` really is the whole setup.
+
+## Why it matters
+
+The hard part of self-publishing is not the writing, it is the packaging. EPUB is a zip archive of XHTML files that also needs an OPF package manifest, a navigation document, a cover image and, usually, embedded fonts. Most word processors refuse to produce a valid one, and most converters produce something a validator will complain about.
+
+EPublish takes the shortcut of assuming your manuscript is plain HTML. You keep writing in an editor you already know, and the tool assembles the archive around your text. It writes the `mimetype` marker, the OPF manifest, both an EPUB 3 navigation document and an EPUB 2 NCX fallback, and a stylesheet that turns your heading tags into a cover page, drop caps and centred chapter titles.
+
+## Getting it running
+
+Grab the JAR and run it:
+
+```bash
+curl -O https://frequal.com/epublish/epublish.jar
+java -jar epublish.jar novel.html --style Prod
+```
+
+Java 8 or newer is required. The manuscript itself is deliberately boring HTML, and the class names are how the tool decides what each heading means:
+
+```html
+<img class="cover" src="cover.jpg"/>
+<img id="title" src="title.png">
+<div class="asterism" style="filter: grayscale(100%) brightness(0.2);">*</div>
+<h1>Title<br><br>Author</h1>
+<h2 class="Content">Chapter 1</h2>
+<p>Chapter 1 text here.</p>
+<hr/>
+<h2 class="Post">Acknowledgments</h2>
+<p>Acknowledgments here.</p>
+```
+
+`cover.jpg` and `title.png` sit next to `novel.html`. An `h2` with the class `Content` marks a body chapter, `Post` marks back matter, and `Promo` or `Arc` mark the chapters that only appear in certain exports.
+
+The `--style` flag picks which export you want:
+
+| Mode | What lands in the file |
+|---|---|
+| `Prod` | The full book with front and back matter, ready to upload |
+| `Draft` | Contents only, for reviewers, no front or back matter |
+| `Arc` | An advance review copy that includes the advance reader chapters |
+| `Promo` | A promotional copy that includes the promotional chapters |
+
+## What ends up in the EPUB file
+
+The author publishes a free sample chapter of *Means and Motive* built with EPublish, so the output is not a theory. Unpacking it gives a clean EPUB 3 package:
+
+| Path in the archive | What it is |
+|---|---|
+| `mimetype` | Uncompressed marker that must read `application/epub+zip` |
+| `META-INF/container.xml` | Points the reader at the package document |
+| `OEBPS/content.opf` | The OPF manifest and book metadata |
+| `OEBPS/cover.xhtml` and `cover.jpg` | Cover page and its image |
+| `OEBPS/title.xhtml` and `title.png` | The title page |
+| `OEBPS/copyright.xhtml` | A copyright page written for you |
+| `OEBPS/toc.xhtml` and `toc.ncx` | Navigation document plus an EPUB 2 fallback |
+| `OEBPS/template.css` | Stylesheet holding the font faces and drop caps |
+| `OEBPS/fonts/EbGaramond.*` | The embedded serif in TTF, WOFF2 and OTF |
+| `OEBPS/asterism.jpg` | Your custom section-break image |
+
+The drop cap is a CSS rule rather than markup, which is why it survives reflow on different readers:
+
+```css
+h2.Content + p::first-letter {
+    float: left;
+    font-size: 430%;
+    line-height: 0.8em;
+}
+```
+
+The auto-generated copyright page is more than a placeholder. The sample file carries the standard fiction disclaimer, an All Rights Reserved line, a copyright year, a clause prohibiting the use of the book for AI training, a pre-release notice and the export date, which the tool stamps in as it runs.
+
+## The process around the tool
+
+The interesting part is what sits either side of the exporter. Oliver keeps three HTML files per project: `novel.html` for the text itself, `universe.html` for characters, locations, key events and research references, and `guidelines.html` for the target word count, chapter count and writing references. He starts from `universe.html`, writes a short description of each chapter, then drafts the chapters in roughly chronological order.
+
+Unfinished sections are marked with `TBD` annotations, which do double duty: he can search for them while writing, and EPublish uses them in the report it prints alongside the export, listing every chapter with its completion status based on length and remaining markers.
+
+He writes in GNU Emacs with `html-helper-mode` and `flyspell-mode` enabled, and finishes the pipeline with Calibre for the print editions, because the EPUB he exports is not the same file that ends up on paper:
+
+```bash
+ebook-convert novel.epub novel.pdf
+```
+
+## What to watch for
+
+No license is published. The JAR is a free download, the source is not available, and the support section on the tool page asks you to show support by reading his books. Treat it as free to use but not open source, and check before you build a publishing pipeline on top of it.
+
+A few generated values need fixing before an upload. The `dc:identifier` in the package document is the literal string `isbn`, and the NCX mirrors it as `dtb:uid`, so both need a real ISBN or UUID or the file can be rejected. The `dcterms:modified` timestamp is hardcoded to a 2014 date, and the generated stylesheet misspells `font-weight` as `font-wieght`, so readers ignore that declaration.
+
+There is no version history and the Maven metadata still reads `1.0-SNAPSHOT`, so treat the JAR as a moving target rather than something to pin in a build.
+
+## Source and Accuracy Notes
+
+- Tool page: https://frequal.com/epublish/ , verified by direct visit on 2026-11-02
+- Download: https://frequal.com/epublish/epublish.jar , 28,468 bytes served as `application/java-archive`, last modified 2026-06-20
+- Author's writing workflow: https://frequal.com/forwriters/
+- Author's site: https://frequal.com/
+- Sample chapter built with EPublish: https://frequal.com/novels/mam/MeansAndMotiveChapter1.epub
+- HN launch thread: https://news.ycombinator.com/item?id=47998570 , Show HN: Software Engineer to Novelist, 22 points and 11 comments, 2026-05-03
+- License: none published. Free download, source not published, support requested in the form of book purchases.
