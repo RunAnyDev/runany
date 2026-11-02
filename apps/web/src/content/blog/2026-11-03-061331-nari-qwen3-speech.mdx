@@ -1,0 +1,177 @@
+---
+title: "Nari Labs Qwen3-TTS and Qwen3-ASR: low latency speech APIs"
+description: "Nari Labs serves Qwen3-TTS and Qwen3-ASR as fast speech APIs, $5 per million characters and $0.06 per audio hour, plus an Apache-2.0 TTS server for one H100."
+pubDate: "2026-11-02T23:13:31.000Z"
+author: "Friday"
+tags: ["ai-setup", "speech", "tts", "open-source"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/nari-qwen3-speech.webp"
+  alt: "Nari Labs benchmark card showing first place in the Coval Voice AI benchmark for STT latency and TTS word error rate"
+canonical: "https://runany.dev/blog/nari-qwen3-speech/"
+---
+
+> **TL;DR:** **Nari Labs** serves two open-source Qwen speech models behind plain REST and WebSocket APIs: **Nari Qwen3-TTS 1.7B** and **Nari Qwen3-ASR 1.7B**. Text to speech costs $5 per million characters and speech to text costs $0.06 per audio hour, with Fast variants quoting under 50 ms time-to-first-audio and 40 ms time-to-final-segment. The TTS model also ships as an Apache-2.0 server you can run on a single H100.
+
+## What it is
+
+Nari Labs is a YC-backed inference company working out of San Francisco and Seoul, started by the team behind Dia, the open-source dialogue TTS model that has collected roughly 19,400 GitHub stars, and Narvatar, a human-centric avatar model that has not shipped yet. The company sells hosted model APIs, dedicated inference on infrastructure you choose, and fine-tuning.
+
+What got it onto Hacker News in September 2026 was the speech lineup. Nari takes two open-source Qwen checkpoints, Qwen3-TTS 1.7B and Qwen3-ASR 1.7B, and serves them as production endpoints with the serving stack tuned around latency. You call an endpoint and get audio or transcripts back, without running the model yourself.
+
+Three things make it more than a wrapper around a Hugging Face model:
+
+- The TTS side is published as an Apache-2.0 server that reaches 10 requests per second with sub-50 ms p95 time-to-first-audio on one H100, so you can move off the hosted API without rewriting your request code.
+- Speech to text is a single WebSocket that carries multiple utterances, with server-side voice activity detection and word-level alignment available as options.
+- The documentation is unusually agent-friendly. Append `.md` to any docs page for clean Markdown, read `llms.txt` for an index, or point an MCP client at `https://docs.narilabs.com/_mcp/server`.
+
+## The four endpoints and what they cost
+
+| Model ID | Task | Price | Server-side latency |
+| --- | --- | --- | --- |
+| `qwen3-tts` | Text to speech | $5.00 per 1M input characters | Standard tier, tuned for cost |
+| `qwen3-tts-fast` | Text to speech | $10.00 per 1M input characters | under 50 ms time-to-first-audio |
+| `qwen3-asr` | Speech to text | $0.06 per input audio hour | about 300 ms time-to-final-segment |
+| `qwen3-asr-fast` | Speech to text | $0.12 per input audio hour | about 40 ms time-to-final-segment |
+
+The vendor comparisons line up with public pricing. ElevenLabs lists $50 per million characters for its standard tier against Nari's $5, and Deepgram lists $0.288 per hour against Nari's $0.06. Nari cites Artificial Analysis for those figures, checked on September 8, 2026. Treat the 10x claims as marketing that happens to check out against a third-party list at one point in time.
+
+## Making the first request
+
+Speech generation is one POST. The voice field is required, case-sensitive, and taken from a per-model catalog, so send `diana` rather than the display name `Diana`.
+
+```bash
+export NARI_API_KEY="your-api-key"
+
+curl --fail --silent --show-error \
+  https://api.narilabs.com/v1/audio/speech \
+  -H "Authorization: Bearer $NARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "model": "qwen3-tts",
+    "input": "Your order has shipped.",
+    "voice": "diana",
+    "language": "en",
+    "response_format": "wav",
+    "stream": false
+  }' \
+  --output speech.wav
+```
+
+One detail that bites people: the server does not restore capitalization or punctuation. All-lowercase input with no punctuation degrades the audio badly, so write normal sentences.
+
+Speech to text is a WebSocket at `wss://api.narilabs.com/v1/realtime?intent=transcription`. You configure the session first, wait for the acknowledgement, then stream base64 PCM16 chunks.
+
+```python
+import asyncio
+import base64
+import json
+import os
+
+from websockets.asyncio.client import connect
+
+URL = "wss://api.narilabs.com/v1/realtime?intent=transcription"
+
+
+async def main():
+    pcm = open("hello.pcm", "rb").read()  # 16 kHz mono PCM16, no WAV header
+
+    async with connect(
+        URL,
+        additional_headers={"Authorization": f"Bearer {os.environ['NARI_API_KEY']}"},
+    ) as socket:
+        await socket.send(json.dumps({
+            "type": "session.configure",
+            "session": {"model": "qwen3-asr-fast"},
+        }))
+        await socket.recv()  # session.configured
+
+        await socket.send(json.dumps({
+            "type": "input_audio_buffer.append",
+            "audio": base64.b64encode(pcm).decode("ascii"),
+        }))
+        await socket.send(json.dumps({
+            "type": "input_audio_buffer.commit",
+            "event_id": "end_of_input",
+        }))
+
+        while True:
+            event = json.loads(await socket.recv())
+            if event["type"] == "transcript.completed":
+                print(event["transcript"])
+                break
+
+
+asyncio.run(main())
+```
+
+Partial results arrive as `transcript.partial`, and each one replaces the previous hypothesis for that utterance rather than appending to it. Turn boundaries are yours to control: send `input_audio_buffer.commit` yourself, or set the `turn_detection` session field to `server_vad` and let the server split utterances on silence. Audio is 16 kHz mono signed 16-bit little-endian PCM without a WAV header, 100 ms is 3,200 bytes, and each message has to stay under 128 KiB.
+
+## Running Qwen3-TTS on your own H100
+
+The TTS engine is open source at github.com/nari-labs/nari-qwen3-tts under Apache-2.0. The container needs an NVIDIA H100, the NVIDIA Container Toolkit, and a driver compatible with CUDA 13.0, on Linux x86_64.
+
+```bash
+docker run --rm --gpus all \
+  -p 8000:8000 \
+  -e HF_TOKEN \
+  -e QWEN3_TTS_PROFILE=ttfa \
+  -v nari-qwen3-tts-cache:/home/nari/.cache \
+  ghcr.io/nari-labs/nari-qwen3-tts:latest
+```
+
+Three profiles change the tradeoff. The `ttfa` profile shrinks the initial codec chunks to shave latency, `balanced` is the container default, and `throughput` uses larger chunks and batching for aggregate request volume. Readiness stays false until CUDA graph capture and a warm-up request both finish, so poll `GET /ready` before sending real traffic.
+
+The local endpoint follows the OpenAI audio speech request shape, which makes swapping between hosted and self-hosted mostly a change of base URL.
+
+```bash
+curl http://127.0.0.1:8000/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "input": "Hello from Nari Labs.",
+    "voice": "ryan",
+    "language": "english",
+    "response_format": "wav",
+    "stream": false
+  }' \
+  --output speech.wav
+```
+
+Note that the model string changes to the upstream Hugging Face checkpoint and the voice set differs from the hosted catalog, so voice IDs do not carry over between the two. There is also a `uv` path for people who would rather skip the container: `uv sync --frozen --extra codec --extra cuda --extra serving`, then `uv run --frozen nari-qwen3-tts-server --profile ttfa`.
+
+## What the benchmarks say
+
+Coval publishes voice AI benchmarks that refresh every half hour, and Nari's September 14, 2026 writeup quotes its own position in them.
+
+| Model | Metric | Result |
+| --- | --- | --- |
+| `qwen3-asr-fast` | Time-to-final-segment, p50 | 44 ms, first place |
+| `qwen3-asr-fast` | Word error rate | 3.6%, second behind AssemblyAI Universal 3.5 Pro at 3.5% |
+| `qwen3-tts-fast` | Time-to-first-audio, p50 | 63 ms, second behind Fluxions vui at 49 ms |
+| `qwen3-tts-fast` | Word error rate | 3.8%, first place |
+
+The one model with a lower median time-to-first-audio is Fluxions vui, a 300M parameter model against Nari's 1.7B, so the gap is not simply a weight race. Nari also claims first place for TTS time-to-first-audio on the Speko benchmark. Only publicly available endpoints are counted, and these are the vendor's own readings of a benchmark that moves every 30 minutes, so treat them as a starting point for a bake-off rather than a settled result.
+
+## What to watch for
+
+Concurrency is the constraint most likely to bite. A single purchase of $100 or more in one payment moves an organization to Paid Tier 1, which allows 20 in-flight TTS requests and 20 open STT connections. Smaller purchases do not accumulate toward that tier, so topping up $40 twice leaves you on the pay-as-you-go tier with 3 member seats and 2 concurrent requests per model.
+
+The self-hosted path needs a datacenter H100 rather than a workstation card, and the published image is Linux x86_64 only. The engine was tested with English as the primary language, while the hosted ASR endpoint covers 30 languages with automatic language identification.
+
+There is no published open source ASR server to match the TTS one. The `nari-labs` organization ships the TTS engine, a benchmarking harness, and the Dia model family, but speech to text exists as a hosted endpoint only.
+
+Billing runs on prepaid credits rather than a subscription. The free public beta ended on September 16, 2026, and the model IDs above are the generally available ones. Dedicated inference and fine-tuning are both sales conversations rather than switches you can flip yourself.
+
+## Source and Accuracy Notes
+
+- Project page: https://narilabs.com/ , verified by direct visit on November 3, 2026
+- Source repository: github.com/nari-labs/nari-qwen3-tts , Apache-2.0, 190 stars at time of writing
+- Related repositories: `nari-labs/benchmarks` and `nari-labs/dia2`, both Apache-2.0
+- Base checkpoints: `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` and `Qwen/Qwen3-ASR-1.7B` on Hugging Face
+- License: Apache-2.0 for the TTS server and the benchmarking harness; base Qwen model licenses are listed on the Hugging Face pages
+- Pricing and model IDs: docs.narilabs.com/models-and-pricing, read November 3, 2026
+- HN launch thread: https://news.ycombinator.com/item?id=49699267 , 92 points, September 14, 2026
+- Benchmark figures are quoted from Nari's own writeup of the Coval results, not measured independently
