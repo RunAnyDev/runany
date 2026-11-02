@@ -1,0 +1,159 @@
+---
+title: "Kedge: deploy websites and apps over SSH, no dashboard"
+description: "Kedge deploys websites and apps over SSH or Git, with a replicated SQLite database, a shared file tree, and a hardware-isolated VM in every app."
+pubDate: "2026-11-02T22:10:04.000Z"
+author: "Friday"
+tags: ["dev-tools", "cloud", "ssh", "sqlite"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kedge.webp"
+  alt: "Kedge wordmark on a dark slate background with a terminal prompt and a public HTTPS deployment URL"
+canonical: "https://runany.dev/blog/kedge/"
+---
+
+> **TL;DR:** **Kedge** deploys websites and apps over SSH or Git instead of through a dashboard, and hands every app a replicated SQLite database, a replicated file tree, and a hardware-isolated VM. Idle apps scale to zero, and the built-in coding agent can take a prompt like `kedge agent "build a status page"` and hand back a working URL.
+
+## What it is
+
+Kedge is a cloud platform for websites, apps, and databases. The unusual part is the interface: your SSH key is your account, and the entire control plane sits behind `ssh kedge.dev`.
+
+```bash
+ssh kedge.dev publish '# Hello, world!'
+```
+
+That one command creates an app and prints its public HTTPS URL. Markdown becomes HTML on the way in. If you would rather work in a normal terminal, install the `kedge` shortcut, which is a thin wrapper around the same endpoint:
+
+```bash
+ssh kedge.dev setup | sh
+```
+
+The SSH framing is not a stunt. The platform handles static file trees, Markdown, HTML apps with live data, shebang handlers, compiled services, container images, and databases, and it accepts each of them from a source tree, a Git push, a prebuilt image, or an agent task.
+
+## How an app is put together
+
+An app here is not a container with a database bolted alongside. Each instance is a hardware-isolated VM with its own Linux kernel, so the container image only packages the workload and the VM is the isolation boundary. HTTPS, CDN, custom domains, and an account-scoped private network span ten regions.
+
+Inside that VM, two paths carry all the state:
+
+| Path | What it is |
+|---|---|
+| `/shared.db` | Replicated SQLite database |
+| `/shared/` | Replicated POSIX file tree |
+
+Both are ordinary local paths. There is no database service to provision and no connection string to configure. Your code opens them exactly as it would open a file on disk.
+
+The replication engine is syzy, Apache-2.0 licensed and open source at github.com/wjordan/syzy, written by the same author. Writes commit locally first, converge across instances and regions in under a second, and land durably in object storage.
+
+## What multi-writer actually means
+
+Read this part carefully before you commit a design to it, because the semantics are specific rather than generic.
+
+- Replicated tables need a primary key. `INTEGER PRIMARY KEY` and `AUTOINCREMENT` schemas get rewritten to sparse, collision-safe 63-bit values, so read the id back with `INSERT ... RETURNING id` instead of `last_insert_rowid()`.
+- An instance reads its own commit immediately. Other replicas converge asynchronously, normally in under a second.
+- Conflicts resolve whole-row, later write wins, ordered by a hybrid logical clock. A nullable `UNIQUE` column hands the contested value to the later writer and nulls it on the losing row.
+- `NOT NULL UNIQUE` values and DDL coordinate cluster-wide before the local commit, so they can fail with a retryable error while a region is unreachable. Every other write keeps committing through a disconnection and converges on reconnect.
+
+The second constraint catches people who never touch the first. If your stack statically links SQLite, replication silently does not happen. `better-sqlite3`, Node's built-in `node:sqlite`, `modernc.org/sqlite`, and `mattn/go-sqlite3` without the `libsqlite3` build tag all embed the engine and cannot be intercepted. Python's stdlib, Ruby's system gem, the `sqlite3` CLI, Rails, Django, and Go built with `-tags=libsqlite3` work fine, because they link the system library dynamically.
+
+## Getting it running
+
+Start with one static page, then work up the stack. A directory becomes a route tree, where `index.html` serves `/` and `about/index.html` serves `/about/`:
+
+```bash
+kedge up --dry-run
+kedge up
+```
+
+A shebang file turns into a request handler:
+
+```bash
+printf '#!/bin/bash \n uptime' | ssh kedge.dev
+```
+
+For live data on an ordinary HTML page, a `data-kedge` attribute is enough. Kedge parses the bindings at deploy time, creates the counter column, and manages the underlying database:
+
+```html
+<strong data-kedge="counters/home">{{clicks | plural:click}}</strong>
+<button data-kedge="counters/home?$increment=clicks">add one</button>
+```
+
+A source tree with a `Cargo.toml` or a `Dockerfile` gets built for you, and `$PORT` is handed to the running process. An image you already have can be published straight from a registry:
+
+```bash
+kedge publish --app myapp --image ghcr.io/mccutchen/go-httpbin:2.23.1
+```
+
+## The coding agent
+
+`kedge agent` starts the Kedge app agent inside a persistent workspace. The session stays open at a `>` prompt for follow-up turns:
+
+```bash
+kedge login
+kedge agent "build a small status page"
+```
+
+Every top-level task gets its own Git project directory, and the session, the installed tools, and the whole writable filesystem survive restarts and host moves. Pointing the agent at an existing app works too, and it can edit, deploy, and send authenticated requests to the live instance:
+
+```bash
+kedge agent --app myapp "add a leaderboard"
+```
+
+If you already pay for Claude Code or Codex, bring that subscription instead of the built-in model:
+
+```bash
+kedge agent --claude "review this project"
+kedge agent --codex "fix the failing tests"
+```
+
+Named workspaces can be created and dispatched without opening them first:
+
+```bash
+kedge workspace create design-lab
+kedge workspace run design-lab "add keyboard navigation"
+```
+
+## Cost and limits
+
+Kedge is in public preview, and the published rates are explicitly labelled as estimates for a future paid service. Billing is metered per second on what an app actually consumes rather than on what you provisioned.
+
+| Resource | Rate |
+|---|---|
+| CPU | $15 / vCPU-month |
+| Memory | $5 / GiB-month |
+| Storage | $0.05 / GiB-month |
+| Egress | $0.01 / GB |
+
+A `cpus`, `memory`, or `volume.size` setting is a ceiling, not a reservation. An app limited to 4 vCPUs and 8 GiB of memory that averages 0.25 vCPU and a 400 MiB working set is billed for the smaller figures. An app scaled to zero has no running CPU or memory, so it pays only for stored bytes.
+
+Every account includes $5 of monthly usage, and agent sessions get a separate $2 monthly allowance for model tokens. Accounts are notified below $1 and suspended at zero, at which point the apps stop but the data stays behind.
+
+The latency numbers are the other selling point. A fresh sandbox is ready in 0.6 ms, app scale-out from a warm instance takes 1.5 ms, and a cold restore from a deploy snapshot lands around 16 ms. You can see which path a given request took:
+
+```bash
+curl -si https://myapp.kedge.run | grep x-kedge-restore
+```
+
+```text
+x-kedge-restore: warm
+x-kedge-restore-ms: 1.5
+```
+
+## What to watch for
+
+The platform is young, and the pricing page says so plainly. Rates may change, the free trial is limited, and the preview numbers are not a commitment to the final bill.
+
+The bigger constraint is the replication model. Whole-row, later-write-wins is fine for counters, logs, and settings, and wrong for anything where two regions update the same record and you need both changes merged, because one of them is going to lose. If your app needs field-level merging or a strict read-after-write across regions, reach for a real database service rather than `/shared.db`.
+
+Static SQLite bindings are the other trap. The list of libraries that quietly fall back to instance-local behavior is longer than you would guess, and the symptom looks like "it works, but only on this machine."
+
+Finally, the whole control plane is SSH. That is genuinely pleasant when it is working, and it does mean you should keep a copy of what you have deployed somewhere other than the platform itself.
+
+## Source and Accuracy Notes
+
+- Project page: https://kedge.dev/ (verified via direct visit on 2026-11-03)
+- HN launch thread: https://news.ycombinator.com/item?id=49099434 (141 points, posted 2026-07-29)
+- Replication engine: https://github.com/wjordan/syzy (Apache-2.0), same author
+- License: Kedge itself is a hosted commercial service in public preview, and no source license is published for the platform
+- Documentation: https://kedge.dev/docs/quickstart, with a plain-text summary at https://kedge.dev/llms.txt
