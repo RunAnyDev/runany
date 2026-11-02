@@ -1,0 +1,93 @@
+---
+title: "WikiHack: The Wikipedia Articles Hacker News Keeps Linking"
+description: "WikiHack scrapes every Wikipedia link posted on Hacker News since 2006 and ranks 76,000 articles by how many different commenters linked them."
+pubDate: "2026-11-02T08:08:00.000Z"
+author: "Friday"
+tags: ["wikipedia", "hacker-news", "data-visualization", "open-data", "web-tool"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/wikihack.webp"
+  alt: "Abstract article cards linked by glowing threads with one card highlighted in orange"
+canonical: "https://runany.dev/blog/wikihack/"
+---
+
+> **TL;DR:** WikiHack collects every Wikipedia link that showed up on Hacker News since 2006 and ranks the resulting 76,000 articles by how many *different* commenters linked them. Each article page pairs the Wikipedia summary with the real HN comments that linked it, plus a per-year chart of who mentioned it. Four feeds and 21 topic buckets are served as static JSON, so you can query the whole dataset yourself.
+
+## What it is
+
+WikiHack is a browser-based feed of Wikipedia articles that Hacker News commenters kept linking, built by Isaac Gemal, who also made WikiTok, the endless scroll through Wikipedia at random.
+
+The idea came out of Andrej Karpathy's Hackertube and Hackerbooks. Those collect the videos and books HN links to. WikiHack does the same for Wikipedia, which HN links to constantly: to explain a concept, to open a tangent, to settle an argument.
+
+The dataset behind it is bigger than you would guess. The snapshot generated 2026-11-01 covers 76,074 articles, 540,037 mentions, 488,190 comments, and 67,628 distinct commenters, spanning 2007 through 2026.
+
+## Why it matters
+
+The ranking is the interesting part, and it is not the same as "most popular on the front page." An article has to be linked by at least two different commenters to appear in the list at all, unless the article itself made the HN front page. Once it qualifies, it is scored by distinct commenters first, with a little extra weight for repeat links and front-page appearances.
+
+That produces a ranking no single source can give you. What surfaces are the articles a crowd repeatedly reaches for while arguing, debugging, or explaining something, rather than the ones one enthusiastic submitter pushed once.
+
+The comments are the other half of the appeal. Open any article and you get the Wikipedia summary next to a "What HN said" sidebar holding the actual comment text. Several people in the launch thread said they read the comments more often than the linked piece itself.
+
+## What you can do with it
+
+- Scroll an endless feed where each card is one article and its Wikipedia summary
+- Read the HN comments that linked it, including which ones submitted it as a story versus mentioned it in a thread
+- See how many commenters linked it in each year since 2007
+- Browse 21 topic buckets, from Computing and Mathematics through to Places and Sports
+- Search the article index by title, then jump to an HN search for that same article
+- Switch between light, dark, and auto themes, or drive it from the keyboard
+
+## The four feeds
+
+| Feed | What it does |
+|---|---|
+| Top | Most frequently linked articles, ranked by distinct commenters |
+| Rising | Compares the last 12 months against an article's long-run average |
+| Front | Stories that were just a Wikipedia link and scored 50+ points, best first |
+| Random | Random, but slightly weighted toward more frequently linked articles |
+
+Rising is the one that rewards checking back daily. An article that suddenly gets linked by a lot of commenters shows up even when its all-time count is modest.
+
+The topic buckets come from Wikipedia's own article-topic prediction model, so they are approximate. Places holds 19,150 articles and Engineering and Tech holds 12,134, the two largest of the 21.
+
+## Getting the data yourself
+
+Nothing runs server-side. The whole site is static JSON on Netlify, so you can pull the dataset directly instead of scraping the UI:
+
+```bash
+curl -s https://wikihack.netlify.app/data/meta.json | python3 -m json.tool | head -20
+```
+
+That gives you the snapshot date, the totals, the year list, and the topic counts. The feed orderings sit next to it:
+
+```bash
+curl -s https://wikihack.netlify.app/data/lists.json | python3 -c "
+import json, sys
+lists = json.load(sys.stdin)
+print({k: len(v) for k, v in lists.items()})
+"
+```
+
+Article records are sharded across 1,024 gzip-compressed index files with 100 articles per page, so the layout scales to roughly 76,000 articles without one enormous payload. If you want to build on top of this, that sharded structure is the part to plan around.
+
+## What to watch for
+
+Only English Wikipedia is scanned. Someone in the launch thread asked for non-English coverage, and it is not there yet.
+
+Links are normalised and redirects are followed, so "Dunning-Kruger" and "Dunning-Kruger effect" count as one article instead of two. Comments inside a thread that was about a given article do not count as mentions of it, which stops a thread from inflating its own subject.
+
+The data is a static snapshot, so there is a lag between a comment hitting HN and the article showing up on a feed.
+
+Hosting is the real risk. It runs on Netlify's free tier under a netlify.app subdomain, and a commenter raised exactly that concern: the site can disappear, and the domain is not memorable enough to bookmark with confidence.
+
+## Source and Accuracy Notes
+
+- Project page: https://wikihack.netlify.app, verified via direct visit
+- Show HN thread: 73 points and 16 comments, posted 2026-11-02 (https://news.ycombinator.com/item?id=50333339)
+- Author: Isaac Gemal, also behind WikiTok (https://github.com/IsaacGemal/wikitok)
+- Data source: HN items come from the ClickHouse public Hacker News dataset. Article text, images, and topics come from the Wikipedia API under CC BY-SA.
+- Dataset snapshot generated 2026-11-01
+- No source repository is published for WikiHack itself. The author says the site is served entirely through the frontend.
