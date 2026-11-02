@@ -1,0 +1,143 @@
+---
+title: "syscall.sh: every Linux syscall table for 27 architectures"
+description: "syscall.sh lists every Linux system call across 27 architectures with numbers, registers and kernel history, and serves the lot through a JSON API."
+pubDate: "2026-11-02T12:09:02.000Z"
+author: "Friday"
+tags: ["dev-tools", "linux", "kernel", "api", "reference"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/syscall-sh.webp"
+  alt: "The x86_64 Linux syscall table with syscall numbers, argument registers and kernel release history"
+canonical: "https://runany.dev/blog/syscall-sh/"
+draft: false
+---
+
+> **TL;DR:** syscall.sh collects the Linux syscall table for 27 architectures across every kernel release from 3.3 to 7.3, with the number, the argument registers and the release each call appeared in. Each architecture is also a plain JSON file, and a documented API sits on top. It is the reference to open when the number you need is for the target, not for the machine you are sitting at.
+
+## What it is
+
+The Linux syscall table is the mapping between a call like `read` and the number the kernel expects. On x86_64 `read` is 0. On arm64 it is 63. On mips64 it is 5000, and on the x32 ABI it is 1073741824. Every architecture numbers its own calls differently, and the numbers shift between kernel versions as calls are added and, more rarely, removed.
+
+syscall.sh is one site that lays all of that out. Each architecture has a page listing every syscall with its number in decimal and hex, the ABI it belongs to, the kernel entry point, the release it appeared in, a man page link and a link to the matching source on elixir.bootlin.com. A dropdown switches the table between kernel versions, so you can pin the view to 4.9 and see exactly what existed then.
+
+The project started in 2020 as a personal reference and then sat idle for several years. It is back under active maintenance in 2026 with more architectures covered, a kernel selector, generated syscall descriptions and a layout that works on a phone. The same data is available as JSON per architecture and through a documented HTTP API.
+
+Coverage is wide enough for both what you ship today and what you read about:
+
+| Coverage | Value |
+|---|---|
+| Architectures | 27, from x64 and arm64 down to alpha, sh and sparc |
+| Kernel releases | 3.3 through 7.3 |
+| Live calls on x64 at 7.3 | 369 |
+| Formats | HTML pages, per-architecture JSON, REST API |
+
+## Reading a table
+
+Each architecture page opens with the calling convention, because the instruction and the registers are what you actually need when you are writing assembly or hooking a syscall. On x64 it looks like this:
+
+```text
+ARCH     INSTRUCTION   NR     RETURN   ARG0   ARG1   ARG2   ARG3   ARG4   ARG5
+x64      syscall       rax    rax      rdi    rsi    rdx    r10    r8     r9
+arm64    svc #0        x8     x0       x0     x1     x2     x3     x4     x5
+riscv64  ecall         a7     a0       a0     a1     a2     a3     a4     a5
+```
+
+Below the table sits a filter box. Enter a number and it matches that syscall number exactly, enter anything else and it searches the name, the arguments, the description, the family and the Kconfig option. There is a toggle for showing calls the kernel has removed, which comes in handy when you are chasing something that used to exist.
+
+An individual syscall page adds the signature with a copyable number and ABI, the registers mapped one by one, and a cross-reference listing the same call on every other architecture along with its number there.
+
+## The JSON and the API
+
+Every architecture page has a download link, and the file behind it is the whole table:
+
+```bash
+# the entire x64 table
+curl -s https://syscall.sh/x64/syscalls.json | jq '.syscalls | length'
+
+# a single call, with its history
+curl -s https://api.syscall.sh/v2/syscalls/x64/read | jq '.[0]'
+```
+
+That second call returns one record per matching architecture:
+
+```json
+{
+  "arch": "x64",
+  "nr": 0,
+  "name": "read",
+  "description": "read from a file descriptor",
+  "abi": "common",
+  "entry_point": "sys_read",
+  "nargs": 3,
+  "arg0": "unsigned int fd",
+  "arg1": "char *buf",
+  "arg2": "size_t count",
+  "since": "3.3",
+  "removed_in": null,
+  "kconfig": null,
+  "family": null
+}
+```
+
+The `since` and `removed_in` fields are the reason this is more than a lookup table. `removed_in` is filled in for calls the kernel dropped, such as `_sysctl`, which was there from 3.3 and went away in 5.9.
+
+The API at api.syscall.sh documents itself with OpenAPI, and the v2 endpoints cover the same ground as the static files:
+
+| Endpoint | What it returns |
+|---|---|
+| `/v2/kernels` | Every scanned release and the architectures it covers |
+| `/v2/syscalls/{arch}` | All calls for an architecture |
+| `/v2/syscalls/{arch}/{nameOrNumber}` | One call, matched by name or number |
+| `/v2/conventions` | Calling conventions for every architecture |
+| `/v2/diff/{from}/{to}` | What was added and removed between two releases |
+
+The diff endpoint is the one that pays off. It answers what is new in a kernel release without you having to diff two tables yourself:
+
+```bash
+curl -s https://api.syscall.sh/v2/diff/6.6/6.7 \
+  | jq '.arches[] | select(.arch == "x64")
+        | {added: [.added[].name], removed: [.removed[].name]}'
+```
+
+```json
+{
+  "added": ["futex_wake", "futex_wait", "futex_requeue"],
+  "removed": ["lookup_dcookie"]
+}
+```
+
+Reading the same call across architectures is just as easy, which is what makes the API useful for cross-compiling code or checking a target's ABI:
+
+```python
+import json
+import urllib.request
+
+def syscalls(arch):
+    url = f"https://api.syscall.sh/v2/syscalls/{arch}"
+    with urllib.request.urlopen(url) as response:
+        return json.load(response)
+
+calls = {c["name"]: c for c in syscalls("arm64")}
+print(calls["read"]["nr"])       # 63
+print(calls["statx"]["since"])   # 4.11
+```
+
+## What to watch for
+
+The number register on x86_64 is a trap, and the site now documents it after it came up in the launch thread on Hacker News. The syscall number is nominally in `rax`, but since Linux 5.14 the kernel reads only `eax` and ignores the upper half. Older kernels read all of `rax` and returned ENOSYS when the upper bits were not zero. `mov eax, N` clears them and works on both, which is what the architecture page tells you to do.
+
+Descriptions are generated and they are not complete. Well-known calls get a sentence, but plenty of newer ones have a null description, so do not treat the field as guaranteed when you build on the API. The `family` and `kconfig` fields are patchy for the same reason. `kconfig` is populated where the kernel gates a call behind a config symbol, for example `madvise` behind `CONFIG_ADVISE_SYSCALLS`.
+
+The raw syscall count is a poor metric, and the launch thread had a good argument about it. Much of the table is legacy that still has to be supported forever, and io_uring is quietly folding I/O variants into subcommands of a single entry point. Counts also differ wildly between architectures, so a table with 441 calls on x86 and 323 on LoongArch is not measuring much of anything.
+
+There is no versioned API to pin against. The v1 endpoints are kept for older clients but are marked deprecated, and errors on v2 come back as RFC 9457 problem details, so a bad architecture name returns a JSON document rather than a blank body.
+
+## Source and Accuracy Notes
+
+- Project page: https://syscall.sh/ , verified by direct visit
+- Architecture table: https://syscall.sh/x64/ , the kernel selector, the filter box and the register table
+- Static JSON: https://syscall.sh/x64/syscalls.json , the full x64 table
+- API docs: https://api.syscall.sh/docs , OpenAPI schema at https://api.syscall.sh/openapi.json
+- About page: https://syscall.sh/about/ , author TMZ, contact tmz@syscall.sh, GitHub https://github.com/guitmz
+- HN launch thread: https://news.ycombinator.com/item?id=50334704 , Show HN by guitmz, 36 points and 15 comments, 2026-11-02
+- License: none published. No public source repository was found for the site or the API. The theme is Hugo Terminal by panr (MIT) and the syscall data is extracted from the Linux kernel sources, which are GPL-2.0
