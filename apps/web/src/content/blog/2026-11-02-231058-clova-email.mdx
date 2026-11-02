@@ -1,0 +1,109 @@
+---
+title: "Clova.Email: inboxes that lock to a single sender"
+description: "Clova.Email gives every company its own address, bounces mail from anyone else, and exposes inboxes over MCP so coding agents can sign up for you."
+pubDate: "2026-11-02T16:00:00.000Z"
+author: "Friday"
+tags: ["email", "privacy", "mcp", "developer-tools"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/clova-email.webp"
+  alt: "Clova.Email wordmark beside the four inbox types: permanent, one sender, temporary and prefix"
+canonical: "https://runany.dev/blog/clova-email/"
+draft: false
+---
+
+> **TL;DR:** Clova.Email is an alias mail service where each address can be locked to one sender, so a leaked address is worthless to whoever found it. Four inbox kinds cover permanent addresses, single senders, temporary signups and prefix-based aliases made on the spot. An MCP server lets Claude, Cursor or your own scripts create inboxes and wait for incoming mail under scoped permissions.
+
+## What it is
+
+Clova.Email belongs to the same family as SimpleLogin and Fastmail masked addresses, but the lock is the product. Most alias services hide your real address while still accepting mail from anyone who holds the alias. A one-sender inbox here accepts mail from one domain (or from one exact address, if the sender uses Gmail, Outlook or iCloud) and bounces everyone else at the server, before anything is stored.
+
+The author, edpin2000, launched it on Hacker News on 14 October 2026. It reached 115 points and 102 comments, and the thread is worth reading because most of it is people poking at the edge cases the author has not solved yet.
+
+## The four kinds of inbox
+
+| Kind | Takes mail from | Ends | Counts on your plan |
+|---|---|---|---|
+| Permanent | anyone | never | yes |
+| One-sender | the first verified sender, plus up to four more you let in | when you choose | no |
+| Prefix | the first sender of each address made under it | when you choose | yes |
+| Temporary | anyone | on its end date | no |
+
+Prefix is the kind worth understanding first. You create a prefix once, say `service`, and then hand out `service-netflix`, `service$bank` or `service.newsletter-1` without creating anything in advance. The first sender to write to a given suffix claims that suffix, and every prefix holds up to 50 live addresses at a time.
+
+Gmail plus-addressing is the obvious comparison, and the author has answered it repeatedly on HN. Spammers strip the `+`, and a fair number of signup forms reject the format outright. A prefix accepts any punctuation in the suffix, so the address cannot be reconstructed from a leaked table of what people signed up with.
+
+## How a one-sender lock works
+
+The inbox locks to the first sender whose address can be verified using the same checks email uses against forgery. What that means depends on who writes:
+
+- A company locks at the domain level, so `news.northgatebank.example` and `northgatebank.example` both get in.
+- A person on a shared provider locks at the exact address, so `ana@gmail.com` reaches the inbox and nobody else on gmail.com does.
+- Mail that cannot be verified is still delivered, it simply does not lock the inbox, so the inbox keeps waiting for a sender it can check.
+- Mail that lands in the spam folder never locks the inbox either.
+
+Since 17 October 2026 a one-sender inbox accepts up to five senders, which is how you handle a bank that writes from two domains. You can also add a domain by hand from the inbox settings when a sender legitimately changes.
+
+One wrinkle to keep in mind: the first sender to write wins the lock. A spammer could squat a company-named prefix before the real company ever writes to it. The author's position is that permanent inboxes exist for exactly the case where hearing from a stranger is less bad than hearing from nobody.
+
+## Letting an agent handle it
+
+Clova.Email ships an MCP server at `https://clova.email/mcp`, so Claude, ChatGPT, Claude Code, Cursor and VS Code can work with your inboxes. For an assistant that can sign in, you add the address, approve scopes in the browser, and the assistant never sees a credential. For scripts, you create a personal access token under Settings, then Developer.
+
+| Scope | Read | Read and write |
+|---|---|---|
+| Inbox | list your inboxes | create, change and delete them, including who a one-sender inbox accepts |
+| Message | list, search and read mail, drafts, contacts, blocked senders | mark read, pin, delete conversations, write drafts, block senders |
+| Send mail | not offered on its own | sends your drafts, and requires Message at read and write |
+| Profile | name, birthday, phone, photo, plan and storage | change name, birthday, phone and photo |
+
+Tokens expire after 7, 30 or 90 days, or never. A token can never reach billing, change your plan, close the account, change how you sign in, trigger an export or alter forwarding. That last list is a deliberate line: the token is for mail, not for the account around it.
+
+For a client that wants a remote MCP server, the shape is standard:
+
+```json
+{
+  "mcpServers": {
+    "clova": {
+      "url": "https://clova.email/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_PERSONAL_ACCESS_TOKEN"
+      }
+    }
+  }
+}
+```
+
+The site also fills in ready-made settings for Claude Code, Cursor, VS Code and Claude Desktop once you create a token.
+
+What that buys you is on the homepage demo, where the prompt is "Make me an address for the gym trial, and tell me the code they send." The tools doing the work are `create_inbox` and `wait_for_message`. A temporary inbox on a 30 day life is the right shape for a trial, and a one-sender inbox is the right shape for a subscription you want to keep an eye on.
+
+## Pricing
+
+| | Free | Pro | Business |
+|---|---|---|---|
+| Price | $0 | $3 a month or $30 a year | $5 a month or $50 a year |
+| Permanent addresses | 3 | 15 | unlimited |
+| Prefixes | 1 | 25 | 25 |
+| One-sender and temporary inboxes | unlimited | unlimited | unlimited |
+| Forwarding addresses | 1 | 10 | unlimited |
+| Storage | 100 MB | 10 GB | 25 GB |
+| Your own domain | no | no | yes |
+
+Paying yearly costs the price of ten months. One-sender and temporary inboxes never count against the plan, and only permanent addresses and prefixes do, and only while they are switched on.
+
+Forwarding is where the free tier bites. Free forwards up to 10 messages an hour and 100 a day, against 20 a minute and 1,000 a day on Pro and Business. Mail you send from a Free account carries a footer saying it came from Clova.Email, which paid plans let you change or remove.
+
+## What to watch for
+
+Rebrands break one-sender locks, and this is not solved yet. An address locked to `facebook.com` will not accept mail from `meta.com`. On HN the author weighed a button to release the lock and re-claim it against a manual list of related domains, and had shipped neither as of late October 2026. If you use one-sender inboxes with companies that rename themselves, keep a permanent address as a fallback.
+
+There is no self-hosted option either, and no free tier above three permanent addresses. The help centre runs in English and Portuguese, there is a status page at `status.clova.email`, and you can export your entire dataset on any plan, which is a fair counterweight to a hosted service holding every alias you hand out.
+
+## Source and Accuracy Notes
+
+- Project page: https://clova.email/, verified via direct visit
+- Help centre: https://docs.clova.email, verified via direct visit, plans page updated 26 October 2026
+- MCP endpoint: https://clova.email/mcp, verified via direct visit
+- HN launch thread: https://news.ycombinator.com/item?id=50090932, 115 points and 102 comments on 14 October 2026
+- Locking, forwarding limits and token scopes were read from the help centre rather than inferred from the marketing pages
