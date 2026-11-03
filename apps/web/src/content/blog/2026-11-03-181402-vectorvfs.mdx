@@ -1,0 +1,129 @@
+---
+title: "VectorVFS: a vector database that lives in your filesystem"
+description: "VectorVFS stores image embeddings as Linux extended attributes, turning any folder into a vector database with no index file, no daemon, and no extra database."
+pubDate: "2026-11-03T11:14:02.000Z"
+author: "Friday"
+tags: ["python", "vector-database", "linux", "embeddings", "self-hosted"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/vectorvfs.webp"
+  alt: "VectorVFS GitHub card showing the orange broken-file logo, the project name, and the tagline Your filesystem as a vector database"
+canonical: "https://runany.dev/blog/vectorvfs/"
+---
+
+> **TL;DR:** VectorVFS is a Python package that stores image embeddings directly on your files as Linux extended attributes, so a folder of photos becomes a searchable vector database. You run one command to index and search, with no index file, no background service, and no second database to keep in sync. It currently handles images only, requires Linux, and pins an exact PyTorch version.
+
+## What it is
+
+VectorVFS turns a plain Linux directory into a vector database. Instead of writing a separate index file next to your data, or spinning up a vector store such as Qdrant or Milvus, it attaches each file's embedding to the file itself using extended attributes, the metadata slot that Ext4, XFS, Btrfs and ZFS all reserve for small key-value pairs.
+
+The project is by Christian S. Perone, who publishes it under Apache-2.0 at [github.com/perone/vectorvfs](https://github.com/perone/vectorvfs). The package installs from PyPI as `vectorvfs`, requires Python 3.12 or newer, and was last released as version 0.3.0. It has 521 stars and 18 forks, and a single contributor.
+
+Embedding generation uses Meta's Perception Encoders, the CLIP-style dual encoder from the [Perception Encoders paper](https://arxiv.org/abs/2504.13181). The default checkpoint is PE-Core-L14-336, which handles both image and text encoding, so a text query and a photo land in the same vector space and can be compared directly.
+
+## Why it matters
+
+Most vector search setups add a second system to maintain. You have the real files, and then you have an index somewhere else that mirrors them. The index needs its own backup, its own disk space, and its own consistency logic, and it is wrong whenever a file changes and nothing tells the index about it.
+
+Storing the embedding on the inode removes that second system. The vector is attached to the file it describes, so the two cannot drift apart in the ordinary case. Deleting the file deletes the vector. Copying the file copies the vector. There is no daemon to keep running, and the tool claims no background processes at all.
+
+The design constraint that makes this possible is the filesystem itself. Extended attributes are stored in reserved space inside the inode rather than in the file's data blocks, which means the file contents are never touched. A JPEG stays a byte-identical JPEG, and `md5sum` still matches whatever it matched before.
+
+## Getting it running
+
+Installation is a standard pip install, but the dependency list is heavy and worth reading before you commit to it.
+
+```bash
+pip install vectorvfs
+```
+
+That pulls in PyTorch pinned to exactly version 2.5.1, along with matching `torchvision`, `torchaudio`, `torchcodec` and `xformers`. The pin is strict, so it can conflict with any other project in the same environment that needs a different PyTorch. A dedicated virtualenv is the safer route.
+
+Search is a single command. Point it at a folder and a phrase, and it indexes what it has not seen yet, reuses what it has, and prints the closest matches.
+
+```bash
+vfs search cat /my_folder
+```
+
+The tool loads the Perception Encoder, encodes your text query, walks the directory, and for each file either computes a fresh embedding or reads the stored one back from its extended attributes. Results come back ranked by cosine similarity.
+
+```bash
+vfs search -n 3 cat /my_folder     # top 3 matches only
+vfs search -f cat /my_folder       # force re-index, ignoring stored vectors
+vfs search -r cat /my_folder       # recurse into subdirectories
+```
+
+Note that `-f` exists because change detection is incomplete. The project says outright that efficient detection of modified files is still being worked on, so a file you have edited in place may keep serving its old embedding until you force a re-index.
+
+## Using it from Python
+
+The CLI is a thin layer over a small API, and the API is where the real design shows. Three classes matter: an xattr wrapper, a tensor store, and the encoder.
+
+```python
+from pathlib import Path
+
+import torch
+from vectorvfs.encoders import PerceptionEncoder
+from vectorvfs.vfsstore import VFSStore, XAttrFile
+
+path = Path("photos/cat.jpg")
+xattrfile = XAttrFile(path)
+store = VFSStore(xattrfile)
+
+if "user.vectorvfs" not in xattrfile.list():
+    encoder = PerceptionEncoder()
+    features = encoder.encode_vision(path)
+    features = torch.nn.functional.normalize(features).to(torch.float16)
+    store.write_tensor(features)
+
+vector = store.read_tensor()
+print(vector.shape)
+```
+
+The xattr key is `user.vectorvfs`, in the standard Linux `user.` namespace. You can inspect it with ordinary system tools, no Python required.
+
+```bash
+getfattr -d -m "user.vectorvfs" photos/cat.jpg
+```
+
+Embeddings are normalized and cast to float16 before writing, so a typical vector costs roughly 2 KB. That matters because of where the space goes.
+
+## Where the bytes actually go
+
+Extended attributes are not free space. They live in the inode, and the amount available depends on both the filesystem and the inode size chosen at format time.
+
+| Filesystem | Practical xattr limit | Notes |
+| --- | --- | --- |
+| Ext4 | One filesystem block, commonly 4 KB | Small xattrs fit in the inode, larger ones spill to separate xattr blocks |
+| XFS | Up to 64 KB per attribute | Requested as an enhancement, with `xfsdump` and `xfsrestore` support |
+| Btrfs | Varies by filesystem layout | Supported in principle by the project |
+| ZFS | Varies by filesystem layout | Supported in principle by the project |
+
+On Ext4 the standard inode reserves 256 bytes for its own fields. If the filesystem was formatted with a larger inode size, 512 or 1024 bytes for instance, the leftover space is where small attributes live. Attributes that do not fit are written to separate blocks elsewhere on disk with a pointer left in the inode.
+
+This is the practical limit of the design. A 4 KB budget per file means one vector fits comfortably, but several vectors, or a much larger embedding, do not. The project describes three ways around it: quantize the vector to a smaller precision, split one embedding across multiple attribute entries, or let the filesystem spill to external blocks. All three trade away some of the elegance that made the idea appealing.
+
+## What to watch for
+
+Images are the only supported file type. The CLI filters candidates against the set of extensions Pillow can open, so PDFs and plain text files are silently skipped. An open issue asks for PDF and text support, and there is no fix on the repository.
+
+The project is quiet. The last commit landed on 28 April 2025, the same day version 0.3.0 shipped to PyPI. The two releases differ by two hours. As of writing there are seven open issues with no maintainer response, covering a failing pip install, macOS support, offline model downloads, and a request for an official Python client.
+
+macOS does not work. The `perception-models` dependency fails to resolve there, and since the model ships as part of that package, there is no clean path to a macOS install.
+
+Model downloads need the network. There is an open request for a way to pull the weights from Hugging Face for offline use, and the current behaviour is to reach out at startup.
+
+The similarity score is a raw cosine value, printed to three decimals. For a 336-pixel CLIP-style model, a good match usually sits well above 0.2, but the numbers are not calibrated into anything you can threshold confidently without testing on your own images.
+
+## Source and Accuracy Notes
+
+- Project page: https://vectorvfs.readthedocs.io — verified via direct visit
+- Source repository: https://github.com/perone/vectorvfs — Apache-2.0, 521 stars, 18 forks, single contributor
+- Package: https://pypi.org/project/vectorvfs/ — version 0.3.0, requires Python 3.12 or newer
+- Architecture details: https://vectorvfs.readthedocs.io/en/latest/architecture.html — verified via direct visit
+- Usage details: https://vectorvfs.readthedocs.io/en/latest/usage.html — verified via direct visit
+- Embedding model: Meta Perception Encoders, arXiv 2504.13181, default checkpoint PE-Core-L14-336
+- Open issues reviewed for limitations: S3 compatibility, official Python client, offline Hugging Face downloads, XFS support, PDF and text support, pip install failures, macOS support
+- HN launch thread: https://news.ycombinator.com/item?id=43896011 (279 points, 138 comments, 5 May 2025)
