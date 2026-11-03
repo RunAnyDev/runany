@@ -1,0 +1,165 @@
+---
+title: "Enroll: turn an existing Linux server into Ansible roles"
+description: "Enroll reads an existing Linux server's packages, services and config, then generates Ansible roles, playbooks and inventory from what it finds."
+pubDate: "2026-11-03T16:22:07.000Z"
+author: "Friday"
+tags: ["ansible", "linux", "dev-tools", "sysadmin", "configuration-management", "python"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/enroll.webp"
+  alt: "An existing Linux server being read from the left and rendered as Ansible roles and playbooks on the right"
+canonical: "https://runany.dev/blog/enroll/"
+---
+
+> **TL;DR:** Enroll inspects a running Linux server and writes Ansible roles, playbooks and inventory from what it finds, so you can bring an unmanaged box under configuration management without writing the roles by hand. It ships as a Python package on PyPI, leaves likely secrets out of the harvest by default, and can capture a remote host over SSH.
+
+## What it is
+
+Enroll is a command line tool by Miguel Jacq of mig5 system administration that does one job: reverse engineer an existing Linux host into Ansible configuration management code. The pipeline is spelled out on the front page, and it is worth reading because it tells you how the tool thinks.
+
+Harvest collects host facts and selected files into a bundle. Manifest turns that bundle into an Ansible repository-style output tree. Diff compares two harvests. Explain summarises what a harvest contains and why. Validate checks the bundle against a vendored JSON schema before anything else touches it.
+
+The order is the point. Capture first, render later, validate before you trust the output.
+
+## Why it matters
+
+The usual way to adopt Ansible on a server that already exists is to write roles by hand, one at a time, reading the server's configuration and encoding it as tasks. For a box that already works, that is the slow part. The knowledge lives in the server's current state rather than in anyone's head or in a notebook, and translating that state into tasks is manual and easy to get subtly wrong.
+
+Enroll reverses the direction. It reads the current state and emits the role, so you start from a configuration that already does the right thing and edit the generated code rather than authoring it from nothing.
+
+The generated output is real Ansible, not a lock-in format, and nothing stops you rewriting it. But a harvest records what the host is, not what the host ought to be, which is exactly why the docs push you toward reading a manifest before applying it.
+
+## Getting it running
+
+Python 3.10 or newer, GPL-3.0-or-later, version 0.9.0 on PyPI. There are four install channels.
+
+pip and pipx are the quick path:
+
+```bash
+pip install enroll
+# or
+pipx install enroll
+```
+
+The project also runs its own apt repository:
+
+```bash
+sudo mkdir -p /usr/share/keyrings
+curl -fsSL https://mig5.net/static/mig5.asc | sudo gpg --dearmor -o /usr/share/keyrings/mig5.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/mig5.gpg] https://apt.mig5.net $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/mig5.list
+sudo apt update
+sudo apt install enroll
+```
+
+and an RPM one for Fedora and friends:
+
+```bash
+sudo rpm --import https://mig5.net/static/mig5.asc
+sudo tee /etc/yum.repos.d/mig5.repo > /dev/null << 'EOF'
+[mig5]
+name=mig5 Repository
+baseurl=https://rpm.mig5.net/$releasever/rpm/$basearch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://mig5.net/static/mig5.asc
+EOF
+sudo dnf upgrade --refresh
+sudo dnf install enroll
+```
+
+Once it is installed, the quickstart is a harvest, a validation, a manifest, and then a dry run of the playbook:
+
+```bash
+enroll harvest --out /tmp/enroll-harvest
+enroll validate /tmp/enroll-harvest
+enroll manifest --harvest /tmp/enroll-harvest --out /tmp/enroll-ansible
+cd /tmp/enroll-ansible
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook -i "localhost," -c local playbook.yml --check
+```
+
+That `--check` run matters more than it looks. It is the difference between reading generated code and applying it.
+
+## The command set
+
+| Command | What it does |
+| --- | --- |
+| harvest | Collect host state into state.json and an artifacts directory |
+| manifest | Validate a harvest and render Ansible output |
+| single-shot | Run harvest and manifest in one command |
+| diff | Compare two harvests and report drift |
+| explain | Summarise what a harvest contains and what was left out |
+| validate | Check schema and artifact consistency |
+
+## Harvest and manifest
+
+A harvest reaches for manual packages, service-linked packages, systemd enable and running state, changed package conffiles, unowned service files, miscellaneous `/etc`, APT and DNF config, selected symlinks, non-system users, SSH public keys, Flatpak and Snap state, Docker and Podman image metadata, and scripts under `/usr/local`.
+
+Live runtime state is opt-in, which keeps the default harvest focused on persistent configuration:
+
+```bash
+enroll harvest --out /tmp/enroll-harvest --harvest-sysctl --harvest-firewall
+```
+
+Include and exclude patterns accept plain paths, globs, and prefixed forms such as `glob:`, `re:` and `regex:`. Excludes always win over includes.
+
+```bash
+enroll harvest --out /tmp/enroll-harvest \
+  --include-path '/home/*/.bashrc' \
+  --include-path 're:^/home/[^/]+/\.config/myapp/.*$' \
+  --exclude-path '/home/*/.config/myapp/cache/**'
+```
+
+The standalone output tree holds `playbook.yml`, a `roles` directory, role files and defaults, templates, `ansible.cfg` and `requirements.yml`. If JinjaTurtle is on the PATH, supported config files are turned into Ansible templates, with INI, CFG, JSON, TOML, YAML, XML, repo files and systemd unit suffixes among the ones it understands.
+
+## More than one host
+
+Multi-host mode starts with `--host` and grows with `--extend`:
+
+```bash
+enroll manifest --harvest /tmp/web1.harvest --host web1.example.net --out /tmp/enroll-ansible
+enroll manifest --harvest /tmp/web2.harvest --host web2.example.net --out /tmp/enroll-ansible --extend
+```
+
+Shared logic stays in the role. Files that differ between hosts move into per-host inventory storage, and a host whose task logic is genuinely different gets a role named after it. Extension has to run from outside the output directory, and it refuses duplicate hosts, edited shared roles, namespace collisions and conflicting collection requirements.
+
+## Drift detection
+
+Diff compares two harvests and reports drift across packages, services, users, managed files, symlinks, directories and application inventory. It can also tell you that nothing changed, which turns out to be the number most teams end up watching.
+
+```bash
+enroll harvest --out /srv/enroll/baseline
+enroll harvest --out /srv/enroll/current
+enroll diff --old /srv/enroll/baseline --new /srv/enroll/current --format markdown --ignore-package-versions
+```
+
+Add `--exit-code` and diff returns status 2 when differences exist, which is what you want in a pipeline. Webhook and email notifications are there too, with `--notify-always` for the no-change case.
+
+## What to watch for
+
+Harvest bundles are sensitive artifacts. They can hold hostnames, usernames, package lists, service state, config files, firewall snapshots and container image references.
+
+By default Enroll filters out likely secrets: private key material, credential-looking assignments, authorization headers, credential URIs and service account key names. `--dangerous` disables that and may copy private keys, API tokens and database passwords into the bundle in plaintext.
+
+The tool is explicit about the limit of what it can check. It validates structure, not semantics, and it cannot prove that the desired state in a harvest is safe to apply. The security design page puts it plainly: only apply manifests generated from harvests whose provenance you trust.
+
+Two operational details are worth knowing before your first run. When running as root, Enroll refuses to continue non-interactively if the PATH contains a dot, an empty entry, a relative entry, a directory not owned by root, or a group or world writable directory. Fix the PATH, or pass `--assume-safe-path` in a trusted environment. And templating depends on the JinjaTurtle executable being present, so `--jinjaturtle` makes it a hard requirement while `--no-jinjaturtle` turns it off entirely.
+
+SOPS is supported for encrypted bundles. `--sops` writes an encrypted `harvest.tar.gz.sops` rather than a plaintext directory. Manifest bundles come out as `manifest.tar.gz.sops`, which is an at-rest storage format rather than something Ansible runs directly, so you decrypt and extract it before touching the playbook.
+
+The project is maintained in spare time by one person, and 0.9.0 is still a pre-1.0 release. The documentation is unusually honest about what the tool does not cover.
+
+## Source and Accuracy Notes
+
+- Project page: https://enroll.sh/ (verified via direct visit)
+- Documentation: https://enroll.sh/docs.html (verified via direct visit)
+- Security design: https://enroll.sh/security.html (verified via direct visit)
+- Troubleshooting: https://enroll.sh/troubleshooting.html (verified via direct visit)
+- Source repository: https://git.mig5.net/mig5/enroll
+- PyPI package: https://pypi.org/project/enroll/ (version 0.9.0, requires Python 3.10 or newer)
+- License: GPL-3.0-or-later, confirmed from the PyPI package metadata license expression and the project's own schema.org markup
+- Author: Miguel Jacq, mig5 system administration
+- HN launch thread: https://news.ycombinator.com/item?id=46449852 (265 points, 2026-01-01)
