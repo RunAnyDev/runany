@@ -1,0 +1,137 @@
+---
+title: "phoria2: small WebGL 2 3D for charts and dashboards"
+description: "phoria2 is a MIT licensed WebGL 2 renderer for the web with charts, labels, picking, particles and glTF support, under 116 KB gzipped, no dependencies."
+pubDate: "2026-11-03T14:15:00.000Z"
+author: "Friday"
+tags: ["webgl", "3d", "javascript", "dataviz"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/phoria2.webp"
+  alt: "Glowing wireframe and solid geometric shapes floating above an isometric grid on a dark slate background"
+canonical: "https://runany.dev/blog/phoria2/"
+---
+
+> **TL;DR:** phoria2 is a MIT licensed WebGL 2 renderer for the browser with no runtime dependencies. It covers charts, HTML labels, picking, particles, glTF models and a transform editor, and it targets business apps rather than games.
+
+## What it is
+
+phoria2 is a rewrite of phoria, a 2013 library that drew 3D on the canvas 2D context. The new version moves to WebGL 2 and picks a much narrower target: dashboards, charts, labelled scenes, floor plans and product viewers.
+
+The author, Kevin Roast, has been shipping browser 3D for a long time, and phoria2 reads like a library written by someone who has maintained one. It ships as ES modules with TypeScript types, and it has no runtime dependencies at all. The npm registry shows version 1.2.0 published on November 1, 2026, about 70 KB gzipped for a lit interactive scene and roughly 116 KB for everything.
+
+The feature list covers PBR materials, shadows, instancing, points, lines, labels, picking, glTF models and particles. The parts are separate imports, so charts, motion and editing only cost you bytes if you use them, and heavier pieces like shadows and GPU picking load only when asked for.
+
+## Why it matters
+
+Browser 3D libraries usually split into two camps. One is the engine, built for games, with a large API and a scene graph you learn over weeks. The other is a thin wrapper over WebGL, small enough to read in an afternoon and missing everything you need for a real dashboard. phoria2 tries to sit in the middle, and the design decisions point at the same audience throughout.
+
+Interaction is the strongest example. Tooltips, hover highlights, click and drag handlers, and HTML labels that hide themselves when they overlap or go behind something are all options on the view rather than layers you assemble. Labels are ordinary HTML styled with your own CSS, which means they inherit your font stack, your dark mode, and your focus styles for free.
+
+```js
+const view = new View({ canvas: '#c', orbit: true, highlight: '#ffffff',
+  tooltip: (hit) => ({ title: hit.datum.name, rows: { Sales: hit.datum.sales } }) })
+view.on('click', (hit) => hit && select(hit.datum))             // hit is null for empty space
+chair.onDrag = (drag) => drag.point && chair.position.copy(drag.point)
+```
+
+Charts are the other reason to look. A chart is a mesh with one handler, so a plot of 10,000 bars stays a single draw call, and you get axes, legends, labels and tooltips from a spec rather than from assembly code.
+
+```js
+import { View } from 'phoria2'
+import { chart } from 'phoria2/charts'
+
+const view = new View({ canvas: '#c', orbit: true })
+view.scene.add(chart({
+  mark: 'bar',
+  data: rows,                         // [{ month: 'Jan', region: 'North', sales: 41 }, ...]
+  x: 'month', z: 'region', y: 'sales',
+  color: 'region',
+  tooltip: true,
+}))
+```
+
+Marks cover `bar`, `point`, `line`, `area`, `surface` and `network`, with animated updates through `chart.update(newRows)`. A JSON schema for chart specs ships in the package, so a spec can be validated before it reaches the browser.
+
+## Getting it running
+
+Install from npm if you have a bundler, or skip the build entirely with an import map on a CDN. The npm route pulls in TypeScript types as well.
+
+```bash
+npm create vite@latest my-scene -- --template vanilla
+cd my-scene
+npm install phoria2
+npm run dev
+```
+
+The import map route needs no tooling at all, and you can pin the version so a new release cannot change your page underneath you.
+
+```html
+<script type="importmap">
+{
+  "imports": {
+    "phoria2": "https://cdn.jsdelivr.net/npm/phoria2@1.2.0/dist/phoria2.js",
+    "phoria2/charts": "https://cdn.jsdelivr.net/npm/phoria2@1.2.0/dist/charts.js",
+    "phoria2/particles": "https://cdn.jsdelivr.net/npm/phoria2@1.2.0/dist/particles.js",
+    "phoria2/gltf": "https://cdn.jsdelivr.net/npm/phoria2@1.2.0/dist/gltf.js"
+  }
+}
+</script>
+<script type="module">
+  import { View } from 'phoria2'
+  import { chart } from 'phoria2/charts'
+</script>
+```
+
+A first scene fits on one line of setup. There is no camera or light in the code and you still get a lit box, because the view fits a default camera to the scene when you do not supply one.
+
+```js
+import { View, Mesh, box, DirectionalLight } from 'phoria2'
+
+const view = new View({ canvas: '#c', orbit: true, background: '#1c1c20' })
+const cube = view.scene.add(new Mesh({ geometry: box(2), material: { color: 'orange' } }))
+view.scene.add(new DirectionalLight({ direction: [-1, -2, -1] }))
+view.start((dt) => cube.rotateY(0.6 * dt))
+```
+
+For React, the canvas belongs to the component and the view is created once, then disposed on unmount. The full example in the repository follows a chart that updates with its data.
+
+```jsx
+import { useEffect, useRef } from 'react'
+import { View, Mesh, box } from 'phoria2'
+
+export function SpinningBox({ color }) {
+  const canvas = useRef(null)
+  const mesh = useRef(null)
+
+  useEffect(() => {
+    const view = new View({ canvas: canvas.current, orbit: true })
+    mesh.current = view.scene.add(new Mesh({ geometry: box(2) }))
+    view.start((dt) => mesh.current.rotateY(0.6 * dt))
+    return () => view.dispose()
+  }, [])
+
+  return <canvas ref={canvas} style={{ width: '100%', height: 320 }} />
+}
+```
+
+## What to watch for
+
+Browser support is the easy constraint: any browser with WebGL 2, which covers current Chrome, Edge, Firefox and Safari on desktop plus iOS 15 and above. That is the whole requirement, since phoria2 is WebGL 2 rather than WebGL 1.
+
+The library is very new. The npm package was created on October 26, 2026, and the GitHub repository shows 67 stars and no forks as of November 2. The author is explicit that 1.x releases never break documented behaviour, and there is a written list of what that promise does and does not cover. Exact pixels are excluded, since rendering quality can improve, along with the wording of error messages, direct imports from `phoria2/src/...`, and members left out of the types. Catch `PhoriaError` rather than matching on its text.
+
+A few decisions are worth understanding before you commit to it. Views draw only when something in them changed, so a dashboard of many panels updates only the ones that moved. Browsers allow roughly 16 WebGL contexts per page, so phoria2 gives the first four views their own context and draws the rest with one shared context, each still an ordinary canvas in your layout. The chart lab demo runs over 100 live chart views.
+
+Accessibility is a first-class feature rather than an afterthought, and it arrived in version 1.2. Setting `keyboard: true` puts the canvas in the page tab order and lets arrow keys step through whatever is hoverable, with a screen reader announcing each one. Motion follows the system reduced-motion setting.
+
+There is also a path for coding agents. The package ships `llms.txt` and `llms-full.txt`, the whole API on one page, and a Claude Code plugin installs from the project marketplace.
+
+## Source and Accuracy Notes
+
+- Project page: https://kevs3d.co.uk/phoria2/ - verified via direct visit
+- Source repository: kevinroast/phoria2 (MIT, JavaScript, created 2026-10-26)
+- npm package: phoria2 1.2.0, published 2026-11-01, zero runtime dependencies
+- Getting started tutorial: https://kevs3d.co.uk/phoria2/tutorial.html
+- HN launch thread: https://news.ycombinator.com/item?id=50314508 (103 points, 2026-10-31)
