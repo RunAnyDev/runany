@@ -1,0 +1,148 @@
+---
+title: "PatchWave: auto-merge for Dependabot pull requests"
+description: "PatchWave is a GitHub app that analyzes, fixes and merges Dependabot pull requests using static analysis and agents. 25 free PRs a month."
+pubDate: "2026-11-03T02:14:04.000Z"
+author: "Friday"
+tags: ["dev-tools", "github", "dependencies", "security", "ai"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/patchwave.webp"
+  alt: "PatchWave wordmark on a pale yellow card reading 'Dependabot opens PRs. PatchWave merges them.' with a pixel-art purple cat riding a skateboard."
+canonical: "https://runany.dev/blog/patchwave/"
+---
+
+> **TL;DR:** **PatchWave** is a GitHub app that works through the Dependabot pull requests you already get and decides which ones are safe to merge. It checks each update against your code with structural search, type checkers and your own toolchain, writes a verdict with links to the evidence, fixes the code when a major bump breaks CI, and merges only what your policy allows. The free tier covers 25 pull requests a month with no credit card.
+
+## What PatchWave is
+
+Dependabot opens the pull request. PatchWave closes it.
+
+That is the whole pitch, and it is narrower than most tools in this category. PatchWave does not replace Dependabot, it does not support Renovate yet, and it does not try to schedule upgrades on its own. It takes the queue Dependabot already creates and works through it.
+
+The founders, Ben, Josh and Donnie, came at this from the pain of doing the work by hand. One of them ran a freelance business charging clients by the hour to keep dependencies current, and at their own startup Monday mornings went to the same queue. The complaint they landed on is specific: humans checking dependency updates mostly read the changelog and guess, and agents asked to do the same job tend to get lazy and skip actually verifying whether an upstream change touches the code you wrote.
+
+PatchWave's answer is to gather the deterministic context first, then let a narrowly scoped agent reason over it.
+
+## How the analysis works
+
+For every Dependabot pull request, PatchWave pulls:
+
+- The pull request itself: title, description, commits, and comments from people or other bots
+- Upstream changes: release notes, the changelog, and the commits between the two versions
+- Security advisories referenced by the pull request or the release notes
+- CI results, including logs from failed GitHub Actions jobs and CircleCI jobs
+
+Then it checks out your code in an isolated sandbox and runs language-aware tools against it. Structural code search, type checkers and your project's own toolchain are used to find the places where your code touches the parts of the package that changed. It also works out whether you depend on the package directly or only get it transitively through something else.
+
+That distinction matters more than it sounds. A breaking change in a function you never call is not a breaking change for your codebase, and a major bump in a transitive dependency you inherited from another library is a different problem from a major bump in something you call on every request.
+
+## The verdict and the evidence
+
+Every update lands in one of two buckets.
+
+**Safe** covers the easy case. The example PatchWave uses: the update only changes lodash's `template` function, and nothing in the repository calls it.
+
+**Action required** comes with a severity from low to critical, and means the update needs a code fix, a human decision, or both.
+
+Each conclusion links back to where it came from: the changelog, the release notes, a specific commit, or a file and line in your repository. The point is that you can audit the claim rather than take it on faith. PatchWave publishes real reports against open source repositories, so you can read a couple before you install anything:
+
+- `https://reports.patchwave.ai/alam00000/bentopdf/pull/913`
+- `https://reports.patchwave.ai/shipshapecode/shepherd/pull/355`
+
+There is also a supply-chain check. If a package changes publisher, source repository or build provenance, PatchWave refuses to call it safe and sends it to a human. The founders call out the case they care about most: a package that normally publishes through GitHub Actions Trusted Publishing suddenly publishing through an API key.
+
+## When the update breaks your build
+
+Bumping a major version usually means changing your call sites. PatchWave dispatches a fix agent for that case. It updates your code to the new API, repairs lint and formatting fallout, and pushes the result back onto the pull request for you to review.
+
+This is the part with real limits, and the founders are upfront about them. The fix agent works best on pull requests that need modest code changes. For large updates, especially ones spanning multiple majors, it gives up and hands you a remediation plan instead of a patch.
+
+One rule holds no matter what: PatchWave never merges a change it wrote itself. Anything the fix agent touches comes back for a human to approve.
+
+## Auto-merge policy
+
+Auto-merge is off until you turn it on, and when it is on the policy decides what merges. The policy is set per dependency type and per version bump size.
+
+| Dependency type | What it covers | Recommended bumps |
+| --- | --- | --- |
+| Development | Build, test and tooling packages that do not ship with your product | Patch, minor, major |
+| Production | Runtime packages used by your deployed application | Patch, minor |
+| Transitive | Packages installed by your dependencies, mostly for vulnerability fixes | Patch, minor, non-semver |
+
+A pull request merges only when it is up to date with the base branch, passes all required CI checks, and has a safe verdict for every update it contains. PatchWave keeps a merge queue per repository, rebases stale pull requests, re-checks them and pauses the whole queue if the base branch goes red.
+
+The ruleset detail is worth knowing if your default branch requires approving reviews. PatchWave can only bypass a review requirement defined in a ruleset, not one set through branch protection, so you need two rulesets: one holding just the review requirements with PatchWave on the bypass list, and one holding everything else.
+
+## Where your code runs
+
+Each analysis or fix runs in its own short-lived microVM with no inbound network access. PatchWave clones the pull request and deletes the clone when the run ends.
+
+Models run on Amazon Bedrock with zero data retention, and the company says it never trains on your code. Reports (verdicts, evidence and fix plans) are kept, and pull request context such as CI logs is deleted after 30 days. GitHub app tokens are short-lived and never saved.
+
+Secrets you add for private registries and CI providers are encrypted in AWS Systems Manager Parameter Store, and they are handed to your package manager and build as environment variables during analysis. That is a reasonable design, but it means a least-privilege token is worth setting up.
+
+The SOC 2 Type II audit was still in progress when the team posted on Hacker News in October, with the trust center at trust.contextbridge.ai as the place to check its current status.
+
+## The free checkup CLI
+
+Before you commit to a subscription, there is a free read-only CLI that measures what the queue is actually costing you. It reads from the GitHub API over a 90-day window and writes a self-contained HTML report with the pull request backlog, open CVE exposure and an annualized engineer-hours estimate. The whole thing runs locally and never writes back to GitHub.
+
+```sh
+bash -c "$(curl -fsSL https://patchwave.ai/analyze.sh)"
+```
+
+It pulls a signed binary for your platform, verifies the checksum, runs the interactive session and deletes the binary. If you would rather do it yourself, grab the archive from the releases page and unpack it:
+
+```sh
+tar -xzf patchwave-analysis_darwin_arm64.tar.gz
+./patchwave-analysis
+```
+
+The token needs the classic `repo` and `read:org` scopes. Fine-grained tokens are not supported, because of GitHub API restrictions.
+
+```sh
+export GITHUB_TOKEN=ghp_...
+bash -c "$(curl -fsSL https://patchwave.ai/analyze.sh)"
+```
+
+Every release archive ships with GitHub build provenance, so you can tie a downloaded binary back to the commit that produced it:
+
+```sh
+gh attestation verify patchwave-analysis_darwin_arm64.tar.gz --repo contextbridge/patchwave-analysis
+```
+
+## Pricing
+
+| Plan | Price | Pull requests per month |
+| --- | --- | --- |
+| Free | $0 | 25 |
+| Paid | $10 | 35 |
+| Paid | $25 | 50 |
+| Paid | $50 | 75 |
+| Paid | $70 | 100 |
+| Paid | $90 | 125 |
+| Paid | $120 | 175 |
+| Paid | $135 | 200 |
+
+A distinct pull request counts once, when it is analyzed, and fixing is included. It still counts if it is never merged or gets superseded later. When you hit your allowance, additional pull requests pause until the next billing period, so there are no surprise overage charges. Unused paid pull requests roll over for one month, and rolled-over ones are used first.
+
+Enterprise adds running agents in your own cloud, SSO with SCIM provisioning, audit logs and priority support. Open source projects can ask for free credits.
+
+## What to watch for
+
+PatchWave only works with Dependabot and GitHub today, and Renovate support is on the roadmap rather than shipped. The agents have been evaluated most heavily against TypeScript and Ruby, so if your stack is something else, expect the verdict quality to be lower for now.
+
+The auto-merge story depends on your rulesets. If your branch protection is set up in a way PatchWave cannot bypass, you will find yourself back in the queue. Grouping Dependabot updates is the biggest single lever on how many pull requests you get, and the team will help you tune `dependabot.yml` if you email them.
+
+There is also the standing question of trust for anything that merges code. PatchWave's answer is that it never merges its own fixes, that every verdict links to its evidence, and that auto-merge is off by default. That is a reasonable posture, but it is a posture, and 25 pull requests a month is the right place to find out whether you agree with its verdicts before you let it merge for real.
+
+## Source and Accuracy Notes
+
+- Project page: https://patchwave.ai/ - verified via direct visit
+- Documentation: https://patchwave.ai/docs - read from the site's published `llms-full.txt` document
+- Open source checkup CLI: contextbridge/patchwave-analysis - TypeScript, version 1.0.1, binaries built with GoReleaser
+- License: the README states MIT, but the repository does not currently ship a LICENSE file
+- HN launch thread: https://news.ycombinator.com/item?id=50166699 - Show HN, posted 2026-10-20 by a co-founder
+- Pricing verified on https://patchwave.ai/pricing on 2026-11-03
