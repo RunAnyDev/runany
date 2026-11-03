@@ -1,0 +1,169 @@
+---
+title: "Hacker Times: an AI-edited front page for Hacker News"
+description: "Hacker Times turns Hacker News into a newspaper, with an hourly AI-edited front page, five topic desks and a published ranking formula."
+pubDate: "2026-11-03T03:08:15.000Z"
+author: "Friday"
+tags: ["hacker-news", "news-reader", "curation", "web-app"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hacker-times.webp"
+  alt: "A stack of folded broadsheet newspapers on a dark slate background, with cyan and violet accent lines marking the column rules."
+canonical: "https://runany.dev/blog/hacker-times/"
+---
+
+> **TL;DR:** Hacker Times republishes Hacker News as a broadsheet. It ranks stories with a formula it publishes, writes a summary for each one, files them under five topic desks, and cuts a new edition every hour. The whole edition is served as public JSON, and the ranking policy is in that JSON too.
+
+## What it is
+
+Hacker Times is Hacker News laid out as a newspaper. The site reads three pages of the front page, considers 89 stories out of 90 fetched, and prints 34 of them under the desks Technology, Software, Science, Culture and Business, plus a separate row called The conversation.
+
+The editorial work happens before anything is printed. Every story gets a headline rewritten into newspaper register, a summary written from the article page rather than from the link text, and an attribution line naming the publisher and, where the publisher credits one, the photographer. The link still points at the original source.
+
+That rewrite is the whole point of the project. Hacker News titles are written to be clicked, so "Show HN: Subvocal - Talk to your computer without making noise" becomes "Smart Glasses Aim to Turn Silent Speech Into Text". You trade the maker's own wording for a sentence that tells you what happened.
+
+Cards show a comment count rather than a point score, so the number on the card tells you how much arguing a story produced instead of how many people upvoted it. Both values are kept in the data model underneath. When a source page cannot be read, the site says so instead of guessing: those cards print the original submission title and the line "The linked article was unavailable during this update. This is the original Hacker News submission title; no article summary or image is included."
+
+## How the front page gets chosen
+
+The site documents its own selection, which is rare and worth reading carefully. The About panel states three rules:
+
+- The lead slot goes to the story with the highest total points on the first Hacker News page, and a tied incumbent keeps the slot.
+- Every other placement is scored as 60 percent points, 25 percent comments and 15 percent Hacker News rank, measured across the three page pool.
+- Topic desks and the discussion row draw on separate stories, so no story is printed twice.
+
+Those rules are not just prose. The edition is served as JSON at `/api/edition`, and the policy travels inside it under `policyConfig`:
+
+```json
+{
+  "sourcePages": 3,
+  "weights": { "points": 60, "comments": 25, "rank": 15 },
+  "topCount": 7,
+  "discussionCount": 6,
+  "perDesk": 4,
+  "maxStories": 34
+}
+```
+
+Those counts add up to the layout exactly: one lead, seven top stories, six discussion slots and four stories for each of the five desks, which is 34 in total. The payload also carries a `policyVersion` of `hn-balanced-v2`, an `algorithmVersion` of 2, the three Hacker News page URLs it reads with the 30 story ids from each, and the counts it worked from: 90 fetched and 89 eligible candidates.
+
+The panel also prints the arithmetic of the edition. The copy I read reported a source snapshot of 2026-11-03 02:59 UTC, 89 eligible stories considered across three pages, and a note that scores and comments reflect that snapshot.
+
+That last point changes how you read the site. Every number is frozen at the moment the edition was built. The lead story showed 666 comments in the edition while the live thread had 667 a few minutes later. The edition stamp also travels in the payload as a publication version, so two people opening the site minutes apart can be looking at different editions.
+
+### Reproducing the ranking
+
+The policy publishes the weights but not the normalization behind the score, so the exact order of the non-lead slots is not reproducible from the published policy alone. It is recoverable from the same payload, which carries one object per story with the points, comments and rank the score is computed from. Fitting those values against the published editorial scores gives this:
+
+```python
+import math
+
+
+def editorial_score(story, max_points, max_comments, pool_size=89):
+    points = 0.60 * math.log1p(story["score"]) / math.log1p(max_points)
+    comments = 0.25 * math.log1p(story["comments"]) / math.log1p(max_comments)
+    rank = 0.15 * (1 - (story["hnRank"] - 1) / pool_size)
+    return (points + comments + rank) * 100
+```
+
+The points and comments terms are log normalized against the highest values in the pool, and the rank term is a linear decay across the 89 story pool. Reproducing the edition this way lands within 0.00005 points of the published editorial score on all 34 stories. The pool size is pinned by the data as well: 88 and 90 both break the fit by more than 0.16 points, and alternative weightings such as 70/20/10 miss by more than three points.
+
+The lead story is the highest point score on page one, which in that edition was the Astra weight-editing post at 2046 points. The story with the most points overall, HackerTube at 2815, sat at rank 42 because Hacker News buries aging posts even when their score stays high, and it took the second slot.
+
+| | Hacker News | Hacker Times |
+|---|---|---|
+| Headline | the submission title | rewritten into newspaper register |
+| Summary | teaser text from the link | written from the article page |
+| Ranking | points and page order | 60 points, 25 comments, 15 rank |
+| Layout | one flat list | five desks plus a discussion row |
+| Freshness | live, within seconds | frozen hourly edition |
+| Images | link preview thumbnails | pulled from the article page |
+| Paywalled sources | partial teaser | skipped, no bypass attempted |
+
+## The reading experience
+
+The front page is the plainest part of it. A masthead, the desks running down the page, and a View all link on each. Past editions opens an archive drawer, search filters the edition you are reading, and a theme toggle follows your system setting until you pick a side.
+
+Typography does most of the work. The masthead and headlines are set in Manufacturing Consent, a font the project hosts itself under the SIL Open Font License 1.1, and the paper styling comes from a dedicated stylesheet rather than the browser default serif.
+
+Under the hood it is lighter than it looks. The front page ships as a static HTML document with a content hashed stylesheet, a content hashed WOFF2 font, and one deferred reader script of about 5.5 KB. The whole edition also travels inside that document as a JSON payload, and the reader script filters against it in the browser, so search and the desk filters never touch the network. Other routes, such as the not-found page, are served by a Next.js App Router build on Cloudflare through vinext, the open source Vite plugin Cloudflare uses to reimplement the Next.js API.
+
+The response headers are candid about how it renders. `server: cloudflare`, `cache-control: private, no-store` so nothing is served from an edge cache, and a `server-timing: edition` entry that times the edition document lookup and notes it excludes network and paint.
+
+## Pulling the edition yourself
+
+None of this needs the site to be scraped, because the edition is a public API. The policy alone:
+
+```bash
+curl -s "https://hackertimes.ca/api/edition" | jq '.policyConfig, .policyVersion'
+```
+
+The printed stories, with the score and placement the site used:
+
+```bash
+curl -s "https://hackertimes.ca/api/edition" \
+  | jq -r '.stories[] | [.placement, .editorialScore, .headline] | @tsv'
+```
+
+Past editions work through the same endpoint with a date parameter, and `/api/archive` lists which dates exist. The archive currently holds two days, which matches how new the project is:
+
+```bash
+curl -s "https://hackertimes.ca/api/archive" | jq -r '.dates[]'
+curl -s "https://hackertimes.ca/api/edition?date=2026-11-02" | jq '.generatedAt, .publicationVersion'
+```
+
+The Hacker News side is just as open, and the front page is one call away from the Algolia search API:
+
+```bash
+curl -s "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30" \
+  | python3 -c "
+import sys, json
+for hit in json.load(sys.stdin)['hits']:
+    print(hit['points'], 'pts |', hit['num_comments'], 'comments |', hit['title'][:60])
+"
+```
+
+One catch there. The comment count on a Hacker Times card is the total including nested replies, while `num_comments` from the search endpoint only counts the top level. Walking the item tree gives the real total:
+
+```python
+import json
+import urllib.request
+
+
+def load(item_id):
+    url = f"https://hn.algolia.com/api/v1/items/{item_id}"
+    with urllib.request.urlopen(url) as response:
+        return json.load(response)
+
+
+def count_comments(node):
+    return sum(1 + count_comments(child) for child in node.get("children") or [])
+
+
+story = load(50341174)
+print(story["title"], "->", count_comments(story), "comments")
+```
+
+## What to watch for
+
+The rewrite is lossy. Hacker News titles carry the specificity that makes them worth clicking, and the newspaper voice smooths it away. "Astra can read and write weights to improve Qwen" becomes "Researchers Report Direct Edits to Neural-Network Weights", which reads better and tells you less. The attribution line and the comment links lead back to the original thread when you need the original framing.
+
+Summaries are written by a model from the page as it was read at snapshot time, so a misreading survives until the next rebuild, and the site lists no contact address and no corrections route. Five of the 34 stories in the edition I read had their source blocked by an HTTP error, and those fall back to the bare notice rather than a guess. That is the right failure mode, but it leaves real gaps in the edition.
+
+Images are hotlinked from publisher CDNs, and only 7 of the 34 stories had one at all. Those point at hosts including i.guim.co.uk, cdn.sanity.io and substackcdn.com. If a publisher rotates its asset URLs, the picture breaks on a front page that nobody rebuilds until the next hourly cut.
+
+Nothing is open source. There is no public repository, and the Hacker News account that posted the launch thread has no public GitHub presence, so there is no way to self-host the site, extend the ranking, or change the format. The published API and the policy JSON are a good substitute for reading, but they are also a contract you have to take as given rather than a codebase you can change.
+
+## Source and Accuracy Notes
+
+- Project page: https://hackertimes.ca/ - verified via direct visit on 2026-11-03, HTTP 200
+- Edition API: https://hackertimes.ca/api/edition - returns the full edition and policy as JSON, verified 2026-11-03. Archive listing at https://hackertimes.ca/api/archive and dated editions at the same endpoint with a date parameter
+- HN launch thread: https://news.ycombinator.com/item?id=50346981 - Show HN, posted 2026-11-03 by polpenn, 47 points at time of writing
+- Source repository: none public. A GitHub repository search returned no matching repository and the launch author account has no public GitHub user page, so the site is closed source
+- License: the site publishes no software license. The masthead font is Manufacturing Consent, Copyright 2019 The Manufacturing Consent Project Authors, licensed under the SIL Open Font License 1.1 and served from the site's own /fonts/ directory
+- Ranking weights and layout counts: read from the policyConfig object in the edition API, matching the prose in the site's own About panel
+- Editorial score normalization: recovered by fitting the published editorial scores against the shipped story objects on 2026-11-03. The fit reproduces all 34 published scores within 0.00005 points, and the pool size and weights are uniquely determined by that fit
+- Edition analyzed: publication version e-51b5f88babad8df9aff4339e, generated 2026-11-03T02:59:13.620Z, 34 published stories from 89 eligible candidates, 90 fetched
+- Story fetch outcomes in that edition: 22 source pages read, 4 blocked with HTTP 403, 1 with HTTP 429, 1 unavailable, 3 Hacker News self posts, 3 read through other routes
+- Thumbnail: the site publishes no og:image, so og_probe.py found no candidates and a direct grep of the raw HTML for og:image found none either. The image was generated with connector__matrix__generate_image, converted with cwebp to a 1200 by 630 WebP, and uploaded to R2 as hacker-times.webp
