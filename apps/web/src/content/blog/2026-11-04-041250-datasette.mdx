@@ -1,0 +1,135 @@
+---
+title: "Datasette: turn a SQLite file into a website and API"
+description: "Datasette turns any SQLite database into an explorable web UI and JSON API. Install it, query it from the CLI, and extend it with plugins."
+pubDate: "2026-11-03T21:20:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "sqlite", "open-source", "python", "data", "api"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/datasette.webp"
+  alt: "Datasette wordmark logo on a white background"
+canonical: "https://runany.dev/blog/datasette/"
+---
+
+> **TL;DR:** Datasette turns a SQLite file into a browsable website with a JSON API behind it. One command gives you a table browser, faceted filters, full-text search and CSV export with no server to configure. The 1.0 alpha line adds permission-gated SQL writes and a plugin that puts an AI assistant in front of your database.
+
+## What it is
+
+Datasette is a Python tool that takes one or more SQLite databases and serves them as a web application. Point it at a `.db` file and you get an index of tables, a paginated grid view for each one, faceted counts for every column, and a JSON endpoint that mirrors whatever the browser is showing. The same instance also answers ad-hoc `SELECT` queries.
+
+The project is by Simon Willison, who has shipped it under Apache-2.0 since 2017. It has around 11,500 GitHub stars, and the repository was last pushed in early November 2026, so it is actively maintained rather than a museum piece.
+
+The interesting part is the shape of the thing. Datasette does not try to be a database. It assumes you already have a SQLite file, usually because somebody else made it. Its job starts after the data exists and ends where a hosting provider takes over.
+
+## Getting it running
+
+Datasette needs Python 3.11 or newer. Homebrew and pipx are the easy paths on a Mac or a Linux box:
+
+```bash
+brew install datasette
+# or
+pipx install datasette
+```
+
+Make a database and serve it:
+
+```bash
+sqlite3 demo.db "create table posts (id integer primary key, title text);"
+sqlite3 demo.db "insert into posts (title) values ('Hello');"
+datasette serve demo.db
+```
+
+`serve` is the default command, so `datasette demo.db` does the same thing. The server listens on `http://localhost:8001`. Datasette also runs fine as a container, and `datasette package demo.db` will build a Docker image with your database baked in.
+
+The command set covers more than serving:
+
+- `datasette serve` runs the web interface and the API
+- `datasette --get` runs a single API request and exits
+- `datasette inspect` prints a JSON summary of a database file
+- `datasette install` adds a plugin from PyPI
+- `datasette plugins` lists the plugins you already have
+- `datasette package` builds a Docker image around your data
+- `datasette publish` deploys to Heroku, Google Cloud Run or Vercel
+
+## The API is the product
+
+Every page in the interface has a JSON twin. Add `.json` to a table URL and you get the same rows as JSON, which means the web UI is a client of the API rather than a separate code path. The `datasette --get` flag runs a request against the local instance and prints the result to stdout, which is handy for scripting without starting a server:
+
+```bash
+datasette --get '/demo/posts.json?_shape=array&_size=5'
+```
+
+The query parameters are the interesting part:
+
+| Parameter | What it does |
+|---|---|
+| `_shape=array` | Returns each row as a JSON object instead of a column array |
+| `_size=0` | Returns row counts and no rows, which is useful on large tables |
+| `_next=100` | Pagination cursor handed back by the previous response |
+| `_facet=column` | Computes per-value counts for a column |
+| `_search=term` | Runs full-text search over indexed columns |
+
+CSV export is built in the same way. A `.csv` extension on any table URL streams that table out as CSV, with no plugin involved.
+
+You can also store named queries so a reader gets a curated view instead of a raw SQL box. Define them in `metadata.json` next to your database:
+
+```json
+{
+  "databases": {
+    "demo": {
+      "queries": {
+        "recent_posts": {
+          "sql": "select title, created from posts order by created desc limit 10"
+        }
+      }
+    }
+  }
+}
+```
+
+Run `datasette serve demo.db -m metadata.json` and that query gets its own page at `/demo/recent_posts`. The same file carries the license and source for your data, which Datasette then shows in the footer and includes in the API output.
+
+## Plugins are where the real features live
+
+The core is deliberately small, and the plugin directory is where the interesting work happens. Around 143 plugins are listed on the project site, and the ones below all install from PyPI with `datasette install datasette-cluster-map` and similar:
+
+| Plugin | What it adds |
+|---|---|
+| `datasette-cluster-map` | Plots latitude and longitude columns on a map |
+| `datasette-vega` | Charts built with Vega and Vega-Lite |
+| `datasette-import` | Loads CSV files into SQLite tables |
+| `datasette-auth-github` | Authenticates visitors against GitHub accounts |
+| `datasette-graphql` | Exposes an automatic GraphQL API over your SQL |
+| `datasette-render-markdown` | Renders Markdown stored in a column |
+
+## 1.0 is adding writes and an agent
+
+The stable release is still 0.65.5, published on 16 September 2026, but a parallel alpha line is moving quickly. `1.0a41` landed on 24 September 2026, and the alphas have already changed what Datasette is for.
+
+`1.0a31` in May 2026 added SQL write queries, gated behind new permissions such as `execute-write-sql`, `insert-row`, `update-row` and `delete-row`, along with stored queries kept in an internal database. It also renamed canned queries to stored queries. `1.0a40` gave plugins a way to run background tasks.
+
+More interesting for anyone wiring this into AI tooling is Datasette Agent, an open source plugin released in May 2026 that puts a conversational assistant in front of a SQLite database. It supports a long list of tool-calling models, including ones you run on your own hardware, and it ships an export-to-Markdown button for conversations. A hosted demo runs at `agent.datasette.io`.
+
+## What to watch for
+
+Two things deserve attention.
+
+First, the read-only assumption that made Datasette safe to publish is exactly what 1.0 relaxes. On the 0.65 line every database file is treated as immutable, so an `INSERT` cannot run through the interface at all. On the 1.0 alphas, write queries are reachable the moment you grant the permission. If you plan to put a database on the public internet, pin a version and read the permissions list before upgrading.
+
+Second, 0.65.5 shipped a fix for a table permissions bypass. That is the sort of bug that matters most in a tool whose pitch is "here is my data, go look at it", so it deserves a read of the release note before you rely on per-table permissions to hide anything.
+
+The alpha churn is real as well. Forty-one alphas in a year means the 1.0 API surface is still moving, and plugins that declare compatibility with a specific alpha will need updating as it lands.
+
+## Source and Accuracy Notes
+
+- Project page: https://datasette.io/ (verified via direct visit on 2026-11-04)
+- Documentation: https://docs.datasette.io/en/stable/
+- Source repository: simonw/datasette (Apache-2.0, 11,538 stars, last push 2026-11-02)
+- Live demo: https://datasette.io/global-power-plants/global-power-plants
+- Plugin directory: https://datasette.io/plugins
+- Release notes for 0.65.5 and 1.0a40: https://datasette.io/news/2026-09-16/
+- SQL write queries in 1.0a31: https://datasette.io/blog/2026/sql-write-queries/
+- Datasette Agent: https://datasette.io/blog/2026/datasette-agent/
+- HN launch thread: https://news.ycombinator.com/item?id=15691409 (Show HN, 2017-11-14, 269 points)
