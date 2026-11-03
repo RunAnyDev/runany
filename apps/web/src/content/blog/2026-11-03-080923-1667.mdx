@@ -1,0 +1,155 @@
+---
+title: "1667: write a novel in the terminal with language models"
+description: "1667 is a terminal environment for writing fiction with LLMs. It keeps every take in a branchable story tree and runs against local models."
+pubDate: "2026-11-03T01:09:23.000Z"
+author: "Friday"
+tags: ["dev-tools", "terminal", "writing", "llm", "local-models"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/1667.webp"
+  alt: "The 1667 pilcrow mark beside the name and the line: a story-writing tool for the terminal."
+canonical: "https://runany.dev/blog/1667/"
+---
+
+> **TL;DR:** **1667** is a full-screen terminal environment for writing fiction with language models. You write a paragraph, ask for the next one, and every alternative the model produces stays in a branchable story tree instead of replacing what came before. It talks to hosted providers or to a local Ollama or llama.cpp server, keeps projects as plain folders on your machine, and collects nothing.
+
+## What it is
+
+1667 is a full-screen terminal environment for writing fiction with language models. The name comes from writing 1,667 words a day for thirty days, which lands at just over 50,000 words, roughly the length of a short novel. The tool does not track a daily word target.
+
+The core loop is three keys. Press Space and 1667 writes the next part from where you are. Press Enter and a composer opens so you can type a direction instead, something like "let the unlit lantern answer", and the model continues from that instruction. Press R and it takes another pass at the same prompt.
+
+The part that separates it from a chat window is what happens to alternatives. When you retake a paragraph, the new version appears beside the old one instead of overwriting it. Left and Right flip between sibling takes. Deleting is a deliberate key press (D), and it removes that take along with everything below it on the current line.
+
+Projects are folders you choose. `1667 init` creates a `.1667` directory inside one, the story lives there, and export writes your selected story line out to Markdown in the same place. There is no cloud sync and no account.
+
+## Installing it
+
+Three platforms are supported: macOS on arm64 and x64, Linux on glibc 2.17 or later for arm64 and x64, and Windows on x64.
+
+```bash
+curl -fsSL https://1667.ai/install.sh | sh
+```
+
+Windows uses a PowerShell installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://1667.ai/install.ps1 | iex"
+```
+
+There is also an npm route, which needs Node 22:
+
+```bash
+npm install --global @1667-ai/cli@latest
+```
+
+Building from source wants Bun 1.3.14 or later alongside Node 22:
+
+```bash
+git clone https://github.com/1667-ai/1667.git
+cd 1667 && npm ci
+cd tui && bun install --frozen-lockfile && bun start
+```
+
+The project ships its installer as a signed GitHub release asset, so the script can be checked before it runs. The one-liner above skips that step, and the docs carry the `gh attestation verify` version if you want it.
+
+Then create the project folder:
+
+```bash
+mkdir my-story
+cd my-story
+1667 init
+1667
+```
+
+A new project ships with two starter stories. One is called "Start Here" and walks through parts, takes, the map, Facts, and Settings. The tour runs on a dry-run provider, so it does not contact anything external.
+
+## The story tree
+
+Each generated paragraph is a part. Parts stack in order, and each part can hold several takes. The takes you select form the story line, the path a reader would follow.
+
+| Key | What it does |
+| --- | --- |
+| `Space` | Continue this part from the current text |
+| `Enter` | Open the composer and type a direction |
+| `R` | Retake with the same prompt |
+| `Shift+R` | Retake and edit the prompt first |
+| `W` | Write a take yourself, no model involved |
+| `E` | Edit prose and prompt in the full-screen editor |
+| `N` | Add an author's note |
+
+The map (M) is where the branching becomes visible. It cycles three views.
+
+| View | What it shows |
+| --- | --- |
+| Path | The selected story line from start to finish, one row per part, sibling takes drawn as circles |
+| Tree | Where the story branches, so you can follow any line with L |
+| Mass | Every story line side by side, sorted by word count, date, depth, or name |
+
+Because a new take branches from the part you were on, a single story can end up with dozens of parts spread across several lines without any of them being overwritten.
+
+## Facts and context
+
+Before a request goes out, 1667 assembles the prompt from your story text, your instructions, and a set of notes called Facts. Facts hold characters, places, and world rules, and they live in the project next to the story.
+
+A Fact can be always on, which means it enters every continuation and rewrite request. A keyed Fact only enters when its key matches recent story text or the current instruction, so a note about a character's real name can sit dormant until that name appears.
+
+Facts can also change along a branch. Open the actions menu on a story part, create a Fact there, and add a Fact State for when the information changes plus an End State for when it stops applying. That change travels forward along the story line from that part, and a different branch keeps the earlier text.
+
+The context meter reports how large the next request will be, and it distinguishes three levels.
+
+| Display | Meaning |
+| --- | --- |
+| `8.1k` | Exact token count |
+| `≈8.1k` | Near-exact token count |
+| `~8.1k` | Estimated count, leave more room |
+
+Leave extra headroom when the count is an estimate, since an estimate that overshoots the model's limit fails the request outright.
+
+Control+R opens the request viewer before anything is sent. It shows the model, the messages, the facts included, the context window, and the token counts, with API keys hidden. Every generated take also keeps a Generation Record holding the provider, model, and settings that produced it, so you can trace any paragraph back to the settings that wrote it.
+
+## Running it against a local model
+
+1667 never runs a model itself. It talks to a server you choose, on the same machine or somewhere on your network. Presets ship for OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, llama.cpp, KoboldCpp, and a custom endpoint. Anything speaking the OpenAI chat or completions API works through the OpenAI-compatible provider.
+
+| Server | Provider choice | Token count |
+| --- | --- | --- |
+| llama.cpp | llama.cpp text | Near-exact, from the native tokenize endpoint |
+| KoboldCpp | KoboldCpp text | Near-exact, from the native token count endpoint |
+| Ollama | Chat | Estimate |
+| LM Studio | Chat | Estimate |
+| Any OpenAI-compatible server | OpenAI-compatible | Estimate |
+
+For a fully local setup, Ollama is the shortest path:
+
+```bash
+ollama pull qwen3:8b
+ollama serve
+```
+
+Then pick Ollama in Settings, open the Connection panel, and point the base URL at the local server. A model running on your own machine needs no API key, and the story text never leaves the computer.
+
+Two details catch people out. On Linux the model server has to run under the same account as 1667. On macOS and Windows a plain HTTP connection to a local server needs the insecure HTTP setting turned on in advanced Settings.
+
+## What to watch for
+
+The project is pre-1.0 and the docs say so plainly. The project format can change between releases, so back up anything you care about and read the release notes before upgrading. The version at the time of writing is 0.11.0.
+
+On data handling, the short version is that it collects nothing. No analytics, no telemetry, no crash reporter, no install ID, and no account. API keys are kept in a private file outside your project folder and sent only to the provider they belong to. The one outbound request that is not a model request is an update check against the npm registry, which reads package information and carries none of your story or settings. Settings turns it off.
+
+Your provider still sees the text you send it, though. With a hosted model that is your account and their policy. With a local server the text stays on the machine.
+
+The limits are worth knowing up front. Phrase bias and banned strings need tokenizer support, which KoboldCpp handles and others approximate. Reasoning traces only show on chat routes, not text completion routes. One project can be open in only one 1667 process at a time. And there is no chat thread, because a direction is meant to guide the next paragraph instead of starting a conversation.
+
+Import paths exist for people arriving from elsewhere. There are importers for SillyTavern, covering chats, swipes, group chats, character cards, character books, and world info, and for NovelAI, covering stories, scenarios, lorebooks, presets, and retry history. The SillyTavern importer is the more interesting of the two, since a swipe and a take are the same idea wearing different clothes.
+
+## Source and Accuracy Notes
+
+- Project page: https://1667.ai/ (verified via direct visit on 2026-11-03)
+- Documentation: https://1667.ai/docs
+- Source repository: github.com/1667-ai/1667, Apache-2.0 confirmed through the GitHub API
+- npm package: `@1667-ai/cli`
+- HN launch thread: https://news.ycombinator.com/item?id=49330604 (Show HN, 2026-08-17)
+- Version, platform support, and provider list verified against the project's own install and model documentation
