@@ -1,0 +1,144 @@
+---
+title: "Kanban CLI: a local-first board your coding agents can drive"
+description: "Kanban CLI keeps a sprint board in JSON inside your repo and gives coding agents JSON-first commands, role pools, and file locks to work through it."
+pubDate: "2026-11-03T10:11:07.000Z"
+author: "Friday"
+tags: ["cli", "rust", "dev-tools", "task-management"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/kanban-cli.webp"
+  alt: "Kanban CLI summary card showing the board, sprint, and role views of a terminal task tracker"
+canonical: "https://runany.dev/blog/kanban-cli/"
+---
+
+> **TL;DR:** Kanban CLI is a Rust task tracker that keeps its whole board as JSON inside your repository under `.kanban/`. Commands speak JSON to whatever agent is driving them, tasks carry acceptance criteria and a role persona, and completion sits behind a human reviewer. It is young, AGPL licensed, and installed from a clone rather than from crates.io.
+
+## What it is
+
+Kanban CLI puts a sprint board in the terminal, and more usefully, in your repository. `kb init` creates a `.kanban/` directory, and every task, sprint, role, and agent after that is a JSON file inside it. There is no server, no account, and nothing leaves the machine.
+
+The author built it because coding agents had made coordination the hard part. The tool is an attempt to give an agent the board a human team would use, plus guardrails: an explicit actor on every write, acceptance criteria attached to a task, and a state machine that will not skip review.
+
+Two details set it apart from a plain todo list. Output is JSON by default and the human table view is opt-in behind `--human`. And identity is always explicit. `kb task claim` insists on the name of the agent doing the claiming, so the board records who moved what.
+
+## JSON first, tables on request
+
+Most CLI tools are built for a human reading a screen, and agents end up scraping pretty output. This one inverts that. Any command returns a JSON envelope unless you ask for a table, and the author keeps the agent-facing path as the default one.
+
+The JSON is not a dump of internal state. A claim returns the task plus the role context attached to it:
+
+```json
+{
+  "data": {
+    "task": { "id": 1, "title": "Implement user authentication endpoint" },
+    "role_context": {
+      "role_id": "backend",
+      "persona": "You are a senior backend engineer...",
+      "instructions": ["Follow REST best practices...", "..."],
+      "capabilities": ["API design", "Authentication", "..."]
+    }
+  }
+}
+```
+
+That payload is the handoff. An agent claims a task and receives the persona, the behavioral rules, and the skill tags it is expected to work under, so the context comes from the board instead of from whatever the operator remembers to paste into a prompt.
+
+The tool is model agnostic. Any agent that follows instructions well can drive it, and the launch thread notes that it works with an `AGENTS.md` workflow too.
+
+## Getting it running
+
+Rust 1.75 or later is required. There is no published binary, so install from a clone:
+
+```bash
+git clone https://codeberg.org/hydrafog/kanban
+cd kanban
+cargo install --path .
+kb --help
+```
+
+Nix users can skip the build entirely:
+
+```bash
+nix run github:hydrafog/kanban -- --help
+```
+
+One trap worth knowing: do not run `cargo install kanban`. The project calls its crate `kanban` and its Cargo.toml is at version 3.6.0, but that crate is not published, so crates.io hands you an unrelated `kanban` board library instead. Installing by path is the supported route.
+
+Then initialize the board and create a first task:
+
+```bash
+kb init
+kb task create "Implement user authentication endpoint" \
+  --description "As a backend engineer, create POST /auth/login with JWT token generation" \
+  -t "auth" -t "backend"
+kb task criteria add 1 "JWT tokens are signed with HS256"
+```
+
+Descriptions are expected to open with an `As a [role]...` phrase so the task reads as work assigned to a persona. Then walk the task through its states, naming the agent at each step:
+
+```bash
+kb task claim 1 "Claude"
+kb task submit 1 "Claude"
+kb task complete 1 "reviewer-name"
+```
+
+`kb task complete` is the human gate. It takes a reviewer argument and is marked as a human-only step in the source. The surrounding commands are `kb board` for the column view, `kb sprint create` for sprints with capacity and duration, `kb stats` and `kb analytics` for the numbers, `kb recalibrate` for a maintenance pass, `kb agent register` for the roster, and `kb project export` if you want the whole board out as JSON.
+
+## Roles are the reusable idea
+
+A role is not a person. It is a persona, a list of instructions, and a set of capability tags, and a task points at a role rather than at a person. When an agent claims the task, it adopts that role's context for the duration of the work.
+
+| Element | What it holds |
+| --- | --- |
+| `persona` | Identity and expertise injected into the agent's system context |
+| `instructions` | Behavioral rules and standards the agent is expected to follow |
+| `capabilities` | Skill tags used for matching and filtering |
+
+Roles live in `roles.json` and can be created from the command line:
+
+```bash
+kb role create backend "Backend Engineer" "You are a senior backend engineer..."
+kb role list
+```
+
+Role changes are kept in a `role_assignments` history on each task, with the timestamp and whoever made the change, so you can audit how a task drifted from one persona to another.
+
+If you build agent workflows anywhere, this bit is worth copying even if you never install the tool. A board that hands out structured context on claim, keeps acceptance criteria attached, and refuses to mark work done without a named reviewer addresses three things hand-rolled agent setups tend to skip.
+
+## What lands in your repository
+
+Everything is plain JSON on disk, which makes the board diffable and reviewable like any other change:
+
+| Path | Contents |
+| --- | --- |
+| `.kanban/config.json` | Project settings |
+| `.kanban/roles.json` | Role definitions |
+| `.kanban/agents.json` | Registered agent identities |
+| `.kanban/tasks/<ID>.json` | One file per task, with a `.deleted/` folder for tombstones |
+| `.kanban/sprints/<ID>.json` | Sprint metrics |
+| `.kanban/statistics/` | Historical task and role metrics |
+| `.kanban/recalibration/` | Maintenance reports and pending suggestions |
+| `.kanban/.locks/` | Advisory locks, one per entity plus a project-wide lock |
+
+Writes go to a temporary file, flush to disk, then rename into place, so an interrupted write does not leave a half-written task behind. Concurrent writers take per-entity advisory locks through the `fd-lock` crate instead of one global mutex, which means two agents working different tasks do not block each other.
+
+Git integration is part of the design rather than an add-on. Each task gets a branch named after its id and title, dirty work is stashed when the task is claimed, and a completed task is squash-merged back to main with the branch cleaned up.
+
+## What to watch for
+
+This is a young project with a small footprint. The repository was created in April 2026, sits at 4 stars and 2 watchers, and was last updated in late May 2026. There are no release tags, no published crate, and no binary releases, so every install is a build on your own machine. That is fine for a team that already has a Rust toolchain and annoying for everyone else.
+
+The license is AGPL v3, which matters if you plan to run it inside a product or a hosted service.
+
+The documentation disagrees with the code in two places worth knowing before you paste a command. The roles page and the git integration page both show `kb task claim 1 --agent "Claude"`, but the clap definition in `src/cli/commands/task.rs` takes the agent as a positional argument, and the quickstart uses the positional form. The source is what runs. The git integration page also documents a `kb task review` subcommand with an `--approve` flag that does not exist in the current command tree.
+
+The author is deliberately keeping this terminal only. In the launch thread, asked about a browser interface, he argued that a GUI would bloat the core tool and that Git versus GitHub is the same trade-off. That is a defensible call for a CLI, but it does rule out drag and drop, and some developers said as much in the comments.
+
+## Source and Accuracy Notes
+
+- Project page: https://codeberg.org/hydrafog/kanban - verified via direct visit
+- Source repository: hydrafog/kanban on Codeberg, Rust, package `kanban` 3.6.0, binary `kb`, AGPL v3 confirmed from the LICENSE file
+- HN launch thread: https://news.ycombinator.com/item?id=48256520 (17 points, 24 May 2026)
+- Thumbnail: the repository publishes its own 1200x600 summary card, padded and resized to 1200x630
