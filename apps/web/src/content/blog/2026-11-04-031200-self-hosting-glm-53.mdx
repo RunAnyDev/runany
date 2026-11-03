@@ -1,0 +1,198 @@
+---
+title: "Self-hosting GLM-5.3: the 56 B200s behind Revolut"
+description: "Revolut serves GLM-5.3 to 2,000 engineers on 56 B200 GPUs for about $0.30 per million tokens. The vLLM recipe, NVFP4 tuning and harness wiring."
+pubDate: "2026-11-03T20:12:00.000Z"
+author: "Friday"
+tags: ["self-hosted", "glm", "vllm", "llm", "blackwell", "inference"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/self-hosting-glm-53.webp"
+  alt: "Dark GPU server rack with cyan status lights and abstract violet serving traces on a slate gradient"
+canonical: "https://runany.dev/blog/self-hosting-glm-53/"
+---
+
+> **TL;DR:** Revolut serves GLM-5.3 to about 2,000 engineers on 56 B200 GPUs and says it bills itself roughly $0.30 per million tokens, a tenth of what it paid Anthropic and OpenAI. David Abitbol, who leads AI ops there, reports a 60% improvement in coding time and a 70% improvement in lead time once engineers stopped rationing tokens. The interesting part is not the hardware. It is the list of vLLM settings his team tuned to get there without buying one extra GPU.
+
+## What Revolut actually did
+
+Revolut started self-hosting open-weight models on dedicated GPUs in April 2026, with GLM as its first pick for coding. Seven months later the setup serves roughly 2,000 engineers with GLM 5.3 on 56 Nvidia B200s, and the blended cost works out at about $0.30 per million tokens.
+
+The reason for the switch matters more than the number. Revolut had launched Claude Code under strict per-engineer budget caps, around $300 a month, after watching some engineers run up $1,000 to $10,000 a month without much to show for it. Under those caps, engineers hoarded the model for the hardest tickets. The internal chart of 2,000 engineers showed a 10% improvement in lead time and 20% in coding time when Gemini arrived in early 2025, and Claude Code adding very little on top while the caps held.
+
+Self-hosted GLM changed the shape of that chart. From April onward, coding time improved about 60% and lead time about 70%. Abitbol's reading is that the bottleneck for engineering was never the typing. It was the inbox, the Jira tickets, the Confluence pages. Rationed tokens made people save the model for quarterly work. Unrationed tokens let them point it at everything else.
+
+Frontier models did not disappear. Claude Code, Codex and Gemini are all still there as the exception path for the hard cases, and the team is explicit that the latest frontier models are excellent. The default flipped. The exceptions stayed.
+
+## The model underneath
+
+GLM-5.3 is Z.ai's flagship open-weights text model, released in August 2026. It shares a base with GLM-5.2, and every improvement came from post-training rather than a new architecture.
+
+| Property | Value |
+|---|---|
+| Parameters | about 743B total, 39B active per token (MoE) |
+| Experts | 256 routed, 8 active per token, plus 1 shared |
+| Layers | 78, the first three dense |
+| Architecture | `GlmMoeDsaForCausalLM`, sparse attention with a learned indexer |
+| Published weights | FP8 (e4m3, 128x128 block scales) |
+| Context | 1M tokens native, 128K max output |
+| License | GLM-5.3 License |
+
+Two rows in that table deserve more attention later. The 1M context window is what the serving recipe exposes, and it is also the biggest footgun in this deployment. And the license is not plain MIT. The grant is MIT-style, but a Model-as-a-Service operator whose group revenue passes $10 billion over any 12 months has to clear Z.ai's security review before using the weights commercially.
+
+## Serving it with vLLM
+
+vLLM has a first-party recipe for GLM-5.3. It needs a build that includes native GLM5Next rendering (vllm-project/vllm#62424), which is where the Rust frontend binary comes from. The minimum version number alone does not include it.
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install -U vllm --torch-backend auto
+```
+
+Then the standard FP8 path on a single node:
+
+```bash
+export VLLM_USE_RUST_FRONTEND=1
+vllm serve zai-org/GLM-5.3 \
+  --tokenizer-mode glm5_next \
+  --kv-cache-dtype fp8_e4m3 \
+  --tensor-parallel-size 8 \
+  --tool-call-parser glm47 \
+  --enable-auto-tool-choice \
+  --reasoning-parser glm47 \
+  --served-model-name glm-5.3
+```
+
+The two `glm47` parser flags are not decoration. GLM-5.3 always thinks, so the generation prompt opens a reasoning block unconditionally. Without those parsers, tool calls and reasoning come back as raw text instead of structured fields, and every agent harness built on top of it falls over.
+
+On Blackwell, the NVFP4 checkpoint is the better starting point. Inferact's re-quantization is roughly 465GB and drops only the MoE expert linears to NVFP4, leaving shared experts, attention, embeddings and the early dense layers in BF16.
+
+```bash
+export VLLM_USE_RUST_FRONTEND=1
+vllm serve Inferact/GLM-5.3-NVFP4 \
+  --tokenizer-mode glm5_next \
+  --tensor-parallel-size 8 \
+  --enable-expert-parallel \
+  --reasoning-parser glm47 \
+  --tool-call-parser glm47 \
+  --enable-auto-tool-choice \
+  --kv-cache-dtype fp8_e4m3 \
+  --served-model-name glm-5.3-nvfp4
+```
+
+Abitbol's version of the same advice is blunter: on Blackwell generation hardware, do not run anything above FP4. Moving from FP4 up to FP8 costs about 40% more GPU footprint for no loss in precision.
+
+## The knobs that decide whether it works
+
+This is the part worth stealing. Revolut's first configuration was bad, roughly 3 requests per second and time to first token over 10 seconds. By August, on the same 56 GPUs, they were past 7 requests per second and 1.68 seconds to first token. The GPU count never changed.
+
+| Knob | What the talk says | Concrete setting |
+|---|---|---|
+| Context length | "Long context is a scam"; 256k is what you need even when you can serve 1M | `--max-model-len 262144` |
+| Quantization | On Blackwell, stay at FP4 | `Inferact/GLM-5.3-NVFP4` |
+| Tensor parallelism | The model fits on TP4 but the KV cache does not | `--tensor-parallel-size 8` |
+| Prefix cache hit rate | Coding workloads need better than 90% | keep prefix caching on, then measure it |
+| Speculative decoding | Worth optimizing | `--speculative-config.method mtp --speculative-config.num_speculative_tokens 5` |
+| Prefill and decode | Chunked prefill, or split the two into separate pools | `--enable-chunked-prefill`, or a PD cluster |
+| Concurrency | How many sequences share the KV budget | `--max-num-seqs 32` as a starting point |
+
+The row most people skip is the first one. A model that advertises 1M tokens of context will happily accept it, and then the KV cache becomes the bottleneck and every request queues behind a very long prefill. Serving 256k and turning away the rest is usually the faster experience.
+
+The row that matters most in production is the prefix cache. Coding agents replay the same repository, the same system prompt and the same tool definitions on every turn, so a hit rate above 90% is where the savings are. vLLM enables prefix caching by default; if you want a clean benchmark number, turn it off explicitly with `--no-enable-prefix-caching`, because a warm run and a cold run are different measurements.
+
+Abitbol's summary of the whole exercise is 88% improvement in performance for 76% increased demand, with no additional GPUs. The lesson he draws is that you have to resist the urge to scale up. Tune first.
+
+## Pointing your coding tools at it
+
+The endpoints are OpenAI-compatible and speak the Responses API, which is what makes this drop into existing agent harnesses instead of becoming its own thing. Codex CLI takes a custom provider in `~/.codex/config.toml`:
+
+```toml
+model = "glm-5.3"
+model_provider = "self-hosted-glm"
+
+[model_providers.self-hosted-glm]
+name = "Self-hosted GLM"
+base_url = "http://localhost:8000/v1"
+env_key = "GLM_API_KEY"
+wire_api = "responses"
+```
+
+OpenCode takes the same endpoint as an OpenAI-compatible provider in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "selfhosted/glm-5.3",
+  "provider": {
+    "selfhosted": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Self-hosted GLM",
+      "options": { "baseURL": "http://localhost:8000/v1" },
+      "models": { "glm-5.3": { "name": "GLM-5.3" } }
+    }
+  }
+}
+```
+
+Claude Code is the awkward one. It speaks the Anthropic Messages API, so a raw vLLM endpoint will not accept it without a translation layer in front, such as LiteLLM's Anthropic passthrough route. Revolut did not solve that by translating. They kept Claude Code as the exception path.
+
+Reasoning effort is worth knowing because GLM-5.3 always thinks and defaults to the deepest setting. The chat template resolves effort to max unless you explicitly ask for low or high, which you pass either as `reasoning_effort` on the request or inside `chat_template_kwargs`:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-5.3",
+    "messages": [{"role": "user", "content": "Summarize GLM-5.3 in one sentence."}],
+    "temperature": 1,
+    "max_tokens": 4096,
+    "chat_template_kwargs": {"reasoning_effort": "low"}
+  }'
+```
+
+Leave it on max with an interactive coding agent and you are paying for reasoning nobody asked for on every single turn.
+
+## What the 30 cents actually means
+
+The headline number is real, and it is also narrower than it sounds.
+
+| Line item | Figure |
+|---|---|
+| Blended cost per million tokens | about $0.30 |
+| Against the old Anthropic and OpenAI invoice | roughly one tenth |
+| Fleet | 56 B200 GPUs |
+| Engineers served | about 2,000 |
+| Hardware estimate for 56 B200s | about $2.7 million |
+| Renting at $6 to $8 per GPU-hour | $245,000 to $327,000 a month |
+| That works out per engineer | about $120 to $165 a month |
+
+Three caveats. The 30 cents excludes cloud spend, staffing and observability. Revolut has not said whether it owns the cluster or rents it, and the renting figure above is an estimate rather than a disclosure. And the comparison point matters: Z.ai's own hosted API for GLM-5.3 is priced at $1.40 per million input tokens, $4.40 per million output tokens and $0.26 per million cached tokens.
+
+So the self-hosted number wins when utilization is high and steady, and loses when it is not. A team burning a few million tokens a week should rent the API and keep its engineers on Claude Code or Codex. A team running GLM flat out through the working day is looking at a different bill.
+
+## The compliance layer nobody skips
+
+Revolut is an EU-regulated bank, and Abitbol spends the last third of the talk on what that forces you to build. His framing: none of these coding tasks are autonomous agents, they are always human in the loop, and the way you show that to a regulator is with a sandbox rather than a policy document.
+
+The sandbox is the approve-this-tool mechanism Codex and Claude Code already ship, with an allow list on top. Grep allowed, Gradle denied. It also protects you from the bad-actor problem, which is the part people underrate. In a company with 2,000 engineers there are always people using the coding assistant for things you did not intend.
+
+Around that, the team keeps inference inside the data equivalency framework (US, EU, UK and Israel), uses providers that retain no data by default, and runs OpenTelemetry for forensics. Vision is a separate problem because GLM-5.3 is text-only, so Revolut routes image work to Gemini or GLM-5.3-Flash, the first natively multimodal model in the GLM-5 series, through a local router that sends image requests elsewhere and keeps GLM for the main task.
+
+## When it does not pay off
+
+Three honest conditions. Your token volume has to be high enough that a fixed GPU bill beats a metered one, and it has to be steady, because idle GPUs cost the same as busy ones. You have to want an OpenAI-compatible text model that reasons hard on coding tasks rather than a frontier model that wins on hard reasoning. And somebody on the team has to own the fleet, because a 56-GPU deployment that nobody watches drifts into a bad configuration the same way any production service does.
+
+One more caveat on the numbers. The 60% and 70% improvements come from an internal comparison at Revolut, and AI Engineer's own write-up of the talk notes that it does not isolate the model change from other causes. The direction is the interesting part. The absolute figures are not a benchmark you can plan against.
+
+## Source and Accuracy Notes
+
+- Talk: "Shipping like a startup, regulated like a bank", David Abitbol, AI Engineer NYC 2026, https://ai.engineer/nyc/2026/talks/revolut, verified via direct visit on 2026-11-04
+- Full transcript: https://ai.engineer/reading/nyc-2026/transcripts/david-abitbol-revolut.srt, verified via direct download on 2026-11-04
+- Model card: https://huggingface.co/zai-org/GLM-5.3, verified via direct visit on 2026-11-04
+- vLLM serving recipe: https://recipes.vllm.ai/zai-org/GLM-5.3, verified via direct visit on 2026-11-04
+- SGLang cookbook: https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.3, verified via direct visit on 2026-11-04
+- API pricing: https://docs.z.ai/guides/overview/pricing, verified via direct visit on 2026-11-04
+- License text: https://huggingface.co/zai-org/GLM-5.3/blob/main/LICENSE, read in full on 2026-11-04
+- HN discussion: https://news.ycombinator.com/item?id=50350004, 176 points, 2026-11-03, pointing at the original post by Guillermo Flor at https://x.com/guilleflorvs/status/2117379073785696395
