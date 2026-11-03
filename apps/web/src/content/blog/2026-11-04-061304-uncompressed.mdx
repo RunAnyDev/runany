@@ -1,0 +1,148 @@
+---
+title: "uncompressed: hardened Docker Compose for self-hosted media"
+description: "uncompressed is a hardened Docker Compose config for a self-hosted media stack: VPN namespace isolation, Tailscale-only ingress, and auto-healing containers."
+pubDate: "2026-11-03T23:13:04.000Z"
+author: "Friday"
+tags: ["self-hosted", "docker", "media-server", "networking", "homelab"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/uncompressed.webp"
+  alt: "Abstract illustration of stacked server containers inside a glowing shield, linked by a private encrypted tunnel"
+---
+
+> **TL;DR:** uncompressed is a Docker Compose config that runs a self-hosted media stack with qBittorrent living inside Gluetun's network namespace, so a dropped VPN tunnel leaves no route out at all instead of a leaky firewall rule. Every web service sits behind Traefik on a Tailscale-only address, and Cloudflare handles certificate renewals. MIT licensed, nine containers, about eight minutes to install.
+
+## What it is
+
+uncompressed is a Docker Compose config for a self-hosted media stack: Seerr for requests, Radarr and Sonarr for the library, Prowlarr for indexers, qBittorrent for transfers, Bazarr for subtitles, Jellyfin for playback, and Autoheal to restart whatever falls over. The author runs it on Unraid and publishes it as a personal repo with 216 stars.
+
+The services are the familiar Servarr lineup. The wiring is the point.
+
+Most guides for running a torrent client behind a VPN tell you to point it at the tunnel. That is a setting, and settings get changed. Someone adds a container later, a port stays open, an image updates and a flag goes missing.
+
+This repo takes the harder route. qBittorrent starts with `network_mode: "service:gluetun"`, which means it shares Gluetun's entire network stack and owns no interface of its own. Gluetun creates the WireGuard tunnel and qBittorrent lives inside that namespace. When the tunnel drops there is no second path to the internet, because there is no second interface.
+
+That is a kernel boundary, not a firewall rule a typo can defeat.
+
+Here is the Compose fragment that does it:
+
+```yaml
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.1.4
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      WEBUI_PORT:       8080
+```
+
+And the side that builds the namespace:
+
+```yaml
+  gluetun:
+    image: qmcgaw/gluetun:v3.40.0
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER:     protonvpn
+      VPN_TYPE:                 wireguard
+      SERVER_COUNTRIES:         Netherlands,Switzerland
+      SERVER_FEATURES:          p2p
+      VPN_PORT_FORWARDING:      "on"
+```
+
+A small init script, `10-config.sh`, also forces qBittorrent to bind to `tun0`, which is defense in depth on top of the namespace itself.
+
+## Why the network layout matters
+
+Two more decisions shape how the stack behaves day to day.
+
+Gluetun requests a forwarded port from ProtonVPN and pushes it into qBittorrent's API, so incoming peers reach the right port without you hardcoding one. Gluetun's firewall permits outbound traffic to the RFC1918 Docker subnets, which lets Prowlarr still reach Radarr and Sonarr laterally even though it now shares the namespace.
+
+Health checks are endpoint specific and run every 30 to 60 seconds. Autoheal restarts anything that goes red, and `depends_on: service_healthy` means a container does not start until the dependency it needs is actually up. The stack does not limp along in a half-broken state.
+
+## Getting it running
+
+Prerequisites are where people get stuck, because there are four of them and none are optional:
+
+- Docker with Compose installed
+- A Tailscale account, with `tcp:80` and `tcp:443` opened in your Tailscale ACL for Traefik, plus `tcp:8096` for Jellyfin so LAN clients like Infuse can reach it directly
+- A ProtonVPN account with WireGuard keys, pointing at P2P servers in the Netherlands or Switzerland
+- A domain on Cloudflare DNS, plus a scoped API token with Zone read and DNS edit for the ACME challenge
+
+The scoped token matters here. The README asks for a token rather than the Global API key, and it is right to insist.
+
+The fast path is a guided wizard:
+
+```bash
+curl -L https://github.com/Lackoftactics/uncompressed/archive/main.tar.gz | tar xz
+cd uncompressed-main && ./setup.sh
+```
+
+If you would rather keep the checkout around for `git pull` updates later, clone it instead:
+
+```bash
+git clone https://github.com/Lackoftactics/uncompressed.git
+cd uncompressed && ./setup.sh
+```
+
+Either way the wizard asks for the ProtonVPN WireGuard private key, your Tailscale hostname and the Cloudflare token interactively. Then you bring the two stacks up from the repo root:
+
+```bash
+docker network create traefik_proxy
+docker compose -f infra/docker-compose.yml up -d
+docker compose -f arr/docker-compose.yml up -d
+```
+
+Traefik comes up first because the media services need it to route to. Secrets all live in a single `.env` at the root, symlinked into each stack:
+
+```bash
+DOMAIN_NAME=example.com
+TAILSCALE_IP=100.x.x.x
+CF_DNS_API_TOKEN=your_cloudflare_dns_api_token
+WG_PRIVATE_KEY=your_wireguard_private_key
+WG_PUBLIC_KEY=your_wireguard_public_key
+WIREGUARD_ADDRESSES=10.2.0.2/32
+```
+
+## What the three networks give you
+
+The stack runs on three Docker networks, and each one has a single job.
+
+| Network | Flag | Purpose |
+|---|---|---|
+| `traefik_proxy` | `external: true` | Traefik plus the services it routes HTTPS to |
+| `arr_internal` | `internal: true` | Service to service calls with no route off the host |
+| `vpn_network` | bridge | Gluetun and anything sharing its namespace |
+
+Traefik binds to `${TAILSCALE_IP}:443` rather than `0.0.0.0:443`, so nothing answers on the public internet. Off the mesh you do not even get a login page. Certificate renewals use the Cloudflare DNS-01 challenge, so ACME never has to reach your server over HTTP.
+
+Jellyfin is the single exception. It publishes `8096` to the host so Infuse on Apple TV can talk to it directly over the LAN, which keeps 4K playback on the device's own hardware.
+
+Hardware transcoding is mapped through `/dev/dri`, so Intel Quick Sync does the work whenever something has to be transcoded at all. Direct play on a 4K stream sits near 0.2 percent CPU, and a 4K to 1080p Quick Sync transcode runs around 12 percent.
+
+## What to watch for
+
+Traefik is pinned to `v2.10.7` while v3 has been the current major line for a while. The router labels in this config use v2 syntax, so check before adding a service or you will be debugging a label that silently does nothing.
+
+`arr_internal` is marked `internal: true`, which means services on it cannot reach the internet at all. That is exactly right for lateral calls, but if you add a container that needs outbound access, give it a second network.
+
+The paths are Unraid shaped. `DATA_DIR` defaults to `/mnt/user/appdata` and the media folders to `/mnt/user/media`, so on plain Docker or a NAS you adjust the volume paths in `.env` before the first run.
+
+You also need real Cloudflare DNS. There is no fallback to an HTTP challenge, so a domain parked somewhere else will not get certificates.
+
+Finally, this is still one person's stack. The repo is 19 files, the last commit landed in May 2026, and the setup script expects a Tailscale hostname and a ProtonVPN key specifically. Reasonable to run as is, less reasonable to assume it fits a setup you have not thought through.
+
+## Source and Accuracy Notes
+
+- Project page: https://uncompressed.media, verified via direct visit on 4 November 2026
+- Source repository: `Lackoftactics/uncompressed`, 216 stars and 9 forks at time of writing
+- License: MIT, confirmed from the LICENSE file in the repository
+- Compose details above were read directly from `arr/docker-compose.yml` and `infra/docker-compose.yml` in the repository
+- HN launch thread: https://news.ycombinator.com/item?id=47643580, April 2026
