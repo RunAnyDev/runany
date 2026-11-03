@@ -1,0 +1,111 @@
+---
+title: "Armor1 MCP Directory: risk scores for 24,189 MCP servers"
+description: "Armor1's free MCP directory risk-scores 24,189 MCP servers, flagging credential leaks, malicious packages and prompt injection, all through a public JSON API."
+pubDate: "2026-11-03T07:12:11.000Z"
+author: "Friday"
+tags: ["mcp", "security", "dev-tools", "api"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/armor1-mcp-directory.webp"
+  alt: "A shield emblem layered over a grid of MCP server nodes, most glowing cyan and a few glowing amber and red."
+canonical: "https://runany.dev/blog/armor1-mcp-directory/"
+---
+
+> **TL;DR:** Armor1's MCP directory risk-scores 24,189 MCP servers and publishes every verdict through a public JSON API, with no account needed. You can query it from a terminal, check a server before you install it, and turn the high-risk list into a CI gate.
+
+## What it is
+
+Armor1 builds security tooling for agentic AI systems. Their public MCP catalog at `mcp.armor1.ai/mcp-directory` indexes every MCP server the team could find, runs each one through a risk pipeline, and publishes the result.
+
+The catalog currently holds 24,189 servers. 5,076 are flagged as official and the remaining 19,113 are community projects, of which 591 are attributed to third-party registries. 2,923 of them are remote servers reached over a network rather than a local stdio process.
+
+Each entry is a plain record: title, repo URL, remote MCP URL, publisher standing, advertised auth modes, tool count, and a risk level of `success`, `warning` or `failure` with a score between 0 and 1.
+
+## Why it matters
+
+Connecting an MCP server is a copy-paste job. Your editor installs it, the protocol negotiates, and the server inherits whatever access you handed it.
+
+Armor1 says its pipeline surfaced hundreds of exposed API keys and tokens sitting in server configs and source, dozens of servers depending on known malicious packages, and tools built to manipulate an agent's context so it hands data to a second connected server. Their summary endpoint counts 5,056 high-risk servers, 16,359 flagged for high-risk supply chain code, 4,732 with risky tools and 1,168 with insecure auth modes.
+
+The catalog is free and needs no account, which is not how most security directories operate.
+
+## Querying the API
+
+The directory UI is a JavaScript app, but the data underneath it is plain JSON, and that is the part worth knowing about.
+
+Start with the summary of the whole catalog:
+
+```bash
+curl -s "https://mcp.armor1.ai/api/directory/servers/summary"
+```
+
+```json
+{
+  "totalServers": 24189,
+  "officialServers": 5076,
+  "communityServers": 19113,
+  "remoteServers": 2923,
+  "highRiskServers": 5056,
+  "mediumRiskServers": 11026,
+  "lowRiskServers": 8107,
+  "serversWithHighRiskSupplyChainCode": 16359,
+  "serversWithRiskyTools": 4732,
+  "serversWithInsecureAuthModes": 1168
+}
+```
+
+Individual servers take filters, and the parameter names are the same ones the web app sends:
+
+| Parameter | Values | Effect |
+|---|---|---|
+| `risk_level_eq` | `success`, `warning`, `failure` | Match the categorical verdict |
+| `risk_level_ne` | same three values | Exclude a verdict |
+| `officiality_eq` | `official`, `unofficial`, `thirdparty` | Match publisher standing |
+| `search` | free text | Match title and description |
+| `risk_score_orderby` | `asc`, `desc` | Sort by the numeric score |
+| `limit`, `offset` | integers | Paginate |
+
+A page of results comes back with `items`, `limit`, `offset`, `total` and `count`, so the page size and the grand total arrive in the same response and you do not need a second call to know how much is left.
+
+## Checking a server before you install it
+
+The practical use is a lookup. Give it a name and it tells you what you are about to run:
+
+```bash
+# look up one server by keyword
+curl -s "https://mcp.armor1.ai/api/directory/servers?limit=1&search=filesystem"
+```
+
+To triage the whole catalog instead, sort the failing servers by score:
+
+```bash
+# the 20 worst offenders right now
+curl -s "https://mcp.armor1.ai/api/directory/servers?limit=20&risk_level_eq=failure&risk_score_orderby=desc"
+```
+
+The records go deeper than a server-level label. Every tool gets its own entry with a description, input schema, an operation kind, capability tags, dangerous parameters and a destructive level. Operation kinds across the tools I sampled broke down as read, update, create, write and delete, and the capability tags are the part worth reading:
+
+- `cap_net_fetch` and `cap_net_egress` for outbound network calls
+- `cap_secrets_read` for reaching into credentials
+- `cap_fs_read`, `cap_fs_write` and `cap_fs_delete` for filesystem access
+- `cap_db_query` and `cap_db_modify` for database access
+- `cap_exec_process` and `cap_exec_shell` for running commands
+
+That detail is what lets you separate a server that only reads from one that can delete. A server can land on a passing verdict overall and still expose a single tool with a destructive level of `high`.
+
+## What to watch for
+
+The catalog is a snapshot of a moving target. New servers show up daily, and Armor1 is candid that the build is still a work in progress, so treat a risk level as a triage signal rather than a verdict.
+
+Two fields that look interchangeable are not. `risk_level` is the categorical verdict, and `risk_score` is a separate 0 to 1 number used for ordering. Higher scores inside a band mean more concern, and the band medians climb in step, roughly 0.19 for `success`, 0.25 for `warning` and 0.41 for `failure`, but the ranges overlap so filtering on the verdict and sorting on the score is the pattern that holds.
+
+Every entry I pulled through the public API carries a `provenance` of `discovered`, meaning Armor1 found it rather than receiving it from a publisher. Publisher standing lives in the separate `officiality` field, and it deserves a look on its own: in a 400-entry sample, 305 were `unofficial` and 79 were `official`. The first thing to check on any record is the auth mode, since a `no_auth` entry means the server accepts connections with no credential at all.
+
+## Source and Accuracy Notes
+
+- Project page: https://mcp.armor1.ai/mcp-directory, verified via direct visit
+- JSON API: https://mcp.armor1.ai/api/directory/servers and https://mcp.armor1.ai/api/directory/servers/summary, verified via direct request
+- HN launch thread: https://news.ycombinator.com/item?id=46900771
+- Counts and field samples were read from the live API on 2026-11-03
