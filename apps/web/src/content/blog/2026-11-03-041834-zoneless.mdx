@@ -1,0 +1,125 @@
+---
+title: "Zoneless: open-source Stripe alternative for USDC payouts"
+description: "Zoneless is an open-source Stripe alternative that pays sellers in USDC on Solana, speaks the Connect API, and self-hosts from a Docker Compose file."
+pubDate: "2026-11-03T04:18:34.000Z"
+author: "Friday"
+tags: ["open-source-payments", "stripe-alternative", "stablecoins", "solana", "self-hosted", "developer-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zoneless.webp"
+  alt: "The Zoneless dashboard showing connected seller accounts and USDC balances on a dark interface with violet accent panels."
+canonical: "https://runany.dev/blog/zoneless/"
+---
+
+> **TL;DR:** Zoneless gives you a self-hostable payments stack that speaks Stripe's Connect API but settles in USDC on Solana. Swap the import and two header names, and payouts that cost Stripe Connect 0.25% plus $1.50 for international sellers cost about two-tenths of a cent instead. Everything is Apache 2.0 and it starts with a Docker Compose file.
+
+## What it is
+
+Zoneless is a payments platform you run yourself: checkout, subscriptions, connected seller accounts, transfers, and payouts, with USDC on Solana as the only settlement currency. The repository is zonelessdev/zoneless, TypeScript on an Nx monorepo, 576 stars and 57 forks as of today, first committed in March 2026. The license is Apache 2.0 and the SDK ships as `@zoneless/node`.
+
+The interesting part is not that it exists. It is how little you have to change to use it. Resource names follow Stripe's, request shapes follow Stripe's, and the webhook model follows Stripe's. IDs carry the same prefixes with a different suffix, so a connected account is `acct_z_`, a transfer is `tr_z_`, a payout is `po_z_`, and a seller wallet is `wa_z_`. A team already running Stripe Connect can read the migration guide and change four things.
+
+The person behind it is Ben, who posted the Show HN in August 2026. He wrote it because his own marketplace was paying Stripe roughly $9,000 a month in fees, which he says dropped to about $6 after switching. He also says the marketplace has onboarded more than 5,000 sellers and run more than 3,000 payouts, and that 74% of new sellers now pick Zoneless over Stripe when given the choice.
+
+## Where the fee difference comes from
+
+The site's own comparison is worth reading in full, because the gap is not one line item but the entire structure of a payment processor's pricing.
+
+| | Zoneless | Stripe Connect | PayPal Payouts |
+|---|---|---|---|
+| Monthly account fee | Free | $2 per active account | Free |
+| Payout fee (domestic) | about $0.002 | 0.25% plus $0.25 | $0.25 through the Payouts API |
+| Payout fee (international) | about $0.002 | $1.50 per payout | 2%, capped at $20 |
+| Cross-border fee | None | 0.25% to 1.25% | Included in the 2% |
+| Currency conversion | None | 0.50% to 1% FX fee | Plus 4% FX spread |
+| Payout speed | Seconds | 2 to 7 business days | Instant to PayPal |
+| Global coverage | 220+ countries and regions | about 47 countries | 156+ countries |
+| Source code | Open source, Apache 2.0 | Proprietary | Proprietary |
+| Self-hostable | Yes | No | No |
+
+That $0.002 is a Solana transaction fee, which is why the domestic and international rows carry the same number. Distance does not exist on a chain, so the line item that punishes cross-border payouts simply disappears.
+
+The savings calculator on the homepage makes the point with a worked example: 1,000 payouts a month at $50 each with 50% international sellers. Stripe Connect comes to $40.5k a year, PayPal Payouts to $19.5k, Zoneless to roughly $26.
+
+This is the whole pitch, and it also explains the second half of the pitch, which is that the Zoneless column is not only cheaper but verifiable. The thing doing the paying is a public blockchain, so anyone can watch the transactions settle.
+
+## Getting it running
+
+Self-hosting is a clone and a compose file.
+
+```bash
+git clone https://github.com/zonelessdev/zoneless.git
+cd zoneless
+docker compose up -d --build
+curl http://localhost/api/health
+```
+
+That brings up the API, the dashboard, and MongoDB 7 running as a single-node replica set, which the API needs for transactions. The first build takes a few minutes. Then open `http://localhost/setup`, create the platform account, and let the wizard generate an API key and a Solana wallet. Both secrets appear exactly once and nowhere else, so move them into a secret manager before you leave the page.
+
+The SDK initializes against your own instance the same way it initializes against the hosted one:
+
+```typescript
+import { Zoneless } from '@zoneless/node';
+
+const zoneless = new Zoneless(process.env.ZONELESS_API_KEY!, 'http://localhost');
+```
+
+A payout looks the way it would under Stripe, with the currency changed and the account header renamed:
+
+```typescript
+const payout = await zoneless.payouts.create(
+  { amount: 110000, currency: 'usdc' },
+  { zonelessAccount: 'acct_z_1Nv0FGQ9RKHgCVdK' },
+);
+```
+
+Amounts are in cents, so 1000 means 10.00 USDC. Requests made on behalf of a connected account send a `Zoneless-Account` header instead of Stripe's `Stripe-Account`, and webhook signatures arrive in a `Zoneless-Signature` header.
+
+For a real deployment the docs point at a Linux box with 2 GB of RAM, Ubuntu 24.04 in their example, and a separate env file:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production up -d --build
+```
+
+That env file carries the parts that decide how money moves. `APP_SECRET` signs tokens and encrypts data, `LIVEMODE` flips between simulated funds and real mainnet, `SOLANA_RPC_URL` points at the chain, and `SETTLEMENT_RAIL` set to `onchain` gets you real Devnet transactions instead of simulated ones.
+
+## Where the Stripe API stops matching
+
+Not everything lines up, and the migration guide is candid about the edges. Four differences matter before you plan a switch:
+
+- Currency is `usdc` rather than a fiat code, so if your revenue still arrives through Stripe or a bank account you have to fund a platform wallet and use the Top-ups API to track the deposits.
+- `external_accounts` holds Solana wallets, not bank accounts, and a wallet exposes a `wallet_address` where a bank object would have routing and account numbers.
+- Payouts are signed on-chain by your platform wallet, so a payout stays pending until you process it rather than being queued by the processor.
+- There is no reverse endpoint. A payout can only be cancelled while it is still pending, and once it reaches `in_transit` or `paid` it is final.
+
+The last one is the sharp edge, and it is less a bug than a different model. A bank transfer can be recalled. A Solana transaction cannot.
+
+## What to watch for
+
+Refunds and chargebacks are what the HN thread kept returning to, and the honest answer is that the payments world you are replacing does not map cleanly onto the one you are moving to. Blockchain transfers cannot be reversed, there is no chargeback flow to fall back on, and a customer who wants their money back needs a new transaction rather than an adjustment.
+
+Compliance moves rather than disappears. Zoneless does ship seller identity verification, with rules you set and a review queue for sellers who need a check. But as one commenter on the launch thread pointed out, pushing KYC and AML onto someone else does not protect you from paying a sanctioned address, and self-hosting puts that judgment squarely on you. This is where the open-source story makes the most work for you, and you have to do it.
+
+The pricing needs a second read. The founder's $9,000 a month down to $6 figure describes a self-hosted instance he runs himself, not a Zoneless Cloud subscription. Cloud charges $0 for 1,000 payouts a month, $99 for 10,000, and $499 for 100,000, so a marketplace with real volume either self-hosts or moves up a tier.
+
+The project is young. The repository was created in March 2026, the SDK sits at version 0.1.12, and the last push landed at the end of September. Apache 2.0 and a Stripe-shaped API are what make it easy to leave later, which is the point of both the license and the compatibility work.
+
+And the crypto underneath is not optional, whatever the marketing says. The site frames it plainly with a heading that reads "For people who don't care about crypto" and an explanation that it uses the most boring crypto tech out there, stablecoins, to move money. That is true of the settlement layer. It is not true of what your sellers and your customers have to hold to get paid.
+
+## Source and Accuracy Notes
+
+- Project page: https://zoneless.com - verified via direct visit on 2026-11-03, HTTP 200
+- Documentation: https://docs.zoneless.com - self-hosting, deployment, payouts and Stripe migration guides, read from the source files in apps/docs/src/app/pages/docs/data/ on 2026-11-03
+- Source repository: zonelessdev/zoneless - TypeScript, 576 stars, 57 forks, 2 open issues, created 2026-03-23, last push 2026-09-30
+- License: Apache 2.0, confirmed from the LICENSE file in the repository root
+- npm package: @zoneless/node, version 0.1.12, Apache-2.0, depends on @solana/web3.js and bs58
+- Fee table and savings figures: read from the comparison table and the calculator on the homepage on 2026-11-03. The $40.5k, $19.5k and $26 annual figures assume 1,000 payouts a month at $50 each with 50% international sellers, which is the calculator's default selection
+- Cloud pricing: Free at $0 with 1,000 payouts a month, Pro at $99 with 10,000, Scale at $499 with 100,000, read from https://zoneless.com/pricing on 2026-11-03
+- HN launch thread: https://news.ycombinator.com/item?id=49375244 - Show HN by tinyprojects, 83 points and 37 comments, posted 2026-08-20
+- Founder numbers: the $9,000 a month down to about $6 in fees, 5,000+ sellers onboarded, 3,000+ payouts, and 74% of new sellers choosing Zoneless all come from the founder's own post in that thread
+- Customers named on the homepage: PromptBase and Agensi, listed by the project as production users
+- Thumbnail: the site publishes an og:image that is a 1200 by 630 PNG, downloaded, converted to a 1200 by 630 WebP and uploaded to R2 as zoneless.webp
+- Cannibalization check: no existing post, written-repos entry or slug matches the zoneless domain, the project name or the slug. GSC was not available in this session, so no query-level check was run
