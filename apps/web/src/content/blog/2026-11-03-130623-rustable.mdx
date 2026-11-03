@@ -1,0 +1,124 @@
+---
+title: "Rustable: a native database client written in Rust"
+description: "Rustable is an open source database client written in Rust, with native builds for PostgreSQL, MySQL, MariaDB, SQLite and Redis. MIT licensed, free to use."
+pubDate: "2026-11-03T06:06:23.000Z"
+author: "Friday"
+tags: ["database", "dev-tools", "rust", "postgresql"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/rustable.webp"
+  alt: "Rustable database client logo beside the headline Your query took 30ms. Why is your app still thinking?"
+canonical: "https://runany.dev/blog/rustable/"
+---
+
+> **TL;DR:** Rustable is a MIT licensed database client written in Rust, with native builds for PostgreSQL, MySQL, MariaDB, SQLite and Redis. Every feature ships in the free version, including multiple connections, SSH tunnels and row edits you can preview before they run, and the browser demo runs the real engine compiled to WASM.
+
+## What it is
+
+Rustable is a desktop database client built on Rust and egui, a GUI framework that renders through the GPU instead of shipping a web view inside a native shell. It connects to PostgreSQL, MySQL, MariaDB, SQLite and Redis, and the whole project is MIT licensed, which is the part that separates it from the tool it models itself on.
+
+The site is written in a deliberately abrasive voice. The download section calls Windows and Linux users welcome to their inferior operating system, and the FAQ opens by confirming that yes, it is written in Rust, obviously, then adds that mise is also written in Rust, so by that standard it must be good. Underneath the running joke is a real product, released as v0.4.8 on November 3, 2026, with binaries for macOS, Windows and Linux.
+
+There is also a browser demo, and it is not a mockup. The demo bundle is the same Rust code compiled to WebAssembly, running a disposable SQLite file alongside an in-memory Redis instance that supports a subset of Redis commands. You can browse, query and edit there without installing anything. Real server connections need the desktop app.
+
+## Why it matters
+
+TablePlus has become the default recommendation for a lot of developers, and it is a good tool. Its free tier also asks you to pay to have more than two active tabs. For anyone working across a development database, a staging replica and a production read-only connection at the same time, that ceiling shows up quickly.
+
+Rustable takes the opposite position. Everything ships in the MIT license, including the things you would normally pay for. Multiple connections with per-environment colors, so production gets its own alarming color. Separate windows. SSH tunnels. Schema browsing, SQL tabs, saved queries, and staged row edits that show you the SQL before it touches the table.
+
+Engine coverage is the other half of the pitch, and it is uneven in ways the project is upfront about. SQLite and PostgreSQL are the established adapters. MySQL and MariaDB are newer and still marked experimental in the project's own driver capability audit. Standalone Redis 7.4 support arrived more recently still. Rather than a feature checklist, the repository publishes a dated capability document that records what has actually been verified per engine, which is what you want from something that is still moving.
+
+## Getting it running
+
+Downloads are plain release assets. No installer wizard, no account, no telemetry collection.
+
+```bash
+# macOS on Apple Silicon
+curl -L -o Rustable.dmg \
+  https://github.com/RustableApp/Rustable/releases/latest/download/Rustable-macos-arm64.dmg
+open Rustable.dmg
+```
+
+```bash
+# Linux on x64
+curl -L -o Rustable-linux-x86_64.tar.gz \
+  https://github.com/RustableApp/Rustable/releases/latest/download/Rustable-linux-x86_64.tar.gz
+tar -xzf Rustable-linux-x86_64.tar.gz
+```
+
+Every release ships a SHA256SUMS file, so it is worth checking what you downloaded before running it:
+
+```bash
+curl -sL https://github.com/RustableApp/Rustable/releases/latest/download/SHA256SUMS \
+  | grep linux-x86_64.tar.gz
+shasum -a 256 Rustable-linux-x86_64.tar.gz
+```
+
+Building from source uses mise to install the toolchain, and the Cargo lockfile is checked in:
+
+```sh
+mise run dev
+mise run check
+mise run build
+```
+
+The macOS bundle lands at `target/Rustable.app`. For an optimized local binary, `mise exec rust@stable -- cargo run --release` works. The QA build uses the same Cargo output path under a separate feature flag, so copy that binary into a separate app bundle before running it.
+
+## What the free version includes
+
+- Multiple named connections with environment colors and separate windows
+- Connection groups, plus imports from TablePlus and TablePro
+- Ranked fuzzy search, table filters, schema browsing and clickable foreign key relationships
+- SQL editor tabs with completion, query history, saved queries and result export
+- Staged row edits with undo, and the SQL previewed before it applies
+- SSH tunnels, system credential storage and TLS
+- Redis key browsing, command execution, string edits and TTL controls
+
+Engine support, as recorded in the project's capability audit:
+
+| Engine | Version | Status |
+| --- | --- | --- |
+| PostgreSQL | current | Established adapter, full browse, query, edit, import, export |
+| SQLite | current | Established adapter, opens files as copies so originals stay untouched |
+| MySQL | 8.4 | Connections, SQL, browsing, export, CSV import, native acceptance pending |
+| MariaDB | 11.4 | Same feature set as MySQL, with native CSV import and row edits verified |
+| Redis | 7.4 | Standalone only, key browsing, commands, string edits, TTL controls |
+
+Platform builds:
+
+| Platform | Package | Updates | Notes |
+| --- | --- | --- | --- |
+| macOS | .dmg, Apple Silicon | Automatic | Signed and notarized |
+| Windows | .zip, x64 | Manual | SSH needs an external tunnel |
+| Linux | .tar.gz, x64 | Manual | Requires Ubuntu 24.04 or compatible newer |
+
+The hard limits are documented rather than hidden:
+
+| Limit | Value |
+| --- | --- |
+| Rows shown when browsing a table | 500 |
+| Rows shown for a query result | 5,000 |
+| Retained value budget | 16 MiB |
+| Statements per editor run | 128 |
+
+## What to watch for
+
+Version 0.4.8 is early software by the author's own description. They are using it themselves, finding rough edges and working on them.
+
+Support is uneven across engines and platforms in ways that will bite if you skip the details. SSH tunnels work on macOS and Linux only, so on Windows you use a direct connection or bring your own tunnel. Redis support covers standalone servers, and Cluster and Sentinel are explicitly out of scope. Visual schema administration is gated for the newer MySQL and MariaDB adapters, and PostgreSQL functions and procedures are not enumerated in the sidebar.
+
+The result grids are deliberately bounded, and those bounds apply to the retained set rather than guaranteeing anything about memory or server execution. A query matching more than 5,000 rows returns the first 5,000, and exports include what was loaded. One editor run executes at most 128 statements, and earlier autocommit work survives a later failure, so a script that dies halfway leaves you with partial writes. Safe query mode exists for both SQLite and PostgreSQL, but the project is careful to note that it is not a substitute for least-privilege database permissions.
+
+Crash reporting is opt-in rather than automatic. The app writes the first Rust panic to a log in its application support directory, shows you the text and asks before anything reaches a Sentry project. There is no telemetry SDK, no query history collection and no session replay. Home directory paths are replaced before the review prompt, though arbitrary panic messages can still carry sensitive values.
+
+The author describes the build as vibe coded with direction in the launch thread, and the HN comments push back on both the Rust-for-its-own-sake framing and on egui counting as native. Neither argument changes how the app behaves, but they are worth reading before you point it at a production database.
+
+## Source and Accuracy Notes
+
+- Project page: https://rustable.app — verified via direct visit
+- Source repository: RustableApp/Rustable — MIT license, Rust, repository created November 1, 2026
+- Driver capability audit: `docs/DRIVER_CAPABILITIES.md` in the repository
+- HN launch thread: https://news.ycombinator.com/item?id=50347524 — posted November 3, 2026, 7 comments
