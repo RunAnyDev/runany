@@ -1,0 +1,208 @@
+---
+title: "Cryo: freeze a running program, thaw it later"
+description: "Cryo is a new programming language whose running programs freeze to disk and thaw later, built for long-running agents and workflows."
+pubDate: "2026-11-03T22:05:00.000Z"
+author: "Friday"
+tags: ["programming-languages", "dev-tools", "agents", "concurrency", "virtual-machine"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/cryo.webp"
+  alt: "Cryo playground editor showing a program that sleeps for ten seconds, with a snapshot panel on the right"
+canonical: "https://runany.dev/blog/cryo/"
+---
+
+> **TL;DR:** Cryo is a programming language built around a virtual machine that can save a running program to disk and resume it later, possibly on a different machine. A program blocked on input does not hold a process while it waits; the VM writes a snapshot and unloads, then thaws the program when the awaited event arrives. Endothermic Labs is demoing it in a browser playground, and the language itself borrows from the ML family with strict typing, named unions and generic type constructors.
+
+## What it is
+
+Cryo is a new programming language from Endothermic Labs, a San Francisco and New York startup founded by Zachary Wade. The company site is still a holding page announcing a Winter 2026 launch, and the job listings mention working on "Cryo and our upcoming agent platform". The language is the public face of that platform.
+
+What makes Cryo different is the runtime it runs on, the Freeze/Thaw Virtual Machine (FTVM). Conventional programs are treated as disposable: start one, kill it at a moment's notice, run it again later. Cryo programs are built to outlive the process that started them.
+
+The FTVM runs a program for as long as it can. When the program hits a delay, such as waiting on input from a person, the VM writes the program's whole state to storage and unloads it. When the awaited event arrives, minutes or months later and not necessarily on the same machine, the VM loads it back and the program carries on from exactly where it stopped. The program itself does nothing to make this work.
+
+Endothermic Labs frames the motivation in terms of agents, which they describe as long-running services that need to preserve state and context across long stretches of time, where ordinary process lifecycle gets in the way.
+
+## The freeze and thaw model
+
+The playground ships a glossary, and this is the vocabulary that matters:
+
+| Term | What it means |
+| --- | --- |
+| FTVM | The Freeze/Thaw Virtual Machine that Cryo programs run on |
+| Freeze | Saves everything a running program knows and everywhere it is, then frees the VM |
+| Thaw | Loads it back and continues as if nothing had happened |
+| Snapshot | The output of a freeze, everything a thaw needs and nothing else |
+| Unloading | Freezing a program that is waiting, so it costs nothing until needed again |
+| Atomicity | Everything between two save points is atomic, and the program replays that stretch if it is killed |
+
+Atomicity is the piece worth understanding. A program is saved every time it hands control back to the VM's host, which includes every wait on a pipe. If the process running it dies partway through a stretch, the program resumes from its last save point and runs that stretch again, so it never observes a half-finished state of its own. That is a replay-based guarantee rather than a lock or a transaction log.
+
+In the playground, a program that has sat waiting for ten seconds unloads on its own and its status pill changes to Suspended. The panel on the right explains what survives a freeze: the worker is killed and only the snapshot is left.
+
+## The language
+
+Cryo is expression-first and draws on the ML family of languages, SML and OCaml, with some Rust influence. Most constructs are expressions, so `if`, `match` and `select` all produce values, and a block's value is its last expression written without a trailing semicolon.
+
+```cryo
+var stdio = stdio!();
+
+var main = fn() {
+    var is_happy = true;
+
+    if is_happy {
+        stdio <- "Clap your hands!";
+    } else {
+        stdio <- "Please go find a corner to sit in.";
+    };
+};
+```
+
+`loop` is the one construct that is a statement rather than an expression, and it comes in three forms: `loop { }` runs forever, `loop i in 0..<n { }` counts through a range, and `loop x of xs { }` walks an array or tuple. There is no `break` or `continue` yet, so `return` is the way out.
+
+Types are strict and structural. Every value's type is known at compile time and a value has exactly one representation, so a duck-typed union such as `str | int` is not something you can write. Types compare by shape rather than by name, which means a `type` declaration gives a shape a label and nothing else.
+
+Named unions are labeled sum types where each alternative carries its own payload:
+
+```cryo
+type StrOption = $some{ str } | $none{};
+
+var map_str = fn(opt: StrOption, mapper: (val: str) => str) => StrOption {
+    match opt {
+        $some{ val } => { $some{ mapper(val) } }
+        $none{} => { $none{} }
+    }
+};
+
+var stdio = stdio!();
+var main = fn() {
+    var name: StrOption = $some{ "Ringo" };
+    var greeting = map_str(name, fn(val: str) => str { format!("Hi there, $1!", val) });
+
+    match greeting {
+        $some{ val } => { stdio <- val; }
+        $none{} => { stdio <- "Who's there?"; }
+    };
+};
+```
+
+Type parameters live in brackets before the argument list, and a parameterized type is a type in its own right. The playground describes higher-kinded types as a type constructor such as `[U] -> $some{ U } | $none{}`, applied with brackets as `Option[int]`, and because the parameters belong to the type rather than to its declaration, a type constructor can itself be passed as a parameter.
+
+```cryo
+type Option = [U] -> $some{ U } | $none{};
+
+var map = fn[T; U](opt: Option[T], mapper: (val: T) => U) => (Option[U]) {
+    match opt {
+        $some{ val } => { $some{ mapper(val) } }
+        $none{} => { $none{} }
+    }
+};
+
+var main = fn() {
+    var age = map::[int; str]($some{ 29 }, fn(val: int) => str { format!("$1 years old", val) });
+};
+```
+
+Narrow types are the feature with no direct equivalent in most mainstream languages. A range like `1..9` is itself a type, and narrowness propagates through arithmetic, so if `x` is `1..5` then `x + 1` is `2..6`. The primitive types are plain: `int` is a 32-bit signed integer, `str` is an arbitrary-length UTF-8 string, `bool` is `true` or `false`, `null` is unit. There are no floats, bigints or bytes yet.
+
+## Pipes and coroutines
+
+Concurrency uses explicitly declared pipes, and the playground credits this model to Go rather than to the actor systems it superficially resembles. A pipe is a typed queue, `||[ ... ]` creates one and can seed it with initial contents, `pipe <- value` writes to the back and `<- pipe` reads from the front.
+
+Reading an empty pipe is not an error. The coroutine waits until something is written, and that wait is exactly where the FTVM gets a chance to save the program.
+
+```cryo
+var stdio = stdio!();
+
+var main = fn() => int {
+    // Pipes are asynchronous queues
+    // They support asynchronous read and writes, but no random-access
+    var inbox: pipe[str] = ||[];
+
+    // Coroutines are spawned with `|| { ... }`
+    // They return a pipe that resolves to the coroutine's result
+    // And will execute until it hits an empty pipe
+
+    // This coroutine will run until it hits `<- inbox`
+    var reader = || {
+        stdio <- "reader: waiting for mail";
+        var letter = <- inbox;
+        stdio <- format!("reader: got '$1'", letter);
+        letter
+    };
+
+    stdio <- "main: sending";
+
+    // This write will trigger the coroutine to resume
+    inbox <- "hello from main";
+
+    // As a result, we'll be able to read the result from the coroutine
+    var result = <- reader;
+    stdio <- format!("main: the reader returned '$1'", result);
+
+    0
+};
+```
+
+Coroutines take turns rather than running at once. A coroutine only gives way when it waits, on a pipe or a directive, so the code between two waits runs without interruption.
+
+`select` waits on several pipes at all once and continues down whichever arm has a value first. Each arm is written `pipe -> name => { ... }`, and the pipes that lose keep their values ready for a later read.
+
+## Plugins and directives
+
+A directive is a function whose name ends in `!`, implemented by the VM or by a plugin rather than by Cryo itself. Every program has `stdio!`, `format!`, `new_array!` and `panic!`, and plugins add more.
+
+Plugins are imported with a `from plugin` clause, and they are how a program reaches outside its own sandbox:
+
+```cryo
+from plugin "sleep" import { sleep_ms };
+
+var stdio = stdio!();
+
+var main = fn() => int {
+    stdio <- "sleeping for 10s";
+
+    // sleep_ms! doesn't block: it returns a pipe that receives a value once
+    // the time is up. `<-` reads from a pipe, and reading an empty pipe parks
+    // the program. A parked program is just data, which is what Freeze saves.
+    var done = <- sleep_ms!(10000);
+
+    stdio <- "awake";
+    0
+};
+```
+
+That program is the default in the playground, and it captures the whole idea in one screen. The pipe returned by `sleep_ms!` is a socket, a pipe with a plugin on the other end. A socket is either durable, meaning it survives a freeze in the middle of an operation, or transient, meaning it cleans itself up on thaw instead.
+
+The security model deserves attention before you build against it. Plugins run with the VM's own privileges, so a production deployment loads only trusted ones.
+
+## Running it
+
+There is nothing to install. The playground at play.endothermic.ai runs a small version of Cryo in the browser and needs JavaScript.
+
+The page is a full editor with Run, Freeze, Thaw and Reset buttons, a status pill that reports Ready or Suspended, an Examples dropdown, and a stdin prompt along the bottom for feeding input to a parked program. The panel on the right shows the snapshot a freeze produced.
+
+The flow it demonstrates is to run the default program, watch it park on the ten second sleep and report itself Suspended, hit Freeze to capture the snapshot, then hit Thaw to resume from it.
+
+## What to watch for
+
+The honest headline is that none of Cryo's implementation is public yet. The GitHub organisation endothermic-ai has two repositories and neither one is Cryo. `cryo-public` is described as a public placeholder for the project, and `playground` states that it does not host any code. Neither carries a LICENSE file, so there is no license to read and no source to build.
+
+The playground also says plainly that it runs a small version of Cryo, a distinction that matters if you reach for a feature the tutorial only mentions in passing.
+
+Endothermic Labs describes its first product release as still weeks away, with Cryo positioned as a demo of a coming agent deployment platform. That framing suggests the language is the visible part of a product that has not shipped, and the parts that would matter in production, the compiler, the plugin ecosystem and the deployment story, are exactly the parts you cannot inspect.
+
+Inside the language, some gaps are small and some are not. There are no floats, bigints or bytes, and arithmetic works only on `int`. There is no `break` or `continue`, so a long `loop` has to leave through `return`. Not-equal is `<>` rather than `!=`, which will trip up anyone porting code from other languages.
+
+The guarantee to weigh hardest is atomicity. The documented behavior is that a stretch of code between save points runs again after a crash, which follows from that guarantee every side effect inside the stretch happens again too, unless the language gives you a way to make it idempotent. The docs do not get into this.
+
+## Source and Accuracy Notes
+
+- Project page: https://play.endothermic.ai/ (verified via direct visit, 2026-11-04)
+- Company: https://endothermic.ai/ (verified via direct visit, 2026-11-04)
+- Source repository: https://github.com/endothermic-ai (two placeholder repositories, `cryo-public` and `playground`, both created in October 2026 with no source code and no LICENSE file, verified via the GitHub API on 2026-11-04)
+- License: none published. No LICENSE file in either repository and no license statement on the project or company pages
+- HN launch thread: https://news.ycombinator.com/item?id=50261093 (12 points, no comments, 2026-10-27, posted by zwad3)
+- Thumbnail: the playground screenshot at https://play.endothermic.ai/card.png, a 1200x675 PNG, cropped to 1200x630

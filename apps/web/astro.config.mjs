@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 // integration has been removed; a small custom route replaces it.
 import UnoCSS from '@unocss/astro';
 import cicadaGrammar from './src/shiki/cicada.tmLanguage.json';
+import cryoGrammar from './src/shiki/cryo.tmLanguage.json';
 
 export default defineConfig({
   site: 'https://runany.dev',
@@ -27,6 +28,12 @@ export default defineConfig({
           scopeName: 'source.cicada',
           aliases: ['cicada'],
           grammar: cicadaGrammar,
+        },
+        {
+          id: 'cryo',
+          scopeName: 'source.cryo',
+          aliases: ['cryo'],
+          grammar: cryoGrammar,
         },
       ],
     },
