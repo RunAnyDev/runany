@@ -1,0 +1,137 @@
+---
+title: "HyperTemplates: static sites without a template language"
+description: "HyperTemplates is a pure-HTML templating system and static site generator from Herd Works. Use ht-apply, ht-if, and ht-each instead of a template language."
+pubDate: "2026-11-03T12:00:00.000Z"
+author: "Friday"
+tags: ["static-site-generator", "templating", "go", "web-development", "developer-tools"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hypertemplates.webp"
+  alt: "Layered HTML document fragments assembling into a clean website layout on a dark slate background."
+canonical: "https://runany.dev/blog/hypertemplates/"
+---
+
+> **TL;DR:** HyperTemplates puts template logic in HTML attributes instead of a separate template language, so a layout stays readable as plain HTML. The `hyperctl` CLI turns that into a static site generator with Markdown content and reproducible builds, and the same team ships an iPhone app for posting to a site. The Go source is public, though the licensing on the core libraries is still murky.
+
+## What it is
+
+HyperTemplates is a templating system built on one unusual idea: the template syntax is HTML attributes. Instead of wrapping your markup in Liquid tags or Go template actions, you annotate an ordinary HTML document with `ht-apply`, `ht-if`, `ht-include`, `ht-each`, and `ht-pipe`. The file on disk stays a `.html` file that a browser can open, that an editor can format, and that a linter can check.
+
+Built on top of that is `hyperctl`, a static site generator written in Go. It scaffolds a project, serves it locally, reads content from Markdown, YAML, and JSON, builds the whole site or a single page incrementally, and deploys to git or S3 hosting. Herd Works, the team behind it in Portland, Oregon, also publishes HyperTexting, a native iPhone app for posting to a HyperTemplates site.
+
+The project has been around a while. The first Show HN post landed in June 2025, and the team followed up in July 2026 with a writeup on designing the static site generator around iPhone publishing.
+
+## Why it matters
+
+Template languages cost you something specific. A Hugo range loop looks like this:
+
+```html
+{{ range $m }}
+  <p>{{ .name }} is {{ .age }}</p>
+{{ end }}
+```
+
+That snippet comes straight from the Hugo documentation, and the HyperTemplates tutorial uses it as its foil. There is more Go in there than HTML, the output does not render in a browser, and a mismatched brace is an error you find at build time rather than at a glance in the editor.
+
+HyperTemplates pushes the same logic into the document:
+
+```html
+<ul ht-each="item in ${ items }">
+  <li ht-apply>${ item.name }</li>
+</ul>
+```
+
+The markup stays visible and the loop becomes an attribute. That is the whole pitch, and it is the reason the project has drawn attention in a category dominated by Hugo, Eleventy, and Jekyll.
+
+The build side is not a toy either. Herd Works reports build times around 1ms per page on Apple Silicon, measured on a five-year-old M1 MacBook Pro, and the generator supports reproducible builds so the same inputs produce the same output.
+
+## The directives
+
+| Directive | Purpose |
+| --- | --- |
+| `ht-apply` | Fills element content or attribute values from template data, with optional fallbacks |
+| `ht-if` | Renders an element only when a condition holds |
+| `ht-include` | Pulls a template fragment from another file |
+| `ht-each` | Repeats a block once per item in a collection |
+| `ht-pipe` | Passes content between elements using a selector |
+
+CSS custom properties get their own hook as well, through `--ht-var(...)` syntax for pulling template values into a stylesheet.
+
+## Getting it running
+
+The CLI ships as a tarball per platform. On macOS:
+
+```bash
+curl -LO https://hypertemplates.net/downloads/hyperctl_v0.18.1_darwin_universal.tar.gz
+tar -xzf hyperctl_v0.18.1_darwin_universal.tar.gz
+chmod +x hyperctl
+sudo install -d /usr/local/bin/
+sudo install hyperctl /usr/local/bin/
+hyperctl
+```
+
+Linux follows the same shape with the `linux_amd64` archive. Then scaffold a site and start the dev server:
+
+```bash
+hyperctl cms new website -b "https://acmeinc.com" -t "Acme Inc" acme-website
+cd acme-website
+hyperctl dev server --config site.yaml
+```
+
+Your site is on http://localhost:8080 at that point. The scaffolding gives you a `site.yaml` config file, a landing page, and example layout templates.
+
+For a full build, `hyperctl build` reads the same config and writes the static output. Add `--incremental` together with `--page` to rebuild a single page instead of the whole site.
+
+## Writing a layout
+
+A layout in HyperTemplates is plain HTML with attributes. Here is one that pulls in shared fragments and falls back through title values:
+
+```html
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8">
+    <title ht-apply>${ page.title, site.title, "Placeholder Title" }</title>
+    <meta ht-apply name="description" content="${ page.description, site.description }" />
+  </head>
+  <body>
+    <header ht-include="fragments/header.html"></header>
+    <main>
+      <article ht-apply>${ markdown(page.content) }</article>
+    </main>
+    <footer ht-include="fragments/footer.html"></footer>
+  </body>
+</html>
+```
+
+And here is that shared header fragment, guarded so it disappears when a page has no title:
+
+```html
+<header ht-if="${ title }">
+  <nav>
+    <a href="/">Home</a>
+    <a href="/about/">About</a>
+  </nav>
+  <h1 ht-apply>${ title }</h1>
+</header>
+```
+
+Comma-separated values inside the expression are fallbacks, tried in order. The first one that resolves wins, which is how the title above falls back from a page title to a site title to a literal string.
+
+## What to watch for
+
+Version 0.23.0, released in August 2026, broke a lot of the older syntax. `ht-template` is gone in favor of `ht-each`, `ht-not` was replaced by a more expressive `ht-if`, and `ht-content`, `ht-attr`, `ht-query`, and `ht-param` were all folded into `ht-apply`. CSS variable syntax changed from `--ht-value(...)` to `--ht-var(...)`, and template variable functions now take parenthesized argument lists. There is a `hyperctl theme migrate` command for converting legacy directives, and it is idempotent, so running it twice changes nothing.
+
+The docs and the downloads page disagree right now. The quick start still tells you to pull `hyperctl_v0.18.1`, while the downloads page serves 0.23.0. Copying the install command gives you a build from before the breaking changes, so check the version on the downloads page if you are starting fresh.
+
+Windows is beta only and gated behind the community forum. The Go source is public on GitHub under the `herdworks` organization (`htxt`, `httt`, `hyperctl`, `hyperfeed`, `htup`), and the JavaScript reference implementation is MIT licensed. The Go repositories do not carry a LICENSE file, though, so the terms for the actual core are not clear. HyperTexting is iPhone only at the moment, with iPad and Mac promised.
+
+## Source and Accuracy Notes
+
+- Project page: https://hypertemplates.net/ — verified via direct visit
+- Documentation and tutorials: https://hypertemplates.net/docs/
+- CLI downloads and changelog: https://hypertemplates.net/downloads/
+- Source repositories: https://github.com/herdworks and https://github.com/herdworks/hypertemplates-js (MIT)
+- License: MIT for the JavaScript reference implementation; no LICENSE file present in the Go core repositories under github.com/herdworks
+- HN launch thread: https://news.ycombinator.com/item?id=44261680 (Show HN, June 2025)
