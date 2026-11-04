@@ -1,0 +1,123 @@
+---
+title: "no days off: ten years of running every day, visualized"
+description: "no days off turns 3,881 consecutive days of running into a browsable data story. Maps, weather, heart rate zones and a 10.9 MB self-contained page."
+pubDate: "2026-11-04T02:25:57.000Z"
+author: "Friday"
+tags: ["data-visualization", "nextjs", "web-development", "mapbox", "show-hn"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/no-days-off.webp"
+  alt: "A dark map with an orange running route traced across it, the no days off site"
+canonical: "https://runany.dev/blog/no-days-off/"
+---
+
+> **TL;DR:** no days off is a single-page archive of one runner's 3,881-day streak, built by Adrien Friggeri from his own Strava data. Every run is on a map, broken out by weather, heart rate zone, pace and country, down to a 52-week half-marathon block and a bus trip across the western states. There is no install and no account. You open the URL and scroll through a decade.
+
+## What it is
+
+The site is a data visualization project rather than a tool with a feature list. Adrien Friggeri started running every day on July 11, 2015 and the site tracks it to February 23, 2026: 3,881 days, 13,454 miles, 2,088 hours and 257,000 feet of climbing.
+
+He posted it to Hacker News in July 2025 as "Show HN: Ten years of running every day, visualized" and it took 958 points. The thread is worth reading on its own, because the comments are a mix of people confessing their own streaks and runners pushing back on the health framing of running through stress fractures and a cardiac ablation.
+
+The homepage breaks the streak down into headline counters, then into a foreword Friggeri wrote himself, then into sections you can dig into.
+
+## Why it matters
+
+Most personal dashboards stop at the summary. This one keeps the individual run intact and lets you scroll through it. Each entry carries a distance, a pace, an elevation figure, the location, the temperature, the sky conditions and a GPS trace rendered as a line on a Mapbox map.
+
+The interesting part is that the visualizations are all built from the same underlying rows. The same run that appears in the map also drives the heart rate histogram, the weather breakdown and the country table. Nothing is summarized ahead of time.
+
+The runner, pace and weather data comes from Strava. Weather lookups come from OpenWeatherMap, and place names are resolved through OpenCage.
+
+| Section | What it breaks down |
+|---|---|
+| Longest Runs | The ten biggest distances, with dates |
+| Personal Bests | Split times at track distances |
+| Biggest Elevation Gain | The ten climbs with the most feet gained |
+| Races | The 11 finishes that were actual races |
+| Bus Run Bus | 10 runs from a 100-mile bus trip in 2019 |
+| Weekly Half Marathon | 52 straight half marathons in 2016 |
+
+## Getting it running
+
+There is nothing to install. The site is a static export served from Vercel, and the whole thing works in a browser. If you want the raw data, it is embedded in the page source as JSON, which you can pull out directly:
+
+```bash
+curl -s https://nodaysoff.run \
+  | grep -o '"weeklyHalfMarathon":\[[^]]*\]' \
+  | head -c 2000
+```
+
+The underlying activity list is a standard Strava API pull. The endpoint that Friggeri used is the athlete activities endpoint, filtered by epoch timestamp and paginated:
+
+```bash
+curl -s -H "Authorization: Bearer $STRAVA_TOKEN" \
+  "https://www.strava.com/api/v3/athlete/activities?after=1433808000&per_page=100" \
+  | jq '.[0] | {name, distance, start_date, location}'
+```
+
+The endpoint requires the `activity:read` scope, and the `after` and `before` parameters take epoch timestamps. Strava's changelog notes the API base URL moves from `www.strava.com/api/v3` to `api-v3.strava.com` starting January 4, 2027, so an incremental updater written today should target the new host.
+
+## The numbers behind it
+
+Distance distribution across the streak:
+
+| Run distance | Number of runs |
+|---|---|
+| 1 mi | 1,368 |
+| 2 mi | 802 |
+| 3 mi | 510 |
+| 4 mi | 525 |
+| 5 to 6 mi | 598 |
+| 7 to 8 mi | 180 |
+| 9 to 10 mi | 58 |
+| 11 to 12 mi | 42 |
+| 13 to 14 mi | 94 |
+| 15 to 25 mi | 35 |
+| 26 mi and up | 5 |
+
+The one-mile runs are the interesting row. Friggeri calls them "streak savers", the minimum effort needed to keep the chain alive on a bad day, and they have become more common as the streak has aged.
+
+Weather across the runs tells the same story from the other direction. Of 3,639 runs with weather data, 1,734 were cloudy, 1,271 clear, 457 rainy, 84 snowy, 63 misty, 18 drizzly, 7 foggy, 3 hazy, 1 smoky and 1 during a thunderstorm. On the temperature side, 62 runs happened below 20 degrees Fahrenheit and 6 happened above 90.
+
+Mileage by streak year shows the strain of keeping this up while working and having a life:
+
+| Streak year | Miles |
+|---|---|
+| 1 | 1,632 |
+| 2 | 1,322 |
+| 3 | 1,500 |
+| 4 | 1,202 |
+| 5 | 1,564 |
+| 6 | 2,103 |
+| 7 | 1,236 |
+| 8 | 888 |
+| 9 | 575 |
+| 10 | 609 |
+| 11 | 824 |
+
+The site says it plainly: a slight dip in the last few years, because work and life sometimes gets in the way. The streak never broke, but the volume behind it fell by more than half from the peak.
+
+Two of the segments stand out as deliberate projects rather than daily maintenance. The 52 weekly half marathons came out of a 2016 plan: Friggeri intended to run his first half marathon, ended up running 13.1 miles in January, and decided to repeat that every week through the end of the year. The Bus Run Bus segment comes from Rickey Gates' inaugural trip in 2019, a week across the western states where the runners covered 100 miles, with the biggest single day being 20 miles in Yosemite with 4,111 feet of climb.
+
+## What to watch for
+
+The source code is not published. Asked directly on HN whether the pipeline was available, Friggeri explained that the data processing was "mostly a pile of adhoc scripts" and that the incremental Strava update would need significant work to open source. The site itself is MIT-friendly in spirit and built on Next.js with Mapbox and OpenStreetMap tiles, but you cannot fork it.
+
+The page is heavy. The HTML for a single visit is about 10.9 MB because every GPS trace, weather reading and activity is inlined into the document rather than fetched lazily. It is a deliberate trade for a static export that needs no server, and it loads fine on a modern connection, but it is not a model to copy for a site that expects repeat visitors on mobile data.
+
+There is also a data quirk worth knowing about. The country table lists "United States" and "United States of America" as two separate entries, because the place-name resolution returned both spellings for the same country, which splits the US miles across two rows. The same effect puts the streak's 3,881 days across 3,619 country-days, so some runs were not credited to any country at all.
+
+Finally, the claims in the foreword are the runner's own, and they are not medical advice. Friggeri mentions running through stress fractures, flu and a cardiac ablation procedure. If you are considering a daily streak, the HN thread's more cautious runners have better ideas than the site's own headline number.
+
+## Source and Accuracy Notes
+
+- Project page: https://nodaysoff.run (verified by direct visit on 2026-11-04, HTTP 200)
+- HN launch thread: https://news.ycombinator.com/item?id=44522683, 958 points at the time of checking
+- Author: Adrien Friggeri, adrien@friggeri.net. Related site: https://www.runeveryday.com
+- Data sources named in the site footer: OpenCage, OpenWeatherMap and Strava. Map tiles are Mapbox with OpenStreetMap attribution
+- Typography: Jost by Owen Earl and Tamzen by sunaku. Icons from Lucide
+- Deployment: Next.js static export on Vercel, confirmed by the `x-nextjs-prerender` response header
+- All statistics in this post were read from the live page and its embedded JSON payload on 2026-11-04
