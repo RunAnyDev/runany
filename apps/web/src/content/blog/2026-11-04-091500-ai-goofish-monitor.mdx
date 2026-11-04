@@ -1,0 +1,124 @@
+---
+title: "ai-goofish-monitor: AI search for Goofish listings"
+description: "ai-goofish-monitor scans Xianyu (Goofish) listings with Playwright and AI, running real-time or scheduled monitoring tasks behind a full admin UI. Python, MIT licensed."
+pubDate: "2026-11-04T02:15:00.000Z"
+author: "Friday"
+tags: ["automation", "python", "playwright", "ai-tools", "self-hosted"]
+category: "self-hosted"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ai-goofish-monitor.webp"
+  alt: "GitHub social preview card for Usagi-org/ai-goofish-monitor"
+canonical: "https://runany.dev/blog/ai-goofish-monitor/"
+---
+
+> **TL;DR:** ai-goofish-monitor watches Xianyu, the second-hand marketplace known internationally as Goofish, and pulls out the listings you actually want. A Playwright scraper feeds an AI analysis layer, tasks run live or on a schedule, and a web admin UI on port 8000 handles the configuration. It ships as a Docker image and the whole thing is MIT licensed.
+
+## What it is
+
+The project's own description is in Chinese, and it reads roughly like this: a multi-task, real-time or scheduled monitoring and intelligent analysis system for Xianyu, built on Playwright and AI, with a complete backend admin UI, built to help people find what they want among Xianyu's enormous catalog.
+
+That is a slightly unusual market for an open source tool, and it explains the shape of the repository. This is a full application, not a library. The root directory holds a `Dockerfile`, a `docker-compose.yaml` and a `docker-compose.dev.yaml`, a `pyproject.toml` and a `uv.lock`, a `requirements.txt` split into runtime and development variants, and a `static/` directory for the frontend assets.
+
+The project is maintained by a GitHub organization, Usagi-org, with 16,472 stars, 2,850 forks and 42 open issues. It was created on July 16, 2025 and last pushed on October 10, 2026. The repository topics are `ai`, `ai-assistant`, `ai-tools`, `automation`, `gemini` and `goofish`.
+
+Documentation comes in both languages, with a `README.md` and a separate `README_EN.md` side by side, plus a `DISCLAIMER.md` at the root that is worth reading before you point this at a live marketplace.
+
+## How it works
+
+The source under `src/` is organised in layers, and the file names are unusually descriptive about what happens:
+
+| Module | Role |
+|---|---|
+| `scraper.py`, `spider_v2.py` | Playwright-driven collection of listings |
+| `ai_handler.py`, `ai_message_builder.py` | The model call and the prompt payload |
+| `ai_service.py`, `ai_response_parser.py` | Request compatibility and response parsing |
+| `keyword_rule_engine.py` | Deterministic keyword filtering alongside the AI |
+| `scheduler_service.py` | Live and scheduled task execution |
+| `notification_service.py` | Alerting when a match turns up |
+| `price_history_service.py` | Tracking a listing's price over time |
+| `result_blacklist_service.py` | Suppressing listings you do not want |
+| `account_strategy_service.py`, `seller_profile_cache.py` | Per-account behaviour and seller lookups |
+
+The keyword rule engine next to the AI layer is the interesting design choice. A rule engine gives you cheap, explainable filtering for the obvious criteria, and the model handles the judgement calls that rules are bad at. `failure_guard.py` and `rotation.py` sit alongside them as resilience pieces, and `parsers.py` handles the listing payloads coming back off the marketplace.
+
+Under `src/services` there is also `dashboard_service.py` and `dashboard_payloads.py` for the admin UI, `search_pagination.py` for walking result pages, and `result_export_service.py` and `result_storage_service.py` for getting results out of the app and onto disk. Results land in a SQLite database, with the path set through `APP_DATABASE_FILE`.
+
+## Running it
+
+The published image is on GitHub Container Registry, and the compose file wires up the environment, the database and a set of bind mounts:
+
+```yaml
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/usagi-org/ai-goofish:latest}
+    init: true
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      APP_DATABASE_FILE: /app/data/app.sqlite3
+    volumes:
+      - ./data:/app/data
+      - ./state:/app/state
+      - ./config.json:/app/config.json
+      - ./prompts:/app/prompts
+      - ./jsonl:/app/jsonl
+      - ./logs:/app/logs
+      - ./images:/app/images
+      - ./price_history:/app/price_history
+    restart: unless-stopped
+```
+
+```bash
+docker compose up -d
+```
+
+The bind mounts are deliberate. `prompts/` holds the prompt templates the AI layer uses, `config.json` holds task configuration, and `price_history/` holds the price tracking data, so you can edit any of them without rebuilding the image.
+
+There is also a `desktop_launcher.py` at the root for running it outside the container, a `start.sh` for a direct launch, and a `run_live_smoke.sh` script that exercises the thing against the live marketplace.
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill it in. The sample file is commented in Chinese and splits into two blocks, the AI model settings and the web UI settings:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=https://api-inference.modelscope.cn/v1/
+OPENAI_MODEL_NAME=XiaomiMiMo/MiMo-V2-Flash
+
+SERVER_PORT=8000
+WEB_USERNAME=admin
+WEB_PASSWORD=admin123
+```
+
+Two details deserve attention. The endpoint is any OpenAI-compatible API base, and the sample points at a ModelScope inference address, so the model does not have to be OpenAI's. The sample model note says the chosen model must support image analysis, which makes sense since listings are matched partly on their photos.
+
+The admin credentials default to `admin` and `admin123`. Change them before the port is reachable by anything but your own machine.
+
+## The Chrome extension
+
+A `chrome-extension/` folder at the root holds `manifest.json`, `background.js`, `popup.html` and `popup.js`. It is the browser-side companion to the backend, which fits the Playwright design, since the extension can sit in a signed-in browser session while the server handles the scheduled runs.
+
+## When to use it
+
+This suits someone hunting a specific second-hand item where the listing you want may appear and disappear in hours, and where a saved search and a price history are worth more than a one-time search.
+
+The scheduled-task model and the notification service are the parts that earn their keep, because the value is in catching a listing early rather than in browsing the marketplace yourself.
+
+## When to skip it
+
+It scrapes a marketplace, so it sits squarely in the grey area between automation tooling and terms-of-service compliance. The presence of `DISCLAIMER.md` in the repository root suggests the authors are aware of this, and it is worth reading that file and the marketplace's own rules before you run it at any volume.
+
+It also depends on an external model API for the analysis half, which means running cost and an API key are part of the operating model, and the keyword rule engine is the part that still works without one.
+
+## Source and Accuracy Notes
+
+- Project page: https://github.com/Usagi-org/ai-goofish-monitor (homepage field is empty in the GitHub API)
+- Source repository: github.com/Usagi-org/ai-goofish-monitor (MIT license, verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 16472
+- The Chinese project description was quoted in translation above, read from the GitHub API on 2026-11-04
+- Module names and Docker configuration were read from the repository tree and `docker-compose.yaml` on 2026-11-04
+- Repository was created 2025-07-16, last pushed 2026-10-10
