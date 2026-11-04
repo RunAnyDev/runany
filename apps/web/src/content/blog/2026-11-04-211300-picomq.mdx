@@ -1,0 +1,197 @@
+---
+title: "PicoMQ: durable streams on object storage, Kafka on the wire"
+description: "PicoMQ is a Rust stream server that stores records and its write-ahead log in S3-compatible object storage, so nodes hold no state worth backing up."
+pubDate: "2026-11-04T14:13:00.000Z"
+author: "Friday"
+tags: ["streaming", "kafka", "self-hosted", "s3", "rust"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/picomq.webp"
+  alt: "Three small server nodes streaming ordered glowing ribbons into a translucent object storage container"
+canonical: "https://runany.dev/blog/picomq/"
+---
+
+> **TL;DR:** PicoMQ is a stream server written in Rust that keeps every record and its write-ahead log in S3-compatible object storage, so each node holds nothing but caches. It speaks its own HTTP protocol, the Durable Streams protocol and the Kafka wire protocol, and existing Kafka producers and consumer groups work against it unchanged. You bring your own bucket and Postgres, or run it against local files with SQLite.
+
+## What it is
+
+Clients create named streams, append records to them, and read them back over HTTP or over the Kafka protocol. Records live in S3-compatible object storage. Cluster coordination runs through a SQL database. A node is a single binary that holds no local state worth backing up.
+
+That last point is the whole design. A deployment has three moving parts:
+
+- **Nodes** serve clients and hold caches only. The same binary runs the HTTP listener, the Kafka listener, the admin API and the web console.
+- **An object store** holds the data objects, and the write-ahead log by default. S3 and compatible stores work, and so does a local filesystem.
+- **A SQL database** holds the metadata log that coordinates the cluster. Postgres for a cluster, SQLite for a single node.
+
+Cluster state changes are commands written to an ordered log table inside the SQL database. Every node tails that table and applies each command to an in-memory view, so all nodes converge on the same state without talking to each other. The database supplies the ordering that a consensus protocol normally would. Every 1024 applied commands a node writes a snapshot row, and the log below it can be truncated.
+
+Any node accepts any request. A request for a partition owned elsewhere gets a 307 redirect to its owner over HTTP, or `NOT_LEADER_OR_FOLLOWER` over Kafka. Fencing backs that up, so a stale view can cost a redirect but never splits a stream.
+
+The storage engine underneath is a separate project, s3stream, whose own repository describes it as an AutoMQ S3 stream engine. The main PicoMQ repository was created on August 11, 2026 and had 378 stars, 13 forks and 16 open issues when checked.
+
+## Why streams instead of topics
+
+Kafka's data model was built for funneling: many producers, a small number of wide topics, consumers that read every partition in order. It is close to optimal there.
+
+Routing is the opposite shape. One user, one session, one order, one agent run, each with its own ordered log that a consumer wants to read on its own. Kafka pushes those entities into shared partitions, where the partition key decides placement but not access. Getting one entity's records means scanning the partition and discarding everything else, so read amplification becomes the partition size divided by the records actually requested.
+
+PicoMQ makes the per-entity log a first class object:
+
+| | Partitions (Kafka) | Streams (Pico) |
+|---|---|---|
+| Point reads | Finding one entity's records requires scanning the whole partition | The entity is the stream. It is addressed by name and only its records are read |
+| Isolation | Offsets are per partition, so one bad record blocks every entity behind it | Offsets and failures are scoped to one stream |
+| Rescaling | Changing partition counts moves data and disrupts all consumers | A hot stream moves to another node on its own and offsets do not change |
+| Lifecycle | Retention applies per topic, so one entity's data cannot be trimmed independently | Retention, trimming and deletion are per stream operations |
+
+Funneling still works. A topic can have several partitions, and Kafka producers and consumer groups use them as they would on Kafka, through the Kafka protocol. The differences are that trimming and deletion work per stream rather than per topic, and records are not deleted by age until the topic's own TTL lapses.
+
+## Getting it running
+
+Everything ships in one binary. Build the `pico` CLI from source and you have both the server and the client.
+
+```bash
+git clone https://github.com/picomq/picomq && cd picomq
+cargo install --path picomq/pico-cli
+```
+
+A first run needs nothing installed but the binary, because both the metadata log and the object store can be local files:
+
+```bash
+pico serve \
+  --meta-url sqlite:./data/meta.db \
+  --storage=-2@file://./objects
+```
+
+The node serves HTTP on `127.0.0.1:4437`, the admin API and console on `127.0.0.1:9090`, and Kafka on `127.0.0.1:9092`. Every flag has a `PICO_` environment variable equivalent.
+
+Pointing the same command at real infrastructure swaps in Postgres and a bucket:
+
+```bash
+pico serve \
+  --node-id 2 \
+  --protocol ds \
+  --listen 0.0.0.0:4437 \
+  --http-address http://node2.internal:4437 \
+  --auth required \
+  --auth-bootstrap-token-file ./root-token \
+  --meta-url postgres://user:pass@pg:5432/picomq \
+  --storage=-2@s3://bucket?region=us-east-1
+```
+
+Listen on anything other than loopback and you have to choose between `--auth required` and `--insecure-allow-remote`. There is no third option, and auth is off by default.
+
+Docker skips the host install entirely. The compose files in `harness/aio` bring up Postgres plus RustFS as the object store:
+
+```bash
+cd harness/aio
+cp .env.example .env
+docker compose up --build                          # Postgres + RustFS, 1 node
+docker compose -f compose.cluster.yml up --build   # same stack, 2 nodes
+docker compose -f compose.lite.yml up --build      # SQLite + file://, no deps
+```
+
+Streams are URL paths, so any HTTP client works. Create with `PUT`, append with `POST`, read with `GET`:
+
+```bash
+curl -X PUT -H 'Content-Type: text/plain' \
+  http://localhost:4437/streams/orders
+
+curl -X POST -H 'Content-Type: text/plain' -d 'order-1' \
+  http://localhost:4437/streams/orders
+
+curl 'http://localhost:4437/streams/orders?seq=0'
+```
+
+Appends return the sequence of their first record in the `Pico-Start-Seq` header and the next free one in `Pico-Next-Seq`. Reads accept `seq=now` to start at the tail instead of the beginning.
+
+The `pico` binary is the client too, and its verbs map onto the protocol:
+
+```bash
+pico create /streams/orders --content-type text/plain --partitions 3
+seq 1 1000 | pico append /streams/orders --batch 100
+pico read /streams/orders
+pico tail /streams/orders -f
+pico ls --prefix /streams/
+pico trim /streams/orders --seq 500
+pico close /streams/orders && pico delete /streams/orders
+pico --http2 bench -b 1024 -w 512 --connections 4 --streams 4 -d 60
+```
+
+Two details are worth knowing before you copy those commands. `ls` and `trim` exist on the Pico protocol only, and the Durable Streams protocol appends one record per request, so `--batch` only applies to `pico`. On a topic with several partitions, `head`, `append`, `read`, `tail` and `trim` all need `--partition`.
+
+Connection settings are global flags with environment variable equivalents, so a server you use often becomes a saved profile:
+
+```bash
+pico --endpoint http://node2.internal:4437 config set prod
+pico --profile prod ls
+```
+
+The other globals are `--protocol` to pick `pico` or `ds` on the wire, `--http2` to multiplex many concurrent appends over one connection, `--token` for the bearer credential, and `--ca-certificate` for a private CA.
+
+The TypeScript SDK is a single npm package and runs on Node 20 or newer:
+
+```bash
+npm install @picomq/client
+```
+
+```typescript
+import { connect } from '@picomq/client'
+
+const pico = connect('pico', 'http://127.0.0.1:4437')
+const stream = pico.stream('/orders/1042')
+
+await stream.create({ contentType: 'application/json' })
+await stream.append([JSON.stringify({ item: 'widget' })])
+
+for await (const record of stream.records()) {
+  console.log(record.position, new TextDecoder().decode(record.body))
+}
+```
+
+## How a write actually happens
+
+An append is acknowledged when the record is in the write-ahead log. The WAL lives in the object store too, as a sequence of small objects written under the node's own key prefix. A batch is framed with a header carrying its offset, its length and a CRC32 over the body, and the records follow.
+
+Durability is enforced by a reservation object. Starting the WAL writes a reservation naming the node and the epoch it writes at. After each completed bulk, and before acknowledging it, the writer reads that reservation back. If it names anyone else, or cannot be read, the writer is fenced and every later append fails. A takeover rewrites the reservation for the dead node before reading anything, so a dead writer can never acknowledge again.
+
+The tunables decide how that latency feels:
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `batchInterval` | 250 ms | How long records accumulate before a bulk is written |
+| `maxBytesInBatch` | 8 MiB | Size that closes a bulk early |
+| `maxUnflushedBytes` | 1 GiB | Bytes acknowledged but not yet uploaded to data objects before appends wait |
+| `maxInflightUploadCount` | 50 | Bulks in flight at once |
+
+Append latency is tens of milliseconds on ordinary S3 and single digits on S3 Express. That is the price of acknowledging only after the WAL write lands, and it is the first number to measure against your own throughput needs.
+
+The failure table from the documentation is short, and worth reading literally:
+
+| Event | Outcome |
+|---|---|
+| Node crash or restart | Nothing lost |
+| Node host lost | Nothing lost, the WAL is in the bucket |
+| Zone lost | Depends on the bucket's storage class |
+
+Recovery lists the WAL objects past the last committed offset, checks the CRC of every record, uploads the records to data objects, and closes the streams they belong to. Acknowledged records come back. Records that were in flight but never acknowledged may be absent.
+
+## What to watch for
+
+There is no hosted option. Both picomq.com and the sibling project nestor.picomq.com publish product pages with no pricing, no sign-up and no cloud offering, so you are running the bucket, the Postgres instance and the nodes yourself. Postgres matters more than it first appears: cluster metadata is an ordered command log in a table there, and nodes tail it. Reads come from in-memory views, so a slow database delays new commands rather than existing traffic, but it sits on the critical path for anything that changes cluster state.
+
+Auth is off by default, and the flag names are friendly about it. Bind to a non-loopback address and you have to pass `--auth required` or `--insecure-allow-remote` explicitly. The token can be handed over on the command line, but the documented path is `pico auth login`, which stores the credential in the OS keyring or in a private `credentials.toml` when no keyring is available. `PICO_NO_KEYRING=1` forces the file, which is the right setting for CI.
+
+This is a young project. The main repository was created on August 11, 2026, and the storage engine it depends on, s3stream, was created a month later on September 20 and carries only a couple of stars of its own. Apache 2.0 covers both, and neither the site nor the repository publishes a compatibility promise or a release schedule.
+
+The documentation is thorough to a fault. There are pages for ownership and routing, failover, leases, garbage collection, consumer groups, transfers, tuning and TLS, plus Go, Rust and TypeScript clients. What it does not publish is a throughput comparison against Kafka or Redpanda, so the performance figures in this post are the tunables and the latency numbers, not a benchmark.
+
+## Source and Accuracy Notes
+
+- Project page: https://picomq.com — verified via direct visit on November 4, 2026
+- Documentation: https://picomq.com/docs
+- Source repository: PicoMQ/picomq (Rust, Apache-2.0) and the engine in PicoMQ/s3stream
+- License: Apache 2.0, confirmed by the GitHub API license field on both repositories and by the site footer
+- HN launch thread: https://news.ycombinator.com/item?id=49421806 — 159 points and 31 comments on August 24, 2026
