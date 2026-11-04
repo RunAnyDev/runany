@@ -1,0 +1,246 @@
+---
+title: "Video.js v10: the web video player, rebuilt smaller"
+description: "Video.js v10 is a ground-up rewrite of the web video player, splitting state, UI and media into composable parts and cutting the default bundle by 60%."
+pubDate: "2026-11-04T15:10:00.000Z"
+author: "Friday"
+tags: ["video", "html5", "react", "streaming", "open-source", "javascript"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/videojs-v10.webp"
+  alt: "Abstract composition of separate video player panels docking together around a central playback surface"
+canonical: "https://runany.dev/blog/videojs-v10/"
+---
+
+> **TL;DR:** Video.js v10 is a full rewrite of the web video player that broke the old monolith into separate state, UI and media layers. You compose only the pieces you need, so a basic React player ships about 18 kB gzipped instead of the 75 kB v8 core shipped. It went generally available on October 1, 2026, and the current release is 10.3.0.
+
+## What it is
+
+Video.js is the HTML5 video player that most of the web quietly runs on. Steve Heffernan started it in 2010 to move video off Flash, and sixteen years later the project shipped version 10, a ground-up rebuild rather than a version bump.
+
+The rewrite was not a solo effort. Heffernan brought together the people behind Video.js, Plyr, Vidstack, Media Chrome and Mux Player, five projects that the announcement describes as having a combined 75,000 GitHub stars and tens of billions of video plays monthly. The point of merging them was to stop each of them shipping its own version of the same player plumbing, and to rebuild on assumptions that stopped being true somewhere around 2015.
+
+What changed structurally is the split. In v8 the player was one large object with a plugin registry, a component tree, a global options object and a lookup by element id. In v10 those responsibilities are separate and optional. State, UI and media each become their own layer, they communicate through documented API contracts, and the player is something you compose rather than something you instantiate.
+
+That split is what makes the bundle numbers possible. Under v8, asking for a player without audio still shipped the audio code, and hiding the controls still shipped every control. Under v10, code you do not import is code that does not exist in your build output.
+
+The project sits at 40,070 GitHub stars and 7,485 forks, with 860 open issues, on Apache 2.0. It is a foundation member under the Video.js Technical Steering Committee, a role currently held by Mux, which took it over from Brightcove in 2025.
+
+## Why the rewrite happened
+
+Most video players on the web ship around 1 MB minified and several hundred kB gzipped. The reason is not sloppiness so much as architecture. Players are genuinely complex applications, but the old generation was built before tree shaking, modern bundlers and code splitting became standard practice, so it shipped every feature to every adopter. You could strip adaptive bitrate support out of v8 by importing from a deeper path, but almost nobody did, because the default entry point bundled it anyway.
+
+The second problem was customization. The v8 default skin shipped billions of times a month and got very little design attention. The timeline handle in particular was a pseudo-element on a nested child, so overriding it meant writing CSS against the player's generated output with careful specificity and a font-size used as a sizing hack. Video.js v10 makes it a real element with a class you own.
+
+The third problem was that the API surface had become a liability for new work. The v10 documentation and codebase were designed with AI coding agents in mind, so an agent reading the docs gets current v10 patterns rather than memorized v8 idioms. There is an official skill for agents, installable with one command.
+
+## Getting it running
+
+The v10 packages are scoped, so the package name tells you which one you want. React installs the React package, plain HTML and Web Components install the HTML package.
+
+```bash
+npm install @videojs/react@10.3.0
+```
+
+```bash
+npm install @videojs/html@10.3.0
+```
+
+In React, you build a player from a feature set and then render the components inside it.
+
+```tsx
+import '@videojs/react/video/skin.css';
+import { createPlayer } from '@videojs/react';
+import { videoFeatures, VideoSkin, Video } from '@videojs/react/video';
+
+const { Player } = createPlayer({
+  features: videoFeatures,
+});
+
+function App() {
+  return (
+    <Player>
+      <VideoSkin>
+        <Video src="video.mp4" />
+      </VideoSkin>
+    </Player>
+  );
+}
+```
+
+The features argument is the whole point of the design. It takes an array of feature slices that determine which capabilities the player has at all, so a player that does not need audio does not bundle volume and mute code.
+
+Ask for a smaller slice and the player gets smaller with it. The docs show a React player with only playback, a video element and a play button, which comes in under 5 kB gzipped.
+
+```tsx
+import { Container, createPlayer, features } from '@videojs/react';
+import { Video } from '@videojs/react/video';
+
+const { Player, usePlayer } = createPlayer({
+  features: [features.playback],
+});
+```
+
+For plain HTML, the equivalent is two imports and a custom element tree. The player element owns and shares state, the skin carries the UI, and you nest the media element inside it.
+
+```javascript
+import '@videojs/html/video/player';
+import '@videojs/html/video/skin';
+```
+
+```html
+<video-player>
+  <video-skin>
+    <video src="video.mp4"></video>
+  </video-skin>
+</video-player>
+```
+
+There is also a CDN path for projects with no bundler, and the version has to be pinned exactly. The project warns that a range can resolve each file to a different release, which breaks the shared chunks.
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@videojs/cdn@10.3.0/video.js"></script>
+```
+
+The CLI can print the right steps for your framework rather than making you reconstruct them, and it also installs the agent skill.
+
+```bash
+npx @videojs/cli agents init --framework react
+npx @videojs/cli agents skills
+```
+
+## How the composition works
+
+Three ideas do most of the work: features, skins and presets.
+
+Features are the capability slices. Each one, like playback or volume or captions, is an optional unit of state and behavior. You pass the ones you need to `createPlayer` and the player is built from exactly those.
+
+Skins are the UI layer, and they are meant to be taken and owned rather than configured around. The default skins in v10 were designed by Sam Potts, who also created Plyr, and they come in a frosted default flavor and a minimal one. When you want to go further, the Shadcn CLI pulls the skin source into your project so the layout, controls and styles become editable files.
+
+```bash
+npx shadcn@latest add @videojs/video --overwrite
+```
+
+That matters because it moves styling from fighting generated markup to editing components. The v8 handle hack becomes a class you can style normally.
+
+```css
+.slider-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  background: white;
+  border-radius: 50%;
+}
+```
+
+Presets package up the combinations that keep coming up in real projects. A TV streaming app wants different things than a background video, which wants different things than a podcast player, and those combinations are consistent enough across the web that the team pre-built them. The docs list video, audio, live video, live audio and background video presets.
+
+The background video case shows why this matters. A background video needs layout but not controls and not audio, so instead of handing you a full player and asking you to remove things, the preset gives you a player without them.
+
+```html
+<background-video-player>
+  <background-video-skin>
+    <background-video></background-video>
+  </background-video-skin>
+</background-video-player>
+```
+
+The UI components themselves are built on unstyled primitives, in the style of Radix and Base UI. Each component renders a single HTML element, so you have direct access to what is happening. That is why the slider is verbose compared to the old approach, and the announcement is candid that Heffernan was not a fan at first glance before building a skin and changing his mind.
+
+## What the bundle actually costs
+
+The beta announcement published the measured sizes. These are minified and gzipped figures for the default builds, with adaptive bitrate support excluded.
+
+| Player | Minified (kB) | Gzip (kB) |
+|---|---|---|
+| Video.js v8 (core) | 260.5 | 75.2 |
+| Vidstack | 237.4 | 74.1 |
+| Media Chrome | 175.5 | 41.3 |
+| Plyr | 109.8 | 32.6 |
+| Video.js v10 video player (HTML) | 97.4 | 25.1 |
+| Video.js v10 video player (React) | 62.0 | 18.0 |
+| Video.js v10 audio player (React) | 49.2 | 15.2 |
+| Video.js v10 background video (React) | 10.7 | 3.5 |
+
+The headline claim of an 88% smaller default bundle comes from comparing the v10 default against the v8 default, which bundled adaptive streaming that most installs never used. Compare like with like and the reduction is 66%. The generally available release quotes a 60% reduction against the v8 default bundle including adaptive streaming.
+
+The project homepage makes the same point in user-facing terms, showing a slow 4G load of 3.25 seconds and 164 kB for v8 against 1.01 seconds and 51 kB for v10.
+
+The headline number is less interesting than the smallest one. A background video player at 3.5 kB gzipped is a category of use case that simply did not exist before, because the old architecture made it impossible to ship a player that was genuinely small.
+
+## SPF and the streaming engine
+
+Most of a real player's weight is not the UI. It is the streaming engine that handles manifest parsing, segment loading, buffer management, bitrate adaptation, codec detection, media source extensions, DRM and server-side ads.
+
+Video.js v8 handled this with VHS, a monolith. v10 introduces SPF, the Streaming Processor Framework, built around functional components that get composed into purpose-built engines. A short-form video app with simple adaptive streaming needs no DRM code and no ads code, so its engine contains neither.
+
+Adding HLS to each player shows the gap in the general case, because this is where every engine carries its full feature set.
+
+| Player and engine | Minified (kB) | Gzip (kB) |
+|---|---|---|
+| Vidstack + HLS.js | 764.3 | 238.1 |
+| Media Chrome + HLS.js | 701.2 | 202.9 |
+| Video.js v8 + VHS | 697.0 | 202.7 |
+| Plyr + HLS.js | 614.0 | 188.5 |
+| Video.js v10 + HLS.js | 526.5 | 164.1 |
+| Video.js v10 + SPF (HTML) | 144.6 | 38.7 |
+| Video.js v10 + SPF (React) | 107.3 | 31.6 |
+| Video.js v10 + SPF background video (React) | 49.2 | 15.6 |
+
+Looking only at engines, the comparison is starker still.
+
+| Engine | Minified (kB) | Gzip (kB) | Notes |
+|---|---|---|---|
+| dash.js | 962.1 | 294.2 | DASH only |
+| Shaka | 753.0 | 239.1 | HLS and DASH |
+| hls.js | 503.4 | 155.9 | HLS only |
+| VHS (v8) | 434.4 | 127.6 | Requires video.js, HLS and DASH |
+| HLS.js-light | 328.5 | 103.4 | No DRM, subs, alt-audio, CMCD or interstitials |
+| SPF-composed engine | 38.5 | 12.1 | Simple ABR only |
+
+A simple HLS use case on v10 with SPF runs at 19% the file size of v8 with adaptive streaming included. Every engine in the second table is marked as compatible with v10, and the framing is explicit that SPF is not trying to replace the full-featured engines for advanced streaming work. v10 works with all of them today.
+
+## Migrating from Video.js 8
+
+This is a rebuild, not a drop-in update, and the project goes out of its way to make the old code fail loudly rather than silently misbehave.
+
+The `video.js` package on npm now ships without a player in it. It points installs at `@videojs/html` and `@videojs/react`, and it throws coded errors when it detects v8 API patterns. Five codes cover the common cases, each with a documentation page generated from the code name.
+
+| v8 pattern | Error code | v10 replacement |
+|---|---|---|
+| `videojs('my-video', {...})` | `VJS8_LEGACY_INIT` | Compose a player component with the media and skin elements |
+| `videojs.registerPlugin()` | `VJS8_LEGACY_PLUGIN` | Compose behavior as components, or use an extension package |
+| `videojs.registerComponent()` | `VJS8_LEGACY_COMPONENT` | Define a custom element or a React component |
+| `videojs.getPlayer()` | `VJS8_LEGACY_GET_PLAYER` | Hold a reference to the element, or use `usePlayer()` in React |
+| `videojs.options` | `VJS8_LEGACY_OPTIONS` | Configure on the components you render |
+
+One trap worth flagging: the stylesheet at `video.js/dist/video-js.css` is now an empty file, so an existing import of it should be removed rather than kept as a leftover.
+
+Staying on v8 is still a legitimate choice. Brightcove maintains v8 for security fixes until October 1, 2028, and the v8 docs live at legacy.videojs.org. If you are not migrating, pin the major version.
+
+```bash
+npm install video.js@8
+```
+
+The migration guides are published separately for each framework, covering the move from v8, Mux Player, Media Chrome and Vidstack.
+
+## What to watch for
+
+SPF is the source of the largest size wins, and it does not yet support ads or true low-latency live. For those cases the HlsJsVideo component remains the default for HLS, so the player and the streaming engine turn out to be separate decisions you can make independently.
+
+Browser support reaches back to Safari 16, but only through the new Compat skin, so the default skins assume a more modern baseline than v8 did.
+
+The project is young in this form even though the name is old. The v10 rewrite has its own repository with a little over a thousand stars, the main repository carries 860 open issues, and the maintainers are explicit that a stable release is a signal to build with, not a signal that there is nothing left to improve.
+
+Mux holds the foundation role, which means the governance and the sponsorship are both pointed at a company that sells video infrastructure. Nothing in the Apache 2.0 license comes close to being at risk, but it is worth knowing where the project's commercial incentives sit.
+
+## Source and Accuracy Notes
+
+- Project page: https://videojs.org — verified via direct visit on November 4, 2026
+- v10 generally available announcement: https://videojs.org/blog/videojs-10 — published October 1, 2026
+- v10 beta announcement with the bundle tables: https://videojs.org/blog/videojs-v10-beta-hello-world-again — published March 10, 2026
+- Source repository: videojs/video.js, with the v10 rewrite at videojs/v10
+- License: Apache 2.0, confirmed by the LICENSE file on both videojs/video.js and videojs/v10
+- Package versions checked against the npm registry on November 4, 2026: video.js 10.3.0, @videojs/html 10.3.0, @videojs/react 10.3.0, @videojs/core 10.3.0, @videojs/http-streaming 3.17.6
+- Legacy error codes and the v8 support timeline verified from the error registry shipped inside the video.js 10.3.0 tarball
+- HN launch thread: https://news.ycombinator.com/item?id=47506713 — 648 points and 32 comments on March 24, 2026
