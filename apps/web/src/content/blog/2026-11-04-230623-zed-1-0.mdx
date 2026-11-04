@@ -1,0 +1,113 @@
+---
+title: "Zed 1.0: a Rust-native code editor built around AI agents"
+description: "Zed 1.0 turns a five-year Rust rewrite into a shipping editor with GPU-rendered UI, ACP agent support, and the Delta multiplayer beta."
+pubDate: "2026-11-04T16:00:00.000Z"
+author: "Friday"
+tags: ["zed", "rust", "ai-agents", "code-editor", "open-source", "acp"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/zed-1-0.webp"
+  alt: "Zed 1.0 launch artwork showing the Zed app icon beside the text v1.0 on a dark charcoal background"
+canonical: "https://runany.dev/blog/zed-1-0/"
+---
+
+> **TL;DR:** Zed 1.0 is the first stable release of the code editor Zed Industries rebuilt from scratch in Rust after walking away from Atom and Electron. It renders its UI on the GPU, runs multiple AI agents side by side through the Agent Client Protocol, and now has a multiplayer beta called Delta where review happens inside the agent thread rather than a pull request. The editor itself is free forever; the hosted models are not.
+
+## What 1.0 actually is
+
+Zed's history explains its architecture. Zed Industries built Atom, which was a fork of Chromium and spawned the Electron framework in the process, and Electron eventually became the foundation of VS Code. The team walked away from that architecture and started over, writing their own UI framework, GPUI, in Rust, and organizing the whole application around feeding data to shaders running on the GPU. The stated reason was that a web-page architecture puts a ceiling on how fast an editor can feel, and no amount of work could make Atom better than the platform it was built on.
+
+Five years of work produced a real surface area: more than a million lines of code, Git integration, SSH remoting, a debugger, rainbow brackets, and support for macOS, Windows and Linux. The v1.0.0 tag shipped on April 29, 2026 with bookmarks, a `git: view commit` palette action, GIF animation support in the Markdown preview, and DeepSeek-V4-Pro and DeepSeek-V4-Flash model support.
+
+The project has not slowed down since. The stable channel was on 1.26.2 by late October 2026, with a 1.27.0 preview following, and the repository sits at 92,674 stars and 11,399 forks.
+
+## Installing it
+
+Each platform has a first-party path.
+
+```bash
+# macOS, stable channel
+brew install --cask zed
+
+# macOS, preview channel
+brew install --cask zed@preview
+
+# Windows
+winget install -e --id ZedIndustries.Zed
+
+# Linux, x86_64 and AArch64
+curl -f https://zed.dev/install.sh | sh
+```
+
+The Linux script covers Ubuntu, Arch, Debian, RedHat, CentOS, Fedora and similar distributions, and it accepts a `ZED_CHANNEL=preview` variable for the preview build. If it installed Zed for you, `zed --uninstall` removes it and asks whether to keep your preferences.
+
+Agent behavior lives in `settings.json`, and Zed-hosted models and external agents are configured separately.
+
+```json
+{
+  "agent": {
+    "auto_compact": {
+      "enabled": true,
+      "threshold": "90%"
+    },
+    "commit_message_instructions": "Use Conventional Commits format with a type, an optional scope in parentheses, and a short description."
+  }
+}
+```
+
+Automatic compaction is on by default and fires when a thread reaches 90% of the model's context window, summarizing earlier messages so the conversation stays usable instead of starting a new thread.
+
+## The agent story
+
+Zed treats agents as part of the editor's foundation rather than an add-on. You can run multiple agents in parallel, and edit predictions suggest the next change at keystroke granularity.
+
+The more interesting piece is the Agent Client Protocol, an open interface that lets Zed host an agent thread while the agent keeps its own runtime, authentication, model selection and tools. Zed's docs list these agents as available through the ACP Registry:
+
+- Claude Agent
+- Codex
+- OpenCode
+- Copilot
+- Cursor
+- Pi Coding Agent
+
+The list is curated rather than exhaustive, and Zed also documents company-specific setup paths for Gemini and Poolside. Two details matter if you are billing this to someone. Zed does not charge for external agents, and the billing, legal terms, retention and data handling all sit between you and the agent provider. And an Anthropic API key configured for Zed's own agent does not automatically configure Claude Agent, so you wire up each provider separately.
+
+You can browse the registry from inside the editor with the `zed: acp registry` command, and the agent panel opens with `Cmd+Shift+A` on macOS or `Ctrl+Shift+A` on Linux and Windows.
+
+## What it costs
+
+| Plan | Price | What it includes |
+| --- | --- | --- |
+| Personal | $0 forever | The editor, unlimited use with your own API keys or external agents |
+| Pro | $10 per month | Zed-hosted models, unlimited edit predictions, $5 of included tokens, usage-based billing beyond that |
+| Business | $30 per seat per month | Org-wide AI model policies, data governance controls, unified spend visibility, unlimited edit predictions, role-based access control |
+
+Business is self-serve with no minimum seat count, but it has no free trial, and Business seats do not bundle a fixed LLM credit allotment. Order-form contracts start at 25 seats.
+
+## Where it goes next
+
+The 1.0 announcement pointed at Delta, and Delta went into public beta on September 16, 2026. Delta is a multiplayer environment for coding with agents, built around the idea that pull requests break down when agents write most of the code. Instead of opening a pull request, you invite a teammate into the agent conversation. They see the same worktrees, can ask the agent why you chose one design over another, and can pick up the thread where you left off even if you logged off. Each review gets an isolated copy of the parent worktree, so experimenting with an agent cannot disturb the original work.
+
+Zed turned off pull requests on Delta's own repository before launching it, and now builds Delta inside Delta. DeltaDB, the synchronization engine underneath, uses CRDTs and tracks every change at character-level granularity so several people and several agents can share one consistent view of a codebase. Delta runs on macOS, Linux and Windows, in the browser without a download, and from a mobile browser.
+
+## What to watch for
+
+The launch thread on Hacker News has 2,153 points and 690 comments, and the complaints in it are worth reading. One commenter reported that 1.0 still shipped with wrong colors under Wayland and no bitmap font support, with another noting the color problem on macOS too. Another reported memory usage ballooning until a 128 GB machine needed daily session kills, and had moved back to VS Code. People working through ACP pointed out that Zed's wrapper blocks Claude Code commands such as `/mcp` and `/plugins`, and the extension ecosystem is thin enough that one commenter described the only CMake extension as basic.
+
+The backlog is the other honest caveat: 3,037 open issues on the repository, many of them open for years. The team's own framing is that 1.0 does not mean done. If you bounced off Zed a year or two ago because something was missing, the announcement is an invitation to try again, but the extension story and the long tail of open issues are still work in progress.
+
+On licensing, the source is primarily GPL-3.0-or-later with Apache-2.0 components where marked, developed by Zed Industries, Inc., a for-profit company.
+
+## Source and Accuracy Notes
+
+- 1.0 announcement: https://zed.dev/blog/zed-1-0, published April 29, 2026, verified via direct visit
+- Docs: https://zed.dev/docs, covering installation, external agents and agent settings
+- Pricing: https://zed.dev/pricing, verified via direct visit
+- Delta public beta: https://zed.dev/blog/delta-public-beta, published September 16, 2026, verified via direct visit
+- Source repository: zed-industries/zed, at 92,674 stars, 11,399 forks and 3,037 open issues, primary language Rust, as of November 4, 2026
+- License: GPL-3.0-or-later with Apache-2.0 components where marked, per the project README
+- Release versions verified through the GitHub releases API: v1.0.0 on April 29, 2026, then v1.26.2 and v1.27.0-pre on October 28, 2026
+- HN launch thread: https://news.ycombinator.com/item?id=47949027, at 2,153 points and 690 comments
+- The 1.0 announcement predates Delta's public beta and the current release, so version numbers and the Delta section reflect the state as of November 4, 2026
