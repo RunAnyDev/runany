@@ -1,0 +1,135 @@
+---
+title: "Apfel: the AI model already on your Mac, behind a terminal"
+description: "Apfel wraps the AI model built into macOS as a CLI, an OpenAI-compatible server, and a chat app, with no model download and no API key."
+pubDate: "2026-11-04T05:11:01.000Z"
+author: "Friday"
+draft: false
+tags: ["ai-setup", "cli", "apple-silicon", "local-llm", "swift", "mcp"]
+category: "ai-setup"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/apfel.webp"
+  alt: "Apfel wordmark on a green gradient with the tagline The free AI already on your Mac"
+canonical: "https://runany.dev/blog/apfel/"
+---
+
+> **TL;DR:** macOS Tahoe ships a 3B parameter language model on every Apple Silicon Mac, but Apple gives you no way to reach it from a shell or an HTTP client. Apfel wraps Apple's FoundationModels framework in a Swift CLI, an OpenAI-compatible server on localhost, and an interactive chat, so one `brew install` gives you a private, zero-cost, no-API-key model to script against.
+
+## What Apfel is
+
+Starting with macOS 26 (Tahoe), every Apple Silicon Mac carries an on-device language model as part of Apple Intelligence. Apple exposes it through the FoundationModels framework, a Swift API that hands apps a `SystemLanguageModel`. Inference runs on the Neural Engine and the GPU. No network call, no cloud, no API key.
+
+The catch is that you cannot use it the way you use anything else. Out of the box the model powers Siri, Writing Tools, and other system features. There is no command, no HTTP endpoint, no way to pipe text through it. The FoundationModels framework exists, but reaching it means writing a Swift application.
+
+Apfel is that application, minus the app part. It is a Swift 6.3 binary that wraps `LanguageModelSession` and exposes it three ways: as a UNIX command with stdin and stdout, as an OpenAI-compatible HTTP server built on Hummingbird, and as an interactive chat with context management.
+
+It also handles what the raw API leaves out. Proper exit codes, JSON output, file attachments, five context trimming strategies for a small window, token counting through the SDK, and conversion of OpenAI tool schemas into Apple's native `Transcript.ToolDefinition` format.
+
+| Property | Value |
+|---|---|
+| Model | `apple-foundationmodel`, roughly 3B parameters, not configurable |
+| Context window | 4,096 tokens on macOS 26 and on M1/M2 Macs; 8,192 on macOS 27 with an M3 or newer chip and 12 GB or more |
+| Quantization | About 3.5 bits per weight, mixed 2-bit and 4-bit precision |
+| Hardware | Neural Engine and GPU on Apple Silicon |
+| Languages | English, German, Spanish, French, Italian, Japanese, Korean, Portuguese, Chinese |
+| License | MIT |
+
+`apfel --model-info` prints the live context size for your Mac, because the number is read from the system at runtime rather than hardcoded.
+
+## Why it matters
+
+The usual way to get a local model is to install Ollama or LM Studio, pull a multi-gigabyte weights file, and decide on a quantization level. Apfel skips that entire step, because the model is already on the disk of the machine you are sitting at. There is nothing to download, nothing to configure, and no per-token bill.
+
+That makes it interesting for a specific kind of job rather than a general one. Shell glue, a quick rewrite, a summary of a file you just fetched, a classifier inside a pipeline. These are short, frequent, and private enough that sending them to a hosted API feels wrong. On-device also means the script keeps working on a train with no signal.
+
+The second reason is that an OpenAI-compatible endpoint makes apfel easy to adopt without touching application code. Any client that already speaks the OpenAI API can point its base URL at localhost and stop paying per token.
+
+## Getting it running
+
+Requirements are narrow, so check them first: macOS 26 Tahoe or newer, Apple Silicon (M1 or later), and Apple Intelligence enabled in System Settings. Intel Macs and every platform other than macOS are out of scope.
+
+```bash
+brew install apfel
+
+apfel "What is the capital of Austria?"
+# The capital of Austria is Vienna.
+```
+
+The CLI is the piece that makes apfel feel like a UNIX tool rather than a wrapper. It reads stdin, writes stdout, and returns real exit codes, so it drops into an existing pipeline without special handling.
+
+```bash
+# JSON for scripts
+apfel -o json "Translate to German: Apple" | jq .content
+
+# output guaranteed to match your JSON Schema
+apfel --schema person.json "Alice is 30." | jq .name
+
+# just the command, no prose, no markdown fences
+apfel --code "flush the dns cache on macos"
+# sudo /usr/bin/dscacheutil -flushcache
+```
+
+`--code` exits with code 7 when the model returns nothing, so a shell script can branch on that instead of parsing empty output.
+
+To point an existing OpenAI client at it, start the server:
+
+```bash
+apfel --serve
+# endpoint: http://127.0.0.1:11434
+
+curl http://127.0.0.1:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"apple-foundationmodel","messages":[{"role":"user","content":"hello"}]}'
+```
+
+## Three ways to reach the model
+
+| Mode | Command | Reach for it when |
+|---|---|---|
+| Command line | `apfel "prompt"` | you want stdout, pipes, and exit codes |
+| OpenAI server | `apfel --serve` | an SDK, an agent, or a script expects a base URL |
+| Interactive chat | `apfel --chat -s "You are a coding assistant"` | you want a multi-turn session with context trimming |
+
+Chat mode is the one that surprises people. It keeps context across turns and trims it when the window fills, using five different strategies, which is what makes a 4,096 token window usable for a conversation rather than a single prompt.
+
+## Wiring in tools over MCP
+
+Apfel speaks the Model Context Protocol, so the on-device model can call tools. Attach a server with `--mcp` and apfel discovers its tools at startup, runs the calls, and feeds the results back.
+
+```bash
+apfel --mcp ./mcp/calculator/server.py "What is 15 times 27?"
+# tool: multiply({"a": 15, "b": 27}) = 405
+# 15 times 27 is 405.
+
+# local and remote servers can be mixed
+apfel --mcp /path/to/local.py --mcp https://mcp.example.com/v1 "Use both tools"
+```
+
+A calculator ships in the repository as a working example. Remote servers speak Streamable HTTP, and you pass a bearer token through `APFEL_MCP_TOKEN` rather than a command-line flag, since flags show up in `ps aux`. The project refuses bearer tokens over plaintext HTTP.
+
+## What to watch for
+
+The model is small, and the limits are real. A few seconds per response, a context window measured in thousands rather than millions of tokens, and no embeddings available on device at all.
+
+Apple's safety system also blocks some benign prompts, which reads as a bug the first time it happens. `--permissive` reduces the false positives.
+
+Two behaviors are worth knowing before you trust it with anything. The model does not know today's date and has no clock or network access, so it will either refuse or invent one. It also confabulates a different answer each time you ask about its own training cutoff. Injecting the date through the system prompt helps with date-dependent work:
+
+```bash
+apfel -s "Today is $(date '+%B %d, %Y')." "Write a one-line release note dated today."
+```
+
+Image handling is split across macOS versions. On macOS 27 images reach the model itself, on top of the extracted text. On macOS 26 images are text-only, served by on-device OCR and classification, and the 3B model's scene descriptions are coarse enough that OCR remains the reliable way to read print.
+
+The server is worth understanding before you point anything at it. By default it binds to 127.0.0.1 on port 11434 with no token, and it checks the `Origin` header so a foreign website cannot drive your model from a browser. Non-browser clients such as curl and the SDKs send no `Origin` header and are allowed through, which also means any local process on your machine can use it. `--token` or `--token-auto` adds bearer authentication, and `--cors` opens up browser clients without weakening the origin check.
+
+Surrounding projects sit next to the core tool: `apfel-clip`, `apfel-gui`, `apfel-run` for a TOML config layer, and `apfel-server-kit`.
+
+## Source and Accuracy Notes
+
+- Project page: https://apfel.franzai.com (verified by direct visit)
+- Source repository: Arthur-Ficial/apfel
+- License: MIT (verified from the repository license field and the Homebrew formula)
+- Homebrew formula: apfel, version 1.16.0
+- Latest release: v1.16.0, published 2026-10-05
+- Repository stats at time of writing: 6,550 stars, 251 forks, 38 open issues
+- HN launch thread: https://news.ycombinator.com/item?id=47624645 (743 points, 3 April 2026)
