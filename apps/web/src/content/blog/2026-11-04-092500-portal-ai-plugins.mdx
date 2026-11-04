@@ -1,0 +1,96 @@
+---
+title: "Portal AI plugins: Spotify's agent tooling"
+description: "Spotify publishes Portal AI plugins for coding agents: Portal, a setup and search skill set for Backstage, and Shunt, a hook-driven token saver for large file reads."
+pubDate: "2026-11-04T02:25:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai-agents", "claude-code", "backstage", "token-optimization"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/portal-ai-plugins.webp"
+  alt: "GitHub social preview card for spotify/portal-ai-plugins"
+canonical: "https://runany.dev/blog/portal-ai-plugins/"
+---
+
+> **TL;DR:** spotify/portal-ai-plugins is the official plugin marketplace Spotify publishes for AI coding tools. It ships two plugins: Portal, a set of focused skills for setting up, diagnosing and searching Spotify's internal developer portal, and Shunt, which hooks into large file reads and pushes that work into cheaper bulk scripts instead. The manifest targets Claude Code, Codex and Cursor, and the license is Apache-2.0.
+
+## What it is
+
+The repository has almost no prose on it. There is no GitHub description and no topics, which is unusual for a project with 3,059 stars and 239 forks, but the files tell the story clearly.
+
+The root contains three agent-specific manifest directories, `.claude-plugin/`, `.codex-plugin/` and `.cursor-plugin/`, plus a `skills/` directory, a `plugins/` directory, an `assets/` folder, and the usual `AGENTS.md`, `CLAUDE.md` and `package.json`.
+
+The plugin manifest for Portal describes the intent in one line: set up, diagnose, search and operate Spotify Portal through focused Portal CLI workflows. Spotify Portal is the internal developer portal they run on Backstage, documented at `backstage.spotify.com/docs/portal`.
+
+## Two plugins
+
+The marketplace manifest at `.claude-plugin/marketplace.json` is described as the official Spotify Portal plugin marketplace for AI coding tools, and it lists two entries:
+
+| Plugin | Version | Category | What it does |
+|---|---|---|---|
+| Portal | 0.1.0 | developer-tools | Set up, diagnose, search and operate Spotify Portal through Portal CLI workflows |
+| Shunt | 0.2.0 | developer-tools | Shunts I/O-heavy work to AiKA modes to save tokens |
+
+Both are marked Apache-2.0 and both point at the same repository. The Portal manifest also carries the keywords `developer-portal`, `software-catalog`, `service-ownership` and `backstage`, which lines up with what a developer portal is for: finding out who owns a service, and what software catalog entries exist for it.
+
+## The Portal skill set
+
+Skills live in `skills/` at the repository root, and the manifest points there with `"skills": "./skills/"`. Eleven are present:
+
+| Skill | Area |
+|---|---|
+| `setup`, `doctor` | Install and diagnose a Portal setup |
+| `search`, `service`, `actions` | Look up catalog entries and services |
+| `fleetshift-create-shift` | Start a unit of shift work |
+| `fleetshift-run-shift` | Run it |
+| `fleetshift-check-shift` | Check on it |
+| `fleetshift-troubleshoot-shift` | Fix it when it goes wrong |
+| `fleetshift-create-prs` | Open pull requests from the result |
+| `feedback` | Send feedback |
+
+The `fleetshift` names follow a consistent shape: create, run, check, troubleshoot, then open pull requests. Whatever a shift is internally at Spotify, the plugin exposes it as a lifecycle the agent can drive, and the PR step is the point where a shift turns into code in your repository.
+
+## Shunt and the hook model
+
+Shunt is the more interesting of the two plugins, and its structure is unusually concrete.
+
+Its description reads: "Shunts I/O-heavy work to AiKA modes to save tokens. Hooks block large file reads and redirect to bulk-reader/code-writer scripts backed by the Portal CLI." The keywords are `token-optimization`, `model-routing`, `delegation` and `aika`.
+
+The plugin directory makes the mechanism clear:
+
+```text
+plugins/shunt/
+  hooks/    check-bash-read, check-file-size, hooks.json
+  scripts/  bulk-read, code-write, lib
+  skills/   bulk-reader, code-writer
+  evals/
+```
+
+So the model is interception rather than prompting. Two hook scripts, one watching for large file reads and one checking file size, stand in front of the normal path and redirect the work to dedicated scripts that return condensed output. The `evals/` directory suggests the behaviour is measured, not just described.
+
+This is the pattern worth stealing even if you never install it: put a hook in front of the expensive operation and give the agent a cheaper tool that does the same job.
+
+## How it plugs into your agent
+
+The manifest layout is the part you copy. Each agent gets its own directory at the root with the same content in a different format:
+
+- `.claude-plugin/` holds `plugin.json` and `marketplace.json`, matching the Claude Code marketplace schema
+- `.codex-plugin/` holds `plugin.json` and `marketplace.json`
+- `.cursor-plugin/` holds `plugin.json`
+
+`package.json` then wires the same `skills/` directory into a `pi` package, with a `"pi": { "skills": ["./skills"] }` block and a `pi-package` keyword. One skill tree, four agents, no duplication.
+
+## What to watch for
+
+The repository was created on July 23, 2026 and last pushed on October 23, 2026, while the stars kept climbing into November. Versions are early: Portal sits at 0.1.0 and Shunt at 0.2.0.
+
+None of this is usable outside Spotify without the Portal CLI and the underlying developer portal, so read it as a reference implementation of the packaging format rather than something to install for its own sake. The Shunt hook pattern is the part that generalizes, and the manifest layout for multi-agent packaging is the other.
+
+## Source and Accuracy Notes
+
+- Project page: https://backstage.spotify.com/docs/portal (homepage value from the plugin manifests)
+- Source repository: github.com/spotify/portal-ai-plugins (Apache-2.0 license, verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 3059
+- The GitHub API returns a null description and an empty topics array for this repository, so every claim above comes from the manifests, the directory listing and the package metadata, read on 2026-11-04
+- Repository was created 2026-07-23, last pushed 2026-10-23
