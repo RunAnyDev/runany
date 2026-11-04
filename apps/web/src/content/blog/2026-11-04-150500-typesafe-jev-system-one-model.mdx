@@ -1,0 +1,188 @@
+---
+title: "Jev: TypeSafe's System One model for structured decisions"
+description: "TypeSafe's Jev returns typed answers with probabilities instead of text, priced at $42 per million input tokens with free output. How the API works."
+pubDate: "2026-11-04T15:05:00.000Z"
+author: "Friday"
+tags: ["ai", "typesafe", "jev", "structured-output", "decision-models"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/typesafe-jev-system-one-model.webp"
+  alt: "Abstract split rendering of a chat bubble and a typed data block on a dark slate gradient"
+canonical: "https://runany.dev/blog/typesafe-jev-system-one-model/"
+---
+
+> **TL;DR:** Jev is TypeSafe's first System One model, and it does not write text. You send it state plus typed questions, and it returns structured values with probability distributions and a confidence score. The API costs $42 per million input tokens with output billed at zero, and answers arrive in 70 to 500 milliseconds instead of the 3 to 329 seconds a frontier LLM needs for comparable judgment.
+
+## What Jev actually is
+
+TypeSafe AI was founded by Diogo Almeida, who says he worked at OpenAI on the methods behind ChatGPT. After two years in stealth the company released Jev in September 2026, and the model does something a chatbot cannot: it returns data instead of prose.
+
+A language model takes text in and gives text back, so your code has to parse that text, validate it against a schema, and decide what to do when the parse fails. Jev skips the string. You describe the state you want judged and ask a question with a fixed set of options, ordered levels, or a yes/no condition. What comes back is a typed value, a probability distribution across those options, and a confidence number.
+
+The name comes from Kahneman's System 1 and System 2. TypeSafe's argument is that most of what people use LLMs for inside software is fast judgment rather than reasoning: route this ticket, score this candidate, is this urgent, which of these five options fits. Those are exactly the tasks where sampling every answer in one shot beats generating a token at a time.
+
+## The four primitives
+
+| Question type | What it asks | What comes back |
+|---|---|---|
+| Choice | Pick one option from a set you defined | the option, probabilities per option, confidence |
+| Score | Rate the state against ordered levels | the score, probabilities per level, confidence |
+| Noul | Is this statement true | one number from 0 to 1 |
+| Box | Locate an object in an image | box edges as fractions of width and height |
+
+Any mix of them goes into a single request and every question is evaluated in parallel against the same state. Adding questions barely moves response time, and because each one is evaluated in isolation, adding more does not degrade the others the way a longer chat transcript does.
+
+Here is one request that asks all three text-based primitives at once:
+
+```bash
+curl https://api.typesafe.ai/v1/systemone \
+  -H "Authorization: Bearer $TYPESAFE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "Our API integration started returning 500 errors on every request about 20 minutes ago, and we cannot process any customer orders until this is fixed.",
+    "questions": {
+      "department": {
+        "type": "choice",
+        "instructions": "Which team should handle this ticket?",
+        "criteria": {
+          "technical": "API, infrastructure or bug reports",
+          "billing": "Payments, invoices or subscriptions",
+          "sales": "Plans, contracts or upgrades"
+        }
+      },
+      "frustration": {
+        "type": "score",
+        "instructions": "How frustrated does the customer sound?",
+        "criteria": [
+          "Calm, just stating facts",
+          "Frustrated but civil",
+          "Very angry, strong language"
+        ]
+      },
+      "is_urgent": {
+        "type": "noul",
+        "instructions": "Is this message about a production outage?"
+      }
+    }
+  }'
+```
+
+The response mirrors the question keys, so you can match each result back to what you asked without any extra bookkeeping:
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "confidence": 1.0,
+      "probabilities": { "technical": 1.0, "billing": 0.0, "sales": 0.0 }
+    },
+    "frustration": {
+      "type": "score",
+      "score": 0.67,
+      "confidence": 0.5,
+      "probabilities": { "0": 0.33, "1": 0.67, "2": 0.0 }
+    },
+    "is_urgent": { "type": "noul", "noul": 0.99 }
+  },
+  "usage": { "input_tokens": 428, "output_tokens": 73 }
+}
+```
+
+Note that `output_tokens` is 73 even though the answer is a handful of structured values. That is the parallel sampler at work, and it is why output is free.
+
+## Getting a client in place
+
+The API is plain JSON over HTTP, but the SDKs handle retries and rate-limit backoff for you. Pick whichever matches your stack:
+
+- Python, 3.10 or later: `pip install typesafe-sdk`
+- JavaScript and TypeScript: `npm install @typesafe-ai/sdk`
+- Claude Code: `claude plugin marketplace add typesafe-ai/skills` then `claude plugin install typesafe@typesafe-ai`
+- Any other agent environment: `npx skills add typesafe-ai/skills --skill typesafe-ai`
+
+The Python client reads `TYPESAFE_API_KEY` from the environment and takes the same question objects:
+
+```python
+from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
+
+ticket = "Our API integration started returning 500 errors on every request about 20 minutes ago."
+
+with TypeSafeClient(model="jev-latest") as client:
+    response = client.system_one(
+        state=ticket,
+        questions={
+            "department": Choice(
+                instructions="Which team should handle this ticket?",
+                criteria={"technical": "API or bugs", "billing": "Payments"},
+            ),
+            "frustration": Score(
+                instructions="How frustrated does the customer sound?",
+                criteria=["Calm", "Frustrated but civil", "Very angry"],
+            ),
+            "is_urgent": Noul(
+                instructions="Is this message about a production outage?"
+            ),
+        },
+    )
+```
+
+The interesting field is `confidence`, and it is not the same thing as `probabilities`. Probability is the distribution across your options, so a flat distribution and a peaked one can both be useful. Confidence is a single number derived from the shape of that distribution: 1 when all the mass sits on one option, 0 when it is spread evenly. That is the value to threshold on if your code needs to decide whether to act on an answer at all.
+
+## Why the price and the speed look like that
+
+TypeSafe frames the comparison directly against frontier models on the same page as the launch:
+
+| | Frontier LLM | Jev |
+|---|---|---|
+| Output | generated text | typed value plus probabilities |
+| Sampling | one token at a time | every answer in one query |
+| End-to-end latency | 3 to 329 seconds | 70 to 500 milliseconds |
+| Input price | $0.20 to $10 per million tokens | $0.042 per million tokens |
+| Output price | roughly 5x the input price | free |
+
+The speed claim is 40 to 200 times faster for System One shaped queries. The important caveat is that Jev is not a drop-in replacement for a reasoning model. It does not write code, does not handle audio or video, and the docs are explicit that it is not fine-tuned per account, so the same weights serve every customer and you shape behavior through the request.
+
+Context is 64k per request and 32k per question by default. A `TypeSafe-Danger-Zone-Long-Context: true` header raises both limits to 262k tokens, at the same price, but the docs warn it is slower and less accurate than staying inside the default window.
+
+## Where it breaks
+
+TypeSafe publishes a page called Model jaggedness, and it is worth reading before you ship anything on this. The pattern they describe is that Jev answers the question you wrote, not the one you meant.
+
+- It reads scoping words and negations at face value, so the exact condition needs to be in the `instructions` and the boundary cases need to be in the `criteria`.
+- It is not a calculator and does not count reliably. Keep arithmetic in code and let the model handle the judgment.
+- It cannot reliably compare numeric representations. Convert in code and pass either a computed number or a named bucket.
+- The order of your Choice options can affect the answer. Reorder them and check the result holds.
+- It struggles with extra levels of indirection and with large states full of irrelevant detail. Filter first, then send only what the question needs.
+
+The last one matters most for cost. Sending a 64k document to answer one narrow question works, but the docs note that accuracy shifts as the state grows, and the parallel questions cookbook reports that batching 13 questions into one call is 12.2 times cheaper and 10 times faster than sending them separately with no change in answers.
+
+## Who is actually using it
+
+Jack & Jill, a talent marketplace brokered by AI agents, replaced Gemini 3.1 Flash Lite with Jev for 100 percent of calls in one stage of its candidate matching pipeline. They tested both models on 150 live roles with the same candidates.
+
+| Metric | Gemini 3.1 Flash Lite | Jev |
+|---|---|---|
+| Cost per 1,000 candidates scored | $0.755 | $0.092 |
+| Median time to screen each candidate | 20.3 sec | 10.3 sec |
+| Winners kept on the shortlist | 93.9% | 94.6% |
+
+The company projects $500K in annual savings. It is a customer case study published on the vendor's own site, so treat the figures as claims rather than independent benchmarks.
+
+The more telling signal is that Cloudflare shipped its own take on the idea. In October it previewed Clairic on Workers AI as `@cf/cloudflare/clairic`, calling it a new class of System One style extraction models, and credited TypeSafe's Jev as the inspiration. Cloudflare says it intends to release the weights in open source.
+
+## Source and Accuracy Notes
+
+- Launch post: https://typesafe.ai/blog/introducing-system-one-models-and-jev, published 2026-09-15, verified via direct visit on 2026-11-04
+- Documentation: https://docs.typesafe.ai/introduction, raw markdown available at the same paths with an `.md` suffix, verified on 2026-11-04
+- API reference and OpenAPI schema: https://docs.typesafe.ai/api/system-one, endpoint `POST https://api.typesafe.ai/v1/systemone`, verified on 2026-11-04
+- Model list, pricing and context limits: https://docs.typesafe.ai/models, Jev 1.14.0 released 2026-10-14, verified on 2026-11-04
+- Known limitations: https://docs.typesafe.ai/model-jaggedness, verified on 2026-11-04
+- Customer case study: https://typesafe.ai/blog/jack-jill-jev-case-study, published 2026-10-07, verified on 2026-11-04
+- Cloudflare Clairic announcement: https://blog.cloudflare.com/clairic-extraction-model/, published 2026-10-19, verified on 2026-11-04
+- HN discussion: https://news.ycombinator.com/item?id=49717558, 1989 points and 520 comments, 2026-09-15
+- Speed, price and accuracy figures above are vendor or customer reported. No API key was available for this review, so no request in this post was executed against the live service.
