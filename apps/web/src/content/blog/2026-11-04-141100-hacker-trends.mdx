@@ -1,0 +1,171 @@
+---
+title: "Hacker Trends: chart any topic across 45M HN posts"
+description: "Hacker Trends indexes 45M Hacker News posts and comments in Redis Search, charting how any topic rose and fell month by month since 2007."
+pubDate: "2026-11-04T07:11:00.000Z"
+author: "Friday"
+draft: false
+tags: ["hacker-news", "search", "nextjs", "upstash", "redis", "analytics"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hacker-trends.webp"
+  alt: "Hacker Trends wordmark above a stacked orange and blue bar chart, with the note that 45M posts and comments are indexed in Upstash Redis Search."
+canonical: "https://runany.dev/blog/hacker-trends/"
+---
+
+> **TL;DR:** Hacker Trends puts roughly 45 million Hacker News posts and comments into Upstash Redis Search and charts how often any term showed up, month by month, all the way back to 2007. Every spike links to the stories and comments underneath it, and dozens of ready-made comparison pages pair tools like Vercel against Cloudflare. The backend is one Redis index, the front end is Next.js, and the source is MIT licensed.
+
+## What Hacker Trends is
+
+Search Hacker News for "rust" and you get posts and comments sorted by relevance or points. Hacker Trends gives you a second answer to the same query: a line chart of how many times the term came up each month, with the underlying discussion one click away.
+
+The site does four things:
+
+- Full-text search across roughly 45 million stories and comments
+- Month-by-month mention counts for any term
+- Overlaid charts comparing several terms at once
+- Drill-down into the posts and comments behind a given spike
+
+Click a month on the chart and the result list filters to that month, or drag across the chart to select a range. The sort menu switches between relevance, most upvoted, most discussed and newest, and there is a filter for comments only.
+
+The comparison pages are the polished corner of the site. `/compare/vercel-vs-cloudflare` charts both terms across 18 years and pairs the chart with a written summary of the deploy platform fight, Cloudflare holding the CDN conversation for years before Vercel caught up during the Next.js wave. There are dozens more: openai versus anthropic, amd versus nvidia, scala versus swift versus kotlin, docker versus kubernetes, cursor versus claude code versus codex. Each has its own URL, so the comparisons are linkable and indexable instead of trapped in a UI state.
+
+## Why it matters
+
+Hacker News search has no time dimension. It matches keywords across titles, URLs and text, then sorts by points or relevance. Nothing in it answers "when did Postgres overtake MySQL on Hacker News" or "which month did Rust stop being a curiosity". Answering that usually means a BigQuery bill, or downloading the HN dataset and spending a weekend on aggregation.
+
+Hacker Trends did the expensive part once. The archive sits in a Redis index behind a REST API and a term comes back in milliseconds, which turns a research project into a tab you can open and turns "I remember this being discussed a lot in 2019" into a chart you can check in ten seconds.
+
+It also changes what the archive is good for. A single thread is a moment. Eighteen years of monthly mention counts is a history of what the developer community paid attention to, with the receipts underneath.
+
+## The index behind the charts
+
+Every item is a plain Redis hash, one per story or comment, keyed by a prefix plus the item id. A single search index named `hn` covers that prefix, with this schema:
+
+| Field | Type | What it holds |
+|---|---|---|
+| `title` | string | story title, or the opening line of a comment |
+| `text` | string | full body text |
+| `by` | keyword | poster username, exactly filterable |
+| `type` | keyword | story, comment, job, poll or pollopt |
+| `time` | date, fast | timestamp, range filtered and histogrammed |
+| `score` | number | points |
+| `ndesc` | number | comment count on the parent item |
+| `parent` | number | id of the parent item |
+
+```ts
+await redis.search.createIndex({
+  name: "hn",
+  dataType: "hash",
+  prefix: "hn:",
+  schema: s.object({
+    title: s.string(),
+    text: s.string(),
+    by: s.keyword(),
+    type: s.keyword(),
+    time: s.date().fast(),
+    score: s.number("F64"),
+    ndesc: s.number("F64"),
+    parent: s.number("F64"),
+  }),
+});
+```
+
+Plain hashes rather than a dedicated document store is the interesting decision here. There is no separate search engine to run and no separate analytics tier either, because the same index serves both the query and the chart.
+
+## How a term is matched
+
+The matching rules live in one shared helper, and they are stricter than the README suggests. A query is tokenized on whitespace and punctuation, so "GPT-4", "github.com" and "self-hosted" each become multi-token queries that get ANDed together. Every token has to match somewhere, and within a token the match is an OR across title and body. A term counts as a mention if it appears in either, and author handles are deliberately not matched, because for a trend line who posted it is noise.
+
+The one option that reads like it would help is switched off on purpose. Fuzzy matching is rejected because it inflates short terms wildly: the query builder notes that "redis" would pull in 216 thousand titles and 5.8 million comments under fuzzy expansion, against 3 thousand and 35 thousand on exact token matching, which drags the trend line down to the general HN baseline. So the count is exact-token, and a typo returns nothing at all.
+
+Ranking and counting are separated on purpose. Search adds a boost for titles containing the full query as an adjacent phrase, with a deliberately gentle weight so it reorders results without burying popular near-misses. The aggregate path leaves that boost off, because a histogram count does not care about phrase adjacency. The matched set is identical either way, so the number on the chart never changes depending on how you sorted the list.
+
+## The queries behind the chart
+
+A trend line is a date histogram over the same index the search uses.
+
+```ts
+const hn = redis.search.index({ name: "hn", schema });
+
+const { documents } = await hn.query({
+  filter: { title: { $eq: "rust" }, time: { $gte: "2024-01-01" } },
+  orderBy: { time: "DESC" },
+  limit: 30,
+});
+```
+
+```ts
+const { aggregations } = await hn.aggregate({
+  filter: { title: { $eq: "rust" } },
+  aggregations: {
+    by_month: { $dateHistogram: { field: "time", fixedInterval: "30d" } },
+  },
+});
+```
+
+Both calls are assembled from the same options helper, so the terms you type and the range you drag out on the chart end up in one query.
+
+Ingest runs on two scripts. `scripts/ingest.ts` streams monthly Hacker News Parquet dumps from HuggingFace for backfills and pulls new items from the official HN API with a `--live` flag, and a daily GitHub Action keeps the index current. A separate `scripts/ingest-jobs.ts` builds the Who is hiring postings index that the jobs section reads.
+
+## Running it yourself
+
+The project expects Upstash Redis REST credentials and uses Bun.
+
+```bash
+export UPSTASH_REDIS_REST_URL="..."
+export UPSTASH_REDIS_REST_TOKEN="..."
+
+bun install
+
+# ingest one quarter to play with (creates the index on first run)
+bun scripts/ingest.ts 2026 Q1
+
+# build the Who is hiring postings index for the same months
+bun scripts/ingest-jobs.ts 2026-01 2026-03
+
+bun dev
+```
+
+The README also carries a one-click Vercel deploy button that asks for the same two environment variables. Either way the index is created on the first ingest run, so a local instance starts empty until you load some months.
+
+## The API and how it fails
+
+The site calls its own endpoint at `/api/hn`, a Node serverless function sitting in front of Redis. It is worth reading, because the failure handling is more considered than most wrappers get.
+
+```bash
+# mentions per month, returned as a list of histogram buckets
+curl -s 'https://hackernewstrends.com/api/hn?op=aggregate&q=rust'
+
+# matching stories and comments, most upvoted first
+curl -s 'https://hackernewstrends.com/api/hn?op=search&q=rust&sort=score'
+
+# only comments, within a date range
+curl -s 'https://hackernewstrends.com/api/hn?op=search&q=rust&type=comment&from=2024-01-01'
+```
+
+Every response is wrapped in a `result` key. The aggregate call returns `buckets`, each with a timestamp and a document count. The search call returns a list of items carrying `id`, `title`, `by`, `time`, `score` and `type`.
+
+Before it touches Redis, the route runs a fixed sequence: a kill switch, then parameter validation, then a Redis result cache, then a per-IP rate limit, then single-flight so identical concurrent misses share one computation, and finally a global search budget. The budget exists because the Search database collapses past roughly ten queries per second, which the route's own comments trace to a June 2026 postmortem.
+
+The runtime choice is explained in the same file. Aggregating a full 45 million document index with a date histogram takes longer than the hard timeout on Vercel's Edge runtime, where a term like "apple" pushes millions of documents into one bucket, so the route runs on Node with a raised duration ceiling and a 50 second internal deadline. It answers with a busy status before the platform kills it with a bare gateway error, and lets the runaway computation finish in the background so the result still lands in the cache.
+
+## What to watch for
+
+A mention is a mention, not adoption. The chart counts how often a token appeared in a title or a body, with no view of whether the discussion was enthusiasm or a complaint, and no signal about who used the thing.
+
+Multi-word queries are ANDed, so "rust redis" needs both tokens. Volume for a phrase sits lower than for either word alone, which means the pair comparisons read differently from the single-word ones and it is worth checking both.
+
+A spike is also not a trend. One thread going viral moves a whole month, and the drill-down is where you find out whether a rise was a launch, a controversy, or a launch that happened to land next to something else.
+
+The comparison pages carry hand-written summaries. The charts behind them are generated from the index, but the narrative about who led and when is editorial, so read the prose as commentary and the lines as data.
+
+Finally, this measures Hacker News and not the web. There is no query volume, no click data and no session count. For developer tooling and library adoption, HN volume is a decent proxy, because the people shipping these tools are the people reading the thread. For anything else it is one community's sample.
+
+## Source and Accuracy Notes
+
+- Live site: https://hackernewstrends.com (verified via direct visit on 2026-11-04, HTTP 200)
+- Source repository: github.com/upstash/hacker-trends, MIT license, TypeScript, 47 stars and 3 forks at time of writing, created 2026-05-22, last pushed 2026-09-29
+- API verified live on 2026-11-04: the aggregate call for `rust` returned 234 monthly buckets running from September 2007 to November 2026, the search call returned 30 items, and a request with `from` and `to` bounds returned only items inside that window
+- Official social card: https://hackernewstrends.com/opengraph-image, a 1200x630 PNG
+- Built by Upstash and deployed on Vercel, with Upstash Redis Search as the only backend
+- HN launch thread: https://news.ycombinator.com/item?id=48673671 (822 points, 76 comments, 25 June 2026)
