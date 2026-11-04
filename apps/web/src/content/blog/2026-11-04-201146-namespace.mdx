@@ -1,0 +1,169 @@
+---
+title: "Namespace: cloud Mac, Linux and Windows for coding agents"
+description: "Namespace runs cloud macOS, Windows and Linux instances plus Devboxes and GitHub runners, aimed at coding agents that need a real Mac to ship iOS apps."
+pubDate: "2026-11-04T13:11:46.000Z"
+author: "Friday"
+tags: ["dev-tools", "cloud", "ci-cd", "macos", "ai-agents"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/namespace.webp"
+  alt: "Racks of MacBook Pros running macOS cloud instances for coding agents"
+canonical: "https://runany.dev/blog/namespace/"
+---
+
+> **TL;DR:** Namespace sells cloud computers, and the interesting ones are Macs: macOS runs in a virtual machine on Apple Silicon in a datacenter, so a coding agent can build and test an iOS app without a MacBook on your desk. A 4-core Mac instance lists at $0.04 per minute, with a free tier and a 30-day trial on the way in.
+
+## What it is
+
+Namespace runs cloud computers for developers: Linux, Windows and macOS instances, disposable development environments called Devboxes, and GitHub Actions runners you point your existing workflows at. On top of that sits a Bazel remote execution and cache service, plus caches for Turborepo, Gradle, sccache, Buck2 and pants.
+
+The company calls itself a developer platform for agent scale, and the positioning is speed. They own their racks and run their own hypervisor and scheduler rather than renting capacity from AWS or GCP, and the claim is that this buys faster boot times and better build performance.
+
+That framing came with real money behind it. A $42M Series B closed October 5, 2026, led by Scale Venture Partners with NEA, 20VC, Essence, Burst Capital and Susa Ventures participating, which took total funding to $65M. They say revenue grew 8x over the previous 12 months and that more than 1,000 companies build on the platform. Zed, Framer, ClassPass, Warp and DuckDB are named as customers.
+
+There are four ways in:
+
+- `nsc`, the cloud CLI, plus a separate `devbox` CLI for Devboxes
+- A TypeScript SDK and a gRPC or Connect API
+- A hosted MCP server, so Claude Code, Codex and Cursor can create and inspect infrastructure directly
+- A GitHub Actions runner that replaces the GitHub-hosted one in a workflow file
+
+## Why a Mac in a datacenter matters
+
+The post that got people talking was "Mac at any scale", published November 3, 2026 by Kirill Nikolaev, which hit 395 points on Hacker News.
+
+The problem it solves is narrow and real. You cannot build an iOS app without a Mac. The iOS Simulator only runs on macOS, and Apple requires a recent Xcode before you can submit to the App Store. xtool exists for people who want to sidestep Xcode, but it is not yet a serious replacement. So if you want a coding agent to handle iOS work, the agent needs a Mac, and almost no cloud provider offers one.
+
+Namespace decided to build macOS cloud instances, which meant building datacenter hardware around Apple Silicon. The fleet started with MacBook Pros in racks, because the supply chain made it the only option. They ordered Mac Minis in January and received them in July, and Mac Mini waited 10 months for M5 cores before jumping to M6 ahead of other models. MacBook Pros were available, so MacBook Pros went in the rack.
+
+Each one gets an IP KVM for remote management, an external 10G Ethernet NIC, and a custom holder that wicks heat off the hotspots. That is four cables per laptop, 48 per shelf, plus 12 more for Ethernet.
+
+Mac Minis and Studios are on the way. They are easier to run: built-in 10Gb networking, automatic boot after a power cycle, and full configuration over MDM. The cooling shelves were designed with airflow simulation rather than guesswork.
+
+## Getting it running
+
+The CLI is the fastest way to see it working.
+
+```bash
+brew install namespacelabs/namespace/nsc
+```
+
+Linux and macOS users without Homebrew can use the install script, and there is an npm package too:
+
+```bash
+curl -fsSL https://get.namespace.so/cloud/install.sh | sh
+npm install -g @namespacelabs/cli
+```
+
+Log in, and Devboxes have their own CLI installed separately:
+
+```bash
+nsc login
+```
+
+```bash
+curl -fsSL get.namespace.so/devbox/install.sh | bash
+```
+
+Creating a Devbox with a repo already checked out:
+
+```bash
+devbox create --name my-devbox --image builtin:default --size m \
+  --checkout github.com/myorg/myrepo
+```
+
+The integration that matters most for agent workflows is the MCP server, which lets an agent inspect builds, analyze CI usage and manage Devboxes.
+
+```bash
+claude mcp add --transport http --scope user namespace https://mcp.namespace.so/mcp
+```
+
+Codex takes a URL instead, and a read-only variant of the endpoint exists for both:
+
+```bash
+codex mcp add namespace --url https://mcp.namespace.so/mcp
+```
+
+From code, the TypeScript SDK creates an instance and waits for it to come up:
+
+```typescript
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { createComputeClient } from "@namespacelabs/sdk/api/compute";
+
+const client = createComputeClient();
+
+const instance = await client.compute.createInstance({
+  shape: { os: "linux", machineArch: "amd64", virtualCpu: 2, memoryMegabytes: 4 * 1024 },
+  documentedPurpose: "TypeScript SDK example",
+  deadline: timestampFromDate(new Date(Date.now() + 30 * 60 * 1000)),
+});
+
+await client.compute.waitInstanceSync(
+  { instanceId: instance.metadata!.instanceId },
+  { timeoutMs: 10 * 60 * 1000 },
+);
+```
+
+## What it costs
+
+Billing is built on a unit minute: one vCPU plus 2 GB of RAM for one minute, multiplied by a platform factor.
+
+| Platform | Multiplier |
+|---|---|
+| Linux | 1x |
+| Windows | 2x |
+| Linux on Apple Silicon | 7x |
+| macOS | 10x |
+
+Mac shapes are then billed at their own published per-minute rate:
+
+| Shape | vCPU | RAM | Disk | Prepaid | Overage |
+|---|---|---|---|---|---|
+| 4x7 | 4 | 7 GB | 80 GB | $0.04 | $0.06 |
+| 6x14 | 6 | 14 GB | 104 GB | $0.06 | $0.09 |
+| 8x14 | 8 | 14 GB | 112 GB | $0.08 | $0.12 |
+| 12x28 | 12 | 28 GB | 160 GB | $0.12 | $0.18 |
+| 12x56 | 12 | 56 GB | 272 GB | $0.18 | $0.27 |
+| 16x28 | 16 | 28 GB | 176 GB | $0.16 | $0.24 |
+| 16x56 | 16 | 56 GB | 272 GB | $0.20 | $0.30 |
+
+A 4-core Mac for half an hour costs $1.20. A 12-core, 56 GB Mac for half an hour costs $5.40.
+
+The plan structure:
+
+| | Developer | Team | Business |
+|---|---|---|---|
+| Monthly | $0, pay as you go | $100 | $250 |
+| Unit minutes included | Pay per use | 100,000 | 250,000 |
+| Docker builds included | Pay per use | 1,000 | 2,500 |
+| Max instance duration | 3 hours | 5 hours | Up to 24 hours |
+| Concurrency (Linux) | 32 vCPU | 64 vCPU | 160 vCPU |
+| Concurrency (macOS) | 12 vCPU | 24 vCPU | 48 vCPU |
+| Audit log retention | 7 days | 7 days | 30 days |
+
+Devboxes are billed separately, starting at $0.004 per minute. The Devbox Plus plan at $250 per month includes 50,000 Devbox minutes on Linux and macOS plus 400 GB-month of storage. There is a 30-day free trial across Compute, Devboxes and GitHub runners, and the Developer plan needs no credit card.
+
+## What to watch for
+
+Apple caps how much macOS you can virtualize, and that cap shows up in the product. Their engineering blog is blunt about it: Apple allows only two macOS VMs per physical Mac. So they slice the hardware in half, keeping two cores for the VM host. A 14-core Mac mini splits 2, 6 and 6, and an 18-core MacBook splits 8 and 8. That is why the macOS shape list tops out at 16 vCPU and why the core counts are odd rather than round.
+
+Check the plan against your run lengths. A Developer instance dies after 3 hours and a Team instance after 5. If your agent runs a long test suite, you need Business for 24-hour instances, and you pay for that headroom whether or not you use it.
+
+The MacBook fleet has operational quirks worth reading before you rely on it. Their own writeup describes FileVault decryption prompts that vanish from an external screen after five minutes of inactivity, with the SSH-based unlock path also expiring after five minutes on laptops. An unplanned reboot can therefore leave a machine waiting for someone to press its power button. For planned reboots they use `fdesetup authrestart`, which keeps the disk unlocked. They also report USB Ethernet adapters that stop showing a link and need the network service deleted and recreated in macOS Settings, plus HDMI cables that fall out of the socket whenever anyone touches the shelf.
+
+On licensing, Apple writes macOS rights per device rather than per virtual machine, and the tiers are not identical in what they grant. If you intend to run Mac instances at real volume, read the agreement your sales contact hands you rather than assuming the Developer tier covers production-scale use.
+
+Then there is the shape of the dependency. You are renting minutes on hardware Namespace bought, racks they built and a hypervisor they wrote. The GitHub Actions side is easy to walk away from, since it is a runner label in a workflow file. The Devbox, Bazel and API surfaces are theirs. The open-source Kubernetes layer underneath is Apache-2.0 on GitHub at namespacelabs/foundation, with the SDK and integrations at namespacelabs/integrations under the same license. The cloud service itself is proprietary.
+
+## Source and Accuracy Notes
+
+- Project page: https://namespace.so, verified via direct visit on November 4, 2026
+- Pricing: https://namespace.so/pricing, with a machine-readable copy at https://namespace.so/pricing.md, verified via direct visit on November 4, 2026
+- Engineering post "Mac at any scale": https://namespace.so/blog/mac-at-any-scale by Kirill Nikolaev, November 3, 2026, verified via direct visit
+- Documentation: https://namespace.so/docs, with a page index at https://namespace.so/docs/llms.txt, verified via direct visit
+- Funding: https://namespace.so/blog/series-b, $42M Series B announced October 5, 2026
+- Open-source components: https://github.com/namespacelabs/foundation and https://github.com/namespacelabs/integrations, both Apache-2.0
+- HN launch thread: https://news.ycombinator.com/item?id=50352758
+- Pricing figures are published list prices and do not include taxes or committed-use discounts
