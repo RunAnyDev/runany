@@ -1,0 +1,161 @@
+---
+title: "Proa: a Rust web framework for HTML and Markdown"
+description: "Proa is a Rust web framework for rendering typed components to HTML, Markdown, and streaming responses, with RSJS islands for browser interactivity."
+pubDate: "2026-11-04T04:08:00.000Z"
+author: "Friday"
+draft: false
+tags: ["rust", "web-framework", "server-side-rendering", "dev-tools"]
+category: "dev-tools"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/proa.webp"
+  alt: "Proa wordmark on a dark slate gradient with a cyan accent line"
+canonical: "https://runany.dev/blog/proa/"
+---
+
+> **TL;DR:** Proa is a Rust web framework that renders typed Rust components straight to HTML and to Markdown from the same component definition. You install one Cargo crate, run one command to scaffold a site, and you get server rendering with browser JavaScript only on the parts you mark as islands. The project is Apache-2.0, about seven weeks old, and its performance numbers come from the project itself.
+
+## What Proa is
+
+Proa is a web framework built on Axum, written in Rust, and it is chasing one specific problem: the same page usually needs to exist in more than one shape. A product listing wants HTML for people, Markdown for an agent that reads the page, and JSON for an API. Most stacks make you write that three times, and the copies drift.
+
+Proa's answer is to make the output format a property of the component rather than of the route. A component implements a render trait, the framework asks for a target, and the same struct can hand back an HTML page for one request and a Markdown document for the next. The framework also ships HTTP content negotiation, so a single URL can serve both.
+
+The rest of the feature set follows the usual server-rendered shape: layouts and pages, streaming SSR, data loading with deduplication, page caching at the edge, SQLx, Diesel or Toasty through a DataLoader, forms with typed actions, and an Axum route handler for JSON and webhook endpoints.
+
+## One component, many render targets
+
+The core idea is small. You write a struct, implement `WebRenderSync` for it, and call the `html_sync!` macro with your markup. The macro validates the template at compile time, folds adjacent static markup together, and keeps escaping correct for the dynamic slots.
+
+```rust
+use proa_core::{DataLoader, WebContext, WebRenderSync, WriteError};
+use proa_macros::html_sync;
+
+struct Greeting {
+    name: String,
+}
+
+impl<L: DataLoader> WebRenderSync<L> for Greeting {
+    fn render(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
+        html_sync! {
+            <main class="mx-auto max-w-3xl px-6 py-16">
+                <h1 class="text-4xl font-semibold">"Hello, "{self.name}</h1>
+                <p class="mt-4 text-zinc-600">"Rendered by Proa."</p>
+            </main>
+        }
+        .render(cx)
+    }
+}
+```
+
+To give that same component a Markdown representation, you add a second trait implementation over the same data. Nothing is duplicated except the template.
+
+```rust
+use proa_core::{DataLoader, WebContext, MdRenderSync};
+use proa_macros::md_sync;
+
+impl<L: DataLoader> MdRenderSync<L> for Greeting {
+    fn render_md(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
+        md_sync! { r###"
+            # Hello, {self.name}
+
+            Rendered by Proa.
+            "###
+        }
+        .render_md(cx)
+    }
+}
+```
+
+Four traits cover the combinations you will hit in practice:
+
+| Trait | Macro | When you reach for it |
+|---|---|---|
+| `WebRenderSync` | `html_sync!` | The normal fast path, nothing to await |
+| `WebRender` | `html!` | The component needs to await work |
+| `MdRenderSync` | `md_sync!` | Markdown from data you already have |
+| `MdRender` | `md!` | Markdown that has to await work |
+
+If you already have a synchronous HTML component and want Markdown without hand-writing it, the core crate has an `html-to-markdown` feature. You delegate with `proa_core::to_markdown(self).render_md(cx)`. The docs are candid that this allocates during conversion, so hand-written Markdown stays the faster path when you care about the difference.
+
+## Getting it running
+
+The setup is short, and the CLI handles the scaffolding.
+
+```bash
+cargo install proa-cli --locked
+proa new site hello-proa --yes
+```
+
+Running the same install command again updates an existing Cargo install. There is also `proa update --check` if you want to preview the latest stable version before taking it.
+
+One prerequisite catches people out: the basic app template expects the Tailwind CSS CLI on your PATH. The generated project separates styling into `styles/input.css` and `public/styles.css`, with a `proa.config.json` and `proa.lock.json` alongside `Cargo.toml`, and the CLI wires Tailwind into the build.
+
+The project also publishes the docs in several places, which is unusual and worth knowing about if you work with agents. Alongside the normal site, you get a machine-readable index at `/docs/llms.txt`, a full dump at `/docs/llms-full.txt`, a Rust-specific one at `/docs/rsjs/llms.txt`, and each page is fetchable as raw Markdown. There is an MCP server in the official registry under `io.github.proa-web/docs`, the docs package is on npm as `@proa-labs/docs` and on PyPI as `proa-docs`, and there is a Go SDK published under `github.com/Proa-Labs/proa/sdk/go`.
+
+## Islands when they earn it
+
+Proa calls its browser-side model RSJS, and it is not a second framework. An island is a normal server component that you annotate, and the browser picks up from the HTML the server already sent. It does not re-run the server component tree to make the page interactive.
+
+```rust
+use proa_core::{DataLoader, WebContext, WebRenderSync, WriteError};
+use proa_macros::html_sync;
+use rsjs::{rsjs, signal};
+
+struct Counter {
+    initial: i32,
+}
+
+#[rsjs(component, client)]
+impl<L: DataLoader> WebRenderSync<L> for Counter {
+    fn render(self, cx: &mut WebContext<L>) -> Result<(), WriteError> {
+        let count = signal(self.initial);
+
+        html_sync! {
+            <button
+                data-counter
+                type="button"
+                on_click={|_| count.update(|value| value + 1)}
+            >
+                "Count: "{count.get()}
+            </button>
+        }
+        .render(cx)
+    }
+}
+```
+
+The island guide is explicit about where the line sits. Data, links, forms, tables and metadata belong in a normal server-rendered page. A native form posting to the server does not need an island either. You reach for `#[rsjs(component, client)]` when something has to toggle, filter, validate, copy or react to input without a navigation, and for async RSJS queries when the browser needs data after hydration. Beyond signals there is typed shared state across independent owners, named event handlers, input bindings, component props carrying callbacks, and deferred hydration strategies that wait until the island matters.
+
+## What the numbers actually say
+
+The project publishes its own benchmarks in a separate repository, and the homepage leads with a headline figure: Proa render p50 of 5.56 ms, with React `renderToString` about 237x slower at p50, measured on an 8-vCPU AMD EPYC-Milan VPS.
+
+The benchmarks repository is more careful than the homepage. It compares 17 renderers on three canonical pages (a component, a table and a product grid) with one-core P50 multiples on a log scale, then measures sustained HTTP throughput, CPU per response, peak RSS, Suspense streaming with eight async boundaries per request, and P50/P95 tail spread. There is a separate SvelteKit comparison for production HTTP, cold start and product scaling, and the README notes that SvelteKit's response end is a different boundary from Proa's resolved-HTML stream, since native SvelteKit promise streaming hands data to the browser to render.
+
+| Claim | Figure | Where it comes from |
+|---|---|---|
+| Proa render p50 | 5.56 ms | proa.so homepage |
+| React `renderToString` at p50 | 237x slower | proa.so homepage |
+| Renderers compared | 17 | proa-benchmarks README |
+| Canonical pages | 3 (component, table, product grid) | proa-benchmarks README |
+
+Treat all of it as vendor-reported. The comparison is against `renderToString`, which is not what a production React app does, and the benchmark repo is written by the same team shipping the framework. The methodology is published and the charts are inspectable, which is better than most launch-day claims, but nobody independent has reproduced these numbers yet. The homepage also shows re-creations of GitHub, Sentry and Airbnb as showcase apps, and the site states plainly that they are independent demos, not affiliated with or endorsed by those companies.
+
+## What to watch for
+
+The framework is young. The repository was created in September 2026 and had a little over 380 stars and 21 forks when this was written, with the core crate, macros and Axum adapter on version 0.3.0 and RSJS on 0.2.0. A 0.x version signals that the API is still moving, and the docs list an explicit troubleshooting page for dependency resolution failures, which is what a 0.x ecosystem tends to mean.
+
+The Rust requirement is the real constraint. If you are on a JavaScript or Python stack, adopting Proa means picking up the toolchain, and the multi-target rendering story only pays off if you actually need more than one target. For a site that renders HTML and nothing else, the framework's headline advantage does not apply.
+
+The version numbers on crates.io also imply more than one adapter to track. Right now the ecosystem is centered on Axum, with SDKs for Go and documentation packages for npm and PyPI, but those surfaces will move at different speeds from the Rust core.
+
+Licensing is Apache-2.0, which is permissive and fine for commercial work. The team also publishes re-creations of other companies' interfaces as showcase apps, so if you plan to ship anything resembling them, check the trademark side separately from the code license.
+
+## Source and Accuracy Notes
+
+- Project page: https://proa.so (verified by direct visit)
+- Documentation: https://proa.so/docs (verified by direct fetch of the quickstart and islands guides)
+- Source repository: Proa-Labs/proa
+- License: Apache-2.0 (verified from the repository license field and the README license badge)
+- Benchmarks: https://github.com/Proa-Labs/proa-benchmarks
+- HN launch thread: https://news.ycombinator.com/item?id=50105467 (107 points, 15 October 2026)
