@@ -1,0 +1,139 @@
+---
+title: "Buzzedin: NYC rental alerts and the rent data behind them"
+description: "Buzzedin watches NYC rental sites and alerts you in minutes, then publishes the asking-rent numbers behind those alerts as JSON, CSV, and Markdown every month."
+pubDate: "2026-11-04T11:11:35.000Z"
+author: "Friday"
+tags: ["housing", "new-york", "rent-data", "alerts", "data"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/buzzedin.webp"
+  alt: "Buzzedin, a New York City rental alert service paired with a public rent analytics dashboard"
+canonical: "https://runany.dev/blog/buzzedin/"
+---
+
+> **TL;DR:** Buzzedin watches StreetEasy, LeaseBreak, NYBits, Reddit and building sites around the clock, then emails you when a listing matches a description you wrote in plain English. The part worth stealing is that the same pipeline publishes the asking-rent numbers behind those alerts, as JSON, CSV or Markdown, every month.
+
+## What it is
+
+Buzzedin is a rental search-monitoring tool for New York City, run by a company called Dabudage LLC. It reads listings from StreetEasy, LeaseBreak, NYBits, the r/NYCapartments subreddit and a few other sources, then pushes matches to you by email and push notification instead of making you refresh five tabs.
+
+It shipped as Leaseswap and was renamed in the fall of 2026. Every leaseswap.nyc link still redirects, and the site says your alerts, matches and account carried over without any setup.
+
+Two halves sit side by side in the product. The alerting side runs the hunt. The data side publishes what the city is asking right now: a rent analytics dashboard across 200+ neighborhoods, a monthly rent report, per-neighborhood rent pages, and a map of lease takeovers where a tenant hands their lease straight to the next tenant.
+
+![The Buzzedin homepage with a plain-English search box and live counters for rent-stabilized listings, lease takeovers, and deals found today](https://cdn.runany.dev/blog/thumbnails/buzzedin-alerts.webp)
+
+## Why the alerting side exists
+
+A listing that fits in New York is usually gone within hours. The homepage tells the story with a clock: a one-bedroom in Fort Greene goes up at 8:02 am, Buzzedin reads it at 8:03, your phone lights up at 8:03, and by 9:30 am the rest of the city is refreshing.
+
+The free tier is deliberately slow. Free alerts arrive at least six hours after a match is found, and their own October 2026 figure says a typical free alert landed about ten hours after the listing went up. Paid tiers remove the wait, and for anyone competing for the same apartment that delay is the whole problem.
+
+The other piece is context that listing sites do not give you. Buzzedin separates listings that merely claim rent-stabilized status from buildings that appear on the state rent-controlled list, and it prices every listing against what comparable apartments in the same neighborhood ask.
+
+## The rent data behind the alerts
+
+As of November 4, 2026 the analytics dashboard covered 100,601 listings from the previous six months. The citywide median asking rent was $4,195, with half of listings asking between $3,225 and $5,584.
+
+![The Buzzedin rent analytics dashboard, with filters for neighborhood, borough, bedrooms and amenities above four summary tiles for median rent, lower quarter, upper quarter and listing count](https://cdn.runany.dev/blog/thumbnails/buzzedin-analytics.webp)
+
+The monthly report for October 2026 breaks the same market down by size:
+
+| Bedrooms | Median | 25th pct | 75th pct | New listings | vs September |
+| --- | --- | --- | --- | --- | --- |
+| Studio | $3,500 | $2,795 | $4,133 | 2,524 | +2.9% |
+| 1 bedroom | $3,895 | $2,900 | $5,100 | 5,408 | -1.4% |
+| 2 bedrooms | $4,500 | $3,397 | $6,450 | 4,332 | 0.0% |
+| 3 bedrooms | $4,997 | $3,750 | $7,741 | 1,576 | 0.0% |
+| 4 bedrooms | $5,997 | $4,700 | $9,995 | 330 | +5.2% |
+
+Across boroughs for one-bedroom listings, Manhattan ran $4,900 on 2,642 listings, Brooklyn $3,350, Queens $2,885, and the Bronx $2,476 on only 178 listings.
+
+The amenity breakdown is more interesting. Each amenity is priced against apartments with the same number of bedrooms, so the gap is not just larger units in fancier buildings:
+
+| Amenity | Median difference | Difference |
+| --- | --- | --- |
+| Gym in building | +$1,491 | +39% |
+| Dishwasher | +$1,364 | +40% |
+| Elevator | +$1,354 | +39% |
+| Doorman | +$1,313 | +35% |
+| In-unit laundry | +$1,293 | +32% |
+| Laundry in building | +$1,271 | +38% |
+| No fee | +$1,177 | +32% |
+| Outdoor space | +$426 | +10% |
+| Air conditioning | +$235 | +5% |
+
+Read those as what renters pay for apartments like that, not as the price of an amenity. A gym and an elevator are proxies for a newer building in a more expensive spot, and Buzzedin says so in its own methodology notes.
+
+## Pulling the numbers yourself
+
+Every monthly report has a JSON, CSV and Markdown version, and the JSON is the one worth pulling. The endpoint is predictable, so any month is a single request:
+
+```bash
+curl -s https://buzzedin.com/rent/report/2026-10.json | jq '.citywide.rows'
+```
+
+The payload is bigger than it looks. Top-level keys cover the fee breakdown, the reporting window, the source list, per-borough and citywide rows, generated findings, amenity deltas, days on market, takeovers and the neighborhood tables. The citywide rows carry the quartile spread for every bedroom count:
+
+```python
+import json
+import urllib.request
+
+url = "https://buzzedin.com/rent/report/2026-10.json"
+with urllib.request.urlopen(url, timeout=30) as response:
+    report = json.load(response)
+
+for row in report["citywide"]["rows"]:
+    beds = row["bedrooms"]
+    label = "studio" if beds == 0 else str(beds) + " bed"
+    print(
+        label.rjust(8)
+        + "  median $" + format(row["p50"], ",")
+        + "  n=" + format(row["n"], ",")
+        + "  vs prev " + format(row["change_pct"], "+.1f") + "%"
+    )
+
+print("no-fee share:", report["fees"]["no_fee_pct"], "%")
+print("median days on market:", report["days_on_market"]["p50"])
+```
+
+If you would rather not parse JSON, the same report sits at `/rent/report/2026-10.csv` and `/rent/report/2026-10.md`, which is handy when you are feeding a notebook or a docs page. Every filter on the analytics dashboard is encoded in the URL, so any specific view can be shared as a link.
+
+Worth knowing what is not there: no API key, no docs page, no versioned endpoint. It is a plain JSON file on the web, so you can script against it, but you are relying on a path scheme that could change without notice.
+
+## How the numbers are built
+
+The methodology notes are unusually honest, and they are the reason the data is worth using:
+
+- These are asking rents, not signed leases. A listing that never found a tenant still counts.
+- Rents from $1,000 to $50,000 a month, studios through four bedrooms. Rooms in shared apartments and sublets are left out.
+- Each apartment counts once even when it is listed on several sites.
+- Medians and ranges only appear when at least 20 listings sit behind them. The JSON also carries thresholds for amenity groups (100), month-over-month changes (100) and rankings (50).
+- The amenity premium compares apartments with the same number of bedrooms.
+- The data refreshes daily.
+
+Two other figures from the October report make the dataset more useful than a listing board. StreetEasy listings that got marked rented in October had been up for a median of 18 days since Buzzedin first saw them, with a 9 to 38 day interquartile range. And lease takeovers, 245 listings that month, asked a median of 2.8% more than other new listings with the same bedroom count in the same neighborhood.
+
+## What to watch for
+
+Pricing is mid-migration and the site contradicts itself. The support page describes a free tier with one alert on a six-hour email cycle, plus a Pro plan at $14 a month or $79 a year that adds unlimited alerts, instant notifications, AI Deal Scores and building violation and landlord data. The homepage FAQ still advertises a $39 Search Pass covering four months with SMS, and the structured data on the support page says premium features are coming soon. Read the checkout page rather than the FAQ.
+
+The rest is worth keeping in mind:
+
+- Buzzedin is a monitoring layer, not a landlord or a broker. It charges no broker fees, though agent fees on the underlying listings still apply.
+- It states that it is an independent search-monitoring tool, not affiliated with StreetEasy, Zillow, NYBits or LeaseBreak. Those are its sources.
+- The support page says its scrapers run daily, while the homepage says new listings are read the moment they appear. Assume the alert stream is faster than the published data, not the other way around.
+- Coverage is New York City only. There is no second market.
+- The AI Deal Score is generated, not measured. It rates a listing on space, condition, light, amenities, location and noise level, which means photos and listing copy.
+
+## Source and Accuracy Notes
+
+- Project page: https://buzzedin.com/ (verified via direct visit on November 4, 2026)
+- Rebrand notice: https://buzzedin.com/leaseswap (Leaseswap is now Buzzedin, same company, Dabudage LLC)
+- Rent analytics: https://buzzedin.com/analytics (100,601 listings, updated November 4, 2026)
+- Monthly report: https://buzzedin.com/rent/report/2026-10 (with JSON, CSV and Markdown exports)
+- Pricing and support: https://buzzedin.com/support
+- Terms of service: https://buzzedin.com/terms
+- HN launch thread: https://news.ycombinator.com/item?id=44730691 (posted under the Leaseswap name)
