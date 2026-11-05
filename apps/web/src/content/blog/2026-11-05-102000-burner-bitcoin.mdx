@@ -1,0 +1,113 @@
+---
+title: "Burner Bitcoin: a hardware wallet with no seed phrase"
+description: "Burner Bitcoin is a credit-card-sized Bitcoin hardware wallet that keeps keys on a secure chip, skips the seed phrase, and runs from a browser over NFC."
+pubDate: "2026-11-05T03:20:00.000Z"
+author: "Friday"
+tags: ["bitcoin", "hardware-wallet", "self-custody", "nfc", "security"]
+category: "review"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/burner-bitcoin.webp"
+  alt: "A gold Burner Bitcoin card standing upright on a dark rock, lit from behind, with the Bitcoin logo on a white panel"
+canonical: "https://runany.dev/blog/burner-bitcoin/"
+---
+
+> **TL;DR:** Burner Bitcoin is a credit-card-sized **Bitcoin hardware wallet** that generates its key on a secure chip and never shows a seed phrase, because there is nothing to show. Setup is an NFC tap against **BurnerOS**, a web app that runs in the phone browser, so there is no app to install. A card is **$19**, the client libraries are **MIT licensed**, and the part worth reading is how three entropy sources get folded into a single key.
+
+## What it is
+
+Burner is a plastic card with a secure element chip in it, roughly the size of a credit card, and it does one job: hold a private key and sign with it. The key is created inside the card the first time you set it up, never leaves the chip, and there is no screen on the device, which means there is no 24-word recovery phrase to photograph, laminate and file away.
+
+The company behind it is Arx Research, which builds HaLo tags, a line of NFC security hardware used for digital identity signing. Burner is the consumer wallet built on that hardware. The card talks to your phone over NFC, and the wallet interface is BurnerOS, a web app served from os.burner.pro. You tap the card to the back of your phone, a browser page opens, and that page is the wallet. No native app, no extension, no desktop client.
+
+The family covers four products:
+
+- **Burner Bitcoin**, the BTC card this post is about.
+- **Burner Ethereum**, for Ethereum plus tokens on Base, Optimism and Arbitrum.
+- **Burner Terminal**, a reader for taking stablecoin payments in person.
+- **USD II**, a dollar stablecoin card where transfers are fully subsidized, so there are no gas fees to think about.
+
+The Bitcoin card is listed at $19, and the site shows $9 each when you buy six or more.
+
+## Why it matters
+
+Hardware wallets picked up a bad reputation for one reason, and it is not the hardware. It is the recovery phrase. A device that is genuinely secure makes you write down 24 words, and those words become a failure mode with nothing to do with chip security. People lose them, photograph them to a cloud drive, or type them into a site that asks politely enough.
+
+Two incidents from 2026 explain why the problem is sharper right now.
+
+In July, roughly 1,816 BTC were drained from more than 5,200 Coldcard wallets, close to $116 million at the time. No device was broken and nobody touched one. A firmware change from March 2021 had pointed the seed generator at ordinary software randomness instead of the hardware TRNG on the chip, so every seed those devices produced leaned on a single source. Effective key strength fell from a designed 128 bits to roughly 40 on Mk2 and Mk3 units, and roughly 72 on Mk4, Mk5 and Q.
+
+In October, Ledger confirmed that a device sold through CryptoBilis, one of its authorized resellers in Southeast Asia, carried a hidden board that read the recovery words off the screen during setup and shipped them out over a mobile connection. Genuine Check still passed on it, because that check only confirms the chip is genuine.
+
+Burner sidesteps the first class of problem by blending three entropy sources, and the second by having no screen and no words to read. An implant board has nothing to photograph. A key built from one random source has nothing to cover for it when that source misbehaves.
+
+## Getting it running
+
+Buy a card, open BurnerOS in the browser on a phone, and tap the card to the back of it. Setup generates the key on the chip, and from there the browser page signs for you.
+
+The card also speaks to software directly, because Arx publishes the client libraries as open source. LibHaLo is the browser and mobile library, MIT licensed, on GitHub with 81 stars.
+
+```bash
+npm install --save @arx-research/libhalo
+```
+
+In a web app you call `execHaloCmdWeb` and the browser takes over the NFC prompt. This is the signing example straight from the project documentation:
+
+```javascript
+async function btnPressed() {
+    let command = {
+        name: "sign",
+        keyNo: 1,
+        digest: "6e76e202b71892e9ee32a634eefcf522ba1c4cb4eadd7e4562ced1270214c41e"
+    };
+
+    document.getElementById('statusText').innerText = "Please tap NFC tag to the back of your smartphone...";
+
+    try {
+        let res = await execHaloCmdWeb(command);
+        document.getElementById('statusText').innerText = JSON.stringify(res, null, 4);
+    } catch (e) {
+        document.getElementById('statusText').innerText = e;
+    }
+}
+```
+
+There are matching entry points for React Native, through `execHaloCmdRN` with the react-native-nfc-manager package, and for desktop PC/SC readers through `execHaloCmdPCSC`. A `halocli` binary ships from the releases page.
+
+The offline path is the interesting one. Because the libraries talk to the chip directly, a desktop with a USB NFC reader can drive the card with no internet connection at all. The project FAQ points at that setup for anyone who wants the wallet page out of the loop entirely.
+
+## How the key is made
+
+This is the part that decides whether the product is actually safe, so it is worth being precise. Burner's own security writeup compares how four vendors source randomness, and the table is worth reproducing because the industry does not agree on a single answer.
+
+| Wallet | Where the randomness comes from | Sources combined |
+| --- | --- | --- |
+| Coldcard | Hardware TRNG on the device, with optional dice rolls entered by the owner | One by default, two if you add dice |
+| Ledger | A TRNG inside a certified secure element, with cryptographic post-processing in Ledger OS | One, monitored by hardware fault detectors |
+| Trezor | The device's own RNG combined with entropy supplied by the host computer | Two, hashed together |
+| Burner | On-chip TRNG, factory-generated randomness, and optional user input | Up to three, blended through a hash |
+
+Three is the highest count in that table, but the number is not the point on its own. The sources have to be independent, and Burner's three are. The chip's own generator runs when you set the card up, the factory randomness was produced during manufacture, and the optional user input comes from you. A failure in one has no path into the others.
+
+The same writeup is honest about the limit. A wallet with no recovery phrase does not automatically escape the Coldcard class of bug, because it still has to turn a random number into a private key. What it escapes is the step where that number gets written down as words, and the step where a single bad source has the final say.
+
+## What to watch for
+
+No recovery phrase means no recovery phrase. If a card dies, your backup path is the Card Duplicator tool inside BurnerOS, which copies a card onto another card so you hold two, and which also lets you check whether a card you were handed duplicates one that already exists. That is a thinner safety net than 24 words on paper, and it is worth deciding whether it is enough before you put real money on it.
+
+The Bitcoin card is Bitcoin only. No Lightning, no Liquid, no Runes or Ordinals, and no other chain. Spending over Lightning means a different product.
+
+You still trust a vendor, just a different one. The key never leaves the chip, but the firmware that generates it, the card that carries it and the web app that drives it all come from Arx Research. The client libraries are MIT licensed and open, which means you can read exactly how your browser talks to the card, and that is a different promise from being able to read the firmware running on the chip itself.
+
+Two smaller details. The PIN protects signing requests and the card locks permanently after 20 failed attempts, so write the PIN down somewhere other than the device. And Tap to Pay, which would let a merchant be paid by tapping the card through Flexa, is advertised on the product page as coming soon rather than available.
+
+## Source and Accuracy Notes
+
+- Project page: https://www.burner.pro/bitcoin, verified by direct visit on 2026-11-05
+- Company: Arx Research, Inc., confirmed from the site's own structured data
+- Open source client library: arx-research/libhalo (MIT, TypeScript, 81 stars at time of writing), with libhalo-example-reactjs, libhalo-example-pcsc and libhalo-example-react-native alongside it
+- Wallet app: https://os.burner.pro , help centre: https://help.burner.pro
+- Earlier product from the same team: Offline Cash, linked from the Burner site
+- HN launch thread: https://news.ycombinator.com/item?id=44117481 (May 2025, 12 points)
+- Security details above come from Burner's own writeups, the Coldcard entropy comparison from August 2026 and the Ledger implant analysis from October 2026. Both are vendor-authored, and the entropy table is presented as the vendor's comparison rather than an independent audit
