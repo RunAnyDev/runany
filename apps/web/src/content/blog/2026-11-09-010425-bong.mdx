@@ -1,0 +1,130 @@
+---
+title: "Bong: a self-hosted search shortcut redirector in Go"
+description: "Bong is a Go server that turns bang-style shortcuts into redirects, with 61 built-in shortcuts, OpenSearch support, and an Apache-2.0 license."
+pubDate: "2026-11-08T18:04:25.000Z"
+author: "Friday"
+tags: ["self-hosted", "search", "go", "open-source", "productivity"]
+category: "self-hosted"
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/bong.webp"
+  alt: "Bong hero image showing a search shortcut prefix fanning out into directional redirects"
+canonical: "https://runany.dev/blog/bong/"
+---
+
+> **TL;DR:** Bong is a small Go server that reads a query, finds a shortcut prefix in front of it, and redirects you to the matching site. You get 61 built-in shortcuts covering search engines, AI chatbots, package registries, and Korean portals, and you can add your own in a YAML file. It exposes an OpenSearch description, so browsers can treat it as the default search engine. Apache-2.0 licensed, no releases, install with the Go toolchain.
+
+## What it is
+
+Bong sits between you and the search engines you use. You type a query with a short prefix, and Bong works out where you meant to go.
+
+The idea comes from DuckDuckGo bangs. On DuckDuckGo you can type `!w` to search Wikipedia or `!gh` to search GitHub without visiting either site first. DuckDuckGo popularised the pattern, and Kagi and others adopted it. Bong takes the same idea and turns it into software you host yourself, so the shortcut set is yours to edit and the traffic goes wherever you point it.
+
+The prefix defaults to a full stop rather than an exclamation mark. That detail came from the author's own use: on a phone keyboard the dot sits where your thumb already rests, and a bang requires a shift. The prefix is configurable, so `!` works fine if you prefer it.
+
+The public instance at bong.glendalab.com shows 61 shortcuts. The project itself ships as separate pack files, and the live demo loads all of them.
+
+## Why it matters
+
+The obvious comparison is a browser extension or a set of Firefox keyword bookmarks. Both work, and the author says he used browser keywords for years before starting this in 2022.
+
+Bong differs in two ways. It runs on a server, so the same shortcuts work on a phone browser with no extension, on a work machine where you cannot install anything, and in a text mode browser with no JavaScript at all. And because the shortcut table is just YAML you control, you can point `.gh` at a private GitLab instance or `.jira` at an internal tracker, which a public bang list cannot do for you.
+
+The second point is the one that matters for self-hosting generally. This is a Go binary with one dependency, `gopkg.in/yaml.v3`. It embeds its templates, it has no database, and it ships no release artifacts yet, so installation is through the Go toolchain rather than a download.
+
+| Approach | Prefix | Mobile browser | Host it yourself | Needs an extension |
+|---|---|---|---|---|
+| DuckDuckGo bangs | `!` | Yes | No | No |
+| Firefox keyword search | `!` | No | No | No |
+| Bong | `.` (configurable) | Yes | Yes | No |
+| Whiz service worker (same author) | `!` | Yes | Partly | No |
+
+## Getting it running
+
+If you have Go 1.23 or newer on the machine, the install is one command and the binary lands in `GOPATH/bin`.
+
+```bash
+go install github.com/glendalab/bong@latest
+```
+
+Then write a config and start it.
+
+```bash
+cp config.example.yaml config.yaml
+bong config.yaml
+```
+
+The server listens on `:8080` by default and serves a single search page. Point it at your own shortcut file and you are done.
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  "http://localhost:8080/s?q=.gh+rust"
+```
+
+That prints `302 https://github.com/search?q=rust`. A query with no shortcut at all falls through to the default shortcut, which is `g`, so it lands on Google.
+
+## Shortcut packs and the config format
+
+Bong keeps its shortcuts in YAML, and the upstream packs live in a separate repository called bongs. There are four of them: `base.yaml` for search engines, AI tools, references, maps, and translation; `dev.yaml` for code hosts, package registries, and documentation; `media.yaml` for video, music, movies, and games; and `regional/kr.yaml` for Korean portals and shopping sites.
+
+Each pack is included by path relative to the including file, and the overlays follow a strict precedence rule. Later includes override earlier ones, and the including file overrides all of them.
+
+```yaml
+default: g
+include:
+  - bongs/base.yaml
+  - bongs/dev.yaml
+  - bongs/media.yaml
+  - bongs/regional/kr.yaml
+```
+
+A single shortcut entry can be as small as a URL template. The template takes the query as `%s`, which is percent-encoded for you when it goes into a URL.
+
+```yaml
+bongs:
+  gh:
+    title: GitHub
+    aliases: [git]
+    keywords: [code]
+    main_url: "https://github.com"
+    search_url: "https://github.com/search?q=%s"
+    suggest_url: "https://api.github.com/search/repositories?q=%s&per_page=8"
+    suggest_path: "items.full_name"
+```
+
+The `suggest_url` and `suggest_path` pair is what makes autocomplete work for a site that is not Google. The path is a dot path into the JSON response, so `items.full_name` reads the `full_name` field of each item in the `items` array. Google-style OpenSearch suggestions need no path at all.
+
+Suggestions are not limited to Google. GitHub, crates.io, Wikipedia, Wiktionary, ArchWiki, WolframAlpha, and DuckDuckGo all ship their own suggestion endpoints in the packs, and the live demo serves them straight from the `/suggest` route.
+
+Matching is layered. Bong tries exact keys and aliases first, then prefixes, then words in the title, keywords, or host, then substrings, and only falls back to typo tolerance when nothing else matches. Tab completes the first match. Because the author works in Korean, completion also matches Hangul initials and partial syllables, which is why the regional pack is more than a list of URLs.
+
+## Using it as your default search engine
+
+Bong publishes an OpenSearch description at `/opensearch.xml`, which is what browsers look for when you add a custom search engine.
+
+```xml
+<Url rel="results" type="text/html" method="get" template="https://bong.glendalab.com/s?q={searchTerms}"/>
+<Url rel="suggestions" type="application/x-suggestions+json" method="get" template="https://bong.glendalab.com/suggest?q={searchTerms}"/>
+```
+
+Add `https://bong.glendalab.com/opensearch.xml` as a search engine in Firefox or Chrome, set it as default, and every query in the address bar goes through Bong. From there, `.gh` takes you to GitHub and anything without a prefix goes to your default shortcut.
+
+## What to watch for
+
+There are no GitHub releases yet, so `go install` pulls the tip of the default branch. That is fine for a tool this small, but it means you are tracking `main`, not a versioned artefact. The project is young, with 12 stars and a repository created at the end of October 2026, so treat the config format as something that may still move.
+
+The default config points `suggest_url` at Google's suggestion endpoint, which is worth knowing if your goal is to move search traffic away from Google. The suggestions still go to Google even when the redirect itself goes elsewhere.
+
+Running behind a reverse proxy needs `base_url` set explicitly, because Bong ignores `X-Forwarded-*` headers. Without it the OpenSearch description will advertise the wrong origin.
+
+Two more details for self-hosters. POST-style search endpoints are supported through `post_key`, `post_params`, and a `post` flag that moves query parameters into the request body, and the `-check` flag validates a config file and exits, which is worth wiring into a container health check.
+
+The author also builds Whiz, a service worker that does the same job from the browser with a `!` prefix and a double-space trick for typing the bang on mobile. If you want the DuckDuckGo-style prefix and would rather not run a server, that is the closer match.
+
+## Source and Accuracy Notes
+
+- Project page: https://bong.glendalab.com — verified via direct visit, redirect behaviour confirmed against the live instance
+- Source repository: glendalab/bong (Go, module `github.com/glendalab/bong`)
+- Shortcut packs: glendalab/bongs
+- License: Apache-2.0, verified from the LICENSE file in the repository
+- HN launch thread: https://news.ycombinator.com/item?id=50402535
