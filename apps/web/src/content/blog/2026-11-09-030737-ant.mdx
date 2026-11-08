@@ -1,0 +1,165 @@
+---
+title: "Ant: a JavaScript runtime that fits in a 9 MB binary"
+description: "Ant is a JavaScript runtime written in C that runs real npm packages and TypeScript from a 9 MB binary, with its own Silver engine and a VM-isolated sandbox."
+pubDate: "2026-11-09T03:00:00.000Z"
+author: "Friday"
+tags: ["javascript", "runtime", "typescript", "wasm", "open-source"]
+category: "dev-tools"
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ant.webp"
+  alt: "A small ant carrying a glowing JavaScript runtime payload on a dark slate background"
+canonical: "https://runany.dev/blog/ant/"
+---
+
+> **TL;DR:** Ant is a JavaScript runtime written from scratch in C that ships as a single 9 MB binary and starts in about 4 ms. It runs real npm packages and TypeScript files directly, serves HTTP from a default fetch export, and sandboxes untrusted code in its own KVM or Hypervisor VM. The project is MIT licensed and currently maintained by a single person.
+
+## What it is
+
+Ant is a JavaScript runtime built from scratch, not a wrapper around V8, JSC or SpiderMonkey. The engine is called Silver, it has a JIT compiled through a fork of MIR, and the whole thing compiles down to a binary small enough to drop into a container image or an edge worker.
+
+The pitch is size and startup time. Node is around 140 MB, Deno around 77 MB, Bun around 61 MB. Ant is 9 MB, or 5.8 MB when built with `-Os`. That matters in the places where a runtime gets shipped to a device that does not have room for a full Node install, or started once per request on a serverless platform where cold start is billed.
+
+The site claims npm package installs run up to 40 times faster than npm itself, and TypeScript files run with no tsconfig, no bundler and no dist folder. Both are worth trying yourself, since neither has an independent benchmark attached.
+
+## Installing it
+
+The installer is a single curl pipe. It detects your platform, downloads the matching binary from a manifest endpoint, and drops it in `~/.ant` with the executable at `~/.ant/bin`.
+
+```bash
+curl -fsSL https://antjs.org/install | bash
+```
+
+The script maps your machine to one of several targets: `darwin-x64`, `darwin-aarch64`, `linux-x64`, `linux-aarch64`, `windows-x64`, plus a `musl` build for Alpine. On an Apple Silicon Mac running under Rosetta it downloads the ARM build instead, since the native one is faster to run. You can override the destination with the `ANT_INSTALL` environment variable.
+
+Once it is on your path, a one-liner is enough to prove it works:
+
+```bash
+ant --version
+# v16.5.c41757b4.0
+
+ant -p 'Array.from({ length: 5 }, (_, i) => i ** 2).join(",")'
+# 0,1,4,9,16
+```
+
+There is also an official Docker image for `linux/amd64` and `linux/arm64`, which is the cleanest way to try it without touching your shell profile.
+
+```bash
+docker pull themackabu/ant:latest
+docker run --rm themackabu/ant:latest --version
+docker run --rm -v "$PWD:/app" themackabu/ant:latest index.js
+```
+
+## Where it fits against the other runtimes
+
+The comparison numbers come from the project README, measured with `hyperfine` using 10 warmup runs and 100 timed runs. The cold start benchmark imports Hono, registers two routes and exits, so it isolates module resolution and initialization rather than actually serving traffic.
+
+| Runtime | Binary size | Cold start | Engine |
+| --- | --- | --- | --- |
+| Ant | 9 MB | 3.9 ms | Ant Silver |
+| Bun | 61 MB | 8.8 ms | JSC |
+| Deno | 77 MB | 18.6 ms | V8 |
+| Node | 140 MB | 29.4 ms | V8 |
+
+The environment for those numbers was an Apple M5 Pro on macOS 27.0, against Node 26.5.1, Bun 1.4.0 and Deno 2.9.5. Ant was faster than Bun by 2.26 times and Node by 7.50 times on that machine, which is the kind of margin that holds up for module loading but tells you nothing about sustained throughput once your code is actually running.
+
+Spec conformance is the more honest table, because it is checked rather than benchmarked. Ant targets the WinterTC Minimum Common API specification from Ecma TC55.
+
+| Suite | Pass rate | Notes |
+| --- | --- | --- |
+| compat-table | 100% | 1511 of 1511 |
+| Temporal | 100% | 4603 of 4603, revision 2026-08-10 |
+| test262 | about 75% | 40243 of 53578, run 2026-10-21 |
+
+That 75 percent on test262 is the number to keep in mind. Nearly a quarter of the official suite does not pass, so a package that leans on an obscure corner of the language may work on Node and fail here.
+
+## Running npm packages and TypeScript
+
+Ant installs and runs real packages from npm. The examples directory in the repository exercises Express, Hono, Elysia, h3, Preact, React, ky, jiti and esbuild, so the ecosystem coverage is real rather than aspirational. The project also runs its own package registry at `ants.land`, which speaks the npm protocol, so anything published there installs by scope or bare name.
+
+TypeScript runs directly. There is no compile step to configure, which removes an entire category of project scaffolding.
+
+```bash
+ant index.ts
+```
+
+The runtime exposes Node-compatible modules through an `ant:` prefix. `ant:fs` gives filesystem access, `ant:path` gives path helpers, and `ant:ffi` and `ant:shell` reach down into native memory and system commands.
+
+```js
+import { readFile } from 'ant:fs';
+import { join } from 'ant:path';
+
+const body = await readFile(join(import.meta.dirname, 'meow.txt'));
+console.log(body);
+```
+
+The CLI has a flag set worth knowing. `--eval` and `--print` run a script and exit, `--watch` restarts in a fresh isolate when an imported file changes, `--hot` reloads changed modules in place while keeping global state and servers alive, `--web-compat` switches on browser-style location and relative URL handling, and `--jitless` turns off native compilation entirely, which is the first thing to try when a program misbehaves under the JIT.
+
+## Serving HTTP
+
+Ant serves a default fetch export, so a normal framework works without a custom adapter. The example server in the repository routes requests through `rou3` and exports a plain object with a `fetch` handler and a `port`.
+
+```js
+import { createRouter, addRoute, findRoute } from 'rou3';
+
+const router = createRouter();
+
+addRoute(router, 'GET', '/', () => {
+  return new Response(`Welcome to Ant ${Ant.version}!`);
+});
+
+export default {
+  port: 8000,
+  fetch(req) {
+    const url = new URL(req.url);
+    const result = findRoute(router, req.method, url.pathname);
+    if (result?.data) return result.data(req, result.params);
+    return new Response('not found: ' + url.pathname, { status: 404 });
+  }
+};
+```
+
+Run it with `ant server.js` and it listens on port 8000. WebAssembly support is built into the runtime, and the repository ships a WASI example that loads a compiled module, passes arguments through and calls the `_start` export.
+
+## Sandboxing untrusted code
+
+This is the part that makes Ant more than a fast Node clone. Each sandbox is its own KVM or Hypervisor.framework VM, so an escape from one does not reach the host. The default posture is deny-all, and you forward only the ports you name. Mounts are immutable unless you explicitly grant write.
+
+There is also a WebAssembly build of the interpreter published as `@antjs.org/wasm`, which lets you embed Silver inside your own host program and evaluate strings with a hard memory ceiling and an execution timeout.
+
+```js
+import { Ant } from '@antjs.org/wasm';
+
+const ant = await Ant.create({
+  memoryLimit: 64 * 1024 * 1024,
+  timeout: 1_000,
+  globals: { greet: name => `Hello, ${name}!` }
+});
+
+try {
+  console.log(await ant.eval('greet("Silver")'));
+} finally {
+  ant.dispose();
+}
+```
+
+The default memory limit is 128 MiB with a floor of 32 MiB, and the limit has to be page-aligned because WebAssembly enforces it that way. A timeout of zero disables the deadline entirely.
+
+## What to watch for
+
+Ant is a single-maintainer open source project. The governance document is explicit that the maintainer holds merge rights and makes the final call on contribution requests, so the bus factor is one person, and the security policy confirms it: vulnerabilities are reported by email to the maintainer with a 12 hour acknowledgment window and a 2 day initial assessment.
+
+The runtime also has broad system access by design. `ant:ffi` reaches raw memory, `ant:shell` executes system commands, and remote module imports execute code pulled from another origin. The project's own security notes tell you to load only trusted native libraries, sanitize anything that reaches a shell, and import from origins you trust. If you are evaluating Ant for running third-party code, the VM sandbox is the reason to look, and those modules are exactly what you should keep out of reach.
+
+Finally, treat the benchmark table as a starting point rather than a result. The cold start numbers come from one Apple Silicon machine running a Hono import, and the site publishes a daily V8 Octane comparison across nine engines at `bench.antjs.org` if you want the longer view of how the engine holds up.
+
+## Source and Accuracy Notes
+
+- Project page: https://antjs.org/ - verified via direct visit
+- Source repository: https://github.com/theMackabu/ant
+- Package registry: https://ants.land
+- License: MIT, confirmed from the LICENSE.txt file in the repository
+- Language and build: C, built with Meson
+- HN launch thread: https://news.ycombinator.com/item?id=48875377, Show HN with 330 points
+- Latest release at the time of writing: v16.5.c41757b4.0, published 2026-10-24
+- Repository state: 1320 stars, 35 forks, 4 open issues, last pushed 2026-11-08
