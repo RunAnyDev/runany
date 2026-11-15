@@ -1,10 +1,12 @@
 ---
 import BaseLayout from '@/layouts/BaseLayout.astro';
 import PostCard from '@/components/PostCard.astro';
+import Pagination from '@/components/Pagination.astro';
 import { getCollection } from 'astro:content';
 import { getIndexableTags } from '@/utils/tags';
 import { getSlug } from '@/utils/slug';
 import { sortPostsByDateDesc } from '@/utils/posts';
+import { POSTS_PER_PAGE, getPageItems, getTotalPages } from '@/utils/pagination';
 
 const allPosts = await getCollection('blog', ({ data }) => !data.draft);
 const sortedPosts = sortPostsByDateDesc(allPosts);
@@ -17,11 +19,16 @@ const visibleTags = tags.slice(0, maxVisibleTags);
 const hiddenTags = tags.slice(maxVisibleTags);
 const hasMoreTags = hiddenTags.length > 0;
 
-const postsPerPage = 6;
-const initialPosts = sortedPosts.slice(0, postsPerPage);
+// Server-rendered posts for page 1. Crawlers without JavaScript (Googlebot)
+// only see what is rendered here, so the first page ships a full grid of
+// links instead of the 6 cards the old client-side feed exposed.
+const postsPerPage = POSTS_PER_PAGE;
+const initialPosts = getPageItems(sortedPosts, 1);
 const initialTotal = sortedPosts.length;
+const totalPages = getTotalPages(initialTotal);
 const hasMore = initialTotal > postsPerPage;
 const searchablePostCount = sortedPosts.length;
+const serverRenderedCount = initialPosts.length;
 
 const siteUrl = 'https://runany.dev';
 const pageTitle = 'AI Setup, Dev Tools & Local LLM Blog';
@@ -38,7 +45,10 @@ const structuredData = [
   {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
-    itemListElement: sortedPosts.map((post, index) => ({
+    // Only the posts rendered on this page. Listing all 1856 posts here made
+    // the index page ~430 KB of HTML and pushed the real content below the
+    // fold for every crawler.
+    itemListElement: initialPosts.map((post, index) => ({
       '@type': 'ListItem',
       position: index + 1,
       url: `${siteUrl}/blog/${getSlug(post.id)}/`,
@@ -167,6 +177,8 @@ const structuredData = [
 
       {hasMore && <div id="sentinel" class="mt-8 h-1" aria-hidden="true"></div>}
 
+      <Pagination currentPage={1} totalPages={totalPages} totalPosts={initialTotal} />
+
       <p id="empty-state" class:list={['mt-12 text-center text-slate-500', initialTotal !== 0 ? 'hidden' : '']}>
         No posts found.
       </p>
@@ -175,7 +187,7 @@ const structuredData = [
     </section>
   </section>
 
-  <script define:vars={{ postsPerPage, initialTotal, hasMore, searchablePostCount }}>
+  <script define:vars={{ postsPerPage, initialTotal, hasMore, searchablePostCount, serverRenderedCount }}>
     document.addEventListener('DOMContentLoaded', () => {
       const grid = document.getElementById('posts-grid');
       const loadMoreBtn = document.getElementById('load-more-btn');
@@ -188,8 +200,10 @@ const structuredData = [
       const clearSearchBtn = document.getElementById('blog-search-clear');
       const emptyState = document.getElementById('empty-state');
 
-      let currentPage = 1;
       const total = initialTotal;
+      // The server already rendered the first `serverRenderedCount` posts.
+      // The JS feed continues from there instead of re-rendering them.
+      let loadedCount = serverRenderedCount;
       let hasMorePosts = hasMore;
       let loading = false;
       let observer = null;
@@ -208,8 +222,7 @@ const structuredData = [
           return;
         }
 
-        const showing = Math.min(currentPage * postsPerPage, total);
-        statusEl.textContent = hasMorePosts ? `Showing ${showing} of ${total} posts` : `${total} posts`;
+        statusEl.textContent = hasMorePosts ? `Showing ${loadedCount} of ${total} posts` : `${total} posts`;
       };
 
       const createPostCard = (post) => {
@@ -275,12 +288,11 @@ const structuredData = [
       const resetFeed = async () => {
         try {
           const posts = await ensureAllPosts();
-          renderPosts(posts.slice(0, postsPerPage));
-          currentPage = 1;
-          hasMorePosts = total > postsPerPage;
+          renderPosts(posts.slice(0, serverRenderedCount));
+          loadedCount = serverRenderedCount;
+          hasMorePosts = total > serverRenderedCount;
           setPagingVisibility(hasMorePosts);
           if (observer && sentinel && hasMorePosts) observer.observe(sentinel);
-          setPostCount(total);
           setPostCount(total);
       updateStatus();
         } catch (err) {
@@ -332,15 +344,14 @@ const structuredData = [
 
         try {
           const posts = await ensureAllPosts();
-          const nextPage = currentPage + 1;
-          const nextPosts = posts.slice((nextPage - 1) * postsPerPage, nextPage * postsPerPage);
+          const nextPosts = posts.slice(loadedCount, loadedCount + postsPerPage);
 
           nextPosts.forEach((post) => {
             grid.append(createPostCard(post));
           });
 
-          currentPage = nextPage;
-          hasMorePosts = nextPage * postsPerPage < total;
+          loadedCount += nextPosts.length;
+          hasMorePosts = loadedCount < total;
           updateStatus();
 
           if (!hasMorePosts) {

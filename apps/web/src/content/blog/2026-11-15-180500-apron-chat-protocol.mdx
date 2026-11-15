@@ -1,0 +1,161 @@
+---
+title: "Apron Chat Protocol: a chat server in 100 lines"
+description: "Apron is a minimal JSON chat protocol for self-hosted groups. A working server fits in about 100 lines, and any client can talk to it."
+pubDate: "2026-11-15T11:05:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "self-hosted", "chat", "protocol", "python"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/apron-chat-protocol.webp"
+  alt: "Abstract orange apron shape on a dark background representing the Apron Chat Protocol"
+canonical: "https://runany.dev/blog/apron-chat-protocol/"
+---
+
+> **TL;DR:** [**Apron Chat Protocol**](https://apron.chat/) is a minimal JSON wire format for small self-hosted group chats, where the server stays authoritative and a working implementation fits in about 100 lines. Any client can connect to any Apron server, so you can point an existing client at your own backend, or swap the backend without touching the interface. It gives up federation and end-to-end encryption on purpose, which makes it a good fit for a team, a household or a set of bots, and a poor fit for a public community.
+
+## What it is
+
+Apron is a protocol rather than an app. It was designed by Andrey, who goes by shazow and also built ssh.chat in 2014 and maintains urllib3. The first public version showed up as a Show HN post on 2026-11-12, and the current specification is version 10, dated 2026-10-30.
+
+The core bet is that chat protocols have accumulated complexity for reasons that only matter at a scale most self-hosters never reach. Public federation needs identity that spans servers. End-to-end encryption needs key management and an authentication suite along the lines of SASL. Anti-spam needs reputation. Apron drops all of that and starts from a narrower premise: the people on a given server mostly know each other.
+
+What is left is small enough to state in one sentence. The server is the authority on identity, membership and history. The client is mostly a renderer of what the server sends. A minimal server is about a hundred lines of code, and a stateless bot that posts once and disconnects takes a few lines.
+
+Everything on the wire is JSON. Frames borrow the shape of JSON-RPC 2.0 requests, responses and notifications, but drop the `jsonrpc` key and use string ids throughout. WebSocket is the reference transport, although the framing rules also fit a newline-delimited JSON stream over plain TCP or stdio, which is what makes it easy to script against.
+
+## How the protocol works
+
+The mandatory core covers a `server` greeting, `auth`, identities, rooms treated as logs, and `message`. Everything past that is an optional capability that the server advertises in its greeting frame. Nothing is negotiated, and each capability section in the spec states what a client does when the server does not offer it, so partial implementations remain useful.
+
+| capability | adds | fallback |
+|---|---|---|
+| `rooms` | room listing, joining, leaving, editing | one default room, no threads |
+| `history` | paging and recovering a room's log | session-only scrollback |
+| `edit` | edit, move and delete of messages | no edit or delete interface |
+| `reactions` | emoji reactions on messages | reaction controls hidden |
+| `embed:append` | text that grows at the end of a message | post the finished text |
+| `embed:terminal` | live program output in a message | post the output when it ends |
+
+Capability names that start with `ext:` are extension points the spec never defines, which is the sanctioned way to add a niche feature without forking the protocol.
+
+Two design choices carry most of the weight. The first is the auth barrier: `auth` is a request the server fully processes before it handles anything else on that connection, so a frame arriving while authentication is pending is denied or ignored rather than executed under a half-authenticated identity. The second is the id model, where `log_id` is a monotonic position in a room's log and `message_id` identifies the message itself, letting a client page backwards through history and recover after a dropped connection.
+
+A complete session, taken verbatim from the specification, looks like this:
+
+```jsonc
+// <- server greeting with capabilities and auth schemes
+{"method": "server", "params": {"apron": 10, "capabilities": ["rooms"], "auth": ["guest", "token"]}}
+
+// -> guest auth, requesting a display name (the server may choose something else)
+{"method": "auth", "id": "c1", "params": {"scheme": "guest", "name": "Ada"}}
+
+// <- server assigns the identity
+{"id": "c1", "result": {"you": {"user_id": "guest_1234", "name": "Ada"}}}
+
+// -> post a message
+{"method": "message", "id": "c3", "params": {"room_id": "general", "body": {"text": "Hello"}}}
+
+// <- server broadcasts to everyone in the room
+{"method": "message", "params": {
+  "message_id": "1724803200042", "log_id": "1724803200042", "room_id": "general",
+  "from": {"user_id": "guest_1234", "name": "Ada"},
+  "body": {"text": "Hello"}
+}}
+
+// <- confirmation, after the broadcast is complete
+{"id": "c3", "result": {"message_id": "1724803200042"}}
+```
+
+Authentication has five schemes, and the first two cover most self-hosted cases. `guest` asks for no credentials and lets the server assign an identity such as `guest_1234`. `token` is a bearer string the server can rotate, and it is the reference default. The optional ones add passkeys through WebAuthn, a short code emailed to an address, and an `external` scheme that hands sign-in to a page on the server, which is where OAuth or OIDC fits in.
+
+## Running a server in one file
+
+The repository ships a single-file Python server that implements the core plus the `history` capability, and it is small enough to read in one sitting: 155 lines, one dependency, no framework.
+
+```bash
+# PEP 723 inline metadata, so uv handles the dependency
+# requires-python = ">=3.10"
+# dependencies = ["websockets>=14,<17"]
+
+uv run apron_server.py [--host 0.0.0.0] [--port 8765]
+
+# or without uv
+python -m pip install 'websockets>=14,<17'; python apron_server.py
+```
+
+The whole server state is two plain Python objects, and the ids are millisecond timestamps that never repeat:
+
+```python
+GREETING = {"apron": 10, "agent": "apron-python/10", "auth": ["guest"],
+            "capabilities": ["history"]}
+
+
+def send(peers, **frame):
+    # Synchronous writes preserve room order without awaiting slow clients.
+    broadcast(peers, json.dumps(frame, ensure_ascii=False))
+
+
+class ApronServer:
+    def __init__(self, history_size=1000):
+        self.clients = {}  # Only authenticated connections receive broadcasts.
+        self.log = deque(maxlen=history_size)  # Room and message records.
+        self.last_id = 0
+        self.log.append({"room_id": "general", "log_id": self.next_id(), "title": "General"})
+
+    def next_id(self):
+        self.last_id = max(time.time_ns() // 1_000_000, self.last_id + 1)
+        return str(self.last_id)
+```
+
+The file's own docstring is honest about what it leaves out: one room, guest identities, names, replies and the latest 1,000 log records of history, with no edits, room changes, reactions, extensions, persistence or retry deduplication.
+
+For something more complete, the Go reference server implements every capability. The public demo runs on a Cloudflare Worker with a SQLite Durable Object, and the README notes that most of that demo's code exists to keep usage under the free tier quota.
+
+![Apron web client showing a rooms sidebar, a threaded reply and a message composer](https://cdn.runany.dev/blog/inline/apron-chat-protocol-ui.webp)
+
+That screenshot is the SvelteKit client at web.apron.chat talking to the Go reference server. Rooms on the left, a threaded reply in the middle, the composer at the bottom.
+
+## Where Apron sits against the alternatives
+
+![Positioning chart comparing Apron, Zulip, XMPP, Matrix, IRCv3, Nostr, Slack, Discord, Telegram and Signal by custom server and custom client difficulty](https://cdn.runany.dev/blog/inline/apron-chat-protocol-comparison.webp)
+
+This chart comes from the project README. It plots how hard it is to write a custom server on the vertical axis against how hard it is to write a custom client on the horizontal axis. Zulip, XMPP and Matrix sit in the middle. Slack, Discord, Telegram and Signal cluster on the far right because they are closed to custom clients, and the top-left corner marked "no custom servers possible" is where the federated public networks land.
+
+Apron sits alone in the bottom-left, which is the whole argument: easy on both sides. The author compares the goal to HTTP, where browsers do not care whether Nginx, Caddy or something custom is serving them.
+
+| implementation | language | what it covers |
+|---|---|---|
+| apron-server-go | Go | reference server for self-hosting, every capability |
+| apron-server-cloudflare | TypeScript | public demo on a Worker, limited functionality |
+| python-minimal | Python | single-file core server with `history` |
+| js-minimal | JavaScript | the same core server for Bun, no dependencies |
+| apron-web | TypeScript | SvelteKit client at web.apron.chat |
+| apron-pr-bot | TypeScript | bot that posts GitHub pull request activity |
+
+## What to watch for
+
+The security model comes first, because it is the trade-off that decides whether Apron fits your situation. There is no end-to-end encryption between users. The FAQ puts it plainly: if you trust the server and connect over `wss://` it is safe, and if you cannot trust the server then you want a protocol like Signal. Messages are visible to the server operator. TLS protects the connection, not the content.
+
+Second, this is not a protocol for a public community. Spam, sybil attacks and cross-server federation are explicitly out of scope in the security section, and there is no global user network.
+
+Third, clients still have to be careful. A client can connect to any server, so the spec requires that it never runs server-supplied markup or scripts, never opens server URLs unchecked, and sanitizes HTML embeds from every source. Content from other users is untrusted data, never code.
+
+Fourth, the authentication rules have details that matter if you write a server rather than just use one. The server must execute `auth` on every connection, including a retried id, or a deduplicated result would sign in a connection that presented no credentials. Email proposals must return an empty result for every address, so a proposal never reveals which addresses have accounts. Link tokens travel in the URL fragment, where browsers do not send them in request lines or referer headers. An id the caller cannot see returns the same error as one that does not exist, so callers cannot probe for private rooms.
+
+Fifth, the AI footprint is unusual enough to know about. The FAQ explains that the specification was hand-edited and iterated with LLMs, and that each major version change spun out a number of fully autocoded implementations which were then reviewed for friction and common failure modes. The author frames it as protocol-centric agentic engineering, describing an eval loop that checks whether the spec produces good implementations by default. The spec was scrutinized line by line across almost 200 sessions, and the reference servers and clients are largely autocoded with the protocol as the source of truth.
+
+Sixth, the specification moves fast. Version 10 removed `embed:stream` and split it into `embed:append`, for text that grows at the end of a message body such as a streaming model reply and can be revised with backspace, and `embed:terminal`, for live output of an 80x40 terminal kept as `output` when the program ends. That first one is the capability worth watching, because it lets a bot stream a reply into a message that other clients see update in place. Version 9 changed how a server is identified, from its title and avatar to its address, so a server can no longer pass itself off as another by copying a name.
+
+## Source and Accuracy Notes
+
+- Project page: https://apron.chat/ — protocol overview, live demo, implementation listings and FAQ links
+- Specification, version 10: https://raw.githubusercontent.com/shazow/apron/main/PROTOCOL.md — framing, authentication, identity, rooms, capabilities and security considerations
+- Agent index: https://apron.chat/llms.txt — links the spec in Markdown along with the servers, clients, JSON Schema and wire fixtures
+- README: https://github.com/shazow/apron — goals, tradeoffs, background and the license split
+- FAQ: https://raw.githubusercontent.com/shazow/apron/main/FAQ.md — rationale, encryption model, comparison with XMPP, Matrix, Slack and Discord, and the AI usage disclosure
+- Version history: https://raw.githubusercontent.com/shazow/apron/main/HISTORY.md — what changed in versions 8, 9 and 10
+- Minimal server source: https://raw.githubusercontent.com/shazow/apron/main/servers/python-minimal/apron_server.py — the 155-line Python implementation quoted above
+- License: PROTOCOL.md and associated documents are CC0 1.0 Universal, everything else in the repository is MIT, per the README and FAQ
+- HN launch: Show HN post on 2026-11-12 with 66 points, linked from the project page

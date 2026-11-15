@@ -1,0 +1,137 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import PostCard from '@/components/PostCard.astro';
+import Pagination from '@/components/Pagination.astro';
+import { getCollection } from 'astro:content';
+import { getSlug } from '@/utils/slug';
+import { sortPostsByDateDesc } from '@/utils/posts';
+import { POSTS_PER_PAGE, getPageItems, getPagePath, getTotalPages } from '@/utils/pagination';
+
+/**
+ * Server-rendered pagination for the blog index.
+ *
+ * `/blog/` used to render 6 posts and let JavaScript append the rest, so
+ * crawlers only ever saw 6 links on the strongest list page of the site.
+ * These pages give every post a crawlable HTML path from `/blog/`:
+ *
+ *   /blog/          -> posts 1..24
+ *   /blog/page/2/   -> posts 25..48
+ *   ...
+ *
+ * Page 1 stays on `/blog/` so existing links, the canonical tag and the
+ * sitemap entry for the index keep working.
+ */
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+  const sortedPosts = sortPostsByDateDesc(posts);
+  const totalPages = getTotalPages(sortedPosts.length);
+
+  const paths = [];
+  for (let page = 2; page <= totalPages; page += 1) {
+    paths.push({
+      params: { page: String(page) },
+      props: {
+        page,
+        totalPages,
+        totalPosts: sortedPosts.length,
+        posts: getPageItems(sortedPosts, page),
+      },
+    });
+  }
+
+  return paths;
+}
+
+const { page, totalPages, totalPosts, posts } = Astro.props;
+
+const siteUrl = 'https://runany.dev';
+const pagePath = getPagePath(page);
+const pageTitle = `Blog — page ${page} of ${totalPages} | runany.dev`;
+const pageDescription = `Browse runany.dev posts ${(page - 1) * POSTS_PER_PAGE + 1}–${(page - 1) * POSTS_PER_PAGE + posts.length} of ${totalPosts}: AI setup guides, developer tools, self-hosted services and tool reviews.`;
+
+const structuredData = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: `runany.dev Blog — page ${page}`,
+    description: pageDescription,
+    url: `${siteUrl}${pagePath}`,
+    inLanguage: 'en-US',
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement: posts.map((post, index) => ({
+      '@type': 'ListItem',
+      position: (page - 1) * POSTS_PER_PAGE + index + 1,
+      url: `${siteUrl}/blog/${getSlug(post.id)}/`,
+      name: post.data.title,
+    })),
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: siteUrl },
+      { '@type': 'ListItem', position: 2, name: 'Blog', item: `${siteUrl}/blog/` },
+      { '@type': 'ListItem', position: 3, name: `Page ${page}`, item: `${siteUrl}${pagePath}` },
+    ],
+  },
+];
+---
+
+<BaseLayout title={pageTitle} description={pageDescription} canonicalURL={`${siteUrl}${pagePath}`} structuredData={structuredData}>
+  <section class="mx-auto max-w-6xl px-4 py-12 md:py-16">
+    <nav aria-label="Breadcrumb" class="mb-6 text-sm">
+      <ol class="flex flex-wrap items-center gap-2 text-slate-500">
+        <li><a href="/" class="hover:text-cyan-300">Home</a></li>
+        <li>›</li>
+        <li><a href="/blog/" class="hover:text-cyan-300">Blog</a></li>
+        <li>›</li>
+        <li><span class="text-slate-300">Page {page}</span></li>
+      </ol>
+    </nav>
+
+    <div class="mb-10 rounded-3xl border border-white/10 bg-slate-950/70 p-8 shadow-2xl shadow-slate-950/30 md:p-10">
+      <p class="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Runany Blog</p>
+      <h1 class="text-4xl font-black tracking-tight text-white md:text-6xl">All posts — page {page}</h1>
+      <p class="mt-5 max-w-3xl text-lg leading-8 text-slate-300">
+        Showing posts {(page - 1) * POSTS_PER_PAGE + 1}–{(page - 1) * POSTS_PER_PAGE + posts.length} of {totalPosts}.
+      </p>
+    </div>
+
+    <section aria-labelledby="posts-heading">
+      <div class="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <h2 id="posts-heading" class="text-sm font-semibold uppercase tracking-wider text-slate-400">All Posts</h2>
+
+        <form action="/blog/" method="get" class="block w-full max-w-xl">
+          <label class="block w-full" for="blog-search-page">
+            <span class="mb-2 block text-sm font-semibold text-slate-300">Search posts</span>
+            <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 focus-within:border-cyan-300/40">
+              <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5 shrink-0 text-slate-500">
+                <path fill="currentColor" d="M10 4a6 6 0 1 0 3.874 10.582l4.272 4.272l1.414-1.414l-4.272-4.272A6 6 0 0 0 10 4m-4 6a4 4 0 1 1 8 0a4 4 0 0 1-8 0" />
+              </svg>
+              <input id="blog-search-page" type="search" name="q" inputmode="search" autocomplete="off" placeholder="Search by title, keyword" class="w-full border-0 bg-transparent p-0 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-0" />
+            </div>
+          </label>
+        </form>
+      </div>
+
+      <div id="posts-grid" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {posts.map((post) => (
+          <PostCard
+            title={post.data.title}
+            description={post.data.description}
+            pubDate={post.data.pubDate}
+            slug={getSlug(post.id)}
+            category={post.data.category}
+            tags={post.data.tags}
+            image={post.data.image}
+          />
+        ))}
+      </div>
+
+      <Pagination currentPage={page} totalPages={totalPages} totalPosts={totalPosts} />
+    </section>
+  </section>
+</BaseLayout>
