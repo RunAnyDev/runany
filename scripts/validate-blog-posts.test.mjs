@@ -44,6 +44,20 @@ const trendingSetupSectionAlternatives = [
   'Workflow',
 ];
 
+// Depth tier. Posts published before this date are grandfathered. New posts
+// must be researched articles, not summaries: enough prose to explain the
+// tool, at least one illustration in the body, and enough cited sources that
+// every claim can be traced back to a page the author actually read.
+// The blog-publisher and blog-publisher-github-trending skills target
+// 1200-2000 words; the thresholds below leave a small tolerance.
+const DEPTH_START = '2026-11-16';
+const MIN_WORDS = 1100;
+const MIN_H2 = 5;
+const MIN_CODE_BLOCKS = 2;
+const MIN_TABLE_LINES = 3;
+const MIN_INLINE_IMAGES = 1;
+const MIN_SOURCE_URLS = 3;
+
 function parseFrontmatter(source) {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
   if (!match) return { data: null, body: source };
@@ -81,6 +95,54 @@ function wordCount(source) {
 
 function h2Headings(source) {
   return [...source.matchAll(/^##\s+(.+)$/gm)].map((match) => match[1].trim());
+}
+
+// Inline markdown images: ![alt](url). Alt text and hosting are both
+// checked, because an unhosted URL breaks the day the source site changes.
+function inlineImages(source) {
+  return [...source.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((match) => ({
+    alt: match[1].trim(),
+    url: match[2].trim(),
+  }));
+}
+
+// Table lines: rows starting and ending with a pipe. Three lines means a
+// header row plus at least two data rows, i.e. a real comparison table.
+function tableLineCount(source) {
+  return (source.match(/^\|.+\|\s*$/gm) || []).length;
+}
+
+// Distinct source pages cited in the prose. Image URLs are excluded so a
+// post cannot pass this check by hotlinking several pictures.
+function sourceUrls(source) {
+  const withoutImages = source.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
+  const urls = withoutImages.match(/https?:\/\/[^\s)\]<>"']+/g) || [];
+  return new Set(urls.map((url) => url.replace(/[.,;:]+$/, '')));
+}
+
+// Depth and illustration rules for posts published on or after DEPTH_START.
+function checkDepth(body, problems) {
+  const words = wordCount(body);
+  record(problems, words >= MIN_WORDS, `post must be at least ${MIN_WORDS} words (${words})`);
+
+  const headings = h2Headings(body);
+  record(problems, headings.length >= MIN_H2, `post must have at least ${MIN_H2} H2 sections (${headings.length})`);
+
+  const codeBlocks = fencedCodeBlocks(body).length;
+  record(problems, codeBlocks >= MIN_CODE_BLOCKS, `post must have at least ${MIN_CODE_BLOCKS} code blocks (${codeBlocks})`);
+
+  const tableLines = tableLineCount(body);
+  record(problems, tableLines >= MIN_TABLE_LINES, `post must contain at least one table with two data rows (${tableLines} table lines)`);
+
+  const images = inlineImages(body);
+  record(problems, images.length >= MIN_INLINE_IMAGES, `post must contain at least ${MIN_INLINE_IMAGES} inline illustration (${images.length})`);
+  for (const image of images) {
+    record(problems, image.alt.length > 0, `inline image is missing alt text: ${image.url}`);
+    record(problems, image.url.startsWith('https://cdn.runany.dev/'), `inline image must be hosted on cdn.runany.dev (${image.url})`);
+  }
+
+  const urls = sourceUrls(body);
+  record(problems, urls.size >= MIN_SOURCE_URLS, `post must cite at least ${MIN_SOURCE_URLS} distinct source pages (${urls.size})`);
 }
 
 function hasSection(source, sectionName) {
@@ -286,6 +348,23 @@ describe(`blog post conventions (published on or after ${CONVENTIONS_START})`, a
         const { body } = parseFrontmatter(source);
         checkConventions(file, data, body, problems);
       }
+      assertNoProblems(file, problems);
+    });
+  }
+});
+
+// Depth tier: new posts must be researched articles with an illustration in
+// the body and enough cited sources to trace every claim. Older posts are
+// grandfathered because they were written under the previous, thinner rules.
+describe(`blog post depth and illustrations (published on or after ${DEPTH_START})`, async () => {
+  const files = (await readBlogFiles()).filter((file) => filenameDate(file) >= DEPTH_START);
+
+  for (const file of files) {
+    it(`${file} is a researched article with illustrations`, async () => {
+      const source = await readFile(path.join(blogDir, file), 'utf8');
+      const problems = [];
+      const { body } = parseFrontmatter(source);
+      checkDepth(body, problems);
       assertNoProblems(file, problems);
     });
   }

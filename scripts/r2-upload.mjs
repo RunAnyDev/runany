@@ -11,6 +11,14 @@
 //
 // Usage:
 //   node scripts/r2-upload.mjs <slug> <filePath>
+//   node scripts/r2-upload.mjs inline/<name> <filePath>
+//
+// A slug containing a slash is treated as a path under blog/ instead of
+// blog/thumbnails/. That is how body illustrations are published:
+//   node scripts/r2-upload.mjs inline/<slug>-workflow.webp ...
+//   -> https://cdn.runany.dev/blog/inline/<slug>-workflow.webp
+// The .webp extension is added only when the slug does not already carry it.
+// Thumbnails keep the historical blog/thumbnails/<slug>.webp key.
 //
 // Reads R2_BUCKET from .env (no other R2 credentials needed — wrangler uses
 // `npx wrangler` which picks up Cloudflare auth from `~/.config/.wrangler/`).
@@ -56,7 +64,10 @@ if (!existsSync(filePath)) {
   process.exit(1);
 }
 
-const key = `blog/thumbnails/${slug}.webp`;
+const objectName = slug.endsWith(".webp") ? slug : `${slug}.webp`;
+const key = slug.includes("/")
+  ? `blog/${objectName}`
+  : `blog/thumbnails/${objectName}`;
 
 function put(cmd) {
   execSync(
@@ -69,7 +80,8 @@ function put(cmd) {
 // "Upload complete" for a thumbnail that was never retrievable from R2 and
 // 404'd on the CDN, so a silent no-op used to pass as success.
 function verify() {
-  const tmp = join(tmpdir(), `r2-verify-${slug}-${Date.now()}.webp`);
+  // Slugs may contain a slash (inline/<name>), so flatten it for the temp file.
+  const tmp = join(tmpdir(), `r2-verify-${slug.replace(/\//g, "-")}-${Date.now()}.webp`);
   try {
     execSync(`npx wrangler r2 object get "${bucket}/${key}" --file "${tmp}" --remote`, {
       cwd: root,

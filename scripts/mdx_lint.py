@@ -11,7 +11,11 @@ Catches patterns MDX/Astro refuses to parse:
 
 Note: inline `![]()` markdown images are now ALLOWED in body (per visual
 density rules in cron skills, 2026-09-13). They must use https://cdn.runany.dev/
-URLs and have alt text. Lint enforces neither — visual density is the skill's job.
+URLs and have alt text.
+
+Depth tier (files published on or after DEPTH_START): a new post must be a
+researched article, not a summary. Same thresholds as the CI validator in
+scripts/validate-blog-posts.test.mjs, so `mdx_lint.py` and CI never disagree.
 
 Usage:
   python3 scripts/mdx_lint.py [file ...]
@@ -27,6 +31,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path("apps/web/src/content/blog")
+
+# Depth tier: files published before this date are grandfathered.
+DEPTH_START = "2026-11-16"
+MIN_WORDS = 1100
+MIN_H2 = 5
+MIN_CODE_BLOCKS = 2
+MIN_TABLE_LINES = 3
+MIN_INLINE_IMAGES = 1
+MIN_SOURCE_URLS = 3
 
 # Patterns that break MDX/Astro builds. Order matters: more specific first.
 CHECKS = [
@@ -71,6 +84,58 @@ def strip_code_fences(text: str) -> str:
     return text
 
 
+def publish_date(path: Path) -> str:
+    """Date prefix of an MDX filename (YYYY-MM-DD), or '' when absent."""
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})", path.name)
+    return match.group(1) if match else ""
+
+
+def lint_depth(path: Path, body: str) -> list[tuple[int, str, str]]:
+    """Depth and illustration checks for posts published on or after DEPTH_START."""
+    findings = []
+
+    def add(check: str, message: str) -> None:
+        findings.append((0, check, message))
+
+    words = len(body.split())
+    if words < MIN_WORDS:
+        add("too-short", f"post must be at least {MIN_WORDS} words ({words})")
+
+    headings = re.findall(r"^##\s+.+$", body, flags=re.MULTILINE)
+    if len(headings) < MIN_H2:
+        add("too-few-sections", f"post must have at least {MIN_H2} H2 sections ({len(headings)})")
+
+    code_blocks = re.findall(r"```[^\n]*\n[\s\S]*?```", body)
+    if len(code_blocks) < MIN_CODE_BLOCKS:
+        add("too-few-code-blocks", f"post must have at least {MIN_CODE_BLOCKS} code blocks ({len(code_blocks)})")
+
+    table_lines = re.findall(r"^\|.+\|\s*$", body, flags=re.MULTILINE)
+    if len(table_lines) < MIN_TABLE_LINES:
+        add(
+            "no-table",
+            f"post must contain at least one table with two data rows ({len(table_lines)} table lines)",
+        )
+
+    images = re.findall(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)", body)
+    if len(images) < MIN_INLINE_IMAGES:
+        add("no-illustration", f"post must contain at least {MIN_INLINE_IMAGES} inline illustration ({len(images)})")
+    for alt, url in images:
+        if not alt.strip():
+            add("image-missing-alt", f"inline image is missing alt text: {url}")
+        if not url.startswith("https://cdn.runany.dev/"):
+            add("image-not-hosted", f"inline image must be hosted on cdn.runany.dev ({url})")
+
+    without_images = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", body)
+    urls = {
+        u.rstrip(".,;:")
+        for u in re.findall(r"https?://[^\s)\]<>\"']+", without_images)
+    }
+    if len(urls) < MIN_SOURCE_URLS:
+        add("too-few-sources", f"post must cite at least {MIN_SOURCE_URLS} distinct source pages ({len(urls)})")
+
+    return findings
+
+
 def lint_file(path: Path) -> list[tuple[int, str, str]]:
     """Return list of (line_number, check_name, message) for each finding."""
     try:
@@ -105,6 +170,10 @@ def lint_file(path: Path) -> list[tuple[int, str, str]]:
                         (line_no, "uppercase-tag", f"Tag '{tag}' must be lowercase.")
                     )
 
+    # Depth tier: only for posts published on or after DEPTH_START.
+    if publish_date(path) >= DEPTH_START:
+        findings.extend(lint_depth(path, body))
+
     return findings
 
 
@@ -116,7 +185,15 @@ def main():
             return 2
         files = sorted(ROOT.glob("*.mdx"))
     else:
-        files = [Path(p) for p in sys.argv[1:]]
+        files = []
+        for arg in sys.argv[1:]:
+            path = Path(arg)
+            if path.is_dir():
+                # The usage line documents directory arguments, so expand them
+                # instead of failing with "Is a directory".
+                files.extend(sorted(path.glob("*.mdx")))
+            else:
+                files.append(path)
 
     if not files:
         print("No files to check.", file=sys.stderr)
