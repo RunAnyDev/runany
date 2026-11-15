@@ -489,11 +489,26 @@ git push
 
 | Cron | Source | Cadence | Scope | Skill |
 |---|---|---|---|---|
-| `blog-poster` | HN Algolia | Every hour | 1 post/tick (top HN launch) | `~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md` |
-| `blog-poster-github-trending` | github.com/trending (HTML scrape) | Daily 9 AM ICT | All NEW trending (capped at 30) | `~/.minimax/agents/mavis/skills/blog-publisher-github-trending/SKILL.md` |
+| `blog-poster` | HN Algolia | Daily 7:30 AM ICT | 1 post/tick (top HN launch) | `~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md` |
+| `blog-poster-github-trending` | github.com/trending (HTML scrape) | Daily 9 AM ICT | 2 NEW trending per tick (`MAX_POSTS_PER_TICK` default 2) | `~/.minimax/agents/mavis/skills/blog-publisher-github-trending/SKILL.md` |
 
-### `blog-poster` (HN, hourly)
-- **Schedule:** `0 * * * *` (every hour on the hour)
+### Publishing cadence — site-wide budget: 2–3 posts/day
+
+**Do not raise the publishing rate without an explicit user instruction.**
+
+The site published ~24 posts/day (HN cron every 2 hours + trending cron capped at 12) until 2026-11-15 — 1858 posts in ~7 months. Google responded by **stopping the crawl**: Search Console showed 2372 sitemap URLs with 0 indexed, and URL Inspection on sampled articles returned *"Discovered – currently not indexed"* or *"URL is unknown to Google"*, i.e. Google knew the URLs but never fetched them. Pages with impressions fell from 243 (June) to 32 (Nov 1–14).
+
+Current budget:
+
+| Cron | Schedule | Posts/day |
+|---|---|---|
+| `blog-poster` (HN) | `30 7 * * *` — daily 7:30 AM ICT | 1 |
+| `blog-poster-github-trending` | `0 9 * * *` — daily 9:00 AM ICT | 2 (cap) |
+
+Both skill files (`~/.minimax/agents/mavis/skills/blog-publisher/SKILL.md` and `.../blog-publisher-github-trending/SKILL.md`) carry the same budget note and are the source of truth for the tick agents. Leftover trending repos are not lost — they stay in `.data/written-repos.txt` and are picked up by the next tick.
+
+### `blog-poster` (HN, daily)
+- **Schedule:** `30 7 * * *` (daily at 7:30 AM ICT)
 - **Model:** `MiniMax-M2.7` lean — ~360K tokens/tick vs 3.1M for M3 verbose
 - **Workdir:** `~/personal/runany`
 - **Session mode:** new (each tick = fresh session, no cross-tick state)
@@ -502,6 +517,7 @@ git push
 
 ### `blog-poster-github-trending` (GitHub, daily)
 - **Schedule:** `0 9 * * *` (9:00 AM ICT daily)
+- **Per-tick cap:** `MAX_POSTS_PER_TICK` default **2** (was 12, before that 30) — see "Publishing cadence" above
 - **Model:** `MiniMax-M2.7` lean (per-repo loop budget)
 - **Workdir:** `~/personal/runany`
 - **Session mode:** new
@@ -512,7 +528,7 @@ git push
   - Audit a post's thumbnail at any time: `/tmp/thumb-audit.mjs` pattern — a real image is never exactly 1200x630 with the template's three traffic-light dots at pixels (120,106) (140,106) (160,106).
 - **Dedup:** owner/repo (lowercased) match in `.data/written-repos.txt` OR any existing post slug contains BOTH owner + repo as slug words. Plus blocklist substring match + unsafe keyword filter (`kms`, `crack`, `activator`, `keygen`, `piracy`, `malware`, `cheat`, `exploit`).
 - **Per-repo loop:** GitHub API metadata → thumbnail → R2 upload → CDN verify → MDX write → lint → commit. ~6 calls/repo × ~16 repos/day = ~100 calls/tick.
-- **Output:** One commit per post + one final tracking commit for `.data/written-repos.txt` updates. Expect ~10-16 commits/day on busy trending days.
+- **Output:** One commit per post + one final tracking commit for `.data/written-repos.txt` updates. Expect 2-4 commits/day (2 posts + tracking commit), not the ~10-16 of the old uncapped schedule.
 - **Token note:** Cron currently runs WITHOUT `GITHUB_TOKEN` (not in `.env`). Uses unauthenticated API (60 req/hr). With ~16 repos/day = ~16 API calls/tick, sustainable for ~3 weeks before hitting limits. Add token to `.env` to lift to 5000 req/hr.
 
 ### Discovery → publish flow (lean, ~12-15 tool calls)
