@@ -29,7 +29,7 @@ Use this skill to create runany.dev blog posts about newly popular GitHub develo
 - Every factual sentence must trace back to a source you actually read. Never write from memory or from the one-line GitHub description.
 - Include at least one inline illustration in the body: a real screenshot from the README or site, or an abstract concept image when no real one exists. Upload it to the CDN first, then reference it with Markdown syntax and descriptive alt text:
   ```bash
-  cwebp /tmp/shot.png -o /tmp/shot.webp -resize 1400 1400 -q 80
+  node scripts/prepare-image.mjs illustration /tmp/shot.png /tmp/shot.webp
   node scripts/r2-upload.mjs inline/<slug>-ui.webp /tmp/shot.webp
   curl -sI "https://cdn.runany.dev/blog/inline/<slug>-ui.webp" | head -1   # expect HTTP/2 200
   ```
