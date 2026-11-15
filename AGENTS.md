@@ -230,8 +230,10 @@ proxy_url = "https://api.allorigins.win/raw?url=" + tool_url
 curl -L -o /tmp/thumb_src.png "https://source-image-url"
 # Convert to WebP (1200x630, quality 85)
 cwebp /tmp/thumb_src.png -o /tmp/thumb.webp -resize 1200 630 -q 85
-# Upload to R2 — MUST use Node.js AWS Signature v4 script below
-# ⚠️ wrangler r2 object put --remote SILENTLY FAILS (file goes to local mock, NOT R2)
+# Upload to R2 — canonical path is the wrangler-based helper script
+node scripts/r2-upload.mjs <slug> /tmp/thumb.webp
+# Verify the CDN serves it (expect HTTP/2 200)
+curl -sI "https://cdn.runany.dev/blog/thumbnails/<slug>.webp" | head -1
 ```
 
 > Skip Priority 1 if: site returns 403/404/captcha, image is < 300px wide, image is a 1-pixel tracker, or image is a generic stock photo. Fall through to Priority 2.
@@ -262,38 +264,50 @@ node --input-type=module <<'EOF'
 import sharp from 'sharp';
 await sharp('/tmp/thumb.svg').resize(1200, 630, { fit: 'cover' }).webp({ quality: 85 }).toFile('/tmp/thumb.webp');
 EOF
-# Upload to R2 — MUST use Node.js AWS Signature v4 script
-# ⚠️ wrangler r2 object put --remote SILENTLY FAILS
+# Upload to R2
+node scripts/r2-upload.mjs <slug> /tmp/thumb.webp
 ```
 
 **Environment variables** (`~/personal/runany/.env`):
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`, `R2_ACCOUNT_ID`
 - `GITHUB_TOKEN`
 
-**MDX frontmatter:** thumbnail URL goes in `image.url` field. Body should NOT contain `![]()` markdown image tags — PostLayout renders from frontmatter only.
+**MDX frontmatter:** the thumbnail URL goes in the `image.url` field.
+
+**Inline illustrations in the body ARE ALLOWED and REQUIRED** for posts published on or after 2026-11-16. The old "no `![]()` in body" rule is gone. Requirements:
+
+- At least one inline image per post (two for posts over 1500 words), with descriptive alt text.
+- Images must be hosted on `cdn.runany.dev`. Upload with a slash in the slug, which maps to `blog/<slug>.webp`:
+  ```bash
+  cwebp /tmp/shot.png -o /tmp/shot.webp -resize 1400 1400 -q 80
+  node scripts/r2-upload.mjs inline/<post-slug>-ui.webp /tmp/shot.webp
+  curl -sI "https://cdn.runany.dev/blog/inline/<post-slug>-ui.webp" | head -1   # expect HTTP/2 200
+  ```
+- Markdown syntax in the body: `![What the reader sees](https://cdn.runany.dev/blog/inline/<post-slug>-ui.webp)`.
+- The frontmatter thumbnail is a separate artifact and does not count as the body illustration.
 
 **MDX curly braces pitfall:** MDX parses `{...}` as JSX expressions even inside table cells and inline text. Never use literal `{var}` placeholders in body content — Astro build fails with `ReferenceError: var is not defined`. Use square brackets `[var]`, wrap in a code span `` `{var}` ``, or escape as `&#123;var&#125;`. Code blocks (```fenced```) are safe because MDX doesn't parse expressions inside fences.
 
-**R2 upload via Node.js (wrangler --remote is broken for R2):**
-Use `scripts/r2-upload.mjs` (reads credentials from `.env`, no hardcoded keys):
+**R2 upload:** use `scripts/r2-upload.mjs` (reads `R2_BUCKET` from `.env`, no hardcoded keys):
 ```bash
-node scripts/r2-upload.mjs [slug] [filepath]
+node scripts/r2-upload.mjs <slug> <filePath>          # -> blog/thumbnails/<slug>.webp
+node scripts/r2-upload.mjs inline/<name>.webp <file>   # -> blog/inline/<name>.webp
 ```
-The `wrangler r2 object put --remote` command silently fails — returns "Upload complete" but file goes to local mock storage, NOT R2.
+The script uses `npx wrangler r2 object put` under the hood and verifies the object landed by reading it back. Do not use `@aws-sdk/client-s3` directly: Node.js v26's bundled TLS rejects Cloudflare R2's S3-compatible endpoint with `EPROTO ... sslv3 alert handshake failure` (the older `r2-upload-s3.mjs` in git history is the broken path).
 
 **Validation:**
 - ✅ All 21 existing thumbnails verified on R2
 - ❌ DO NOT commit if CDN returns 404 — thumbnail must be uploaded and verified in R2
-- ⚠️ CDN verification via `curl` / Python `urlopen` returns HTTP 403 (Cloudflare Bot Management) — file IS in R2. Use `wrangler r2 object get --remote` instead.
+- ✅ CDN verification via `curl -sI` works and returns `HTTP/2 200` for a published object. If it returns 403 or 404, re-check with `npx wrangler r2 object get "runany/<key>" --file /tmp/check.webp --remote` before assuming the object is missing.
 
 ### 6. Content Rules
 
 - **Code blocks**: ALWAYS include a language identifier (`bash`, `python`, `javascript`, `json`, `yaml`)
 - **Headings**: H2 for main sections, H3 for sub-steps
 - **Links**: Use relative paths for internal links (`/blog/other-post/`)
-- **Images**: Local in `public/` or external URLs
+- **Images**: frontmatter thumbnail on `cdn.runany.dev`, plus at least one inline illustration in the body (also on `cdn.runany.dev`, with alt text). See "Inline illustrations" above.
 - **TL;DR**: Add block quote `>` for summary (AI summary box will extract)
-- **FAQ**: Add Q&A format at the end if there are common questions
+- **Structure**: prose-first. Do not stack rigid sections like `## Practical Evaluation Checklist`, `## Security Notes`, `## FAQ` or `## Conclusion`; fold that content into the sections where it belongs.
 
 ### 7. Sync priority-posts list (when promoting a post)
 
