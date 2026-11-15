@@ -1,0 +1,111 @@
+---
+title: "Qwen Code: an open-source AI coding agent in your terminal"
+description: "Qwen Code is an open-source terminal coding agent with subagents, auto-memory, MCP and 30k GitHub stars. Runs on Qwen, OpenAI, Anthropic, Gemini or a local model."
+pubDate: "2026-11-15T10:37:00.000Z"
+author: "Friday"
+tags: ["ai-coding", "cli", "typescript", "agentic", "open-source"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/qwen-code.webp"
+  alt: "Qwen Code repository card showing the project name, description and star count"
+canonical: "https://runany.dev/blog/qwen-code/"
+---
+
+> **TL;DR:** Qwen Code is an open-source coding agent that lives in your terminal, and the framework plus the Qwen models are both Apache-2.0 and public. It runs against Qwen, OpenAI, Anthropic, Gemini, OpenRouter or a local Ollama and vLLM server, and the npm package has passed 30,000 GitHub stars. What makes it more than a thin CLI wrapper is the harness around the model: subagents, auto-memory, skills, MCP servers, sandboxing and git worktrees all work from the first session.
+
+![Qwen Code terminal interface showing the chat panel, tool calls and the model selector](https://cdn.runany.dev/blog/inline/qwen-code-terminal.webp)
+
+## What it is
+
+Qwen Code started as a fork of Google Gemini CLI v0.8.2 and stopped syncing with upstream at version 0.1, according to the acknowledgements section of the [project README](https://github.com/QwenLM/qwen-code). That fork became a multi-protocol agent framework rather than a Gemini-only client. The current release on [npm](https://www.npmjs.com/package/@qwen-code/qwen-code) is 0.27.3, and the repository has about 30,400 stars, 3,500 forks and 2,300 open issues.
+
+The name is misleading in one respect. Qwen Code is not locked to Qwen models. The documentation lists built-in providers for OpenAI, Anthropic, Gemini and Qwen, plus third-party providers such as DeepSeek, MiniMax, Z.AI, Kimi and OpenRouter, and a custom provider option for a local server or a proxy. Switching provider happens at runtime, so the same binary can call a hosted frontier model in the morning and a local Ollama model in the afternoon.
+
+It is also not terminal-only, despite where the project started. The same package ships a desktop app for macOS, Windows and Linux, editor plugins for VS Code, Zed and JetBrains, a web UI, SDKs in TypeScript, Python and Java, and chat channel integrations for Telegram, DingTalk, WeChat, WeCom, Feishu, QQ Bot, email and GitHub issues.
+
+![Qwen Code across interfaces: terminal, desktop app, browser, editor plugins and chat channels](https://cdn.runany.dev/blog/inline/qwen-code-interfaces.webp)
+
+## Why it matters
+
+Most coding agents split into two camps. Either you get a chat box bolted onto a proprietary model with a handful of tools, or you get an open framework that expects you to assemble the context yourself. Qwen Code ships the whole harness as the default: auto-memory, skills, subagents, MCP, hooks and sandboxing are on from the first session rather than behind a setup guide.
+
+Two details matter more than the feature list. The first is that the agent writes its own notes and recalls them across sessions, and it loads your `QWEN.md` and `AGENTS.md` briefings automatically, so context survives between runs without you re-prompting it. The second is that the project uses its own agent and models to file issues, submit pull requests, review code and run tests against itself, which the README describes as the project iterating on itself.
+
+The evaluation section gives a concrete number rather than a claim. On SWE-bench Verified, seven Qwen Code versions scored between 76.40% and 77.80% on average with the same Qwen 3.7 Max model, over 500 tasks with three trials per version, and the repository publishes the per-version numbers and the evaluation configuration in its evaluation docs.
+
+## Getting it running
+
+The recommended installer uses a standalone archive per platform and falls back to npm only if needed:
+
+```bash
+# Linux / macOS
+curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash
+
+# Windows PowerShell
+irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex
+```
+
+Both installers live on an Aliyun OSS bucket, and the [quickstart documentation](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) documents a manual install plus offline installation with a release archive and a SHA256SUMS file for verification. If you prefer a package manager, npm requires Node.js 22 or later:
+
+```bash
+npm install -g @qwen-code/qwen-code@latest
+brew install qwen-code
+```
+
+Restart your terminal afterwards so the environment variables take effect. Then start the agent inside your project:
+
+```bash
+cd /path/to/your-project
+qwen
+```
+
+On first launch a provider menu appears. It offers a Qwen account with subscription (Plus or Pro through chat.qwen.ai), QwenCloud, Alibaba Model Studio, the built-in third-party providers, and a custom provider for a local server or a proxy. Inside the session, `/auth` handles credentials and `/resume` brings back an earlier conversation.
+
+For automation the same binary runs headless, which is how you wire it into CI:
+
+```bash
+qwen -p "Explain this repository and show me where to start."
+qwen serve --open
+```
+
+Every surface shares the same agent core, so the choice is about where you talk to it:
+
+| Surface | Entry point | Notes |
+| --- | --- | --- |
+| Terminal | `qwen` | the default path, `/auth` and `/resume` live here |
+| Desktop | desktop-latest release | macOS, Windows and Linux builds |
+| Web UI | `qwen serve --open` | experimental, served on `http://127.0.0.1:4170` |
+| Editor | VS Code, Zed and JetBrains plugins | language server support is still experimental |
+| Chat | `qwen channel start` | Telegram, DingTalk, WeChat, WeCom, Feishu, QQ Bot, email, GitHub |
+| Headless | `qwen -p "..."` | scripts, CI and batch jobs |
+| SDK | TypeScript, Python and Java packages | build your own client on the agent core |
+
+## How it works
+
+The harness is where the engineering sits. Subagents delegate focused subtasks with their own context and toolsets. Agent Teams add a leader that coordinates teammates sharing a task list, with read-only investigators and at most one worktree writer. Agent Arena runs the same task on several models in isolated git worktrees so you can compare solutions and merge the winner.
+
+Dynamic Workflows push it further: the model writes JavaScript workflows that fan out work in parallel, add verification passes and can resume after an interruption. Goals keep a session working across turns until an independent verifier accepts the result, inside a token budget. Scheduled tasks use `/loop` and cron tools to re-run prompts on an interval.
+
+Memory and skills cover the other half. Auto-Memory lets the agent write its own notes and recall them later, and `/learn` distills a document or a codebase into a new skill. Built-in skills such as `/review`, `/batch` and `/bugfix` work immediately, while letting the agent generate skills on its own stays opt-in.
+
+Extensibility runs through MCP for tools, resources and prompts, plus hooks that fire your own scripts before and after tool calls and at session start and end. LSP support, Computer Use and Browser Use are all marked experimental and opt-in, and Plan Mode lets the agent read and plan before it touches a file, with approval modes ranging from per-call confirmation to YOLO.
+
+## What to watch for
+
+The daemon is the part to read carefully. By default it listens on loopback without bearer authentication, so any local process that can reach it can use the full API, including code execution. On a shared or untrusted host you need to set `QWEN_SERVER_TOKEN` and start it with `--require-auth`. The default address is `http://127.0.0.1:4170`.
+
+Several headline features are labelled experimental or opt-in in the README, and the labels differ per feature: Agent Teams and Agent Arena are experimental, Dynamic Workflows and agent-generated skills are opt-in, and LSP, Computer Use and the web UI are experimental. A feature being listed in the capabilities table does not mean it is stable.
+
+Version numbering is worth tracking. The main line is 0.27.x on npm, while a separate 1.0 Preview branch merges the agent harness of Qoder with Qwen Code, and the installation instructions differ between the two. The project also ships in eight documentation languages, which matters more than usual for a project this actively translated.
+
+Two practical notes. The npm package is `@qwen-code/qwen-code`, not the `@google/` scoped name from earlier builds. And with 2,300 open issues against an Apache-2.0 codebase that ships releases every few days, expect breaking changes in configuration keys between minor versions.
+
+## Source and Accuracy Notes
+
+- Source repository: https://github.com/QwenLM/qwen-code (verified via GitHub API `html_url`, Apache-2.0, about 30,400 stars at time of writing)
+- README: https://github.com/QwenLM/qwen-code (provided the capabilities matrix, install commands, SWE-bench numbers and the Gemini CLI fork history)
+- Documentation overview: https://qwenlm.github.io/qwen-code-docs/en/users/overview (provided the provider menu, installer fallback behaviour and Node.js requirement)
+- npm package page: https://www.npmjs.com/package/@qwen-code/qwen-code (provided the current version 0.27.3 and the package name)
+- Illustrations: the terminal interface and the multi-interface overview images published in the project README
