@@ -228,8 +228,8 @@ proxy_url = "https://api.allorigins.win/raw?url=" + tool_url
 ```bash
 # Download
 curl -L -o /tmp/thumb_src.png "https://source-image-url"
-# Convert to WebP (1200x630, quality 85)
-cwebp /tmp/thumb_src.png -o /tmp/thumb.webp -resize 1200 630 -q 85
+# Convert to WebP (crop to 1200x630 around the most interesting region, aspect preserved)
+node scripts/prepare-image.mjs thumbnail /tmp/thumb_src.png /tmp/thumb.webp
 # Upload to R2 — canonical path is the wrangler-based helper script
 node scripts/r2-upload.mjs <slug> /tmp/thumb.webp
 # Verify the CDN serves it (expect HTTP/2 200)
@@ -279,12 +279,13 @@ node scripts/r2-upload.mjs <slug> /tmp/thumb.webp
 - At least one inline image per post (two for posts over 1500 words), with descriptive alt text.
 - Images must be hosted on `cdn.runany.dev`. Upload with a slash in the slug, which maps to `blog/<slug>.webp`:
   ```bash
-  cwebp /tmp/shot.png -o /tmp/shot.webp -resize 1400 1400 -q 80
+  node scripts/prepare-image.mjs illustration /tmp/shot.png /tmp/shot.webp
   node scripts/r2-upload.mjs inline/<post-slug>-ui.webp /tmp/shot.webp
   curl -sI "https://cdn.runany.dev/blog/inline/<post-slug>-ui.webp" | head -1   # expect HTTP/2 200
   ```
 - Markdown syntax in the body: `![What the reader sees](https://cdn.runany.dev/blog/inline/<post-slug>-ui.webp)`.
 - The frontmatter thumbnail is a separate artifact and does not count as the body illustration.
+- **Never distort an image.** `cwebp -resize W H` forces the output to exactly WxH, so a 1544x1060 screenshot became a 1400x1400 square and the text looked stretched. Use `node scripts/prepare-image.mjs illustration <src> <out>` for body illustrations (scales down inside 1400x1400, aspect preserved) and `node scripts/prepare-image.mjs thumbnail <src> <out>` for the OG thumbnail (crops to 1200x630 around the most interesting region, aspect preserved). The script prints the resulting dimensions.
 
 **MDX curly braces pitfall:** MDX parses `{...}` as JSX expressions even inside table cells and inline text. Never use literal `{var}` placeholders in body content — Astro build fails with `ReferenceError: var is not defined`. Use square brackets `[var]`, wrap in a code span `` `{var}` ``, or escape as `&#123;var&#125;`. Code blocks (```fenced```) are safe because MDX doesn't parse expressions inside fences.
 
@@ -519,7 +520,7 @@ git push
 6. Optional GSC cannibalization check via `mcp__gsc__get_search_analytics` — may fail silently if token expired
 7. Write MDX with `write` tool — 1 call
 8. `python3 scripts/mdx_lint.py <file>` — 1 call (fix + re-run if any findings)
-9. `cwebp` + `node scripts/r2-upload.mjs <slug>` (or `image_synthesize` if no OG) — 1-2 calls
+9. `node scripts/prepare-image.mjs thumbnail` + `node scripts/r2-upload.mjs <slug>` (or `image_synthesize` if no OG) — 1-2 calls
 10. `git add` (specific files only) + commit + push — 1 call group
 11. Final response: `Published: <title>` + `URL: https://runany.dev/blog/<slug>/`
 
