@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,6 +10,28 @@ const root = process.cwd();
 const dataDir = path.join(root, '.data');
 const trackingPath = path.join(dataDir, 'written-repos.txt');
 const postsPerRun = Number.parseInt(process.env.POSTS_PER_RUN || '17', 10);
+
+// GitHub token resolution: GITHUB_TOKEN from the environment wins, otherwise
+// fall back to the GitHub CLI's own login. `gh auth token` returns a fresh
+// token on every call, so no secret has to be stored in .env and nothing
+// expires there. Without this the scripts sent `Authorization: Bearer ` with
+// an empty token, which the API answers with 401 "Bad credentials".
+function resolveGitHubToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  try {
+    const token = execSync('gh auth token', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (token) {
+      process.env.GITHUB_TOKEN = token;
+      return token;
+    }
+  } catch {
+    // gh not installed or not logged in: continue unauthenticated
+  }
+  return '';
+}
 
 async function loadDotEnv() {
   const filePath = path.join(root, '.env');
@@ -214,6 +237,7 @@ function today() {
 
 async function main() {
   await loadDotEnv();
+  resolveGitHubToken();
   validateRequiredEnv();
   await mkdir(dataDir, { recursive: true });
   const trackedRepos = await readTrackedRepos();
