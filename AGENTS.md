@@ -270,7 +270,11 @@ node scripts/r2-upload.mjs <slug> /tmp/thumb.webp
 
 **Environment variables** (`~/personal/runany/.env`):
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`, `R2_ACCOUNT_ID`
-- `GITHUB_TOKEN`
+- `GITHUB_TOKEN` — optional. It is not set in `.env` today, and an empty value made the old `Authorization: Bearer ${GITHUB_TOKEN}` call fail with 401 "Bad credentials". The GitHub helper scripts now fall back to `gh auth token`, which returns a fresh token from the GitHub CLI login on every call, so nothing has to be stored in a file:
+  ```bash
+  GH_TOKEN=$(gh auth token 2>/dev/null || grep '^GITHUB_TOKEN=' .env | cut -d= -f2-)
+  curl -sL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/OWNER/REPO
+  ```
 
 **MDX frontmatter:** the thumbnail URL goes in the `image.url` field.
 
