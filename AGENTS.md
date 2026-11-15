@@ -555,6 +555,43 @@ Add new entries to the file (not memory) — `dedup-check.py` and the cron agent
 
 OAuth token at `~/.minimax/agents/mavis/mcp-gsc/token.json` expired 2026-06-09. If `mcp__gsc__*` calls return 401, the cron agent logs `GSC_AUTH_FAILED` and skips cannibalization (proceeds with `SAFE_TO_WRITE` marked in `.data/cannibalization-decisions.jsonl`). Re-auth by re-running the project's GSC auth script (likely `cd apps/web && npm run gsc:auth` — confirm in project docs).
 
+---
+
+## Google Search Console access (scripts/gsc-client.mjs)
+
+**Do not use `mavis mcp call gsc ...` any more.** The `mavis` CLI symlink
+(`~/.minimax/bin/mavis` → `/Applications/MiniMax Code.app/Contents/Resources/resources/daemon/cli.js`)
+is broken: the app moved to `app.asar` and that path no longer exists. The
+`mcp-gsc` skill still documents the old command and will fail.
+
+Use the repo client instead — it speaks MCP over stdio to the same
+`mcp-search-console` server configured in `~/.minimax/mcp/mcp.json`:
+
+```bash
+cd ~/personal/runany
+node scripts/gsc-client.mjs list_properties '{}'
+node scripts/gsc-client.mjs get_sitemaps '{"site_url":"sc-domain:runany.dev"}'
+node scripts/gsc-client.mjs get_sitemap_details '{"sitemap_url":"https://runany.dev/sitemap.xml"}'
+node scripts/gsc-client.mjs check_indexing_issues '{"urls":"https://a/\nhttps://b/"}'
+node scripts/gsc-client.mjs inspect_url_enhanced '{"page_url":"https://runany.dev/blog/pikimov/"}'
+```
+
+- `site_url` defaults to `sc-domain:runany.dev` (override with `GSC_SITE_URL`).
+- OAuth client secrets come from `GSC_SECRETS_FILE` (default `~/gsc-token.json`); no credential is stored in this repo.
+- Long payloads: pass args as a file — `node scripts/gsc-client.mjs check_indexing_issues @/tmp/args.json`.
+- Destructive calls (`delete_sitemap`) need `GSC_ALLOW_DESTRUCTIVE=true`.
+
+### Daily indexing monitor (2026-11-15 → 2026-11-29)
+
+A daily cron tracks whether Google actually crawls and indexes the articles,
+because the sitemap alone looked healthy while **0 of 2372 URLs were indexed**.
+
+- **Watchlist:** `.data/gsc-watchlist.txt` — 11 fixed article URLs (4 newest, 4 spread Jul–Oct, 2 edge cases, 1 already-indexed control). Fixed, not rotating, so day-over-day states are comparable.
+- **Log:** `.data/gsc-index-log.jsonl` (git-ignored) — one JSON line per day.
+- **Cron:** Mavis task "gsc-index-monitor", daily 10:30 ICT, agent `mavis`, session `new`.
+- **Checks per run:** `get_sitemap_details` (submitted vs indexed) → `check_indexing_issues` on the watchlist → `get_advanced_search_analytics` (page dimension, 28 days) for the impression-bearing article count.
+- **Baseline (2026-11-15):** sitemap submitted 2372 / indexed 0; watchlist 0 indexed; 47 blog URLs with impressions in the last 28 days.
+
 ### Lean-mode pitfalls (real failures, keep checklist in mind)
 
 - **MDX `{var}`** — Literal `{` outside code fences parses as JSX. Use `[var]`, `` `{var}` ``, or `&#123;var&#125;`. Real failure 2026-06-22 ClickNest post L104:40.
