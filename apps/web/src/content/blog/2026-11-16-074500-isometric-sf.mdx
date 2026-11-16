@@ -1,0 +1,134 @@
+---
+title: "Isometric SF: the Bay Area painted in pixel art by AI"
+description: "Isometric SF is the San Francisco Bay Area painted in pixel art by an AI model. How a 20B teacher model taught a 4B student to paint 1,300 square miles."
+pubDate: "2026-11-16T00:30:00.000Z"
+author: "Friday"
+tags: ["dev-tools", "ai", "maps", "open-models"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/isometric-sf.webp"
+  alt: "Isometric SF map interface showing downtown San Francisco in pixel art with the Transamerica Pyramid at the centre"
+canonical: "https://runany.dev/blog/isometric-sf/"
+---
+
+> **TL;DR:** Justin Chavez built a zoomable, shareable isometric pixel-art map of the entire San Francisco Bay Area by training a 4-billion-parameter image model to paint it, tile by tile. The model chain runs from Nano Banana 2 down to Qwen-Image-Edit-2511 and finally to FLUX.2 Klein 4B, which produced roughly 177,000 tiles in about 119 H100-hours. The map, the places directory and the share links are live at isometricsf.com.
+
+## What Isometric SF is
+
+isometric sf is a Leaflet map of the San Francisco Bay Area drawn as SimCity 3000 pixel art, covering about 1,300 square miles of land from the Golden Gate down to San Jose. You can glide from the whole Bay down to a single building, search for a place, a town, a street address or a latitude and longitude and let the map fly you there, or hit the dice button to land somewhere random. A yellow Share button turns whatever is currently on screen into a link with an optional note attached.
+
+Every tile was painted by an image model working from Google Maps 3D captures. The rest of the map is assembled from real data: OpenStreetMap for the base map, ESA WorldCover 2021 for land cover, Copernicus WorldDEM-30 for elevation, and Wikivoyage for the curated place list. The site publishes its own credit panel for every one of these, which is rarer than it should be.
+
+Alongside the map there is a directory of 25 landmarks, each with its own pixel-art hero image and an "Open on the map" button that drops you at the right zoom level. Places are grouped by region: the Golden Gate and Alcatraz sit with San Francisco, while Apple Park, Levi's Stadium and the Winchester Mystery House belong to the South Bay.
+
+![Isometric SF map interface showing downtown San Francisco in pixel art with the Transamerica Pyramid at the centre](https://cdn.runany.dev/blog/inline/isometric-sf-map-ui.webp)
+
+The visual reference is Andy Coenen's Isometric NYC, which Chavez saw in January 2026 and wanted to copy for the Bay. He says in his write-up that it was not the one-shot he had hoped for, because nine months of progress on open models had abstracted away much of the work that project required.
+
+## Why the pipeline is the interesting part
+
+The map itself is a fun artifact. The reproducible recipe behind it is the part worth reading, because it answers a question a lot of people were quietly asking: what does it actually take to paint something at this scale with an open model?
+
+The short answer is a teacher-student chain. A frontier model that nobody can afford to run at scale sets the style on 45 sample images. An open 20-billion-parameter model learns that style and becomes a teacher in turn. A much smaller 4-billion-parameter student learns from the teacher's 1,460 paintings and then does the real work, about four times faster. The student was small enough to make the whole Bay affordable, and by Chavez's own measurement it kept buildings and roads in place slightly better than the model that taught it.
+
+| Stage | Model | Size | Job it does | Output |
+|---|---|---|---|---|
+| Style seed | Nano Banana 2 | proprietary | sets the pixel-art look | 45 restyled renders |
+| Prototyping | Qwen-Image-Edit-2511 plus LoRA | 20B parameters | teacher, trains on seeds | 1,460 training paintings |
+| Production | FLUX.2 Klein 4B plus LoRA | 4B parameters | paints the Bay | about 177,000 tiles |
+
+The other thread running through it is agents. Coding agents wrote the code, took screenshots to check their own progress and fixed what looked wrong. Chavez supplied the product instincts, caught edge cases like a bridge being drawn as water, and bought more GPUs and SSDs when the runs needed them. Reading the write-up, the division of labour is roughly: the agents did the building, the human did the judging.
+
+## How the map gets built
+
+The first decision was the camera. Chavez faced the map east to show off the west coast of the Peninsula, and used an orthographic camera tilted 30 degrees below the horizon. He let an agent render the alternatives rather than guess, which produced a 4x3 grid of tilts and directions to compare:
+
+```text
+Using Google's Photorealistic 3D Tiles and an orthographic camera, render [a landmark in your city] at tilts of 30°, 45° and 60° below the horizon, facing north, east, south and west. Make each view 1.5 km wide and lay them out in a labeled 4×3 grid.
+```
+
+That prompt is worth reading as a pattern on its own. "Let the agent render the options, then pick one" is a much better way to settle a taste question than arguing about it in a chat window.
+
+Capture came next. Google's Photorealistic 3D Tiles come as a hierarchy of 3D boxes, and NASA's open-source 3DTilesRendererJS picks the right level of detail for whatever the camera can see. Three.js renders the scene, headless Chromium driven by Playwright takes the screenshot, and that setup allows captures to run in parallel. The area to capture was drawn on geojson.io and handed to the agent as a JSON blob:
+
+```text
+Use the tile capturer to render every tile in [your GeoJSON] at [your capture angle].
+```
+
+Style transfer came next, and it started with a single sentence. Forty-five Google renders covering city, suburbs, grassy hills, ocean cliffs and parks were handed to Nano Banana 2 with a prompt that set the target look, then a second instruction was added after he noticed the outputs carried cast shadows:
+
+```text
+Redraw this render as SimCity 3000 pixel art, matching the reference image.
+
+Exclude all cast shadows
+```
+
+Chavez reviewed every single training seed by eye, which is where the human eye earns its keep. He found a blank rooftop that came back with writing on it, white road markings that turned yellow, and a ship that grew larger than it was in the original render.
+
+From there the pipeline became a loop: train a prototyping model on the seeds, generate a large area with it, look for problems at scale, adjust the seeds, retrain. The prototyping model was a LoRA on Qwen-Image-Edit-2511 trained with infill, where one region of each training image is replaced with a corrupted copy of the Google render (desaturated, noised, darkened) and the model learns to repaint it. He considered the newer Qwen Image 2.1, which scored better on benchmarks, but kept 2511 because in his own comparisons it style-transferred more consistently.
+
+The production model was FLUX.2 Klein 4B, a 4-step distilled model, with its own style LoRA. The teacher painted 1,460 places from raw photos, and each photo became three training examples (the original plus two color-shifted copies) so that Klein would learn the style rather than copy Google's color quirks. That gave 4,380 training examples and a 5,000-step run, from which he picked the checkpoint at step 3,000 because the seam and color error curves were both at their lowest there.
+
+## Getting 177,000 tiles to agree
+
+Each painting is made alone, so neighbours disagree at the edges. Stitched naively, the map looks like a checkerboard of slightly different shades, which is the exact failure mode Chavez saw when comparing against other isometric maps.
+
+The fix is called hemming. Instead of feathering, which averages a wide band around 512 px where two 1024 px images overlap, hemming keeps only the middle of each painting and fades across a narrow 64 px band where tiles meet. A color correction pass then evens each painting against its neighbours.
+
+He explicitly considered the alternative that tiny.london uses: MultiDiffusion with RePaint-style pinning on a shared canvas of latents, where tiles are generated together. He passed on it for two reasons. Hemming keeps every tile an independent request with no ordering, so nothing waits on a neighbour. And repainting is simpler, because a single tile can be regenerated and hemmed back in without regenerating everything around it.
+
+The raw Google renders had their own problem. The photos of the Bay were not all captured on the same day, so stitching them produced obviously mismatched patches of green, brown and grey with black holes. The correction works by finding where color suddenly jumps, treating the jump as a patch outline, and shifting the patch colors smoothly until they match their surroundings. He applied it mostly to forest and hills and skipped cities, where color jumps are too common to isolate.
+
+Captures were also noisy, so he built three detectors: one for coloring, since sky holes always come back the same shade; one for file size, since blurry images compress smaller; and one watching network logs for HTTP 429s. Flagged captures were retaken by waiting longer for the render to load or by requesting a different tile resolution, and rarely a surviving hole was filled from the pixels around it.
+
+Water was handled by refusing to generate it. The sea and the Bay are overlaid from OpenStreetMap in one consistent color, which meant skipping the model on roughly 16% of the map. The overlay erases structures that sit over water, so a pixel detector tells structure from water and brings the bridge cables back.
+
+![Golden Gate Bridge rendered as pixel art with teal water, showing the red towers and the Marin headlands](https://cdn.runany.dev/blog/inline/isometric-sf-golden-gate.webp)
+
+## What it cost to run
+
+The bill is the part people skip, so here it is. About 172 H100-hours from first test to final map, of which roughly 119 went into generating the map itself, producing something like 177,000 images including re-runs. Training the LoRA took under six hours across four versions, and the first version finished in under an hour. Storage was 3 terabytes across captures, recaptures and experiments, and color correction ran about 10 times faster on SSD than on HDD.
+
+The whole thing ran on Modal, driven from the command line by the agents:
+
+```bash
+modal run
+modal container list
+modal billing summary
+modal app stop
+```
+
+A guard script polled the bill and stopped the app once it hit a set dollar amount, which is how the runs were left going overnight. The single biggest speed-up came from queueing: keeping six batches permanently in flight with `.spawn()` and a longer `scaledown_window` meant containers stayed warm instead of paying repeated cold starts. Three H100s went from 29 to about 68 images per minute at 1536 px.
+
+For scale, a MacBook Pro would have taken more than 100 days to paint the Bay.
+
+| Resource | Figure |
+|---|---|
+| Total GPU time | about 172 H100-hours, first test to final map |
+| Map generation | about 119 H100-hours, roughly 177,000 images including re-runs |
+| LoRA training | under 6 hours across four versions |
+| Storage | 3 terabytes of external drives |
+| Speed on one H100 | 1.1 s per tile for Klein at 4 steps, against 3.9 s for Qwen with Lightning |
+| Throughput on 3 H100s | 29 to about 68 images per minute at 1536 px |
+
+## What to watch for
+
+The tiles are licensed CC BY-NC 4.0. Reuse is free as long as it is non-commercial and carries credit plus a link to isometricsf.com; anything commercial needs the author's approval on X. The data layers each carry their own terms, including ODbL for OpenStreetMap and CC BY-SA 4.0 for the Wikivoyage place names.
+
+A pixel-art map is an interpretation, not a survey. Individual buildings are plausible rather than measured, and the model occasionally got things wrong before a human caught it. If you need ground truth about a property line, this is the wrong source.
+
+What the site does not offer is the machine itself. Across the home page, the places directory and both write-ups there is no link to a source repository, no model weights and no dataset. You get the map and the method, including the prompts above, but not a runnable pipeline.
+
+Two things are explicitly unfinished. Chavez notes that a more extensive write-up detailing the code fixes, the evals, the color corrections and the seam work is still coming, and that seam handling is an active research area with other methods being tried.
+
+## Source and Accuracy Notes
+
+- Product page: https://isometricsf.com/ - what the map is, the credits panel with every data license, the feature list and the 25 place links
+- Places directory: https://isometricsf.com/places/ - the curated landmark list, region groupings and hero images
+- Author write-up: https://www.justinchavez.com/blog/isometric-sf/ - the story behind the project, the agent workflow, the Modal GPU hours and the teacher-student model chain
+- Technical guide: https://www.justinchavez.com/blog/isometric-sf-how/ - capture angle, training data, hemming, color correction, bad-render detectors, the water overlay and the comparison table
+- HN launch thread: https://news.ycombinator.com/item?id=50487228 - 253 points on 2026-11-13
+- Illustrative screenshots were captured from isometricsf.com directly; the map tiles are credited to Justin Chavez under CC BY-NC 4.0
+- License of the map tiles confirmed from the credits panel on isometricsf.com; licensing of the underlying capture and training code was not found on any page read, so the post does not claim it
