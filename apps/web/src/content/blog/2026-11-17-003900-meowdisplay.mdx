@@ -1,0 +1,159 @@
+---
+title: "MeowDisplay: your iPhone as a second Mac display"
+description: "MeowDisplay is a free, GPL-3.0 Mac app that mirrors or extends your Mac onto an iPhone or iPad, with touch control, remote file access and no account."
+pubDate: "2026-11-17T00:39:00.000Z"
+author: "Friday"
+tags: ["macos", "iphone", "ipad", "remote-control", "open-source"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/meowdisplay.webp"
+  alt: "MeowDisplay promotional graphic showing a MacBook, iPad, iPhone and Mac mini all running the app side by side"
+canonical: "https://runany.dev/blog/meowdisplay/"
+---
+
+> **TL;DR:** MeowDisplay turns an iPhone, iPad, Android phone or spare Mac into a display for your Mac, and the touch controls are good enough that you can genuinely work from it. It is free, open source under GPL-3.0, needs no account, and runs no hosted relay, so your screen and keystrokes travel directly between your own devices over TLS 1.3. The current release is 2.1, which added floating windows on top of the tiled layout.
+
+## What MeowDisplay actually is
+
+MeowDisplay is a Mac app that sends your display to another device, paired with a receiver app for iPhone, iPad, Android and a second Mac. It was written by raiseCatError as a fork of OpenDisplay by Philip Poloczek, which supplied the original display, capture, encoding and receiver foundation.
+
+Two things separate it from the usual remote desktop category. First, it is explicitly for using your own Mac from a smaller screen, not for enterprise remote support or fleet management, and the documentation says so plainly. Second, there is no account, no subscription and no cloud service in the path. The project page at https://meowdisplay.app/ states that screen, audio and input data travel directly between paired devices over mutually authenticated TLS 1.3, and that MeowDisplay runs no hosted relay.
+
+The practical effect is that it fills a gap Apple left. Sidecar works with iPads, but not iPhones. MeowDisplay works with both, plus Android and a spare Mac.
+
+## Three ways to see your Mac
+
+You pick a mode per device, and you can change it from the Mac app or ask to switch from the receiver, with the Mac confirming the change.
+
+| Mode | What the receiver shows | Needs a physical Mac display |
+|---|---|---|
+| Mirror | An existing Mac display, exactly as it appears | Yes |
+| Extend | A separate virtual desktop you arrange in macOS | No |
+| Window view | Individual Mac windows you select, as tiles | No |
+
+Mirror copies an existing display, and when you have several attached you choose which one to share. Extend creates a virtual display on the Mac that macOS treats like any other screen, so you can drag windows onto it and arrange it alongside your real ones.
+
+Extend is the more interesting of the two because it is built on the private macOS `CGVirtualDisplay` API. That also means the Mac app ships as a notarized direct download rather than through the Mac App Store. Because a virtual display does not need real hardware, Extend works in clamshell mode with the lid closed as long as the MacBook stays on power, and it works on a headless Mac with no monitor plugged in at all.
+
+![MeowDisplay Mac app Overview screen with the Devices sidebar and a nearby iPad Pro ready to pair](https://cdn.runany.dev/blog/inline/meowdisplay-ui.webp)
+
+## Window view and floating windows
+
+Window view is the mode that makes MeowDisplay more than a screen mirror. Instead of sending your whole desktop, you pick individual Mac windows and lay them out on the receiver as panes, tabs or tiles. Open and Save panels work too, so a browser file upload chooser drawn on the Mac takes taps where it is drawn, with Escape cancelling and Return confirming.
+
+Stage Peek is how you browse: touch and hold a screen edge and the Mac windows appear as cards you can tap to select. A Full Desktop card takes you back to Mirror or Extend.
+
+Release 2.1, published on 11 November 2026, added floating windows. A window can now float above your pane layout instead of occupying a tile. You drag its title to move it, pull a curved corner grip to resize it, and throw it at a screen edge to tuck it away, leaving a thin strip you can tap to bring it back. It is worth being precise about what this does not do: resizing a float changes only the picture on your receiver. The real window on the Mac keeps its size and place, and tucking a float does not close it. If you want the Mac window itself to change, the pane menu has Fill Window on Mac and Restore Previous Size on Mac, which both require control of the Mac.
+
+![iPad in Window view showing Safari and TextEdit across three panes with one TextEdit floating above the layout](https://cdn.runany.dev/blog/inline/meowdisplay-window-view.webp)
+
+## Touch input that does not feel like a trackpad
+
+A touchscreen mirroring a desktop is normally miserable, because your finger is fat and the desktop was designed for a mouse. MeowDisplay puts a lot of work into that gap, and the input modes are the core of it.
+
+| Input mode | Behaviour |
+|---|---|
+| Direct Touch | Touch maps to the matching position on the Mac display |
+| Trackpad | Pointer moves relatively, like a MacBook trackpad, with a sensitivity slider |
+| Natural Touch | Tap to click, swipe to scroll with momentum, hold then move to drag |
+
+Trackpad mode is the most literal. The pointer moves relatively instead of jumping to wherever you touched, and turning video off leaves the receiver as a pure trackpad and keyboard with the connection and trays still live.
+
+Natural Touch is the smarter one. It uses the Accessibility permission the Mac app already holds to work out what is under your finger, so a one-finger swipe in a scrollable area scrolls with momentum instead of dragging the pointer, and holding still for a moment switches a touch back to plain Direct Touch. When it cannot identify the interface reliably, it falls back rather than guessing.
+
+Smart Touch is the experimental layer on top, off by default. It adds one-finger momentum scrolling in supported scrollable areas, and a title-bar hold that builds a soft haptic, ticks after half a second, and then lets you drag the window with your finger. Moving before the tick stays an ordinary touch. It works best with apps that publish standard macOS accessibility information.
+
+Precise Control solves the fat-finger problem directly: hold one finger down anywhere, and a second finger fine-tunes the pointer and clicks exactly where it points. In Trackpad mode the relative movement starts from that first touch instead.
+
+Apple Pencil support on supported iPads sends strokes back to the Mac as pen-tablet input with tilt, follows the tip on Pencil-hover models, and ignores fingers resting on the glass while the tip is down.
+
+![iPhone receiver running MeowDisplay with the Main Control Tray docked along both edges of the screen](https://cdn.runany.dev/blog/inline/meowdisplay-control-tray.webp)
+
+The Main Control Tray sits on the edge of the receiver screen with Command, Option, Control, Shift, Escape, Tab, Toggle Dock, Keyboard and Settings. Modifiers latch, so a chord is two taps rather than four.
+
+## How the connection is set up
+
+There are three transports, and the choice mostly comes down to how far apart the devices are.
+
+USB needs a data-capable cable and you trust the Mac. It is the most reliable path with no network setup, and it works on iPhone and iPad. Android USB is not implemented.
+
+Local Wi-Fi discovers receivers over Bonjour, including nearby peer-to-peer Wi-Fi.
+
+Remote Access reaches a paired Mac over a private network you control, and the docs point at Tailscale. The important nuance is that the address only routes the connection; pairing still authenticates it. MeowDisplay does not ship a relay, and it does not implement a tailnet-wide directory.
+
+On Wi-Fi and Remote Access you can pick the network transport as Auto, QUIC or TCP. Auto uses QUIC when both apps support it and falls back to TCP when QUIC cannot get through. USB is unaffected by the setting.
+
+Wake and Connect sends bounded Wake-on-LAN packets to bring a sleeping Mac back and reconnect, which needs Wake for Network Access enabled and compatible hardware. A sleeping Mac's own Tailscale node cannot relay its own wake packet, so remote wake needs a router or another awake device on that Mac's LAN.
+
+## The permission model is the real feature
+
+Every session starts with input off. Connecting never grants control by itself, and a receiver has to ask through Request Control. On the Mac, each device carries an Input Requests policy.
+
+| Mac setting | Lock screen control |
+|---|---|
+| Always Allow Requests | Yes, with no extra step |
+| Ask | Only if the device had control before the Mac locked |
+| Never Allow Requests | Never |
+| Allow Input off | Never, for any device |
+| Allow Lock Screen Control off | Never for that device |
+
+Allow Input in the Mac's Input settings is the master switch. While it is off, nothing connected can control the Mac no matter what was granted earlier, though devices can still connect and see the screen.
+
+Remote Finder, which lets you browse Mac files from the phone, is permissioned separately for each action: viewing, saving copies, uploading, renaming and moving, and moving to the Trash are each set to Ask, Always Allow or Block per device. When a device first opens Remote Finder, the Mac asks whether to allow this session, always allow approved folders, or open all files, and that last option asks again to confirm. The buttons wake up after a moment so a stray click cannot answer.
+
+One detail stands out. When an authorized iPhone or iPad unlocks a locked Mac, the macOS lock screen appears and you type your password there. macOS checks it. MeowDisplay passes the keys on and never checks, logs or keeps them.
+
+## Getting it running
+
+You need the Mac app and one receiver. Download the Mac DMG from https://meowdisplay.app/downloads and drag it to Applications, or use Homebrew.
+
+```bash
+# Mac 2.1, share and receive, macOS 14+
+brew install --cask raiseCatError/tap/meowdisplay
+
+# Receiver-only build for an older Mac, macOS 12+
+brew install --cask raiseCatError/tap/meowdisplay-receiver
+```
+
+The iPhone and iPad apps are free on the App Store and need iOS or iPadOS 16.4. Both DMGs are signed and notarized by Apple, and SHA-256 checksums are published with the releases, so you can check what you downloaded.
+
+```bash
+curl -sLO https://github.com/raiseCatError/meowdisplay/releases/latest/download/SHA256SUMS.txt
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+Android is closed testing on Google Play and needs Android 10 or later. You join the tester group, opt into the closed test, then install from the private Play listing.
+
+If you want to build from source instead, the repository README covers it.
+
+```bash
+git clone https://github.com/raiseCatError/meowdisplay.git
+cd meowdisplay
+echo "DEVELOPMENT_TEAM=YOURTEAMID" > .env
+./generate.sh
+```
+
+Then open MeowDisplay.xcodeproj and run the OpenSidecarMac scheme for the Mac app or OpenSidecariOS for the receiver.
+
+## What to watch for
+
+The honest caveats are on the compatibility page, and they are specific. On macOS 15 the Mac app can quit right after you approve pairing, tracked as issue 219. Version 2.1 includes a proposed fix that the project says has not been verified on macOS 15 yet.
+
+The receiver-only Mac app has not been tested on physical hardware. Mac-to-Mac keyboard and trackpad forwarding is implemented with automated tests but still awaits physical verification with two Macs. Android 2.0 is network only, and it trails iOS on several settings, a gap the project tracks in its own parity guide.
+
+The 2.1 features split by platform in ways that matter. Floating windows, the Open and Save panel fix and the Mission Control notices need 2.1 on the Mac and are iPhone and iPad only, not Android and not Mac Receiver. The tested matrix is macOS 27.0.1 automatically, macOS 27.0 by hand, plus iOS and iPadOS 27.0.1. The minimum versions are build floors, not a promise that every device has been exercised.
+
+On cost, MeowDisplay is free with no subscription, which puts it against paid tools like Duet Display, Luna Display, Astropad and Jump Desktop. The GPL-3.0 license covers the code. It began as a fork of OpenDisplay by Philip Poloczek, and the README notes the original work is copyright 2026 Philip Poloczek.
+
+## Source and Accuracy Notes
+
+- Project page: https://meowdisplay.app/ — feature overview, no-account and no-relay claims, device links, image assets
+- Downloads: https://meowdisplay.app/downloads — DMG sizes and dates, OS floors, Homebrew casks, SHA-256 checksums, App Store and Google Play details
+- Features: https://meowdisplay.app/features — Window view, floating windows, Stage Peek, input modes, Smart Touch, Precise Control, Mac gestures, Apple Pencil, Remote Finder, clipboard, device policies
+- Setup and FAQ: https://meowdisplay.app/docs — installation, connections, transport options, input and audio, lock screen table, Remote Access, wake and reconnect
+- Source repository: https://github.com/raiseCatError/meowdisplay — README overview, connections, security model, requirements, build from source, GPL-3.0 license and OpenDisplay attribution
+- Press page: https://meowdisplay.app/press — press kit screenshot URLs used for the illustrations in this post
+- License: GPL-3.0, verified from the repository README and the project footer
+- HN launch thread: https://news.ycombinator.com/ (Show HN, 121 points, 2026-11-09)
