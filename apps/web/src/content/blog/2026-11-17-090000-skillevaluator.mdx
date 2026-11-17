@@ -1,0 +1,178 @@
+---
+title: "NVIDIA SkillEvaluator: Does Your Agent Skill Actually Work?"
+description: "NVIDIA SkillEvaluator scores AI agent skills for quality, security, overlap and live agent behavior, through a three-tier pipeline you can run from a terminal."
+pubDate: "2026-11-17T09:00:00.000Z"
+author: "Friday"
+tags: ["github-trending", "agent-skills", "ai-evaluation", "python", "dev-tools"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/skillevaluator.webp"
+  alt: "GitHub social preview card for NVIDIA/SkillEvaluator"
+canonical: "https://runany.dev/blog/skillevaluator/"
+---
+
+## TL;DR
+
+> **TL;DR:** SkillEvaluator is NVIDIA's open source framework for proving an agent skill earns its place. It works in three tiers: static validation, semantic overlap detection, and a live agent run with and without your skill installed. The first tier runs offline in seconds, and the third gives you a number called Skill Lift, which is the whole reason the tool exists.
+
+An agent skill is a folder of instructions plus supporting files, defined by the [Agent Skills specification](https://agentskills.io/). NVIDIA's framing of why this matters is blunt: skills get published into their catalog only after a measurement says they are ready. SkillEvaluator is that measurement layer, released under Apache 2.0 and published to PyPI as version 0.9.0 on November 13, 2026. At the time of writing the repository has 2,754 stars, 364 forks and 19 open issues, written in Python for 3.12 through 3.14.
+
+What makes the design interesting is that it refuses to infer quality from a model reading a skill and forming an opinion. It measures behavior instead. A skill gets installed, an agent gets given tasks, and the run happens twice: once with the skill, once without. The difference between those two runs is the result.
+
+## The three tiers, and what each one needs
+
+Each tier answers one question, and each is an independent entry point. Nothing requires you to run the earlier tier first, which means you can stop wherever your budget stops.
+
+| Tier | Question it answers | Representative commands | What it needs |
+| --- | --- | --- | --- |
+| Tier 1 | Is this skill safe and well formed? | `tier1 PATH`, `quality-check`, `security-scan`, `pii-scan`, `lint-scripts`, `rubric-eval` | Nothing for deterministic checks; Semgrep, SkillSpector and Gitleaks binaries for full scanner coverage |
+| Tier 2 | Does this guidance repeat itself or overlap with other skills? | `context-optimization-check`, `similarity-check` | An embeddings provider, plus a chat model for intra-skill analysis; local OpenAI-compatible endpoints work |
+| Tier 3 | Does the skill actually change how the agent behaves? | `tier3`, `tier3 evaluate` | Provider access, a supported agent, and a running sandbox, Docker by default |
+
+Tier 1 covers schema and frontmatter validation, deterministic quality scoring, security scanning for prompt injection and data exfiltration, secret and PII detection, license checks, and script linting. It pulls pinned, verified releases of [SkillSpector](https://github.com/NVIDIA/SkillSpector), NVIDIA's own skill security scanner, along with Gitleaks. Semgrep is optional. The deterministic half runs offline with no model key at all.
+
+Tier 3 is the interesting one. The agent runs generated tasks twice per case, with the same prompt, model, task inputs and grading criteria, and each run gets its own isolated sandbox. The only variable is whether the skill is installed. Underneath, [Harbor](https://github.com/harbor-framework/harbor), an open source framework for repeatable agent evaluation, handles the sandbox execution while SkillEvaluator turns evaluation cases into task bundles and scores the outcome.
+
+## Getting a first result without an API key
+
+The tier 1 quality check runs against a bundled reference skill called `text-analyzer`, so you can see the tool work before you point it at anything of your own.
+
+```bash
+pip install skillevaluator
+
+skillevaluator validate \
+  ./my-skill --tiers 1
+```
+
+Straight from a source checkout, with uv provisioning Python 3.13 and the dependencies:
+
+```bash
+git clone --depth 1 https://github.com/NVIDIA/SkillEvaluator.git
+cd SkillEvaluator
+
+uv run --python 3.13 skillevaluator quality-check \
+  src/skillevaluator/tier3/reference_skills/text-analyzer \
+  -r cli -r json -o reports/first-quality
+```
+
+The bundled example scores 88.8 out of 100 with a grade of B, exits zero, and writes `reports/first-quality/skillevaluator-quality.json`. The passing threshold defaults to 70. No API key, no scanner, no GPU, no Docker.
+
+Before any of that, run the harness check. It answers a question that quietly invalidates every downstream measurement: will your agent load this skill at all?
+
+```bash
+skillevaluator harness-check ./my-skill
+```
+
+```text
+╭─ Harness compatibility · my-skill ──────────────────────────────────────────────────────╮
+│  ⚠️ codex        degraded    Description cut to 1,021 chars + '...' in the skill list   │
+│  ❌ claude-code  not loaded  .agents/skills is not scanned                              │
+│  ✅ opencode     loads                                                                  │
+│  ✅ hermes       loads                                                                  │
+│  ✅ openclaw     loads                                                                  │
+│  ❌ copilot-cli  not loaded  description is 1,028 UTF-16 units, 4 over the 1,024 limit  │
+╰────────────────────────────────────────────────────────────────── ❌ 2 of 6 not loaded ─╯
+```
+
+No LLM inference, no model key, no agent run. A skill that never loads cannot score anything, so this is the cheapest gate in the whole pipeline and it runs as part of tier 1 by default.
+
+When you do want model-backed rubric scores, the provider config points at NVIDIA Build:
+
+```bash
+export SKILL_EVAL_LLM_PROVIDER=nv_build
+export NVIDIA_API_KEY='nvapi-...'
+
+uv run --python 3.13 --extra llm skillevaluator rubric-eval \
+  src/skillevaluator/tier3/reference_skills/text-analyzer \
+  -r cli -r json -o reports/first-build
+```
+
+Eligible NVIDIA Developer Program members can use NVIDIA-hosted endpoints for free prototyping, subject to access terms and rate limits. The same key covers tier 2 embeddings and the tier 3 agents.
+
+## What the published benchmark numbers look like
+
+NVIDIA published a benchmark in their developer blog covering more than 300 verified skills across over 30 products, evaluated on two harnesses, using an August 12, 2026 snapshot of the catalog's `benchmarks.json`.
+
+| Dimension | Without skill | With skill | Skill Lift |
+| --- | --- | --- | --- |
+| Correctness | 46 | 87 | +41 |
+| Discoverability | 42 | 82 | +40 |
+| Effectiveness | 39 | 78 | +39 |
+| Efficiency | 43 | 78 | +35 |
+| Security | 97 | 98 | +1 |
+| All dimensions | n/a | n/a | +31 |
+| Excluding Security | n/a | n/a | +39 |
+
+Skill Lift is the with-skill score minus the without-skill score, measured in points rather than percent change.
+
+Two caveats belong next to those numbers. First, Discoverability and Efficiency are scored against the skill itself, so they read as evidence that the agent activates and uses the skill correctly once installed, not as a measurement of unaided agent behavior. Second, Security started at 97, so the ceiling there is one point. For that dimension the real bar is that installing a skill does not make things worse.
+
+By harness, Claude Code showed +34 across all dimensions and +42 excluding Security, while Codex showed +29 and +36. Per-product lift ranged from roughly +2 to +46, so the domain and the task mattered several times more than which agent you ran.
+
+The methodology details are worth reading, because they set how much weight the averages carry. 85 percent of the published skills ran a single attempt per task and 15 percent ran two. Live agent runs vary between runs, and the blog reports no confidence intervals.
+
+Here is a real benchmark card from the project's own documentation, showing the shape of a tier 3 result for a demo skill:
+
+![Skill Benchmark report card for demo-skill showing a PASS verdict, evaluation metadata for Claude Code and Codex on 8 tasks, and a results table with baseline to skill uplift scores](https://cdn.runany.dev/blog/inline/skillevaluator-ui.webp)
+
+The report records the evaluator version, the agents used, task counts, attempts per task and the sandbox mode, then breaks the lift out by dimension for each harness.
+
+## Wiring it into CI
+
+The intended production path is `skillevaluator ci init`, which opens a setup pull request so you pick checks and thresholds instead of writing evaluation code yourself.
+
+```bash
+skillevaluator ci init
+```
+
+Ready-made workflow templates ship in the repository under `ci/bundles/0.9.0`: a GitHub Actions `skill-checks.yml`, a GitLab `gitlab-skill-checks.yml`, and an optional `publish-skill-reports.yml` that publishes reports and adds pull request comments as a second workflow.
+
+![CI publisher row for skills/glossary-builder showing a FAIL scan result, a quality score of 98.2 A, one error, three warnings and a link to the full report](https://cdn.runany.dev/blog/inline/skillevaluator-ci.webp)
+
+Running the full pipeline yourself looks like this:
+
+```bash
+uv run --python 3.13 --extra all skillevaluator doctor --env-mode docker
+uv run --python 3.13 --extra all skillevaluator validate ./my-skill
+```
+
+`doctor` checks readiness rather than inference success, which is useful in CI where you want a fast answer about missing scanners before spending money on inference. The gating rules are layered: tier 1 gates `validate`, tier 2 gates unless you pass `--no-block-on-dedup`, and tier 3 gates only when you add `--block-on-agent-eval`. Use `--tiers 1,2` to skip live evaluation or `--tiers 1` for static checks alone.
+
+To generate the evaluation dataset for tier 3, the flow creates an `evals/evals.json` file where each case carries an ID, a prompt, an expected output and optional assertions. The `--full` flag includes explicit, implicit, contextual and negative cases.
+
+```bash
+skillevaluator create-eval-dataset ./my-skill --full
+
+skillevaluator tier3 evaluate ./my-skill \
+  --agents codex \
+  --env-mode docker
+```
+
+## Where the framework stops being helpful
+
+The support level is stated as Experimental: community-supported on a best-effort basis through GitHub Issues, with no SLA and no NVIDIA enterprise support entitlement. Expect the edges to be rough.
+
+Tier 3 is where cost and time accumulate. You need a provider key, an agent credential and a running sandbox, and model plus managed-sandbox usage can incur charges.
+
+The autopilot is the other soft spot. When tier 3 finds no existing evaluation source, it creates one skill-grounded starter case with limited coverage, so a passing tier 3 run on autopilot alone is weak evidence. Standalone dataset generation demands substantive `evals/EVAL.md` guidance, a `--prompt` file containing task requests and outcomes, or matching retained traces. `--force` replaces the autopilot starter and `--refine` refines it, while an explicit `--grounding skill` permits skill-only starters. Templates omit unauthored negatives, so you supply the real cases.
+
+One more finding from NVIDIA's own write-up cuts against a common assumption: token savings are not automatic. SkillEvaluator tracks token usage separately from the Efficiency score, and skill quality turned out to have a bigger effect on results than which agent you ran.
+
+The approach is already spreading beyond NVIDIA. OpenClaw is piloting tier 3 evaluations for official organizations on ClawHub with an Evals tab in its interface, and Nous Research wired an optional SkillSpector advisory scan into the install flow of Hermes Agent, where each skill scan takes about 1.4 to 1.5 seconds.
+
+## Source and Accuracy Notes
+
+- Source repository: NVIDIA/SkillEvaluator (verified via GitHub API `html_url`), 2,754 stars, 364 forks, 19 open issues, Apache-2.0, Python, default branch `main`, created 2026-06-24, last push 2026-11-17.
+- Repository README: https://github.com/NVIDIA/SkillEvaluator — provided the install commands, the harness check output, the three-tier command table, the gating rules and the support level.
+- Documentation site: https://docs.nvidia.com/skills/skillevaluator/ — provided the tier requirements table, the run flow, the five scored dimensions, the Skill Lift and pass@k definitions, and the report formats.
+- PyPI project page: https://pypi.org/project/skillevaluator/ — provided the CI template table, the GitHub and GitLab setup paths and the agent install route.
+- NVIDIA developer blog: https://developer.nvidia.com/blog/evaluating-ai-agent-skill-performance-with-nvidia-skillevaluator/ — provided the baseline and with-skill benchmark tables, the per-harness Skill Lift table, the methodology, the stated limitations and the partner pilot details.
+- PyPI release metadata: https://pypi.org/pypi/skillevaluator/json — version 0.9.0, requires Python 3.12 to 3.14, uploaded 2026-11-13.
+- Research paper: https://arxiv.org/abs/2608.20614 — cited by the project for the evaluation method.
+- Harbor sandbox framework: https://github.com/harbor-framework/harbor — the execution layer behind tier 3.
+- SkillSpector scanner: https://github.com/NVIDIA/SkillSpector — the skill security scanner tier 1 depends on.
+- Illustrations: `benchmark-card-after.png` and `repository-ci-results-example.png` from the project's `docs/assets` directory, uploaded to the runany CDN.
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`).
+- Stars at time of writing: 2,754.
