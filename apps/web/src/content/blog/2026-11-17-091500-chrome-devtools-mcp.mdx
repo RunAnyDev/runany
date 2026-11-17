@@ -1,0 +1,182 @@
+---
+title: "chrome-devtools-mcp: Chrome DevTools for Your Coding Agent"
+description: "chrome-devtools-mcp gives coding agents 61 DevTools tools over MCP and a CLI: navigation, emulation, network, performance, Lighthouse audits and heap snapshots."
+pubDate: "2026-11-17T09:15:00.000Z"
+author: "Friday"
+tags: ["github-trending", "mcp", "chrome", "dev-tools", "typescript"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/chrome-devtools-mcp.webp"
+  alt: "GitHub social preview card for ChromeDevTools/chrome-devtools-mcp"
+canonical: "https://runany.dev/blog/chrome-devtools-mcp/"
+---
+
+## TL;DR
+
+> **TL;DR:** chrome-devtools-mcp puts the whole Chrome DevTools panel behind your coding agent, over the Model Context Protocol and also as a plain terminal CLI. The current release exposes 61 tools across 12 categories, ships seven agent skills alongside them, and the CLI path is the part most people miss. It also hands an agent a real performance trace, a Lighthouse audit and a heap snapshot rather than a flat DOM.
+
+Chrome DevTools for agents is an open source project from the Chrome DevTools team, published under Apache 2.0 and maintained as part of the DevTools ecosystem itself. At the time of writing the repository has 57,710 stars and 4,853 forks, with 128 open issues. The npm package `chrome-devtools-mcp` was at version 1.13.0 on November 11, 2026, with 66 versions published to date.
+
+The official documentation at [developer.chrome.com/docs/devtools/agents](https://developer.chrome.com/docs/devtools/agents) frames the project as three separate things you can install: an MCP server, a terminal CLI, and a set of agent skills. That framing matters, because most setups only use the first one.
+
+## What you actually get
+
+The MCP server connects your agent to a live Chrome instance over the [Model Context Protocol](https://modelcontextprotocol.io/). It is agent-agnostic by design, and the project states that interoperability is the point rather than locking in a single model vendor.
+
+Underneath it sits [Puppeteer](https://github.com/puppeteer/puppeteer) for driving the browser, and the [devtools-frontend](https://github.com/ChromeDevTools/devtools-frontend) project for the performance tooling. That combination is what makes the difference from a generic browser automation server: the same trace recording, console inspection and network panel that you would use by hand are available as tool calls.
+
+The tool reference documents 61 tools, grouped into categories you can switch on and off individually:
+
+| Category | Tools | What it covers |
+| --- | --- | --- |
+| Input automation | 10 | click, drag, fill, fill_form, handle_dialog, hover, press_key, type_text, upload_file, click_at |
+| Navigation automation | 6 | close_page, list_pages, navigate_page, new_page, select_page, wait_for |
+| Debugging | 10 | evaluate_script, get_console_message, get_css_styles, lighthouse_audit, list_console_messages, screencast_start and more |
+| Memory | 14 | take_heapsnapshot plus analysis tools for dominators, retainers, duplicate strings and edges |
+| Extensions | 5 | install_extension, list_extensions, reload_extension, trigger_extension_action, uninstall_extension |
+| Performance | 3 | performance_start_trace, performance_stop_trace, performance_analyze_insight |
+| Emulation | 2 | emulate, resize_page |
+| Network | 2 | list_network_requests, get_network_request |
+| Network mocks | 2 | mock_network, remove_network_mock |
+| Progressive Web Apps | 4 | get_os_app_state, install_pwa, launch_pwa, uninstall_pwa |
+| WebMCP | 2 | list_webmcp_tools, execute_webmcp_tool |
+| WebAuthn | 1 | configure_webauthn |
+
+Categories that default to off include network mocks, extensions, WebMCP, PWA automation and the third-party developer tools category. Each one is enabled with its own flag, for example `--categoryExtensions`.
+
+## Getting it running
+
+Requirements are modest: Node.js LTS, Chrome current stable or newer, and npm. Adding the server to an MCP client takes one config block.
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  }
+}
+```
+
+The official guide also documents per-client setup for Antigravity, Claude Code, Codex, Copilot, VS Code and Gemini CLI. Codex, for example, takes a single command:
+
+```sh
+codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
+```
+
+Claude Code users can install the MCP server and all seven skills together as a plugin:
+
+```sh
+/plugin marketplace add ChromeDevTools/chrome-devtools-mcp
+/plugin install chrome-devtools-mcp@chrome-devtools-plugins
+```
+
+One behaviour catches people out: connecting to the server does not launch Chrome. The browser starts the first time the agent calls a tool that needs it.
+
+## The CLI is the part most people skip
+
+The package also ships a `chrome-devtools` binary that talks to a background daemon instead of going through an MCP client. The daemon uses Unix sockets on Linux and macOS and named pipes on Windows.
+
+```sh
+npm i chrome-devtools-mcp@latest -g
+chrome-devtools status # check if install worked.
+```
+
+Once it is running, the CLI exposes every tool the MCP server has, including ones that need a flag to activate in server mode.
+
+```sh
+chrome-devtools navigate_page 1 --url "https://developers.chrome.com"
+chrome-devtools take_screenshot 1 --filePath screenshot.png
+chrome-devtools stop
+```
+
+The first tool call starts the server and browser in the background if they are not already up. The same background instance is reused afterwards, so page state and cookies survive between commands. You can also drive it explicitly with `start`, `stop` and `status`, and `start` forwards arguments such as `--headless` to the underlying MCP server.
+
+For scripting and CI this is the better surface, because you avoid the MCP protocol overhead entirely. The Chrome documentation describes the CLI as the path for fast, token-efficient browser commands run from terminal scripts or pipelines.
+
+One security note from the CLI guide: it enables unrestricted filesystem access by default, and `--workspace` is how you limit the file tools to specific directories.
+
+## Running it against a real page
+
+To see what the tooling actually produces, I installed the CLI locally and ran a Lighthouse audit against the Chrome DevTools documentation site. The output arrives as structured text with category scores and the failing nodes:
+
+```text
+## Lighthouse audit results
+Mode: navigation
+Device: desktop
+URL: https://developer.chrome.com/docs/devtools/agents
+### Category scores
+- Accessibility: 85 (accessibility)
+- Best Practices: 77 (best-practices)
+- SEO: 85 (seo)
+- Agentic Browsing: 50 (agentic-browsing)
+### Audit summary
+Passed: 51
+Failed: 8
+Total timing: 14062.08ms
+### Failed audits
+- third-party-cookies [best-practices]: Uses third-party cookies (4 cookies found) (score: 0)
+- color-contrast [accessibility]: Background and foreground colors do not have a sufficient contrast ratio. (score: 0)
+  Nodes (3):
+  - selector="div.devsite-landing-row-item-body > div.devsite-landing-row-item-description-content > p > a" label="Antigravity 2.0"
+    Fix any of the following: Element has insufficient color contrast of 4.27 (foreground color: #1a73e8, background color: #f9f9f9, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1
+- image-alt [accessibility, seo]: Image elements do not have `[alt]` attributes (score: 0)
+  Nodes (4):
+```
+
+The audit failed 8 checks, including three colour contrast failures with the exact offending selectors and the computed ratios, four images missing alt text, links that rely on colour alone to be distinguishable, and an accessibility tree the agent could not read cleanly. That is a concrete report rather than a pass or fail badge, and the selectors are directly actionable in a code review.
+
+The same CLI can emulate a device. Applying a 390 by 844 viewport with Slow 4G network conditions and a 4x CPU slowdown gives you a mobile rendering of the page under test:
+
+![Chrome DevTools for agents landing page rendered at a 390 by 844 mobile viewport with Slow 4G network throttling and 4x CPU slowdown applied](https://cdn.runany.dev/blog/inline/chrome-devtools-mcp-emulation.webp)
+
+The `emulate` command covers more than viewport size. It also takes network conditions, CPU throttling rate, geolocation coordinates, user agent, colour scheme, forced colours, reduced motion and contrast preferences, which is enough to reproduce a bug report from a specific device and location.
+
+The desktop view of the same documentation shows the scope the project is aiming at, with the use cases listed in the sidebar:
+
+![Chrome DevTools for agents get-started page showing the sidebar of use cases including emulate user experiences, Lighthouse audits, auto-connect, third-party tools, extension debugging and memory leak analysis](https://cdn.runany.dev/blog/inline/chrome-devtools-mcp-desktop.webp)
+
+## Configuration worth knowing about
+
+The [configuration reference](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/configuration.md) lists around sixty flags. A few change the shape of the session rather than just tweaking it.
+
+`--slim` exposes three tools only, covering navigation, script execution and screenshots. That is the right setting when you want a browser in the loop without filling the agent's context with sixty tool definitions.
+
+`--autoConnect` attaches to a Chrome instance you already have running instead of starting a new one. `--isolated` gives the browser a temporary user data directory that is cleaned up on close, and `--headless` runs without a UI. The CLI enables headless by default and enables isolated mode by default unless you pass `--userDataDir`.
+
+`--blockedUrlPattern` and `--allowedUrlPattern` restrict where the agent can navigate, `--redactNetworkHeaders` keeps headers out of the network tool output, and `--experimentalVision` lets the agent see the rendered page rather than only the accessibility tree.
+
+`--performanceCrux` is on by default and lets performance tools send trace URLs to the Google CrUX API to pull field data next to lab data. Turn it off with `--no-performance-crux` if you do not want trace URLs leaving the machine.
+
+Usage statistics are also collected by default, covering tool invocation success rates, latency and environment information. The opt-out is `--no-usage-statistics`, and collection is skipped entirely when `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` or `CI` is set in the environment. Update checks against the npm registry can be disabled with `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS`.
+
+The project's own [design principles document](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/design-principles.md) explains the shape of the API. Tools return semantic summaries rather than raw data, so a trace tells you that LCP was 3.2 seconds instead of dumping fifty thousand lines of JSON. Errors are meant to be self-healing, meaning they carry context and a suggested fix. Heavy assets come back as a file path or resource URI instead of an inline stream.
+
+## When it is the wrong choice
+
+The disclaimer in the project documentation is worth reading carefully, because it is broader than it first appears. The server exposes the full content of the browser instance to the MCP client, so it can inspect, debug and modify any data in the browser. Avoid putting anything sensitive into a session you do not trust.
+
+Support is officially limited to Google Chrome and Chrome for Testing. Other Chromium-based browsers may work, but that is not guaranteed, and the project states you should use them at your own discretion.
+
+The troubleshooting guide is a good sign of maturity and also a good warning list. There is a `Target closed` error when the browser cannot start, usually because another Chrome instance is running. On recent macOS versions the `--autoConnect` mode can fail with `EPERM: operation not permitted` because the system blocks reading the Chrome profile folder without a permission grant, and the fix is granting Files and Folders access to Chrome in System Settings. Virtual machine to host debugging needs an SSH tunnel because Chrome validates the Host header. And if your MCP client sandboxes the server with macOS Seatbelt or Linux containers, Chrome cannot start its own nested sandbox, so you need to disable sandboxing for this server or pass `--browserUrl` to point at a browser you run yourself.
+
+The seven bundled skills are worth a mention too, because they are what turns a pile of tools into a workflow: `chrome-devtools` and `chrome-devtools-cli` cover general operation, then there is one each for accessibility auditing, cookie and session debugging, Largest Contentful Paint debugging, memory leak hunting, and troubleshooting the MCP connection itself. They live in the npm package, and they are versioned against the tool set, so they need updating whenever the server updates.
+
+## Source and Accuracy Notes
+
+- Source repository: ChromeDevTools/chrome-devtools-mcp (verified via GitHub API `html_url`), 57,710 stars, 4,853 forks, 128 open issues, Apache-2.0, TypeScript, default branch `main`, created 2025-09-11, last push 2026-11-16.
+- Project documentation: https://developer.chrome.com/docs/devtools/agents — provided the three-pillar structure, the per-client install commands for Antigravity, Claude Code and Codex, and the use-case list.
+- Get-started guide: https://developer.chrome.com/docs/devtools/agents/get-started — provided the MCP server, CLI and agentic skills breakdown.
+- Repository README: https://github.com/ChromeDevTools/chrome-devtools-mcp — provided the MCP client config block, the CLI commands, the seven skill folders, the usage statistics and update-check behaviour, the browser support disclaimer and the CrUX note.
+- Tool reference: https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/tool-reference.md — provided all 61 tool names and their 12 categories.
+- Configuration reference: https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/configuration.md — provided the flag list, the `--slim` three-tool description, category defaults and the `--performanceCrux` behaviour.
+- CLI guide: https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/cli.md — provided the daemon architecture, the automatic start and persistence behaviour, and the `--workspace` filesystem note.
+- Design principles: https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/design-principles.md — provided the token-optimized and self-healing error rationale.
+- Troubleshooting guide: https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/troubleshooting.md — provided the macOS permission, VM tunnel and OS sandbox limitations.
+- npm package: https://www.npmjs.com/package/chrome-devtools-mcp — version 1.13.0, published 2026-11-11, Apache-2.0, 66 published versions.
+- Illustrations: captured with the `chrome-devtools` CLI version 1.13.0 running against developer.chrome.com, then uploaded to the runany CDN.
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`).
+- Stars at time of writing: 57,710.
