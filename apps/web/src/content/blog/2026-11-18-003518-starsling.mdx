@@ -1,0 +1,140 @@
+---
+title: "StarSling: AI-native CI runners for GitHub Actions"
+description: "StarSling is AI-native CI for GitHub Actions: drop-in Ubuntu runners billed per second, adaptive CPU and memory, and agents that open optimization PRs."
+pubDate: "2026-11-18T00:35:00.000Z"
+author: "Friday"
+tags: ["ci", "github-actions", "dev-tools", "ai-agents"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/starsling.webp"
+  alt: "StarSling wordmark on a dark background for its AI-native GitHub Actions runners"
+canonical: "https://runany.dev/blog/starsling/"
+---
+
+> **TL;DR:** StarSling replaces `ubuntu-latest` in your GitHub Actions workflows with hosted Ubuntu runners billed by the second, then adds two adaptive systems that resize a running job mid-step and route each job to the fastest healthy sandbox. On top of that sit agents that read your real run history and open pull requests with caching, sharding and workflow security fixes. Every price, label and command is public, and the audit skills run entirely on your own machine.
+
+## What StarSling is
+
+StarSling announced itself on [Hacker News](https://news.ycombinator.com/item?id=50536468) on November 17, 2026, a YC P25 company selling what it calls AI-native CI for GitHub Actions. The pitch fits into a single line of YAML: your workflow keeps every action and every build command, and only the `runs-on:` label changes.
+
+Behind that label sits a hosted runner fleet running Ubuntu 26.04 or 24.04 on 5th Gen AMD EPYC hardware, from 2 to 64 vCPU, billed by the second rather than the minute. The company reports more than 3 million CI jobs have run on it. The customer numbers on the homepage give a sense of what the change buys: Mastra says its slowest test suite went from 29m 56s to 5m 06s at wall-clock p95, Better Auth halved end-to-end time from 2m 22s to 1m 04s, and Partcl cut job queue time from 9.5 minutes to 35 seconds.
+
+The second half of the product is a set of agents that read your actual CI history and open pull requests against it. The [runners page](https://starsling.dev/products/runners) lists six merged PRs from Mastra and Better Auth as examples: sharding a kitchen-sink Playwright suite across three parallel jobs, swapping the default password hasher inside a test helper, fetching checkouts with `--filter=blob:none` to cut a full-history clone from 1,572 MB down to 189 MB, and scoping `id-token: write` to publishing jobs only.
+
+That last item is the part worth pausing on. These are the kinds of changes a CI audit tool produces when it can see your real timings and your real workflow graph, rather than a checklist it applies to a fresh repository.
+
+## How the runners work
+
+Two adaptive systems do the interesting work, both documented in the [Adaptive Compute launch post](https://starsling.dev/blog/adaptive-compute).
+
+**Afterburner** resizes a running job every second, based on the CPU and memory pressure of the current step. When a step heats up it adds up to 25% more CPU and up to 50% more RAM, at no extra cost. The post gives a concrete trace: a `starsling-ubuntu-26.04` runner is 4 vCPU and 16 GB, so a compile that saturates all four cores brings a fifth core online for that step, and a test suite pushing memory toward 16 GB raises the ceiling to as much as 24 GB until the spike passes. The job then drops back to 4 vCPU and 16 GB on the same label at the same per-minute price. A single job can boost several times inside one step that needs it.
+
+![Isometric diagram of the Afterburner board, one lane per vCPU with a raised memory lane above them, steps labeled setup, upload, test and compile, and the Afterburner chip lit as it adds one extra vCPU and 8 GB](https://cdn.runany.dev/blog/inline/starsling-afterburner.webp)
+
+**Sandbox Router** decides which provider and region hosts each job. Two sandboxes with identical resource shapes can deliver very different end-to-end times because of startup speed, small-file disk behavior, noisy neighbors on the same bare-metal host, backbone cuts and regional GitHub outages. The router weights providers from CI execution telemetry, and every completed job sharpens the placement for your organization. When a provider stops starting sandboxes, its weights drop to zero and the jobs headed there turn back to healthy providers in under a second.
+
+Combined, the two are claimed to make StarSling runners up to 2.32x faster than GitHub-hosted ones. A price-versus-build-time chart published with the post gives a narrower read: at 4 vCPU, StarSling is 1.67x faster than GitHub-hosted, and 1.95x faster with Afterburner, measured on TypeScript and Rust jobs on October 13, 2026 with a sample of one to five runs.
+
+![Price versus build time chart showing GitHub-hosted runners in grey taking roughly 8 minutes at 2 vCPU, while StarSling in cyan and StarSling with Afterburner in orange finish the same work in roughly 4 minutes at a lower price per job](https://cdn.runany.dev/blog/inline/starsling-performance.webp)
+
+## What the agents actually do
+
+The agent side is split into four skills published as an open source repository, [starslingdev/skills](https://github.com/starslingdev/skills), and they run on your machine rather than inside StarSling's control plane.
+
+`ci-speedup` is the interesting one. It samples your real Actions runs through the GitHub API, reconstructs the job graph, works out which check actually gates a pull request from merging, and ranks findings by developer wall-clock wait rather than by runner minutes alone. It checks its findings against a catalog of 98 optimization patterns spanning hygiene, data-driven detection and structural critical-path analysis. Detection, ranking and the critical-path math are deterministic and reproducible; only blocking logs that no pattern matched get handed to an LLM for a grounded read.
+
+`ci-score` grades a checkout against a published best-practice rubric and ranks a fix for every gap. It runs fully offline. `ci-secure` scans workflows for ten critical attack vectors, explains each one as a plain-English attacker scenario, and fixes the ones you pick. `sling` is the odd one out: it needs a StarSling account and gives an agent the operational view of that account, usage, billing, runs and failures, reading the CI data StarSling already collects.
+
+The audit skills deliberately keep your data local. Their README states they do not send audit results or repository contents to StarSling, and they leave fixes in your working tree for review instead of committing, pushing or opening a pull request unless you ask.
+
+```bash
+npx skills add starslingdev/skills
+```
+
+That installs all four; you pick the skills and the agent when prompted. Add `-g` to install for every project instead of just the current one, or target a single skill:
+
+```bash
+npx skills add starslingdev/skills --skill ci-speedup
+```
+
+`ci-speedup` needs Python 3.9 or newer, PyYAML and an authenticated `gh` CLI. `ci-score` needs only Python and PyYAML.
+
+## Getting it running
+
+The migration is deliberately boring. You swap the runner label, and nothing else in the workflow file moves.
+
+```yaml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: starsling-ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test
+```
+
+The label grammar comes from the [label reference](https://docs.starsling.dev/configuration/label-reference.md): a base label where the numeric suffix is the vCPU count, and the unsuffixed label is the 4 vCPU default. `starsling-ubuntu-26.04` is 4 vCPU and 16 GB, `starsling-ubuntu-26.04-8` is 8 vCPU and 32 GB, `starsling-ubuntu-24.04-64` is 64 vCPU and 256 GB. GPU runners use a separate base with a selector, such as `starsling-ubuntu-26.04-gpu/gpus=rtx-5090:1`.
+
+The onboarding runbook at [docs.starsling.dev/start.md](https://docs.starsling.dev/start.md) is written to be handed straight to a coding agent, and it is specific about the parts people get wrong. It tells the agent to fetch the live label reference before mapping anything, to skip a label it cannot find an exact match for rather than falling back to a default size, and to leave your organization's own runners alone since their names do not reliably state the OS version or size.
+
+```bash
+curl -fsSL https://docs.starsling.dev/configuration/label-reference.md
+gh api --paginate orgs/OWNER/actions/hosted-runners --jq '.runners[].name'
+```
+
+Once the migration pull request exists on a branch named `migrate-starsling-runners`, you install the StarSling GitHub App from the dashboard and confirm the environment with the CLI.
+
+```bash
+sling login
+sling doctor --agent
+```
+
+The [sling CLI](https://starsling.dev/cli) is a client for StarSling's HTTP API, generated from the OpenAPI spec, and it supports Apple Silicon macOS and glibc x64 Linux. `sling why` explains a failed job with evidence, `sling time` decomposes wall clock into runner-lifecycle phases, `sling top` ranks your time and cost hotspots, and `sling bill` shows what you owe plus a month-end projection.
+
+## What it costs
+
+The [pricing page](https://starsling.dev/pricing) lists per-second rates with normalized per-minute comparisons against GitHub's Linux x64 larger-runner list prices.
+
+| Label size | StarSling per minute | GitHub per minute | You save |
+| --- | --- | --- | --- |
+| 2 vCPU / 8 GB | $0.004 | $0.006 | 33% |
+| 4 vCPU / 16 GB (default) | $0.008 | $0.012 | 33% |
+| 8 vCPU / 32 GB | $0.016 | $0.022 | 27% |
+| 16 vCPU / 64 GB | $0.032 | $0.042 | 24% |
+| 32 vCPU / 128 GB | $0.064 | $0.082 | 22% |
+| 64 vCPU / 256 GB | $0.128 | $0.162 | 21% |
+
+The default 4 vCPU rate is $0.00013333 per second. New paid subscriptions bill whole seconds from job start to finish with no one-minute minimum, and existing subscriptions stay on whole-minute billing with a one-minute minimum until they migrate. Queue time is never billed, concurrency is unlimited, and failed jobs are billed for the time they ran. New accounts get 2,000 free minutes in the first month.
+
+The pricing page's own estimator shows 2,000 minutes of 4 vCPU work at $16.00 gross, or $8.00 after the free minutes, against $40.80 for the same workload on GitHub's runners.
+
+GPU runners are a different proposition and still in private beta. A dedicated RTX PRO 6000 lists at $0.06422 per minute with a 4 vCPU, 16 GB host and 100 GB disk, the RTX 5090 at $0.03022 and the RTX 4090 at $0.02522. The comparison is against GitHub's single 16 GB T4 at 8.1 FP32 TFLOPS and $0.052 per minute, which is why the claimed savings sit in the low 90s.
+
+## What to watch for
+
+The biggest trap is the one the onboarding runbook calls out first. GitHub's standard runners are free for public repositories, so on a public repo StarSling minutes are a brand new cost rather than a cheaper version of an existing bill. On a private or internal repo, GitHub's standard runners give you 2 vCPU while the migration moves you to 4, which usually changes the comparison in your favor.
+
+The second is `ubuntu-latest`. On GitHub it may still resolve to an older Ubuntu for some repositories, so the migration is also an OS upgrade, and the runbook asks you to run the workflows before merging the pull request.
+
+Billing edge cases are worth a look. Whole-second billing only applies to new subscriptions, and a job that fails still costs you the seconds it burned. GPU access requires emailing the founders directly, and SOC 2 Type 2 is listed as in progress rather than complete.
+
+Finally, the licensing is split. The runners are a proprietary hosted service. The skills are open source and run locally, which means you can use `ci-speedup`, `ci-score` and `ci-secure` on any repository without paying for anything, and they will not send your code to StarSling.
+
+## Source and Accuracy Notes
+
+- Project page: https://starsling.dev — positioning, customer metrics, benchmark numbers, competitor comparison table, FAQ
+- Runners page: https://starsling.dev/products/runners — runner lineup, merged agent pull requests, migration flow
+- Pricing page: https://starsling.dev/pricing — per-second rates, CPU and GPU tables, monthly estimator, billing rules
+- Adaptive Compute post: https://starsling.dev/blog/adaptive-compute — Afterburner behavior, Sandbox Router, resilience, price-versus-build-time chart
+- Skills page: https://starsling.dev/skills and https://starsling.dev/skills/ci-speedup — skill descriptions, install prompts, pattern catalog
+- Skills repository: https://github.com/starslingdev/skills — README, skill table, requirements, data handling policy
+- Onboarding runbook: https://docs.starsling.dev/start.md — label mapping rules, migration branch name, verification steps
+- Label reference: https://docs.starsling.dev/configuration/label-reference.md — exact labels, vCPU counts and per-minute prices
+- CLI reference: https://starsling.dev/cli — sling command list and supported platforms
+- HN launch thread: https://news.ycombinator.com/item?id=50536468 — launch date and company stage
+- License: runners are a proprietary hosted service; the skills repository is open source. No separate license file was located on the pages read, so treat the skill repository terms as unverified beyond its public MIT-style presentation.
