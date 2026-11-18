@@ -1,0 +1,144 @@
+---
+title: "PaperOrchestra: multi-agent AI research paper writing"
+description: "PaperOrchestra is a Google Cloud AI Research multi-agent framework for AI research paper writing: lab notes in, LaTeX manuscripts out."
+pubDate: "2026-11-18T02:20:00.000Z"
+author: "Friday"
+tags: ["ai-agents", "multi-agent", "research-writing", "latex", "python"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/paper-orchestra.webp"
+  alt: "GitHub social preview card for google-research/paper-orchestra"
+canonical: "https://runany.dev/blog/paper-orchestra/"
+---
+
+> **TL;DR:** PaperOrchestra is a multi-agent pipeline from Google Cloud AI Research that takes a rough idea summary plus an experiment log and returns a submission-ready LaTeX paper with a verified bibliography and self-generated figures. The part that earns attention is the citation layer: candidate references are found by a search-grounded model and then confirmed against the Semantic Scholar API, so the bibliography contains papers that actually exist. A paper costs roughly 60 to 70 LLM calls and about 40 minutes of wall clock. You supply the API keys and a conference template, the framework handles the rest.
+
+## What PaperOrchestra actually does
+
+Most tools sold as "AI writes my paper" take a topic string and hand you filler. PaperOrchestra is built around a different input contract: the material you already have once the experiments are done but drafting has not started. Two artifacts, an Idea Summary that distills the method and its theoretical basis, and an Experimental Log carrying the setup, the baselines, the datasets, the metrics and the numbers that ended up in your tables.
+
+From those two artifacts the framework assembles a full LaTeX manuscript that conforms to a real conference template. The [repository](https://github.com/google-research/paper-orchestra) ships templates for CVPR 2025 and ICLR 2025, and you can add your own by creating a subfolder under `templates/`. The output is the LaTeX source alongside a compiled PDF.
+
+The authors are Yiwen Song, Yale Song, Tomas Pfister and Jinsung Yoon at Google Cloud AI Research. The work is written up as [arXiv:2604.05018](https://arxiv.org/abs/2604.05018), and the repo carries an explicit disclaimer that it is not an officially supported Google product.
+
+## The five agents
+
+The pipeline splits drafting into specialists so that literature search, figure generation and revision can each run at their own pace.
+
+| Agent | Responsibility | LLM calls per paper |
+|---|---|---|
+| Outline | Turns raw materials into a structured section plan | 1 |
+| Literature Review | Finds candidate papers, verifies them, drafts Introduction and Related Work | about 20 to 30 |
+| Plotting | Plans figures, generates them, critiques and redraws | about 20 to 30 |
+| Section Writing | Writes and compiles the whole manuscript in one multimodal call | 1 |
+| Content Refinement | Iterates on the draft using simulated peer review | about 5 to 7 |
+
+![Framework overview showing the PaperOrchestra agent pipeline](https://cdn.runany.dev/blog/inline/paper-orchestra-pipeline.webp)
+
+Two details in that table are worth pulling out. Section Writing is a single call, not one call per section, which is why the manuscript reads coherently rather than as stitched-together fragments. And the Content Refinement agent has a hard acceptance rule: a revision is kept when the overall review score rises, or when it ties and the net change across sub-scores is not negative. Any decrease sends the agent back to the previous version and halts the loop.
+
+## How the literature review avoids invented references
+
+This is the core of the design. The Literature Review agent runs a two-stage retrieval flow instead of a single search call.
+
+First comes parallel candidate discovery, where a search-grounded model runs across ten concurrent workers to pool candidate papers quickly. Second comes sequential citation verification, where each candidate goes through the Semantic Scholar API at the maximum rate of one query per second. The agent drops candidates that exceed the venue's research cutoff or that have no verified mapping, deduplicates what survives by Semantic Scholar ID, compiles a citation registry and auto-generates a `.bib` file.
+
+The rate limit is why verification runs sequentially while discovery runs in parallel. It also means a full run is bounded by how fast Semantic Scholar will answer, not by how fast your model can search.
+
+The payoff shows up in the citation counts. Baselines average 9 to 14 references and inflate their F1 score by fetching the obvious must-cite papers, which leaves recall on good-to-cite papers near zero. PaperOrchestra produces 45.73 to 47.98 citations, close to the roughly 59 in the human-written originals, and improves P1 recall by 12.59 to 13.75 percent over the strongest baseline.
+
+## Running it yourself
+
+Setup is a conda environment plus a dependency install, straight from the README.
+
+```bash
+conda create -n paper_orchestra python=3.11
+conda activate paper_orchestra
+pip install -r requirements.txt
+```
+
+Keys go in a `.env` file at the project root. Which ones you need depends on which models you point the pipeline at.
+
+```env
+SEMANTIC_SCHOLAR_API_KEY=your_semantic_scholar_api_key
+OPENAI_API_KEY=your_openai_api_key
+VERTEX_AI_PROJECT=your_vertex_ai_project
+VERTEX_AI_LOCATION=your_vertex_ai_location
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+Then the pipeline runs from the command line, with the raw materials directory and the template directory as required arguments.
+
+```bash
+python paper_writing_cli.py \
+  --raw_materials_dir /path_to_your_raw_materials/ \
+  --latex_template_dir /path_to_your_latex_template/ \
+  --output_dir /path_to_your_output_folder/ \
+  --use_plotting true
+```
+
+| Flag | Behaviour |
+|---|---|
+| `--raw_materials_dir` | Required. Folder holding the idea summary and experimental log |
+| `--latex_template_dir` | Required. Target template, for example `templates/cvpr2025` |
+| `--output_dir` | Destination folder. A timestamped folder is created when omitted |
+| `--use_plotting` | Enables the plotting agent. Defaults to False |
+| `--writer_model_name` | Model used by the writer and literature agents |
+| `--reflection_model_name` | Model used by the reflection agents |
+
+There is also a Streamlit demo under `frontend/`. The [frontend README](https://github.com/google-research/paper-orchestra/blob/main/frontend/README.md) documents launching it with `streamlit run frontend/app.py` and cleaning up orphaned pipeline processes with `pkill -f paper_writing_cli.py` when the server dies without a clean shutdown.
+
+![A generated CVPR manuscript page produced by PaperOrchestra](https://cdn.runany.dev/blog/inline/paper-orchestra-manuscript.webp)
+
+## What the evaluations say
+
+The [project page](https://yiwen-song.github.io/paper_orchestra/) and the [full paper](https://arxiv.org/html/2604.05018v1) report two separate evaluation tracks, an automated LLM judge and a human side-by-side study, and the numbers differ noticeably between them.
+
+| Metric | PaperOrchestra | Human written baseline |
+|---|---|---|
+| Human side-by-side win margin, literature review | 50 to 68 percent | reference point |
+| Human side-by-side win margin, overall quality | 14 to 38 percent | reference point |
+| Automated judge win margin, literature review | 88 to 99 percent | reference point |
+| ScholarPeer simulated acceptance, CVPR | 84 percent | 86 percent |
+| ScholarPeer simulated acceptance, ICLR | 81 percent | 94 percent |
+| Citations generated | 45.73 to 47.98 | about 59 |
+
+The human study used 11 AI researchers across 40 randomly sampled papers, 20 per venue, for 180 paired evaluations. The gap between the automated margin of 88 to 99 percent and the human margin of 50 to 68 percent is instructive on its own. The authors attribute it to LLM judges behaving like structural graders, rewarding explicit problem-gap-solution paragraphs and bulleted thematic groupings, while human readers prefer dense narrative factuality.
+
+Two ablations support the architecture. Refined manuscripts beat their unrefined drafts in 79 to 81 percent of side-by-side matchups with zero losses, and the simulated acceptance rate rises 19 percent on CVPR and 22 percent on ICLR after refinement. Papers that use generated figures instead of the original human ones still tie or win 51 to 66 percent of comparisons.
+
+## What one paper costs
+
+Latency was measured on a random subset of 10 papers, 5 from each venue, running a single worker, with the highest and lowest times dropped before averaging.
+
+| Pipeline | LLM calls | Mean time per paper |
+|---|---|---|
+| Single Agent | 1 | runs fast, no rigorous citations or grounded visuals |
+| AI Scientist-v2 | about 40 to 45 | 35.1 minutes |
+| PaperOrchestra | about 60 to 70 | 39.6 minutes |
+
+The extra minutes buy a lot of searching and a lot of redrawing. Models used in the experiments were Gemini-3.1-Pro as the writing backbone for PaperOrchestra and every baseline, Gemini-3-Flash with Google Search grounding for literature discovery, Gemini-3-Pro-Image for visuals, and GPT-5 as one of the evaluation judges.
+
+## Where it falls short
+
+The dataset is not in the repo. The generation data is released separately at a later date, so you cannot reproduce the benchmark numbers from a fresh clone without obtaining it first.
+
+Figure generation is delegated to an external framework called PaperBanana, and the authors say that limits their direct control over figure hallucinations. They propose vision-language model verification and dedicated human evaluation as future work rather than something already solved.
+
+The refinement loop runs on structured LLM-generated peer review feedback, not on a human in the loop. Moving to interactive critique is listed as future direction, which means today the framework cannot be steered mid-draft by a researcher who spots a mistake.
+
+Finally, pretraining contamination is a genuine risk for a benchmark built from 200 public conference papers. The authors mitigate it by anonymizing and de-contextualizing every input, and they note that shared underlying models make the contamination apply equally to all compared systems, but they do not claim the risk is removed.
+
+## Source and Accuracy Notes
+
+- Source repository: google-research/paper-orchestra, verified via the GitHub API (`html_url`), 3520 stars, 456 forks, Python, Apache-2.0, created 2026-05-01, last push 2026-11-15
+- README: https://github.com/google-research/paper-orchestra, provided the install steps, environment variables, CLI flags, project structure and the dataset caveat
+- Project page: https://yiwen-song.github.io/paper_orchestra/, provided the agent descriptions, the benchmark composition, the manuscript gallery and the headline human evaluation numbers
+- Full paper: https://arxiv.org/html/2604.05018v1, provided the method details, evaluation tables, the citation coverage analysis, the ablation results, Appendix A limitations and Appendix B cost figures
+- arXiv record: https://arxiv.org/abs/2604.05018, provided the author list, submission date and subject classifications
+- Frontend README: https://github.com/google-research/paper-orchestra/blob/main/frontend/README.md, provided the Streamlit launch steps and the orphan process cleanup
+- License: Apache-2.0, verified via GitHub API `license.spdx_id`
+- Stars at time of writing: 3520
+- Both inline illustrations are real figures from the project page, uploaded to this site's CDN
