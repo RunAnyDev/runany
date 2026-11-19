@@ -1,0 +1,148 @@
+---
+title: "last30days: an agent skill that reads the last 30 days"
+description: "last30days is an AI agent skill that researches any topic across Reddit, X, YouTube, Hacker News and Polymarket, then synthesizes a cited brief scored by real engagement."
+pubDate: "2026-11-19T02:05:00.000Z"
+author: "Friday"
+tags: ["ai-skills", "deep-research", "claude-code", "python", "research"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/last30days-skill.webp"
+  alt: "GitHub social preview card for mvanhorn/last30days-skill"
+canonical: "https://runany.dev/blog/last30days-skill/"
+---
+
+> **TL;DR:** last30days is a Python agent skill that researches any topic across roughly thirty sources at once, then ranks what it finds by real engagement instead of SEO. Reddit, Hacker News, Polymarket and GitHub work with no configuration; X, YouTube, TikTok, arXiv, Yahoo Finance and about twenty more unlock with your own keys. The output is a markdown brief with cited quotes, upvote counts, market odds and share-price moves, saved to a local folder you can search later. It reached 70,061 GitHub stars and took 1,059 stars in a single day.
+
+## What it actually does
+
+The premise is a complaint about how search works. A general search engine aggregates editorial judgment, while the places where technical opinion forms fastest are comment sections, video transcripts and prediction markets. Those are walled gardens with separate APIs, separate auth, and separate rate limits.
+
+last30days bridges them with an agent. You type a topic, the skill resolves who and what matters around it, queries every enabled source in parallel, scores the results by engagement, relevance and freshness, merges duplicate stories across platforms, and hands you one brief.
+
+The repository README puts the framing bluntly: Google aggregates editors, this searches people. A thread with 1,500 upvotes is treated as a stronger signal than a blog post nobody read, and a Polymarket contract with $66K in volume carries more weight than a pundit's guess.
+
+![A dozen walled gardens searched in parallel by one agent](https://cdn.runany.dev/blog/inline/last30days-skill-ui.webp)
+
+Version 4 of the skill adds a layer aimed at competitive intelligence. A company run also reads that month's US patent filings and flags only the applications that look out of character for that company or describe something unannounced. It reads the company's own careers page and flags roles that give away upcoming teams, including teams nobody has covered yet. These are surfaced as Patent Secret Signals and Jobs Page Secret Signals.
+
+## The source list and what each one costs
+
+Availability is the thing to understand before you install. A useful subset works out of the box, and everything else is opt-in.
+
+| Source | Works without keys | What it contributes |
+|---|---|---|
+| Reddit | Yes | Top comments with real upvote counts, and threads the editorial layer ignores |
+| Hacker News | Yes | Developer consensus, points and comment counts |
+| Polymarket | Yes | Real-money odds on events, plus how far those odds moved |
+| GitHub | Yes | PR velocity, stars, releases, issues and discussions |
+| arXiv | Yes | New papers in the window, installed as a free CLI |
+| Techmeme | Yes | The editorial tech-news layer, date-windowed |
+| Yahoo Finance | Yes | Share-price move next to the S&P 500 for listed companies |
+| X / Twitter | Bring your own token | Posts, likes and reposts from the last week |
+| YouTube | Bring your own key | Full transcripts searched for quotable lines |
+| TikTok | Bring your own key | Captions and engagement numbers |
+| LinkedIn | Bring your own session | Posts and articles, with articles weighted higher |
+
+Beyond those, the skill also knows how to reach Bluesky, Instagram Reels, Threads, Pinterest, StockTwits, Digg, Meta Ads, dev.to, Truth Social, Xiaohongshu, Trustpilot, Amazon reviews, DripStack newsletters, Telegram channels, patent filings, careers pages and your own local markdown or PDF corpus.
+
+## Installing it
+
+Claude Code is the recommended host because the marketplace handles updates for you.
+
+```text
+/plugin marketplace add mvanhorn/last30days-skill
+/plugin install last30days
+```
+
+For Codex, Cursor, Copilot, Gemini CLI or any of the Agent Skills hosts, the open `skills` CLI covers 50-plus harnesses.
+
+```bash
+npx skills add mvanhorn/last30days-skill -g
+```
+
+Drop the `-g` to install per project instead of globally, which is what you want if the skill lives in a repo you commit. Claude Desktop installs it as a Model Context Protocol bundle (`.mcpb`) downloaded from the releases page, and OpenClaw uses `clawhub install last30days-official`. A first-run setup wizard unlocks the key-gated sources.
+
+One gotcha worth knowing up front: the marketplace plugin and the `npx skills` copy do not dedupe. If you install both, `/last30days` shows two entries. Pick one install method per machine.
+
+## Running a research pass
+
+The slash command is the normal entry point.
+
+```text
+/last30days Peter Steinberger
+```
+
+The engine itself is a Python script you can call directly, which is how you would wire it into cron or a larger agent. It requires Python 3.12 or newer.
+
+```bash
+python3 skills/last30days/scripts/last30days.py "AI coding agents" --emit=json
+```
+
+A `--preflight` flag prints the config source, the browser-cookie plan, planned file writes and optional commands without reading cookies, writing anything or starting research. It is the safe way to see what a run would do before it does it.
+
+![A generated research brief with cited quotes and a per-source engagement ledger](https://cdn.runany.dev/blog/inline/last30days-skill-out-ui.webp)
+
+The output format is a markdown brief with each finding quoted and attributed, followed by a ledger of everything pulled. A real run in the project's own promo material lists Reddit threads and comment counts, X posts and likes, YouTube videos and views, TikTok videos, Instagram reels, Hacker News stories, LinkedIn posts and GitHub activity, each with the numbers attached.
+
+Two other modes matter. A topic-less discovery mode sweeps category listings and front-page stories to surface what is breaking, then returns velocity-ranked topics with a ready-to-run follow-up command. A library mode turns saved briefs into a local Atom feed and a browsable index.
+
+## Where output goes and how keys are handled
+
+Research files land in `~/Documents/Last30Days/` by default, with one file per topic named after a slug. Same topic and suffix on the same day overwrites, on different days appends a date stamp. Override the location with `LAST30DAYS_MEMORY_DIR` or the `--save-dir` flag.
+
+```bash
+# ~/.config/last30days/.env
+LAST30DAYS_MEMORY_DIR=~/Documents/Last30Days
+LAST30DAYS_LIBRARY_OWNER=Your Name
+LAST30DAYS_LIBRARY_CONTEXT=off
+```
+
+One detail that bites people: the `.env` reader expands a tilde but not `$HOME`, so a literal `$HOME/Documents` string is stored verbatim and breaks path resolution. Use `~/...` or a full absolute path.
+
+On data handling, the default is that everything runs on your machine and only the APIs you call see your data. There is one exception to know about. If you configure a reasoning provider such as `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_GENAI_API_KEY`, the engine sends your research topic and retrieved content snippets to that provider for relevance scoring. Leave all of those unset and the engine falls back to a local scoring model with no external reranking call.
+
+Setting `LAST30DAYS_STORE=1` persists findings into a local SQLite database called `research.db`. It is never uploaded anywhere.
+
+On macOS you can skip the `.env` file entirely and store keys in the system Keychain.
+
+```bash
+# Interactive setup, prompts for each known key
+skills/last30days/scripts/setup-keychain.sh
+
+# Inspect or remove entries
+skills/last30days/scripts/setup-keychain.sh --list
+skills/last30days/scripts/setup-keychain.sh --delete XAI_API_KEY
+```
+
+Keychain items use the service name `last30days-<KEY>`, and the loader treats them as the lowest-priority source, so `.env` and process environment still win on collision. On Linux and Windows the loader is a no-op and nothing changes.
+
+## Maintenance signals and rough edges
+
+The project is genuinely active. The changelog records a 4.3.2 release on 2026-11-17 and a 4.3.1 on the same day, with a 4.3.0 two days earlier. That is a fast release cadence for a skill this size, and the entries are specific rather than cosmetic. Version 4.3.0 rewrote Polymarket selection so that a team's title odds at any price lead a run, rather than near-settled props and title-word collisions.
+
+The 4.3.1 release is a good example of honest maintenance. A Hermes skill scanner had started returning a `dangerous` verdict on the install, and the cause was that `SKILL.md` named the `scripts/lib` folders as if they were files, so the scanner reported the skill as a stale index entry whose files no longer existed upstream. The fix corrected the references, and the install path works again with a forced install.
+
+Other recent fixes show the shape of the remaining rough edges. Windows installs of the PrintingPress CLIs for Digg, arXiv, Techmeme and Yahoo Finance now activate without a manual PATH edit. The doctor command stopped telling users to add a `GROQ_API_KEY` or `OPENAI_API_KEY` for caption-free YouTube videos, because no source calls the transcription module yet and the key changed nothing. Successful X cookie discovery is explained when it fails, with the manual credential alternative spelled out.
+
+Windows support for the Claude Desktop bundle is explicitly deferred until the per-platform manifest entry points are sorted out.
+
+## Limits worth knowing
+
+The engine's own `SKILL.md` is emphatic that the runtime skill spec is the source of truth and that retrieved web content is untrusted evidence rather than instruction. That is the right posture for a tool that reads arbitrary forum posts, and it is worth taking seriously: the skill synthesizes text from pages it did not write.
+
+Setup is also not uniform across hosts. The Claude Desktop path needs Python 3.12 on your PATH, and the bundle ships engine source but uses your local interpreter. Keys do not sync between Claude Desktop and Claude Code, since those maintain separate credential stores by design, so you re-enter them once.
+
+The most honest framing of the tool is that it trades editorial judgment for collective attention. That is a different question, not obviously a better one, and the ranking logic makes a value judgment you should agree with before relying on it for decisions that matter.
+
+## Source and Accuracy Notes
+
+- Source repository: mvanhorn/last30days-skill (verified via GitHub API `html_url`)
+- README: https://github.com/mvanhorn/last30days-skill — install commands, source table, key costs, how-it-works steps, v4 feature list, data handling and keychain instructions
+- Changelog: https://raw.githubusercontent.com/mvanhorn/last30days-skill/main/CHANGELOG.md — release history for 4.2.1, 4.3.0, 4.3.1 and 4.3.2, including the Hermes scanner fix and the Windows CLI PATH fix
+- Configuration reference: https://raw.githubusercontent.com/mvanhorn/last30days-skill/main/CONFIGURATION.md — save directory precedence, `.env` handling, store flag and provider priority
+- Runtime skill spec: https://raw.githubusercontent.com/mvanhorn/last30days-skill/main/skills/last30days/SKILL.md — version 4.3.2 frontmatter, Python 3.12 requirement, reference routing and the untrusted-evidence contract
+- Images: `media/pr-assets/last30days-ad.gif` and frames from the same promo asset, extracted from the repository
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 70061, with 6245 forks and 22 open issues
