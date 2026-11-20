@@ -1,0 +1,122 @@
+---
+title: "Ghost Downloader 3: one app for every protocol"
+description: "Ghost Downloader 3 merges HTTP, BitTorrent, FTP, M3U8, eD2k and video site downloading into one native app with a browser sniffing extension."
+pubDate: "2026-11-20T09:25:00.000Z"
+author: "Friday"
+tags: ["downloader", "python", "bittorrent", "cross-platform", "qt"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/ghost-downloader-3.webp"
+  alt: "GitHub social preview card for XiaoYouChR/Ghost-Downloader-3"
+canonical: "https://runany.dev/blog/ghost-downloader-3/"
+---
+
+> **TL;DR:** Ghost Downloader 3 is a single native desktop and Android app that handles HTTP, BitTorrent, FTP, M3U8, MPEG-DASH and eD2k downloads, plus a browser extension that sniffs media off a page and hands it straight to the app. It is GPL licensed, written in Python on a Qt 6 interface, ships on Windows, macOS, Linux and Android, and exposes an aria2 compatible RPC API for scripting.
+
+## One app instead of five
+
+Most download setups on a desktop are a small pile of separate programs. You have a download manager for HTTP, a torrent client for magnets, a separate client for the older eD2k network, a stream recorder for HLS, and something else to pull a video off a site with a parser attached. [XiaoYouChR/Ghost-Downloader-3](https://github.com/XiaoYouChR/Ghost-Downloader-3) folds those into one application with one task list.
+
+The project started as a way to help a Bilibili creator manage resources, and it has grown into a GPL v3.0 application with 12808 stars, 801 forks and 87 open issues. The last push landed on 19 November 2026. It is written in Python, uses PySide6 and PyQt-Fluent-Widgets for the interface, and runs on Windows 10 and newer, macOS 13 and newer, Linux with glibc 2.35 and newer, and Android 9 and newer.
+
+| Platform | Required version | Architectures |
+|---|---|---|
+| Windows | 10+ | x86_64, arm64 |
+| macOS | 13.0+ | x86_64, arm64 |
+| Linux | glibc 2.35+ | x86_64, arm64 |
+| Android | 9.0+ | arm64-v8a |
+
+The engine story is the interesting part. Rather than reimplementing every protocol, Ghost Downloader drives existing tools. BitTorrent handling comes from libtorrent, eD2k comes from Kelpie, a separate engine by the same author, and DASH, HLS and MSS download is handled by N_m3u8DL-RE. Video site parsing is yt-dlp, FTP is aioftp, and the HTTP layer is wreq, an ergonomic client that emulates TLS fingerprints.
+
+That fingerprint emulation is the feature the author leads with. Downloaders are easy to block because automated clients look automated, and reusing a real browser's TLS signature makes the request look like something else. Combined with smart chunking that avoids a separate merge step, and bandwidth auto-detection, the argument is that a download manager should be judged on a bad connection rather than a good one.
+
+## The extension is the interesting part
+
+The browser extension is what separates this from a normal download manager. It watches the page, finds the stream sitting behind the player, and hands it to the desktop app. A download button appears directly on the video, with no quality cap and no 720p ceiling. Open the extension popup and it lists every medium on the page, video, audio, images, HLS and DASH streams, and you take what you want.
+
+![Download button shown on a video page by the Ghost Downloader browser extension](https://cdn.runany.dev/blog/inline/ghost-downloader-3-ui.webp)
+
+Nothing is copied and pasted. Your cookies and headers travel with the task, so a download that needs a logged in session simply works. The extension itself builds on cat-catch, the resource sniffing extension, and the project's own documentation lists sniffing, interception, Cat Catch support and batch images as its feature set.
+
+![Add task dialog in Ghost Downloader with the clip range thumbnail and the quality menu set to HDR](https://cdn.runany.dev/blog/inline/ghost-downloader-3-task.webp)
+
+On Android the app does something the desktop build cannot. It records live M3U8 streams and keeps downloading in the background, and the site shows the same engine running on a phone.
+
+There is also a benchmark, published at [gd.xychr.com/docs/benchmark](https://gd.xychr.com/docs/benchmark/). The site claims 2.9 times faster at best on a throttled server or link, 6 of 6 test downloads completed, and 5 of 6 tests where it was the fastest, with every downloader running the same connection count. Those numbers come from the project itself, so treat them as a starting point rather than a verdict.
+
+## A command line that does not look like a GUI app
+
+Underneath the interface sits a command line client called `ghd`, installed from Settings, Command Line Tool. The verbs map cleanly onto the task list.
+
+```bash
+ghd probe <url>          # Preview a URL without adding a task
+ghd add <url>...         # Add and start tasks
+ghd tasks                # List tasks
+ghd task <taskId>        # Show task details
+ghd pause <taskId>...    # Pause tasks
+ghd start <taskId>...    # Resume tasks
+ghd remove <taskId>...   # Remove tasks and delete unfinished files
+ghd wait <taskId>...     # Wait for tasks to finish
+```
+
+The example in the project's own documentation shows how far it goes, including per-file selection inside a torrent.
+
+```bash
+# see which files the torrent contains
+ghd probe "https://example.com/a.torrent"
+# download only files 0 and 3 into ./downloads
+ghd add "https://example.com/a.torrent" --select 0,3 -o ./downloads
+# wait until the download finishes
+ghd wait tsk_0123
+```
+
+The app also speaks an aria2 compatible RPC API, which is what makes it usable from third party tools and scripts rather than only from its own window. You can change the URL, headers or proxy on a running task, and the project promises that progress is never lost while you do it.
+
+## What sits underneath
+
+Looking at the dependency list in the README gives you the architecture without reading the source. On top of the engines already mentioned, there is m3u8 and mpegdash for manifest parsing, FFmpeg for media work, Nuitka as the Python compiler, uvloop and winloop for the asyncio event loop, loguru for logging, desktop-notifier for cross platform notifications, and QuickJS-NG, a small embeddable JavaScript engine.
+
+The application is built with asyncio throughout, which is why the engine stack is mostly asynchronous Python rather than subprocess calls. The task model treats sessions, tasks and engines as separate layers, and the plugin system called Feature Packs plugs into that model. The public roadmap still has making the plugin API public unchecked, along with enhanced task editing such as binding multiple sessions to one task, so the extension story is documented but still settling.
+
+Documentation lives at [gd.xychr.com/en/docs](https://gd.xychr.com/en/docs/) and is split into getting started, downloads, the browser extension, a power user section on editing tasks, batch work, TLS fingerprinting and proxies, troubleshooting, and a developer section covering setup, architecture and writing a FeaturePack.
+
+## Where it stands against the alternatives
+
+The documentation compares Ghost Downloader against IDM, NDM, Gopeed, Motrix and FDM. Reading the project's own table is more useful than a general summary.
+
+| Capability | GD | IDM | NDM | Gopeed | Motrix | FDM |
+|---|---|---|---|---|---|---|
+| HTTP / HTTPS | yes | yes | yes | yes | yes | yes |
+| BitTorrent / Magnet | yes | no | no | yes | yes | yes |
+| Free | yes | no | yes | yes | yes | yes |
+| Open source | yes | no | yes | yes | yes | no |
+| Browser to desktop deep integration | yes | partial | partial | partial | no | partial |
+| Resource sniffing | yes | yes | partial | no | no | partial |
+| HLS / m3u8 / DASH | yes | no | partial | no | no | partial |
+| Site specialization | yes | no | no | no | no | no |
+| Extensible with plugins | yes | no | no | yes | no | partial |
+
+The pattern is that Ghost Downloader and Gopeed are the only free open source options in the set, and Ghost Downloader is the only one with full marks on browser integration, sniffing and stream support.
+
+## The catch
+
+Several things are worth knowing before you switch. Qt 6.6 and newer dropped support for CPUs without the AVX instruction set, so very old hardware is out.
+
+Translations are handled on Crowdin rather than through pull requests, and the source language is Simplified Chinese. A new language only reaches the app once 60 percent of the desktop text is translated, and anything left untranslated falls back to English.
+
+The README also carries a sponsored advert for a residential proxy network at the top of the page. That is normal for a project with this size, but it is worth noticing.
+
+Code signing is free courtesy of SignPath.io and i0ntempest.com, which is how a GPL project ships signed installers for several operating systems without paying out of pocket.
+
+## Source and Accuracy Notes
+
+- Source repository: [XiaoYouChR/Ghost-Downloader-3](https://github.com/XiaoYouChR/Ghost-Downloader-3) (verified via GitHub API `html_url`)
+- README: https://github.com/XiaoYouChR/Ghost-Downloader-3 - features, platform requirements table, the `ghd` command reference, roadmap, dependency and reference stack, license
+- Project site: https://gd.xychr.com/ - extension workflow, protocol coverage, Android recording, benchmark claims, screenshot URLs
+- Documentation: https://gd.xychr.com/en/docs/ - documentation structure, competitor comparison table, developer section, benchmark link
+- Benchmark: https://gd.xychr.com/docs/benchmark/ - linked from the site and docs as the source for the speed and sniffing claims
+- License: GPL-3.0 (verified via GitHub API `license.spdx_id` and the README license section), Copyright 2023-2026 XiaoYouChR
+- Stars at time of writing: 12808, with 801 forks and 87 open issues
+- The comparison table above reproduces the project's own matrix, in which GD is the subject of comparison
