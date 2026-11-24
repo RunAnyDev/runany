@@ -1,0 +1,140 @@
+---
+title: "Hermit CRM: a self-hosted CRM in Markdown files"
+description: "Hermit CRM is a free, open-source CRM for solo founders. Every company, contact and conversation is a Markdown file in git on your own machine."
+pubDate: "2026-11-24T00:30:00.000Z"
+author: "Friday"
+featured: false
+draft: false
+tags: ["crm", "self-hosted", "open-source", "python", "ai-tools"]
+category: "self-hosted"
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/hermit-crm.webp"
+  alt: "The Hermit CRM pipeline board with a follow-up list and deal columns"
+canonical: "https://runany.dev/blog/hermit-crm/"
+---
+
+> **TL;DR:** Hermit CRM stores a solo sales pipeline as Markdown files in a git repo on your own laptop, then serves a local web app on port 8765 with a pipeline board, follow-up radar, calendar and reports. It costs nothing under Apache 2.0, and your AI coding tool can read and reshape the records directly. It is built for one person, so a team should look elsewhere.
+
+## What it is
+
+Hermit CRM is a CRM for exactly one person: a founder, a freelancer, someone doing their own sales. There is no account to create and no server to run. You install it, and a web app comes up at http://127.0.0.1:8765 with your pipeline on it.
+
+The unusual part is the storage layer. There is no Postgres, no SQLite and no hosted vendor. A folder on your machine, `~/crm` by default, holds the whole database. Each company gets its own folder, each contact and each conversation its own file, and every one of those files is plain text in a git repository. Your pipeline can be opened with any editor, grepped, diffed and rolled back with `git revert` when a change goes wrong.
+
+The project is at version 1.0 and is published on PyPI as `hermitcrm`. It is free and open source under the Apache License 2.0, with no warranty and no support. It runs on macOS, works on Linux with less testing, and does not support Windows yet.
+
+## The data model: one company, one file
+
+This is the actual file behind a card on the pipeline board, taken from the project's own example:
+
+```yaml
+---
+name: Northwind Robotics
+website: northwind-robotics.com
+country: DE
+source: referral
+stage: offer
+stage_changed: 2026-09-15
+value_eur_month: 4000
+next_step: Follow up on the proposal
+next_step_due: 2026-09-24
+---
+```
+
+That is a `company.md` file with YAML frontmatter. Stage, monthly value, next step, due date: all of it lives in text you can read with the app closed. The docs describe the rest of the layout the same way, a folder per company, a file per contact, a file per conversation, each one small enough to read at a glance.
+
+![The Hermit CRM pipeline board with columns for prospect, engaged, discovery and offer, and a follow-up list above showing one reply you owe and one message waiting on them](https://cdn.runany.dev/blog/inline/hermit-crm-pipeline.webp)
+
+One more file deserves attention. `PIPELINE.md` in the data folder is the whole board regenerated as a single Markdown page on every write: stages with counts and monthly value, overdue next steps, silent accounts, parked companies, closed companies from the last 90 days. If you ever stop wanting the web app, that file plus the git history is still a usable pipeline.
+
+## How it works
+
+The app is a local web server reading and writing the git repo. Every save is a commit, which is why the product can promise to undo any change without inventing a proprietary history format. The web app writes the change, git records it, and the interface offers an Undo button that reverts it.
+
+The AI part is not built into the product. Enrichment, the "Ask Hermit" question box on every page, scheduled routines and outreach drafts all shell out to whichever AI command-line tool you already have, Claude Code, Codex, Cursor or Gemini CLI. Your records go to that provider because you asked for the feature, not because a vendor has a line on them. The MCP server (`hermitcrm mcp`) exposes the same data to Claude Desktop, ChatGPT and Cursor.
+
+The Adjust button is the most interesting piece. You describe a change in one sentence and the agent writes it into your data folder following recipes that ship with the product. A dashboard becomes a file under `dashboards/`, a new field becomes a few lines in `fields.toml`, a recurring job becomes an entry in `routines.toml`. Every generated change is a commit, so a bad generation is one revert away. Routines ship paused and only ever write drafts.
+
+![The Monday review dashboard in Hermit CRM, pinned in the sidebar, showing open deals, tasks due this week and the open deals with their next step](https://cdn.runany.dev/blog/inline/hermit-crm-dashboard.webp)
+
+Capture works the way it does in any serious CRM, but without OAuth. You forward or BCC mail to a tracking address and it is logged against the right contact, you paste a secret ICS link for your calendar, you import from CSV or `.xlsx`, or you keep a bookmarklet that turns the page you are looking at into a filled-in form. You type the app password and the calendar link into the Settings page yourself, so they never pass through a chat with an AI tool.
+
+![A company page in Hermit CRM showing the Northwind Robotics record with its contact timeline of emails, calls and notes](https://cdn.runany.dev/blog/inline/hermit-crm-company.webp)
+
+## Getting it running
+
+The shortest path is to hand the install to an AI coding tool. The project's INSTALL.md is written as a script for an agent to follow, and the README gives the one line to paste:
+
+```text
+Read https://raw.githubusercontent.com/Hermit-CRM/hermit-crm/main/INSTALL.md and set up Hermit CRM for me.
+```
+
+That agent checks the machine, installs the command, creates your data folder, asks a few questions and starts the app. It deliberately never asks for an app password or a calendar URL.
+
+If you would rather do it by hand, `uv` brings its own Python:
+
+```bash
+uv tool install hermitcrm
+hermitcrm init ~/crm                                # a new data folder; asks 3 questions
+hermitcrm --data ~/crm serve                        # http://127.0.0.1:8765
+hermitcrm --data ~/crm schedule install --serve     # daily sync, web app always on
+```
+
+`pipx install hermitcrm` behaves the same way. From a clone, `pip install .` in a virtual environment on Python 3.11 or newer does the job, and the downloadable archive from the site ships with a SHA-256 to check before you unpack it.
+
+Two commands help once you are inside. `hermitcrm init --demo` fills the folder with thirteen made-up companies, and `hermitcrm doctor` checks the whole installation end to end.
+
+## What the board actually shows
+
+The pipeline page is one column per open stage, with defaults of prospect, engaged, discovery and offer that you can rename and reorder in Settings. Cards show the company name, how many days it has sat in the stage, the country, the last touch, the next step with its due date (red when overdue, struck through when done) and the monthly value when you set one.
+
+Above the board sits the follow-up radar, and its rules are sharper than most. "You owe a reply" means the newest message in that company's history came from them and is at least a day old. "Waiting on them" means you wrote last, nothing is planned, and it has been five days. A note is a memo and never counts as contact. A meeting is not a message you sent, so it never creates a "waiting on them" row. A task scheduled for later silences that row but not the other one, because a reply you owe is owed.
+
+The filter bar takes a small language that stays in the URL, so a view can be bookmarked:
+
+```text
+text      contains
+!text     does not contain
+=text     equals
+>x        larger than
+<x        smaller than
+-x        empty
+*x        not empty
+```
+
+Filters combine with AND. Below the board, closed and parked companies collapse into lists, and a parked company whose return date has arrived moves back to prospect on its own, in a single commit.
+
+## How it compares
+
+The project publishes its own comparison, with prices checked on 7 November 2026. It is not a claim that the others are bad. Each comparison page on the site says plainly when the hosted tool is the better choice.
+
+| CRM | Best for | Price for one person | Where your data lives | Source code |
+|---|---|---|---|---|
+| Hermit CRM | One person doing their own sales | Free | A folder on your own computer | Apache 2.0 |
+| HubSpot | Teams wanting marketing, sales and service | Free to 2 users, then $7 a seat a month | HubSpot's cloud | Closed |
+| Attio | Start-up teams wanting a flexible data model | Free to 3 seats, then EUR 31 a seat a month | Attio's cloud | Closed |
+| Pipedrive | Sales teams living in a deal pipeline | No free plan, EUR 14 a seat a month | Pipedrive's cloud | Closed |
+| Twenty | Teams wanting an open-source CRM to self-host | Self-hosting free, cloud $9 a user a month | Your server or Twenty's cloud | AGPL-3.0 |
+
+Twenty is the closest comparison, since it is also open source, but it wants a server and Docker, and it is a team product. HubSpot is free for two users, so a two-person team that does not mind the cloud is not spending anything either.
+
+## What to watch for
+
+The first limit is the one that ends most evaluations: Hermit CRM is built for one person. There is no multi-user support, no permissions and no shared pipeline. If two people need the same funnel, the site itself points you at HubSpot, Attio or Twenty instead.
+
+The second is platforms. macOS is the supported target, Linux works but is less tested, Windows does not work yet. On Linux there is no keychain, so the mail password ends up in a file only your user account can read.
+
+The third is the warranty. The project is blunt about it: version 1.0 is stable for daily use, but it comes with no warranty of any kind and nobody is on the hook if it loses your data. The project leans on git to make that recoverable, and it tells you to keep your own backups and to restore one now and then to check it works. A commit per write is a convenience, not a guarantee.
+
+Mail capture is where the rough edges are. BCC capture over IMAP is tested with Gmail, iCloud is untested, and Outlook usually blocks it. There is no OAuth, so account setup is manual by design, which keeps credentials out of chat windows but also means a misconfigured mailbox quietly logs nothing.
+
+Finally, the AI features cost nothing extra because they run on the subscription you already have, but they are not free of consequences. Enrichment, Ask Hermit, routines and outreach drafts send what they read to your AI provider. Turn off the daily update check with `update_check = false` and use none of the network features, and nothing leaves your machine.
+
+## Source and Accuracy Notes
+
+- Project page: https://hermitcrm.io/ - what it is, the feature list, the one company one file example, the install message for AI tools, and the FAQ on data location, platforms, mail capture and price.
+- Documentation: https://hermitcrm.io/docs/ - pipeline stages and cards, the follow-up radar rules, filter syntax, the calendar and tasks pages, and the regenerated PIPELINE.md.
+- Source repository: https://github.com/Hermit-CRM/hermit-crm - README read from the GitHub repository, covering install commands, the data responsibility section, the comparison table, roadmap and the Apache 2.0 licence.
+- Comparison page: https://hermitcrm.io/compare/ - the CRM table and vendor prices, checked on 7 November 2026.
+- Licence: Apache License 2.0, confirmed from the project README and linked on the home page.
+- Screenshots: the pipeline board, the company timeline and the dashboard image all come from the project's own site and repository.
