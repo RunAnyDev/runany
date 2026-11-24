@@ -1,0 +1,124 @@
+---
+title: "AutoClip: Turn One Video Link Into 10 Ready-to-Post Clips"
+description: "AutoClip is an open-source desktop app that cuts long podcasts and interviews into short vertical clips with subtitles, covers, and captions. Local rendering, MIT licensed."
+pubDate: "2026-11-24T09:00:00.000Z"
+author: "Friday"
+tags: ["github-trending", "dev-tools", "ai-video-editor", "content-repurposing", "python"]
+category: "dev-tools"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/autoclip.webp"
+  alt: "GitHub social preview card for zhouxiaoka/autoclip"
+canonical: "https://runany.dev/blog/autoclip/"
+---
+
+> **TL;DR:** AutoClip takes a YouTube or Bilibili link, reads the whole transcript in one pass, and hands back up to 10 short vertical clips per platform, each with burned-in subtitles, a cover image, and ready-to-paste caption text. Editing and rendering happen on your own machine, so the source video never leaves it. The app is MIT licensed and free; you pay only for whichever cloud model you point it at.
+
+![AutoClip home screen with a link import box and a list of processed projects](https://cdn.runany.dev/blog/inline/autoclip-ui.webp)
+
+## What it is
+
+AutoClip is a desktop application for repurposing long videos. You paste a link, pick the platforms you post to, and the tool produces finished clips. It is aimed squarely at people who already have a library of long-form material (interviews, podcasts, course recordings) and want to reuse it on short-form channels without sitting in a timeline.
+
+The project describes its own pitch in three steps: paste the link and choose a platform, let it read the entire video and pick what is worth posting, then deliver a publishing package. That package is the part that matters. Each clip comes with a title, a description, hashtags, a cover image, and a ZIP you can download or push straight to a connected account.
+
+The maintainer is explicit that this is a solo project with an irregular response time. There is no instant support or one-to-one deployment service, and the README asks for bug reports to include the version, system, model, and redacted logs.
+
+Supported targets are Douyin, Xiaohongshu, Bilibili, TikTok, Reels, YouTube Shorts, and YouTube. Vertical platforms get an aspect ratio and duration treatment specific to their rules; Bilibili and YouTube stay horizontal.
+
+## How it works
+
+The pipeline starts with transcription. If the source video already ships author subtitles, AutoClip uses them and skips speech recognition entirely. When there are none, you choose between a local Whisper or SenseVoice install and a cloud transcription provider. The local Whisper base model download is around 220 MB.
+
+Then it reads the full transcript once and picks complete exchanges, from the first sentence of a question to the end of the answer. On the project's own numbers, a two to three hour interview yields 18 to 33 candidate segments, of which the top 10 by score are produced automatically and the rest are available on request.
+
+Framing follows the active speaker. Shots with no detected speaker keep the full frame rather than being cropped to a guess.
+
+Packaging is per-platform. Douyin and Xiaohongshu default to an interview-style layout, TikTok, Reels, and Shorts default to a full-screen podcast style. A model first judges the emotional register of a segment (calm, serious, strong opinion, sincere, light) and then picks from seven color schemes and several subtitle animation styles.
+
+Here is where the cost and time actually go, from the project's measured records on an Apple Silicon Mac with rendering queued at low priority and single-threaded:
+
+| Source video | Pipeline | Link to finished | Segments to clips | Model calls | Model cost |
+|---|---|---|---|---|---|
+| Jensen Huang, 1h43m, English to Xiaohongshu | Current | 7.5 min | 21 to 10 | 34 | ¥0.09 |
+| TIM x Luo Yonghao, 2h52m, Chinese to Douyin | Current, no subtitles | 29.5 min | 18 to 10 | 32 | ¥0.20 |
+| Karpathy, 2h26m, English to Douyin | Transitional | 34 min | 25 to 25 | 53 | ¥0.16 |
+| MrBeast, 2h06m, English to TikTok | Legacy | 65 min | 33 to 33 | 194 | ¥0.64 |
+
+The legacy row is the interesting one. The old pipeline made 194 model calls in four sequential steps and took 35 minutes just on segment selection. The current pipeline reads the whole transcript in a single pass with parallel calls, which drops selection to 25 seconds and the whole job to 7.5 minutes when author subtitles are available.
+
+## Running it
+
+There are three ways in, and the project recommends picking based on what you are doing rather than which sounds best.
+
+The desktop app is the path most people want. Download the installer from GitHub Releases, pick the `.dmg` for Apple Silicon or the `-setup.exe` for Windows x64, and the bundle ships its own Python and FFmpeg. On macOS 15 and later you may need to open Settings, then Privacy and Security, then Still Open on first launch.
+
+The self-hosted path is Docker, which is also the only option on Intel Macs and Linux:
+
+```bash
+git clone https://github.com/zhouxiaoka/autoclip.git
+cd autoclip
+cp env.example .env
+mkdir -p data logs uploads
+docker compose up -d --build
+```
+
+The web interface comes up on port 3000, and API docs are served at port 8000 once the backend is up. If you hit permission errors on bind-mounted directories under Linux, fix ownership before starting again:
+
+```bash
+docker compose run --rm --no-deps --user root --entrypoint sh autoclip -c 'chown -R autoclip:autoclip /app/data /app/logs /app/uploads'
+docker compose up -d
+```
+
+For batch work or agent integration, the CLI and MCP server share the same one-click path as the desktop app. Python 3.10 or newer and FFmpeg on PATH are the requirements, and the local CLI does not need Redis.
+
+```bash
+autoclip --version
+autoclip produce talk.mp4 --srt talk.srt --platform douyin --portrait-style podcast --json
+autoclip outputs PROJECT_ID --export-kits
+```
+
+The `produce` command skips transcription entirely when you pass an existing `.srt`. There is also a one-line install path for the MCP package via `uvx autoclip-mcp` or `npx skills add zhouxiaoka/autoclip`.
+
+The MCP server exposes `start_quick_output` and `get_quick_output_status` as the current entry points, with older `run` and `export` commands still working. You can debug it directly with `autoclip mcp`, or write the client config for OpenCode with `autoclip mcp install opencode`.
+
+## Model configuration
+
+Every LLM decision goes through a provider you choose. The settings screen offers three routes, and all of them use your own credentials.
+
+| Option | Address | Key required |
+|---|---|---|
+| Cloud API | Any OpenAI-compatible endpoint, custom Base URL supported | Yes |
+| Ollama | `http://localhost:11434/v1` by default | No |
+| LM Studio | `http://localhost:1234/v1` by default | No |
+
+One Docker gotcha is worth flagging: when the container talks to a model server on your host, `localhost` refers to the container itself. You need to point it at an address the container can actually reach.
+
+## Limits and gotchas
+
+The desktop installer is not code signed or Apple notarized yet. The project tracks this as issue 119, and warns that new versions may trip SmartScreen or antivirus false positives. The mitigation it offers is verifiable: every installer is built by a public GitHub Actions workflow named `Desktop Build`, and you can check the SHA-256 of your download against the `build-provenance.json` file attached to the release. Running from Docker or source is the other way to sidestep the warning.
+
+Cloud usage sends data out, and the project is specific about what. Cloud analysis sends the relevant subtitles and caption text. Vision-based understanding or reference-frame cover generation sends sampled frames. Cloud transcription sends audio. Local analysis with local transcription keeps everything on your machine. Videos are only uploaded to a platform when you explicitly choose to post them, and anonymous analytics and error reporting can be switched off in settings.
+
+Platform rules can block output entirely. YouTube requires a complete segment of at least 180 seconds, so short material needs to go out as Shorts or to Bilibili instead. Each platform filters by eligibility first and only then picks the highest-scoring candidates, up to 10 automatically per platform.
+
+The published timing and cost numbers are honest about their limits. The project states they come from different source videos with different output counts and processing settings, not a controlled benchmark, and that cloud transcription, vision models, image generation, and posting services are excluded from the cost figures. One entry in the cloud transcription set, a 2h15m interview at 889 seconds of transcription, is flagged as an unexplained outlier that will be re-measured.
+
+The research note in the repo also carries a warning worth reading before you trust the output: the author studied what actually drives views and concluded that choosing the right moment matters far more than piling on effects.
+
+## When it fits
+
+AutoClip earns its place if your raw material is spoken-word and already has subtitles, and your problem is volume rather than craft. If you publish three long interviews a month and want them to become thirty shorts, the batch mode and MCP entry points are the reason to use it over a timeline.
+
+The opposite case is equally clear. If your source is screen recording, gaming footage, or anything with little dialogue, the project says so itself: those need vision recognition enabled and a model that supports images, and you still have to check the selected segments manually.
+
+## Source and Accuracy Notes
+
+- Source repository: zhouxiaoka/autoclip (verified via GitHub API `html_url`, 14455 stars, MIT license, Python)
+- README: https://github.com/zhouxiaoka/autoclip - features, install paths, CLI and MCP commands, model provider table, FAQ, privacy summary
+- Project site: https://zhouxiaoka.github.io/autoclip_intro/ - platform walkthrough, measured timings and token usage per source video, packaging layout
+- Cost and time documentation: https://github.com/zhouxiaoka/autoclip/blob/main/docs/COST_PER_VIDEO.md - per-stage timing breakdown, cloud transcription regression set, methodology caveats
+- Illustration: https://github.com/zhouxiaoka/autoclip/blob/main/docs/images/home-v1.4.0.png - AutoClip home screen, imported from the repository
+- License: MIT (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 14455
