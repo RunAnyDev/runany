@@ -1,0 +1,173 @@
+---
+title: "MiniMind: Train a 64M LLM From Scratch in Two Hours"
+description: "MiniMind is a pure PyTorch LLM training project that takes a 64M-parameter model from tokenizer to RLHF on one GPU, with every algorithm implemented from scratch and no abstraction layers."
+pubDate: "2026-11-24T09:00:00.000Z"
+author: "Friday"
+tags: ["github-trending", "ai-setup", "llm-training", "pytorch", "machine-learning"]
+category: "ai-setup"
+featured: false
+draft: false
+image:
+  url: "https://cdn.runany.dev/blog/thumbnails/minimind.webp"
+  alt: "GitHub social preview card for jingyaogong/minimind"
+canonical: "https://runany.dev/blog/minimind/"
+---
+
+> **TL;DR:** MiniMind is a complete LLM training pipeline written from scratch in native PyTorch, from tokenizer training through pretraining, SFT, LoRA, DPO, and RL variants, down to Agentic RL for multi-turn tool use. The headline model is 64M parameters and trains on a single RTX 3090 in about two hours for roughly the price of a coffee. Everything runs on one GPU and every algorithm is implemented in the repo rather than pulled from a framework.
+
+![MiniMind dense model architecture showing tokenizer encoder, transformer layers with GQA attention, and the FFN block](https://cdn.runany.dev/blog/inline/minimind-ui.webp)
+
+## What it is
+
+MiniMind is a Chinese-language open-source project for learning how large language models actually work. The author frames it plainly: rather than teaching you to run LoRA on an existing checkpoint, the goal is to train a small model from zero and understand every line that gets you there.
+
+The scale is aggressive on purpose. The mainline model is 64M parameters, which the project describes as roughly 1/2700 the size of GPT-3. That number is not a throwaway line: the point is that a normal person's GPU can complete a full training run overnight, so the loop of "change something, retrain, measure" stays open.
+
+The repository covers the entire lifecycle. Tokenizer training, data cleaning, pretraining, supervised fine-tuning, LoRA, RLHF with DPO, RLAIF with PPO, GRPO, and CISPO, tool use, Agentic RL, adaptive thinking, and white-box distillation are all present as code.
+
+Everything is implemented in native PyTorch without relying on high-level abstractions from third-party libraries. LoRA does not depend on `peft`, DPO is not a wrapper around `trl`, and the tokenizer code is included. The author argues this is the difference between understanding a system and being able to use a well-documented interface.
+
+Sibling projects extend the family into other modalities: MiniMind-V for vision, MiniMind-O for omni, MiniMind-dLM for diffusion language models, and MiniMind-Linear for linear attention.
+
+## The model configuration
+
+The current `minimind-3` mainline follows the Qwen3 and Qwen3-MoE ecosystem. Model config lives in `./model/model_minimind.py`.
+
+| Model name | Parameters | Vocab | Max positions | Layers | d_model | KV heads | Q heads | Note |
+|---|---|---|---|---|---|---|---|---|
+| minimind-3 | 64M | 6400 | 32768 | 8 | 768 | 4 | 8 | Dense |
+| minimind-3-moe | 198M-A64M | 6400 | 32768 | 8 | 768 | 4 | 8 | 4 experts, top-1 |
+| minimind2-small | 26M | 6400 | 32768 | 8 | 512 | 2 | 8 | Earlier version |
+| minimind2-moe | 145M | 6400 | 32768 | 8 | 640 | 2 | 8 | Earlier version |
+| minimind2 | 104M | 6400 | 32768 | 16 | 768 | 2 | 8 | Earlier version |
+
+The choice of `d_model=768` with `n_layers=8` is deliberate and the README explains the reasoning. Citing the MobileLLM research on small models, depth tends to matter more than width when the parameter count is fixed, so deeper and narrower structures tend to learn abstract concepts better. But there is a floor: below `d_model=512` the embedding dimension becomes too narrow, and adding layers cannot fully compensate for the resulting small `d_head` at a fixed query head count. Eight layers at 768 sits in the balance point between training speed, stability, and result quality.
+
+The tokenizer is worth a second look. MiniMind's vocabulary is 6400 tokens, which is tiny next to the competition:
+
+| Tokenizer | Vocabulary size | Origin |
+|---|---|---|
+| MiniMind | 6,400 | Custom |
+| Mistral | 32,000 | Mistral AI |
+| Yi | 64,000 | 01.AI |
+| Llama 3 | 128,000 | Meta |
+| ChatGLM | 151,329 | Zhipu AI |
+| Qwen2 | 151,643 | Alibaba |
+
+A small vocabulary is not free, and the project is upfront about the tradeoff. The 6400-token tokenizer is less efficient at encoding and decoding than the Chinese-friendly alternatives, and it also means tokenizer choice shifts perplexity scores, which is why the project points readers at BPB (bits per byte) for cross-tokenizer comparison. The payoff is that embedding and output layers take up a smaller share of the parameter budget, which matters a great deal at this scale. The project ships one tokenizer on the mainline and recommends against retraining it, since changing the vocabulary breaks weight compatibility and downstream ecosystem support.
+
+## Training cost
+
+The headline claim of two hours and about 3 yuan refers to a specific thing: the SFT stage, one epoch, on a single NVIDIA 3090. The full breakdown of per-stage estimates at roughly 1.3 yuan per hour for a rented 3090:
+
+| Model name | Params | pretrain_t2t_mini | sft_t2t_mini | Tool call | RLAIF |
+|---|---|---|---|---|---|
+| minimind-3 | 64M | 1.21h, ¥1.57 | 1.10h, ¥1.43 | 0.9h, ¥1.17 | 1.1h, ¥1.43 |
+| minimind-3-moe | 198M-A64M | 1.69h, ¥2.20 | 1.54h, ¥2.00 | 1.26h, ¥1.64 | 1.54h, ¥2.00 |
+
+The author's own hardware for reference: an i9-10980XE, 128 GB of RAM, eight RTX 3090s at 24 GB, Ubuntu 20.04, CUDA 12.2, and Python 3.10.16. You do not need that to run the project. A single card is enough for the dense model.
+
+## Getting it running
+
+Clone and install dependencies first:
+
+```bash
+git clone --depth 1 https://github.com/jingyaogong/minimind
+cd minimind && pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+```
+
+Before training, check that PyTorch sees your GPU:
+
+```python
+import torch
+print(torch.cuda.is_available())
+```
+
+CPU and MPS work as fallbacks, with the README noting that speed and compatibility differ substantially.
+
+### Running inference
+
+Download the released weights from ModelScope or Hugging Face, then run them:
+
+```bash
+# download the model
+modelscope download --model gongjy/minimind-3 --local_dir ./minimind-3
+# or
+git clone https://huggingface.co/jingyaogong/minimind-3
+
+# run from the transformers-format folder
+python eval_llm.py --load_from ./minimind-3
+# or run from raw PyTorch weights in ./out
+python eval_llm.py --load_from ./model --weight full_sft
+```
+
+There is an optional Streamlit chat UI. The model folder needs to be copied into `./scripts/` first, because the demo script scans that directory for subfolders containing weight files.
+
+```bash
+cd scripts && streamlit run web_demo.py
+```
+
+Third-party inference engines work too, which is a good check that the format is clean:
+
+```bash
+# ollama
+ollama run jingyaogong/minimind-3
+# vllm
+vllm serve /path/to/model --served-model-name "minimind"
+```
+
+The repo also ships an OpenAI-compatible server in `serve_openai_api.py`, which means you can point FastGPT, Open-WebUI, or Dify at a locally trained 64M model. It supports `reasoning_content`, `tool_calls`, and the `open_thinking` toggle.
+
+### Training from scratch
+
+Download the dataset files into the `./dataset` directory. For a quick reproduction of the "MiniMind Zero" chat model, the project says you need only `pretrain_t2t_mini.jsonl` and `sft_t2t_mini.jsonl`.
+
+```bash
+# pretraining (required)
+cd trainer && python train_pretrain.py
+# supervised fine-tuning (required)
+cd trainer && python train_full_sft.py
+# evaluate a trained checkpoint
+python eval_llm.py --weight full_sft
+```
+
+Pretraining writes `out/pretrain_*.pth` files, where the suffix is the model dimension, 768 by default. Fine-tuning writes `out/full_sft_*.pth`, where `full` indicates full-parameter tuning rather than LoRA.
+
+Every training script supports checkpointing. Adding `--from_resume 1` lets the run pick up where it stopped, and checkpoints land in `./checkpoints/` as `<weight>_<dimension>_resume.pth`. The resume path handles crossing over to a different number of GPUs by adjusting the step count, and it restores wandb run continuity so a resumed training run stays one run in your tracker. For long or unstable environments, this matters.
+
+Multi-GPU training on a single machine uses DDP, and the pattern extends to multi-node:
+
+```bash
+torchrun --nproc_per_node N train_xxx.py
+```
+
+Add `--use_wandb` to log the run. One practical note from the README: direct access to WandB is usually blocked on mainland China networks since mid-2025, so the project now defaults to SwanLab, whose API is nearly compatible. Switching is usually a matter of changing `import wandb` to `import swanlab as wandb`.
+
+## Training curves and what to expect
+
+The repository publishes loss curves for each stage, which makes it possible to see what a healthy run looks like before you start your own.
+
+![Supervised fine-tuning loss curve from the MiniMind repository showing training and validation loss decreasing over steps](https://cdn.runany.dev/blog/inline/minimind-loss.webp)
+
+The 2026-04-01 release that produced `minimind-3` and `minimind-3-moe` changed a lot beyond the weights. The separate `train_reason.py` script was removed, with thinking behavior now handled by `chat_template` plus the `<think>` marker and an `open_thinking` switch. Tool call capability was folded into the mainline `sft_t2t` and `sft_t2t_mini` data, so a default `full_sft` run already has basic tool use. A new native `train_agent.py` script handles multi-turn tool-use scenarios with GRPO and CISPO, and the RLAIF and Agentic RL flows got a decoupled rollout engine so you can swap the generation backend. The tokenizer moved to BPE with ByteLevel, and LoRA weights can now be merged into full weights through `scripts/convert_model.py`.
+
+Evaluation is wired to third-party benchmarks including C-Eval, C-MMLU, and OpenBookQA, and YaRN is included for RoPE long-text extrapolation.
+
+## When it fits
+
+MiniMind is for you if you want to understand a training pipeline rather than call one. If you have read about attention, DPO, or GRPO and want to see the actual loss functions and rollout loops in readable code, this is a rare amount of clarity available under Apache 2.0 with no framework in the way.
+
+It is not the right tool for shipping a production model. A 64M parameter model with a 6400-token vocabulary will not do the job a frontier model does, and the project does not pretend otherwise.
+
+It is also not a beginner's first repository. The README assumes you know what a tokenizer is and why pretraining and SFT are different phases. If you want to see what a model does rather than how it is built, download the released weights and start at inference.
+
+## Source and Accuracy Notes
+
+- Source repository: jingyaogong/minimind (verified via GitHub API `html_url`, 69506 stars, Apache-2.0 license, Python)
+- README: https://github.com/jingyaogong/minimind - project scope, model config tables, tokenizer comparison, training cost tables, training and inference commands, release history
+- Project site: https://jingyaogong.github.io/minimind - headline figures, model size and memory table, feature summary
+- Hugging Face model card: https://huggingface.co/jingyaogong/minimind-3 - release notes and model usage details
+- Illustration: https://github.com/jingyaogong/minimind/blob/master/images/LLM-structure.jpg - dense model architecture diagram, imported from the repository
+- Illustration: https://github.com/jingyaogong/minimind/blob/master/images/sft_loss.jpg - supervised fine-tuning loss curve, imported from the repository
+- License: Apache-2.0 (verified via GitHub API `license.spdx_id`)
+- Stars at time of writing: 69506
